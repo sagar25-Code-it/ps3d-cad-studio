@@ -1,0 +1,17 @@
+/* Read-only evidence route; intentionally excluded from the normal application entrypoint. */
+.vehicle-evidence-renderer { min-height:100vh; padding:28px; color:#e8eefc; background:radial-gradient(circle at 88% 8%,#17355b 0,#0b1426 34%,#070c16 100%); font-family:Inter,ui-sans-serif,system-ui,sans-serif; }
+.vehicle-evidence-renderer>header { display:flex; align-items:flex-start; justify-content:space-between; margin:0 auto 18px; max-width:1160px; }
+.vehicle-evidence-renderer>header span { color:#5eead4; font-size:11px; font-weight:800; letter-spacing:.17em; }
+.vehicle-evidence-renderer>header h1 { margin:5px 0 2px; font-size:28px; letter-spacing:-.03em; }
+.vehicle-evidence-renderer>header p { margin:0; color:#9fb0ca; font-size:13px; }
+.vehicle-evidence-renderer>header>strong { padding:8px 12px; border:1px solid #2dd4bf66; border-radius:999px; color:#5eead4; background:#0f766e22; font-size:11px; letter-spacing:.12em; }
+.vehicle-evidence-renderer>.vehicle-orthographic { max-width:1160px; margin:0 auto; border:1px solid #36506d; border-radius:14px; background:#0b1220ee; box-shadow:0 22px 70px #0008; overflow:hidden; }
+.vehicle-evidence-renderer>.vehicle-orthographic svg { display:block; width:100%; height:auto; max-height:none; }
+.vehicle-evidence-renderer .vehicle-orthographic nav { pointer-events:none; }
+.vehicle-evidence-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; max-width:1160px; margin:14px auto 0; }
+.vehicle-evidence-metrics article { display:grid; gap:3px; padding:13px 15px; border:1px solid #263a52; border-radius:10px; background:#101a2a; }
+.vehicle-evidence-metrics small { color:#8fa3bd; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+.vehicle-evidence-metrics b { color:#f8fafc; font-size:14px; }
+.vehicle-evidence-metrics span { color:#5eead4; font-size:10px; }
+.vehicle-evidence-renderer>footer { max-width:1160px; margin:13px auto 0; color:#71849f; font-size:10px; text-align:center; }
+@media (max-width:760px) { .vehicle-evidence-renderer { padding:14px; } .vehicle-evidence-metrics { grid-template-columns:1fr 1fr; } }

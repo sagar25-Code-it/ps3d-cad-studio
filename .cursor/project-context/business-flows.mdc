@@ -1,0 +1,119 @@
+---
+description: Live PS3D browser user journeys and automation boundaries.
+globs:
+alwaysApply: false
+---
+
+# PS3D business flows
+
+```yaml
+businessFlows:
+  - id: start-or-recover-model
+    name: Start or recover a local model
+    description: Start the worker, recover the newest atomic IndexedDB revision when available, otherwise validate the bounded fallback model.
+    entryPoints:
+      - apps/studio-web/src/App.tsx useEffect bootstrap
+      - apps/studio-web/src/worker-client.ts bootstrap
+      - packages/model-worker/src/worker.ts
+    criticality: high
+
+  - id: edit-parametric-model
+    name: Edit and regenerate a semantic model
+    description: Submit a revision-checked idempotent command, validate sketch and solid outputs, build evidence, persist atomically, then render the accepted result.
+    entryPoints:
+      - apps/studio-web/src/App.tsx runCommand
+      - packages/commands/src/index.ts
+      - packages/model-worker/src/worker.ts
+    criticality: high
+
+  - id: navigate-model-history
+    name: Undo or redo committed intent
+    description: Reconstruct legal semantic history from the journal, reevaluate the selected projection, and persist a new auditable revision.
+    entryPoints:
+      - apps/studio-web/src/App.tsx moveHistory
+      - packages/commands/src/index.ts CommandSession
+    criticality: high
+
+  - id: save-and-recover-local
+    name: Save a durable browser-local revision
+    description: Store the document, evidence, and bound payload hash atomically in IndexedDB and recover only validated records.
+    entryPoints:
+      - apps/studio-web/src/App.tsx saveLocal
+      - packages/persistence/src/index.ts
+    criticality: high
+
+  - id: native-document-exchange
+    name: Download or open a bounded native revision
+    description: Serialize or parse an exact versioned document-and-evidence envelope, validate hashes and model behavior in a fresh worker, and preserve the old durable revision on failure.
+    entryPoints:
+      - apps/studio-web/src/App.tsx downloadNative
+      - apps/studio-web/src/App.tsx openNative
+      - packages/import-export/src/index.ts
+    criticality: high
+
+  - id: export-mesh-solid
+    name: Export a validated STL mesh solid
+    description: Request an explicit-unit binary STL from the accepted worker solid and validate its record count and finite geometry before download.
+    entryPoints:
+      - apps/studio-web/src/App.tsx exportStl
+      - packages/import-export/src/index.ts exportBinaryStl
+    criticality: medium
+
+  - id: inspect-and-select-body
+    name: Inspect and select a rendered body
+    description: Orbit, pan, zoom, fit, pick, and cross-highlight a derived render artifact without modifying semantic state.
+    entryPoints:
+      - apps/studio-web/src/App.tsx viewport
+      - packages/viewport-three/src/index.ts
+    criticality: medium
+
+  - id: broad-workbench-authoring
+    name: Author sketches, parts, assemblies, surfaces, and drawings
+    description: Edit one shared bounded semantic project through stable revisioned operations, then derive truth-labeled sketch, assembly, surface, and vector drawing previews while retaining the worker-qualified part evidence path.
+    entryPoints:
+      - apps/studio-web/src/App.tsx
+      - packages/workbench-core/src
+      - packages/workbench-sketch/src
+      - packages/workbench-geometry/src
+      - packages/workbench-drawing/src
+    criticality: high
+
+  - id: consent-gated-automation
+    name: Inspect or modify a model through MCP
+    description: A local MCP host supplies a bounded project, inspects capability or project state, previews a revision-checked operation, and receives a new project only after a matching receipt and explicit confirmation; the server writes no file or external state.
+    entryPoints:
+      - apps/mcp-server/src/server.ts
+      - packages/workbench-mcp/src/index.ts
+      - apps/studio-web/src/workspaces/AutomateWorkspace.tsx
+    criticality: high
+
+  - id: learn-and-verify-capabilities
+    name: Learn PS3D from beginner through advanced practice
+    description: Read the same truth-labeled twelve-module curriculum in the responsive Learning Center or its generated fifteen-page PDF, then retain completion state only in the current browser.
+    entryPoints:
+      - apps/studio-web/src/learning/LearningCenter.tsx
+      - apps/studio-web/src/learning/learning-content.ts
+      - apps/studio-web/src/learning/learning-pdf.ts
+    criticality: medium
+
+  - id: create-cloud-identity-and-personal-token
+    name: Create an isolated account and MCP credential
+    description: Sign up or sign in through Supabase Auth, require a valid server-side session, create one scoped expiring personal access token, display its raw value once, and later list or revoke only that user's token records.
+    entryPoints:
+      - apps/studio-web/src/cloud/AccessPortal.tsx
+      - apps/studio-web/src/cloud/auth-client.ts
+      - api/auth.ts
+      - api/access-tokens.ts
+      - supabase/migrations/202608220001_remote_mcp.sql
+    criticality: high
+
+  - id: connect-remote-ai-host
+    name: Connect a capable AI host through remote MCP
+    description: Discover OAuth/resource metadata or present a scoped personal token over HTTPS, validate identity and Origin, enforce payload/rate limits, then invoke only the allowlisted pure PS3D MCP methods without storing model payloads.
+    entryPoints:
+      - api/mcp.ts
+      - api/oauth-protected-resource.ts
+      - api/oauth-consent.ts
+      - packages/workbench-mcp/src/index.ts
+    criticality: high
+```

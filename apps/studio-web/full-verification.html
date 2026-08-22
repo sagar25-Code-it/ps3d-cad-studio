@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PS3D Browser Regression Verification</title>
+    <style>
+      body { margin: 0; padding: 32px; color: #dbeafe; background: #07111f; font: 14px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      h1 { font: 700 22px/1.2 system-ui, sans-serif; color: #f8fafc; }
+      #summary { margin: 18px 0; padding: 14px 16px; border: 1px solid #1e3a5f; border-radius: 10px; background: #0c1b2e; }
+      .pass { color: #5eead4; }
+      .fail { color: #fda4af; }
+      pre { max-height: 70vh; overflow: auto; padding: 16px; border: 1px solid #1e3a5f; border-radius: 10px; background: #0c1b2e; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>PS3D browser-compatible regression verification</h1>
+    <div id="summary">Running deterministic application test suite…</div>
+    <pre id="log" aria-live="polite"></pre>
+    <script type="module">
+      import { exchange3dTests } from "../../tests/exchange-3d.test.ts";
+      import { modelAndCommandTests } from "../../tests/model-and-commands.test.ts";
+      import { revisionBoundaryTests } from "../../tests/revision-boundaries.test.ts";
+      import { sketchTests } from "../../tests/sketch.test.ts";
+      import { workbenchCoreTests } from "../../tests/workbench-core.test.ts";
+      import { workbenchDrawingTests } from "../../tests/workbench-drawing.test.ts";
+      import { workbenchElectricalTests } from "../../tests/workbench-electrical.test.ts";
+      import { workbenchElectromechanicalTests } from "../../tests/workbench-electromechanical.test.ts";
+      import { workbenchGeometryTests } from "../../tests/workbench-geometry.test.ts";
+      import { workbenchHealthTests } from "../../tests/workbench-health.test.ts";
+      import { workbenchMcpTests } from "../../tests/workbench-mcp.test.ts";
+      import { workbenchTemplateTests } from "../../tests/workbench-templates.test.ts";
+      import { workbenchVehicleTests } from "../../tests/workbench-vehicle.test.ts";
+
+      const tests = [
+        ...modelAndCommandTests,
+        ...sketchTests,
+        ...exchange3dTests,
+        ...revisionBoundaryTests,
+        ...workbenchCoreTests,
+        ...workbenchGeometryTests,
+        ...workbenchDrawingTests,
+        ...workbenchTemplateTests,
+        ...workbenchElectricalTests,
+        ...workbenchElectromechanicalTests,
+        ...workbenchVehicleTests,
+        ...workbenchHealthTests,
+        ...workbenchMcpTests
+      ];
+      const lines = [];
+      const originalLog = console.log.bind(console);
+      const originalError = console.error.bind(console);
+      console.log = (...values) => { lines.push(values.map(String).join(" ")); originalLog(...values); };
+      console.error = (...values) => { lines.push(values.map(String).join(" ")); originalError(...values); };
+      let failures = 0;
+      for (const test of tests) {
+        try {
+          await test.run();
+          console.log(`PASS ${test.name}`);
+        } catch (error) {
+          failures += 1;
+          console.error(`FAIL ${test.name}`);
+          console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
+        }
+      }
+      console.log(`${tests.length - failures}/${tests.length} browser-compatible tests passed`);
+      console.log("Node-only solid-kernel evidence tests remain a separate CI gate and are intentionally not loaded in this browser page.");
+      console.log = originalLog;
+      console.error = originalError;
+      const summaryLine = `${tests.length - failures}/${tests.length} browser-compatible tests passed`;
+      const passed = failures === 0;
+      document.querySelector("#summary").textContent = summaryLine;
+      document.querySelector("#summary").classList.add(passed ? "pass" : "fail");
+      document.querySelector("#log").textContent = lines.join("\n");
+      globalThis.__PS3D_FULL_TEST_RESULT__ = { passed, summaryLine, lines, failures };
+    </script>
+  </body>
+</html>

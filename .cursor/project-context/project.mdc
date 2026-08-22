@@ -1,0 +1,134 @@
+---
+description: Live PS3D repository identity, technology, verification, and constraints.
+globs:
+alwaysApply: false
+---
+
+# PS3D project configuration
+
+```yaml
+project:
+  name: ps3d-cad-studio-original
+  displayName: PS3D CAD Studio
+  type: browser-app-plus-local-and-remote-mcp
+
+repositories:
+  primary: https://github.com/sagar25-Code-it/ps3d-cad-studio
+  modifiable:
+    - https://github.com/sagar25-Code-it/ps3d-cad-studio
+  readOnly: []
+  involved:
+    - https://github.com/sagar25-Code-it/ps3d-cad-studio
+  localWorkspace: true
+  remoteStatus: release-candidate-source-present; live GitHub/Vercel/Supabase resources pending browser publication
+
+technology:
+  languages:
+    - TypeScript
+    - JavaScript
+    - CSS
+    - HTML
+    - JSON
+    - Markdown
+  languageVersions:
+    node: ">=24.0.0"
+    typescript: "7.0.2"
+    ecmascriptTarget: ES2023
+  frameworks:
+    - React 19.2.8
+    - React DOM 19.2.8
+    - Three.js 0.185.1
+    - Vite 7.3.6
+    - Web Workers
+    - IndexedDB
+    - Model Context Protocol SDK 2.0.0 (local Node stdio only)
+    - Zod 4.4.3 (local MCP schemas only)
+    - Vercel Web-standard Node.js Functions
+    - Supabase Auth and Postgres REST/RPC
+  buildTool: pnpm 11.9.0 workspace
+  testCommands:
+    fullSuite: pnpm test
+    singleClass: pnpm test
+    typecheck: pnpm typecheck
+    productionBuild: pnpm build
+  packageRoots:
+    - apps/mcp-server/src
+    - apps/studio-web/src
+    - api
+    - packages/commands/src
+    - packages/evidence/src
+    - packages/import-export/src
+    - packages/model-schema/src
+    - packages/model-worker/src
+    - packages/persistence/src
+    - packages/sketch-kernel/src
+    - packages/solid-bracket-kernel/src
+    - packages/solid-kernel-api/src
+    - packages/solid-manifold-adapter/src
+    - packages/viewport-three/src
+    - packages/workbench-core/src
+    - packages/workbench-drawing/src
+    - packages/workbench-geometry/src
+    - packages/workbench-mcp/src
+    - packages/workbench-sketch/src
+    - packages/worker-protocol/src
+    - scripts
+    - supabase/migrations
+    - tests
+  routeConfigPatterns:
+    - apps/studio-web/index.html
+
+bugbot:
+  enabled: false
+  repoUrl: https://github.com/sagar25-Code-it/ps3d-cad-studio
+  triggerOnDraftPr: false
+  botLogins: []
+
+jira:
+  enabled: false
+  baseUrl: TBD
+  projectKey: TBD
+  projectStyle: none
+
+branching:
+  defaultBranch: main
+  mergeStrategy: pull-request
+  commitConvention: conventional-with-accurate-signoff
+
+dependencies:
+  internal:
+    - project-owned workspace packages under packages/*
+  external:
+    - react 19.2.8
+    - react-dom 19.2.8
+    - three 0.185.1
+    - @modelcontextprotocol/server 2.0.0 (local Node stdio only)
+    - zod 4.4.3 (local Node stdio only)
+    - TypeScript 7.0.2
+    - Vite 7.3.6
+    - manifold-3d 3.5.1 (development-only candidate; forbidden from production graph)
+
+agentVerification:
+  runLocally: browser-compatible checks only on the protected workstation
+  ciCommands:
+    compile: pnpm typecheck
+    unitTests: pnpm test
+    build: pnpm build
+  skipLocal: []
+  deferTo:
+    - GitHub Actions clean runner for frozen install, typecheck, full tests, production build, CodeQL, and dependency review
+
+constraints:
+  - Work only in ps3d-cad-studio-original; do not inspect or reuse the older derived project
+  - Implement from neutral PS3D requirements and approved primary technical sources only
+  - Do not copy third-party CAD code, UI, assets, wording, samples, or distinctive workflows
+  - Keep the semantic document authoritative and derived geometry disposable
+  - Preserve worker isolation, bounded input validation, atomic persistence, and explicit failure diagnostics
+  - Keep manifold-3d, WASM, and dynamic evaluation out of the production browser graph
+  - Keep the Node-only MCP SDK, protocol core, Zod, and apps/mcp-server out of the production browser graph; remote functions may call only the project-owned pure handler layer
+  - Add no dependency or asset without provenance, license, lockfile, notice, security, and build-boundary review
+  - Do not commit secrets, tokens, .env files, private keys, personal data, build output, or unexplained binaries
+  - Do not claim exact B-rep, NURBS, persistent face naming, universal robustness, or production readiness without evidence
+  - Publish, commit, and deploy only through the explicitly authorized Chrome Incognito release workflow; stop for any paid plan, unexpected privilege, or unrecoverable action
+  - Only .cursor/project-context files may be project-specific under .cursor
+```

@@ -1,0 +1,6 @@
+{
+  "name": "@ps3d/workbench-drawing",
+  "version": "0.2.0-preview.1",
+  "private": true,
+  "type": "module"
+}

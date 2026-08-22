@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PS3D Vehicle Verification</title>
+    <style>
+      body { margin: 0; padding: 32px; color: #dbeafe; background: #07111f; font: 14px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+      h1 { font: 700 22px/1.2 system-ui, sans-serif; color: #f8fafc; }
+      .summary { margin: 18px 0; padding: 14px 16px; border: 1px solid #1e3a5f; border-radius: 10px; background: #0c1b2e; }
+      .pass { color: #5eead4; }
+      .fail { color: #fda4af; }
+      article { margin: 10px 0; padding: 12px 14px; border-left: 3px solid currentColor; background: #0c1b2e; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>PS3D vehicle v2 verification</h1>
+    <div id="summary" class="summary">Running deterministic browser-runtime tests…</div>
+    <main id="results" aria-live="polite"></main>
+    <script type="module">
+      import { workbenchVehicleTests } from "../../tests/workbench-vehicle.test.ts";
+
+      const results = [];
+      for (const test of workbenchVehicleTests) {
+        try {
+          await test.run();
+          results.push({ name: test.name, ok: true });
+        } catch (error) {
+          results.push({ name: test.name, ok: false, error: error instanceof Error ? (error.stack ?? error.message) : String(error) });
+        }
+      }
+      const passed = results.filter((result) => result.ok).length;
+      document.querySelector("#summary").textContent = `${passed}/${results.length} vehicle tests passed`;
+      document.querySelector("#summary").classList.add(passed === results.length ? "pass" : "fail");
+      for (const result of results) {
+        const article = document.createElement("article");
+        article.className = result.ok ? "pass" : "fail";
+        article.textContent = `${result.ok ? "PASS" : "FAIL"}  ${result.name}${result.error ? `\n${result.error}` : ""}`;
+        document.querySelector("#results").append(article);
+      }
+      globalThis.__PS3D_VEHICLE_TEST_RESULTS__ = results;
+    </script>
+  </body>
+</html>

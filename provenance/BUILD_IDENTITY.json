@@ -1,0 +1,32 @@
+{
+  "identitySchemaVersion": 1,
+  "buildId": "ps3d-phase1-workbench-preview-local-2026-08-19.1",
+  "sourceSet": {
+    "algorithm": "ps3d-evaluator-source-closure-v1-sha256",
+    "sha256": "96cc5f44659b6757301c8dd3bb1994d92c6231bdd19f85541e77ec3d09aa8605",
+    "paths": [
+      "packages/commands/src/index.ts",
+      "packages/evidence/src/index.ts",
+      "packages/evidence/src/validation.ts",
+      "packages/import-export/src/index.ts",
+      "packages/model-schema/src/core.ts",
+      "packages/model-schema/src/index.ts",
+      "packages/model-schema/src/validation.ts",
+      "packages/model-worker/src/worker.ts",
+      "packages/persistence/src/index.ts",
+      "packages/sketch-kernel/src/index.ts",
+      "packages/solid-bracket-kernel/src/index.ts",
+      "packages/solid-kernel-api/src/index.ts",
+      "packages/worker-protocol/src/index.ts",
+      "packages/worker-protocol/src/validation.ts"
+    ]
+  },
+  "kernel": {
+    "engineProfile": "phase0-ps3d-bracket-mesh-1-serial-f64",
+    "adapter": "ps3d-solid-bracket-kernel",
+    "adapterVersion": "0.0.1-phase.0",
+    "dependency": "project-owned",
+    "dependencyVersion": "0.0.1-phase.0",
+    "representation": "closed-oriented-manifold-triangle-mesh"
+  }
+}

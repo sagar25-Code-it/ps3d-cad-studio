@@ -1,0 +1,778 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+3 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R 12 0 R 14 0 R 16 0 R 18 0 R 20 0 R 22 0 R 24 0 R 26 0 R 28 0 R 30 0 R 32 0 R] /Count 15 >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 1856 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 604 595 238 re f
+0.10 0.85 0.72 rg 48 748 76 8 re f
+BT 0.35 0.93 0.82 rg /F2 11 Tf 1 0 0 1 48 712 Tm (PS3D STUDIO / PUBLIC LEARNING SERIES) Tj ET
+BT 0.96 0.98 1 rg /F2 28 Tf 1 0 0 1 48 665 Tm (PS3D Studio Learning and Safe) Tj ET
+BT 0.96 0.98 1 rg /F2 28 Tf 1 0 0 1 48 631 Tm (Practice Manual) Tj ET
+BT 0.08 0.20 0.29 rg /F1 13 Tf 1 0 0 1 48 554 Tm (Public preview edition 0.2 - August 2026) Tj ET
+0.12 0.70 0.61 rg 48 488 499 2 re f
+BT 0.16 0.24 0.31 rg /F1 11 Tf 1 0 0 1 48 446 Tm (A progressive, evidence-aware path from first navigation to multidisciplinary) Tj ET
+BT 0.16 0.24 0.31 rg /F1 11 Tf 1 0 0 1 48 429 Tm (CAD review and secure AI collaboration. Every exercise distinguishes qualified) Tj ET
+BT 0.16 0.24 0.31 rg /F1 11 Tf 1 0 0 1 48 412 Tm (geometry, deterministic engineering assistance, illustrative previews, and) Tj ET
+BT 0.16 0.24 0.31 rg /F1 11 Tf 1 0 0 1 48 395 Tm (unavailable professional-kernel behavior.) Tj ET
+0.93 0.96 0.97 rg 48 184 499 142 re f
+BT 0.75 0.22 0.17 rg /F2 11 Tf 1 0 0 1 68 290 Tm (READ THIS BEFORE ENGINEERING USE) Tj ET
+BT 0.20 0.25 0.29 rg /F1 10 Tf 1 0 0 1 68 260 Tm (PS3D is a bounded public preview. Qualified, preview, and unavailable) Tj ET
+BT 0.20 0.25 0.29 rg /F1 10 Tf 1 0 0 1 68 244 Tm (capabilities are labeled separately. Nothing in this manual is) Tj ET
+BT 0.20 0.25 0.29 rg /F1 10 Tf 1 0 0 1 68 228 Tm (manufacturing release, certification, roadworthiness, homologation, or) Tj ET
+BT 0.20 0.25 0.29 rg /F1 10 Tf 1 0 0 1 68 212 Tm (professional engineering approval.) Tj ET
+BT 0.33 0.39 0.44 rg /F1 9 Tf 1 0 0 1 48 82 Tm (Copyright 2026 Sagar Patel / PS3D Master. Source distributed under the MIT License.) Tj ET
+BT 0.33 0.39 0.44 rg /F1 9 Tf 1 0 0 1 48 58 Tm (Manual generated from the same source content as the PS3D Learning Center.) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 2780 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 21 Tf 1 0 0 1 48 716 Tm (LEARNING PATHWAYS) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 694 Tm (Choose a route, then complete every verification gate for the modules you use.) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (2/15) Tj ET
+0.94 0.97 0.98 rg 48 550 499 112 re f
+0.08 0.70 0.60 rg 48 550 8 112 re f
+BT 0.09 0.53 0.47 rg /F2 9 Tf 1 0 0 1 72 636 Tm (BEGINNER) Tj ET
+BT 0.07 0.14 0.20 rg /F2 16 Tf 1 0 0 1 72 614 Tm (First session) Tj ET
+BT 0.20 0.35 0.44 rg /F2 9 Tf 1 0 0 1 72 593 Tm (01 Orientation -> 02 Navigation) Tj ET
+BT 0.25 0.31 0.35 rg /F1 9 Tf 1 0 0 1 72 572 Tm (Learn the interface, local project safety, and spatial controls.) Tj ET
+0.94 0.97 0.98 rg 48 418 499 112 re f
+0.08 0.70 0.60 rg 48 418 8 112 re f
+BT 0.09 0.53 0.47 rg /F2 9 Tf 1 0 0 1 72 504 Tm (STUDENT) Tj ET
+BT 0.07 0.14 0.20 rg /F2 16 Tf 1 0 0 1 72 482 Tm (Design intent) Tj ET
+BT 0.20 0.35 0.44 rg /F2 9 Tf 1 0 0 1 72 461 Tm (03 Sketch -> 04 Part) Tj ET
+BT 0.25 0.31 0.35 rg /F1 9 Tf 1 0 0 1 72 440 Tm (Build constrained intent and a bounded qualified solid revision.) Tj ET
+0.94 0.97 0.98 rg 48 286 499 112 re f
+0.03 0.54 0.72 rg 48 286 8 112 re f
+BT 0.09 0.53 0.47 rg /F2 9 Tf 1 0 0 1 72 372 Tm (PROFESSIONAL) Tj ET
+BT 0.07 0.14 0.20 rg /F2 16 Tf 1 0 0 1 72 350 Tm (Multidisciplinary review) Tj ET
+BT 0.20 0.35 0.44 rg /F2 9 Tf 1 0 0 1 72 329 Tm (05 Assembly -> 10 Exchange) Tj ET
+BT 0.25 0.31 0.35 rg /F1 9 Tf 1 0 0 1 72 308 Tm (Review assemblies, surfaces, drawings, electrical realization, and controlled exchange.) Tj ET
+0.94 0.97 0.98 rg 48 154 499 112 re f
+0.55 0.25 0.82 rg 48 154 8 112 re f
+BT 0.09 0.53 0.47 rg /F2 9 Tf 1 0 0 1 72 240 Tm (ADVANCED) Tj ET
+BT 0.07 0.14 0.20 rg /F2 16 Tf 1 0 0 1 72 218 Tm (Research and automation) Tj ET
+BT 0.20 0.35 0.44 rg /F2 9 Tf 1 0 0 1 72 197 Tm (09 Vehicle -> 11 MCP -> 12 Release) Tj ET
+BT 0.25 0.31 0.35 rg /F1 9 Tf 1 0 0 1 72 176 Tm (Use deterministic studies, secure AI collaboration, and evidence-led release gates.) Tj ET
+BT 0.07 0.14 0.20 rg /F2 10 Tf 1 0 0 1 48 108 Tm (Recommended discipline) Tj ET
+BT 0.25 0.31 0.35 rg /F1 9 Tf 1 0 0 1 48 88 Tm (Save a project copy before destructive template replacement. Change one) Tj ET
+BT 0.25 0.31 0.35 rg /F1 9 Tf 1 0 0 1 48 73 Tm (engineering input at a time. Read diagnostics and Design Health after every major) Tj ET
+BT 0.25 0.31 0.35 rg /F1 9 Tf 1 0 0 1 48 58 Tm (revision. Never convert a preview label into a qualification claim.) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 3217 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 716 Tm (01 / WORKSPACE ORIENTATION AND PROJECT) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 696 Tm (SAFETY) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 670 Tm (Beginner - Foundation) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (3/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 635 Tm (Learn the top command system, workspace tabs, feature history, project) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 618 Tm (persistence, and truthful capability labels.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 583 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 561 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 563 Tm (Identify Sketch, Part, Assembly, Surface, Drawing, Electrical, Vehicle, and) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 549 Tm (Automate workspaces.) Tj ET
+0.08 0.70 0.60 rg 50 524 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 526 Tm (Use local Save, Download, Open, undo, redo, Design Health, and the) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 512 Tm (all-command launcher.) Tj ET
+0.08 0.70 0.60 rg 50 487 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 489 Tm (Read Qualified, Preview, and Unavailable labels before treating an output as) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 475 Tm (engineering evidence.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 444 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 422 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 424 Tm (Open the command launcher with Ctrl+K and search for measure, drawing, and) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 410 Tm (vehicle commands.) Tj ET
+0.03 0.54 0.72 rg 50 385 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 387 Tm (Change workspaces from the top tabs and locate feature history in the left) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 373 Tm (project tree.) Tj ET
+0.03 0.54 0.72 rg 50 348 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 350 Tm (Download a project copy before a major template replacement.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 319 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 297 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 299 Tm (The project revision changes after an accepted operation.) Tj ET
+0.55 0.25 0.82 rg 50 274 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 276 Tm (Undo restores the preceding broad-workbench revision.) Tj ET
+0.55 0.25 0.82 rg 50 251 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 253 Tm (No warning or truth label is hidden by the selected workspace.) Tj ET
+0.99 0.94 0.91 rg 48 152 499 70 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 201 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 181 Tm (A browser preview is not manufacturing release, certification,) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 166 Tm (roadworthiness, or regulatory approval.) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 11 0 R >>
+endobj
+11 0 obj
+<< /Length 3099 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 716 Tm (02 / VIEW ORIENTATION, ORBIT, SELECTION,) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 696 Tm (AND MEASUREMENT) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 670 Tm (Beginner - 3D View) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (4/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 635 Tm (Control the model without losing spatial context or confusing a display) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 618 Tm (measurement with a metrology result.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 583 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 561 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 563 Tm (Use the view cube, named Front/Back/Top/Bottom/Left/Right/Isometric views,) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 549 Tm (and perspective/orthographic projection.) Tj ET
+0.08 0.70 0.60 rg 50 524 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 526 Tm (Switch Select, Orbit, Pan, Zoom, and Measure modes and apply) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 512 Tm (body/face/edge/vertex filters.) Tj ET
+0.08 0.70 0.60 rg 50 487 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 489 Tm (Read the axis triad, grid, camera angles, and two-point measure result.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 458 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 436 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 438 Tm (Fit the current model, select Top, switch to orthographic, then return Home.) Tj ET
+0.03 0.54 0.72 rg 50 413 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 415 Tm (Measure between two visible points and clear the result before selecting) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 401 Tm (geometry.) Tj ET
+0.03 0.54 0.72 rg 50 376 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 378 Tm (Orbit once and confirm the orientation becomes Custom while the axis triad) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 364 Tm (remains consistent.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 333 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 311 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 313 Tm (Fit encloses all visible geometry.) Tj ET
+0.55 0.25 0.82 rg 50 288 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 290 Tm (The active navigation mode is visible.) Tj ET
+0.55 0.25 0.82 rg 50 265 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 267 Tm (Measurement units and selection filter are stated.) Tj ET
+0.99 0.94 0.91 rg 48 166 499 70 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 215 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 195 Tm (Viewport picking is geometric assistance; it is not calibrated) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 180 Tm (inspection equipment.) Tj ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 13 0 R >>
+endobj
+13 0 obj
+<< /Length 3096 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 21 Tf 1 0 0 1 48 716 Tm (03 / CONSTRAINED SKETCH CONSTRUCTION) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 694 Tm (Student - Sketch) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (5/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 660 Tm (Create bounded 2D design intent using entities, construction geometry,) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 643 Tm (constraints, and driving dimensions.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 608 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 586 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 588 Tm (Create line, rectangle, circle, arc, and point entities on the sketch plane.) Tj ET
+0.08 0.70 0.60 rg 50 563 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 565 Tm (Apply horizontal, vertical, coincident, parallel, perpendicular, tangent,) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 551 Tm (equal, concentric, and fixed constraints.) Tj ET
+0.08 0.70 0.60 rg 50 526 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 528 Tm (Edit length, radius, diameter, and coordinate dimensions while monitoring) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 514 Tm (solve state.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 483 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 461 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 463 Tm (Build a centered rectangular profile with a concentric circular feature.) Tj ET
+0.03 0.54 0.72 rg 50 438 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 440 Tm (Add dimensions in a stable order and remove redundant constraints if the) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 426 Tm (diagnostic reports conflict.) Tj ET
+0.03 0.54 0.72 rg 50 401 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 403 Tm (Toggle reference geometry to construction and verify it does not define the) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 389 Tm (intended profile boundary.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 358 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 336 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 338 Tm (Every constraint references existing entities.) Tj ET
+0.55 0.25 0.82 rg 50 313 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 315 Tm (Dimension values remain finite and positive where required.) Tj ET
+0.55 0.25 0.82 rg 50 290 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 292 Tm (The solver reports no blocked conflict before downstream use.) Tj ET
+0.99 0.94 0.91 rg 48 191 499 70 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 240 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 220 Tm (This preview does not yet provide a commercial symbolic solver or every) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 205 Tm (geometric constraint type.) Tj ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 15 0 R >>
+endobj
+15 0 obj
+<< /Length 3143 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 21 Tf 1 0 0 1 48 716 Tm (04 / QUALIFIED PARAMETRIC SOLID WORKFLOW) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 694 Tm (Student - Part) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (6/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 660 Tm (Drive the native bracket solid through bounded parameters and independently) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 643 Tm (checked topology evidence.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 608 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 586 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 588 Tm (Change width, height, thickness, bore, edge, pattern, and revolve-related) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 574 Tm (parameters within schema limits.) Tj ET
+0.08 0.70 0.60 rg 50 549 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 551 Tm (Distinguish the qualified native body from imported tessellated reference) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 537 Tm (geometry.) Tj ET
+0.08 0.70 0.60 rg 50 512 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 514 Tm (Read manifold, triangle, volume, bounds, and revision evidence returned by) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 500 Tm (the isolated worker.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 469 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 447 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 449 Tm (Change thickness, inspect the updated revision, undo, and redo.) Tj ET
+0.03 0.54 0.72 rg 50 424 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 426 Tm (Compare native body evidence with an imported mesh reference in the Part) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 412 Tm (workspace.) Tj ET
+0.03 0.54 0.72 rg 50 387 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 389 Tm (Run Design Health before exporting a release candidate.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 358 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 336 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 338 Tm (Worker output passes topology and limit checks.) Tj ET
+0.55 0.25 0.82 rg 50 313 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 315 Tm (The browser production graph excludes the Node MCP server and candidate) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 301 Tm (kernel packages.) Tj ET
+0.55 0.25 0.82 rg 50 276 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 278 Tm (A failed update leaves the last valid revision available.) Tj ET
+0.99 0.94 0.91 rg 48 177 499 70 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 226 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 206 Tm (The current qualified body family is bounded; it is not a general B-rep) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 191 Tm (feature kernel equivalent to Fusion 360, NX, or SolidWorks.) Tj ET
+endstream
+endobj
+16 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 17 0 R >>
+endobj
+17 0 obj
+<< /Length 3318 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 716 Tm (05 / ASSEMBLY PLANNING AND DEPENDENCY) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 696 Tm (CONTROL) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 670 Tm (Professional - Assembly) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (7/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 635 Tm (Create editable component arrangements, grounding, visibility, explode state,) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 618 Tm (basic mates, and deterministic interference candidates.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 583 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 561 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 563 Tm (Use cargo, BESS, and electrical-panel templates as editable planning) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 549 Tm (geometry.) Tj ET
+0.08 0.70 0.60 rg 50 524 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 526 Tm (Move components, control grounding and visibility, and inspect mate and) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 512 Tm (interference status.) Tj ET
+0.08 0.70 0.60 rg 50 487 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 489 Tm (Review cross-workspace electrical links before replacing an assembly) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 475 Tm (template.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 444 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 422 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 424 Tm (Load a cargo or BESS arrangement and examine components by subsystem.) Tj ET
+0.03 0.54 0.72 rg 50 399 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 401 Tm (Move one ungrounded component, set an exploded view, and confirm undo) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 387 Tm (returns the prior layout.) Tj ET
+0.03 0.54 0.72 rg 50 362 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 364 Tm (Generate an electrical mounting plate only after reviewing the) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 350 Tm (schematic-to-3D mapping dialog.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 319 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 297 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 299 Tm (Grounded components are not moved by an edit.) Tj ET
+0.55 0.25 0.82 rg 50 274 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 276 Tm (AABB interference candidates are reviewed rather than declared exact) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 262 Tm (contact.) Tj ET
+0.55 0.25 0.82 rg 50 237 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 239 Tm (Template replacement explicitly reports broken cross-workspace links.) Tj ET
+0.99 0.94 0.91 rg 48 138 499 70 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 187 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 167 Tm (Assembly previews do not provide a full mate solver, exact collision) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 152 Tm (kernel, tolerance stack, or structural certification.) Tj ET
+endstream
+endobj
+18 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 19 0 R >>
+endobj
+19 0 obj
+<< /Length 2777 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 21 Tf 1 0 0 1 48 716 Tm (06 / BOUNDED SURFACE-SHAPE STUDIES) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 694 Tm (Professional - Surface) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (8/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 660 Tm (Explore crown, twist, segmentation, and display topology while preserving the) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 643 Tm (distinction between a tessellated study and exact Class-A surfacing.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 608 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 586 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 588 Tm (Switch supported surface modes and edit bounded shaping parameters.) Tj ET
+0.08 0.70 0.60 rg 50 563 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 565 Tm (Read patch, vertex, and triangle metrics and inspect open boundaries.) Tj ET
+0.08 0.70 0.60 rg 50 540 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 542 Tm (Use orthographic views, wireframe cues, and fit to review continuity) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 528 Tm (visually.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 497 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 475 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 477 Tm (Create a crown study, change twist, and compare the topology metrics.) Tj ET
+0.03 0.54 0.72 rg 50 452 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 454 Tm (Inspect the boundary from top and isometric views.) Tj ET
+0.03 0.54 0.72 rg 50 429 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 431 Tm (Record unresolved continuity requirements before downstream use.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 400 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 378 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 380 Tm (All generated coordinates are finite.) Tj ET
+0.55 0.25 0.82 rg 50 355 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 357 Tm (Segment limits prevent runaway tessellation.) Tj ET
+0.55 0.25 0.82 rg 50 332 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 334 Tm (The UI calls the output a preview surface study.) Tj ET
+0.99 0.94 0.91 rg 48 233 499 70 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 282 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 262 Tm (No exact NURBS, trimmed-surface, zebra, curvature-comb, or certified) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 247 Tm (Class-A continuity claim is made.) Tj ET
+endstream
+endobj
+20 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 21 0 R >>
+endobj
+21 0 obj
+<< /Length 3308 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 21 Tf 1 0 0 1 48 716 Tm (07 / ENGINEERING DRAWING AND GD&T REVIEW) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 694 Tm (Professional - Drawing) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (9/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 660 Tm (Generate ISO/ASME-oriented multi-view sheets with projection disclosure,) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 643 Tm (dimensions, section view, title block, notes, general tolerances, datums, and) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 626 Tm (bounded GD&T symbols.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 591 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 569 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 571 Tm (Choose sheet size, projection method, scale, view preset, and display style.) Tj ET
+0.08 0.70 0.60 rg 50 546 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 548 Tm (Control automatic dimensions, section view, datum scheme, position,) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 534 Tm (flatness, and perpendicularity entries.) Tj ET
+0.08 0.70 0.60 rg 50 509 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 511 Tm (Review title-block metadata, general tolerance values, and SVG export) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 497 Tm (safety.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 466 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 444 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 446 Tm (Generate a four-view plus isometric ISO sheet and verify first-angle) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 432 Tm (disclosure.) Tj ET
+0.03 0.54 0.72 rg 50 407 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 409 Tm (Enable a section view and datum A-B-C scheme; enter explicit GD&T values) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 395 Tm (appropriate to an exercise only.) Tj ET
+0.03 0.54 0.72 rg 50 370 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 372 Tm (Export SVG and compare the rendered sheet with project parameters.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 341 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 319 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 321 Tm (Views fit inside the selected sheet and do not overlap the title block.) Tj ET
+0.55 0.25 0.82 rg 50 296 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 298 Tm (Dimension values match the project intent and units.) Tj ET
+0.55 0.25 0.82 rg 50 273 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 275 Tm (User-entered tolerances are reviewed by a responsible engineer.) Tj ET
+0.99 0.94 0.91 rg 48 159 499 85 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 223 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 203 Tm (Automatic dimensions and GD&T are drafting assistance, not semantic) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 188 Tm (product-manufacturing information or an authority-approved drawing) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 173 Tm (release.) Tj ET
+endstream
+endobj
+22 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 23 0 R >>
+endobj
+23 0 obj
+<< /Length 3371 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 716 Tm (08 / SCHEMATIC, ERC, AND MOUNTING-PLATE) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 696 Tm (REALIZATION) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 670 Tm (Professional - Electrical) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (10/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 635 Tm (Build a bounded schematic, run deterministic electrical-rule checks, then map) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 618 Tm (verified devices and nets into generic 3D panel envelopes and conductor routes.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 583 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 561 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 563 Tm (Insert and place supported devices, terminals, protection, power conversion,) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 549 Tm (loads, sensors, and grounding symbols.) Tj ET
+0.08 0.70 0.60 rg 50 524 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 526 Tm (Create nets with class metadata and interpret ERC findings.) Tj ET
+0.08 0.70 0.60 rg 50 501 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 503 Tm (Review package mappings, DIN rails, ducts, bonding, clearances, and unsized) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 489 Tm (routes before physicalization.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 458 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 436 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 438 Tm (Generate a motor-starter or BESS auxiliary schematic and resolve every) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 424 Tm (blocking ERC finding.) Tj ET
+0.03 0.54 0.72 rg 50 399 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 401 Tm (Open the circuit-to-3D review, inspect each generic package mapping, then) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 387 Tm (confirm a linked mounting plate.) Tj ET
+0.03 0.54 0.72 rg 50 362 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 364 Tm (Cross-probe one physical component back to its schematic source.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 333 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 311 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 313 Tm (Reference designators are unique.) Tj ET
+0.55 0.25 0.82 rg 50 288 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 290 Tm (Every net endpoint exists.) Tj ET
+0.55 0.25 0.82 rg 50 265 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 267 Tm (Generic envelopes and unsized wires are not mistaken for manufacturer parts) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 253 Tm (or construction routing.) Tj ET
+0.99 0.94 0.91 rg 48 137 499 85 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 201 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 181 Tm (PS3D does not replace ECAD, creepage/clearance qualification,) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 166 Tm (short-circuit study, thermal study, cable sizing, or electrical code) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 151 Tm (approval.) Tj ET
+endstream
+endobj
+24 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 25 0 R >>
+endobj
+25 0 obj
+<< /Length 3755 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 716 Tm (09 / TWO- AND THREE-WHEELER ENGINEERING) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 696 Tm (STUDIES) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 670 Tm (Advanced - Vehicle) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (11/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 635 Tm (Use layered generic templates and deterministic preliminary calculations for) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 618 Tm (topology, hard points, suspension state, axle loads, braking, road load,) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 601 Tm (powertrain, lean, and support polygon.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 566 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 544 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 546 Tm (Compare ICE motorcycle, scooter, EV motorcycle, delta three-wheeler, and) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 532 Tm (tadpole three-wheeler topologies.) Tj ET
+0.08 0.70 0.60 rg 50 507 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 509 Tm (Edit wheelbase, rake, trail, CG, mass, suspension, tire, brake, and) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 495 Tm (powertrain inputs with units and bounds.) Tj ET
+0.08 0.70 0.60 rg 50 470 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 472 Tm (Switch full-droop, design-ride, and full-bump state and isolate sketch,) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 458 Tm (boundary, chassis, suspension, wheel, brake, steering, and powertrain) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 444 Tm (layers.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 413 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 391 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 393 Tm (Load an EV motorcycle and inspect named hard points from side and top views.) Tj ET
+0.03 0.54 0.72 rg 50 368 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 370 Tm (Change one parameter at a time and compare geometry invariants, axle loads,) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 356 Tm (and braking screens.) Tj ET
+0.03 0.54 0.72 rg 50 331 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 333 Tm (Load both three-wheeler layouts and compare the displayed support polygon) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 319 Tm (without claiming stability certification.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 288 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 266 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 268 Tm (Topology-specific hard points exist and remain finite.) Tj ET
+0.55 0.25 0.82 rg 50 243 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 245 Tm (Calculated forces and loads disclose assumptions and evidence gaps.) Tj ET
+0.55 0.25 0.82 rg 50 220 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 222 Tm (Design Health blocks release claims when supplier, tire, brake, or) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 208 Tm (regulatory evidence is absent.) Tj ET
+0.99 0.94 0.91 rg 48 92 499 85 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 156 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 136 Tm (Outputs are preliminary deterministic studies only - not multibody) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 121 Tm (dynamics, FEA, CFD, fatigue, crash, handling validation, homologation,) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 106 Tm (or roadworthiness evidence.) Tj ET
+endstream
+endobj
+26 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 27 0 R >>
+endobj
+27 0 obj
+<< /Length 3443 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 716 Tm (10 / 3D IMPORT, EXPORT, AND PDF MODEL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 696 Tm (PACKAGES) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 670 Tm (Professional - Exchange) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (12/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 635 Tm (Move bounded reference geometry through browser-safe exchange paths while) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 618 Tm (clearly reporting fidelity and unsupported native formats.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 583 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 561 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 563 Tm (Import supported browser-decodable mesh and scene formats with explicit unit) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 549 Tm (handling.) Tj ET
+0.08 0.70 0.60 rg 50 524 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 526 Tm (Export supported tessellated formats and distinguish them from native) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 512 Tm (parametric CAD exchange.) Tj ET
+0.08 0.70 0.60 rg 50 487 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 489 Tm (Create an audit-page PDF with embedded GLB, or pass through a user-supplied) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 475 Tm (U3D/PRC payload for compatible PDF viewers.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 444 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 422 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 424 Tm (Import a reference model and inspect format, file set, size, triangle count,) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 410 Tm (bounds, and warnings.) Tj ET
+0.03 0.54 0.72 rg 50 385 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 387 Tm (Export GLB and STL from a visible scene and verify the chosen unit.) Tj ET
+0.03 0.54 0.72 rg 50 362 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 364 Tm (Create a PDF model package and confirm it is not mislabeled as interactive) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 350 Tm (U3D/PRC.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 319 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 297 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 299 Tm (External buffers and unsafe paths are rejected.) Tj ET
+0.55 0.25 0.82 rg 50 274 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 276 Tm (Unsupported STEP/IGES/native formats remain unavailable rather than silently) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 262 Tm (degraded.) Tj ET
+0.55 0.25 0.82 rg 50 237 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 239 Tm (Export filenames are fixed and sanitized.) Tj ET
+0.99 0.94 0.91 rg 48 123 499 85 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 187 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 167 Tm (The public browser app cannot honestly support every 3D format without) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 152 Tm (licensed or server-side translators; native CAD associativity is not) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 137 Tm (reconstructed from meshes.) Tj ET
+endstream
+endobj
+28 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 29 0 R >>
+endobj
+29 0 obj
+<< /Length 3795 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 21 Tf 1 0 0 1 48 716 Tm (11 / SECURE MODEL-NEUTRAL AI COLLABORATION) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 694 Tm (Advanced - AI / MCP) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (13/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 660 Tm (Connect any compatible AI host through OAuth 2.1 or one expiring personal token,) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 643 Tm (then use deterministic discovery, inspect, preview, receipt review, and) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 626 Tm (confirmed-return workflow.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 591 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 569 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 571 Tm (Sign in with email and password, verify the account, and create one scoped) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 557 Tm (token per client when OAuth is unavailable.) Tj ET
+0.08 0.70 0.60 rg 50 532 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 534 Tm (Call initialize, tools/list, ps3d_guide, ps3d_find_commands, inspect,) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 520 Tm (preview, and only then the receipt-gated apply tool.) Tj ET
+0.08 0.70 0.60 rg 50 495 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 497 Tm (Keep project ownership with the caller: the remote server reads only request) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 483 Tm (payloads, stores no project, and writes no browser or filesystem state.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 452 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 430 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 432 Tm (Prefer a client that follows protected-resource metadata and OAuth 2.1) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 418 Tm (automatically.) Tj ET
+0.03 0.54 0.72 rg 50 393 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 395 Tm (For a header-based client, paste the shown-once bearer token into its secret) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 381 Tm (configuration - never the web password.) Tj ET
+0.03 0.54 0.72 rg 50 356 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 358 Tm (Revoke the token after a test and confirm the next request returns an) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 344 Tm (authorization error.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 313 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 291 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 293 Tm (The MCP endpoint is HTTPS and returns protected-resource metadata.) Tj ET
+0.55 0.25 0.82 rg 50 268 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 270 Tm (Every token is unique, hashed at rest, scope-limited, expiring,) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 256 Tm (rate-limited, and revocable.) Tj ET
+0.55 0.25 0.82 rg 50 231 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 233 Tm (No raw token, password, project payload, or AI prompt is committed or logged) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 219 Tm (by PS3D.) Tj ET
+0.99 0.94 0.91 rg 48 103 499 85 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 167 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 147 Tm (MCP compatibility depends on each AI host's transport and authentication) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 132 Tm (support. PS3D tools do not grant autonomous access to an open browser) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 117 Tm (model or private files.) Tj ET
+endstream
+endobj
+30 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 31 0 R >>
+endobj
+31 0 obj
+<< /Length 3557 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 716 Tm (12 / DESIGN HEALTH AND PUBLIC-RELEASE) Tj ET
+BT 0.06 0.14 0.20 rg /F2 16.5 Tf 1 0 0 1 48 696 Tm (VERIFICATION) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 670 Tm (Advanced - Release) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (14/15) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 635 Tm (Build an evidence trail for a public preview without claiming absolute security,) Tj ET
+BT 0.15 0.24 0.30 rg /F1 11 Tf 1 0 0 1 48 618 Tm (professional-kernel parity, or certification.) Tj ET
+BT 0.08 0.70 0.60 rg /F2 9 Tf 1 0 0 1 48 583 Tm (LEARNING OUTCOMES) Tj ET
+0.08 0.70 0.60 rg 50 561 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 563 Tm (Run schema, geometry, drawing, vehicle, MCP, repository-boundary,) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 549 Tm (dependency, SBOM, source-identity, and production-build gates.) Tj ET
+0.08 0.70 0.60 rg 50 524 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 526 Tm (Review accessibility, responsive layout, headers, authentication failure) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 512 Tm (paths, tenant isolation, token revocation, rate limits, and secret handling.) Tj ET
+0.08 0.70 0.60 rg 50 487 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 489 Tm (Use GitHub private vulnerability reporting, dependency updates, code) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 475 Tm (scanning, and protected release checks.) Tj ET
+BT 0.03 0.54 0.72 rg /F2 9 Tf 1 0 0 1 48 444 Tm (GUIDED PRACTICE) Tj ET
+0.03 0.54 0.72 rg 50 422 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 424 Tm (Complete the release checklist from a clean approved CI environment.) Tj ET
+0.03 0.54 0.72 rg 50 399 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 401 Tm (Create a test account, create and revoke a token, and run initialize plus) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 387 Tm (tools/list against the live endpoint.) Tj ET
+0.03 0.54 0.72 rg 50 362 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 364 Tm (Inspect public source and deployment artifacts for credentials or private) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 350 Tm (paths before announcing the URL.) Tj ET
+BT 0.55 0.25 0.82 rg /F2 9 Tf 1 0 0 1 48 319 Tm (VERIFICATION GATE) Tj ET
+0.55 0.25 0.82 rg 50 297 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 299 Tm (CI is green from a clean checkout.) Tj ET
+0.55 0.25 0.82 rg 50 274 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 276 Tm (The live site sends restrictive security headers and fails closed without) Tj ET
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 262 Tm (environment configuration.) Tj ET
+0.55 0.25 0.82 rg 50 237 5 5 re f
+BT 0.20 0.27 0.31 rg /F1 8.7 Tf 1 0 0 1 66 239 Tm (Known limitations and third-party notices remain visible.) Tj ET
+0.99 0.94 0.91 rg 48 123 499 85 re f
+BT 0.72 0.22 0.16 rg /F2 9 Tf 1 0 0 1 66 187 Tm (PROFESSIONAL BOUNDARY) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 167 Tm (No application is unhackable. Security requires continuing patching,) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 152 Tm (monitoring, disclosure handling, backups, and incident response after) Tj ET
+BT 0.30 0.25 0.23 rg /F1 9 Tf 1 0 0 1 66 137 Tm (release.) Tj ET
+endstream
+endobj
+32 0 obj
+<< /Type /Page /Parent 3 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 33 0 R >>
+endobj
+33 0 obj
+<< /Length 3775 >>
+stream
+0.985 0.99 0.992 rg 0 0 595 842 re f
+0.04 0.11 0.18 rg 0 782 595 60 re f
+0.10 0.85 0.72 rg 48 754 84 5 re f
+BT 0.35 0.93 0.82 rg /F2 9 Tf 1 0 0 1 48 802 Tm (PS3D STUDIO / LEARNING MANUAL) Tj ET
+BT 0.06 0.14 0.20 rg /F2 21 Tf 1 0 0 1 48 716 Tm (PUBLIC RELEASE CHECKLIST) Tj ET
+BT 0.32 0.39 0.43 rg /F1 9 Tf 1 0 0 1 48 694 Tm (A live URL is the start of operations, not the end of security work.) Tj ET
+BT 0.42 0.47 0.50 rg /F1 8 Tf 1 0 0 1 48 34 Tm (PS3D public preview - verify truth labels before engineering use) Tj ET
+BT 0.12 0.32 0.39 rg /F2 8 Tf 1 0 0 1 520 34 Tm (15/15) Tj ET
+0.94 0.97 0.98 rg 48 618 499 62 re f
+BT 0.08 0.70 0.60 rg /F2 12 Tf 1 0 0 1 66 653 Tm (01) Tj ET
+BT 0.16 0.23 0.28 rg /F2 8.5 Tf 1 0 0 1 102 658 Tm (Clean CI: typecheck, deterministic tests, MCP checks, repository) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 644 Tm (boundary, dependency inventory, SBOM, build and source identity.) Tj ET
+0.97 0.98 0.99 rg 48 546 499 62 re f
+BT 0.08 0.70 0.60 rg /F2 12 Tf 1 0 0 1 66 581 Tm (02) Tj ET
+BT 0.16 0.23 0.28 rg /F2 8.5 Tf 1 0 0 1 102 586 Tm (Cloud identity: verified-email sign-up, password recovery,) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 572 Tm (tenant-isolated token list, 7/30/90-day expiry, revocation, and) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 558 Tm (five-token cap.) Tj ET
+0.94 0.97 0.98 rg 48 474 499 62 re f
+BT 0.08 0.70 0.60 rg /F2 12 Tf 1 0 0 1 66 509 Tm (03) Tj ET
+BT 0.16 0.23 0.28 rg /F2 8.5 Tf 1 0 0 1 102 514 Tm (Remote MCP: HTTPS, OAuth protected-resource metadata, bearer validation,) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 500 Tm (strict Origin handling, 1 MB payload cap, allowlisted methods, and rate) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 486 Tm (limiting.) Tj ET
+0.97 0.98 0.99 rg 48 402 499 62 re f
+BT 0.08 0.70 0.60 rg /F2 12 Tf 1 0 0 1 66 437 Tm (04) Tj ET
+BT 0.16 0.23 0.28 rg /F2 8.5 Tf 1 0 0 1 102 442 Tm (Secrets: no .env file, password, raw token, database secret, deployment) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 428 Tm (token, private key, or private system path in GitHub or built assets.) Tj ET
+0.94 0.97 0.98 rg 48 330 499 62 re f
+BT 0.08 0.70 0.60 rg /F2 12 Tf 1 0 0 1 66 365 Tm (05) Tj ET
+BT 0.16 0.23 0.28 rg /F2 8.5 Tf 1 0 0 1 102 370 Tm (Public repository: MIT notice, third-party notices, security policy,) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 356 Tm (private vulnerability reporting, dependency updates, and protected) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 342 Tm (release checks.) Tj ET
+0.97 0.98 0.99 rg 48 258 499 62 re f
+BT 0.08 0.70 0.60 rg /F2 12 Tf 1 0 0 1 66 293 Tm (06) Tj ET
+BT 0.16 0.23 0.28 rg /F2 8.5 Tf 1 0 0 1 102 298 Tm (Live review: desktop and small-screen UI, keyboard focus, error states,) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 284 Tm (manual PDF rendering, token create/revoke, initialize, tools/list, and) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 270 Tm (one read-only tool call.) Tj ET
+0.94 0.97 0.98 rg 48 186 499 62 re f
+BT 0.08 0.70 0.60 rg /F2 12 Tf 1 0 0 1 66 221 Tm (07) Tj ET
+BT 0.16 0.23 0.28 rg /F2 8.5 Tf 1 0 0 1 102 226 Tm (Operations: owner-controlled backups, patching, abuse monitoring,) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 212 Tm (incident response, disclosure handling, and an explicit human release) Tj ET
+BT 0.16 0.23 0.28 rg /F1 8.5 Tf 1 0 0 1 102 198 Tm (decision.) Tj ET
+0.04 0.11 0.18 rg 48 104 499 74 re f
+BT 0.35 0.93 0.82 rg /F2 11 Tf 1 0 0 1 68 150 Tm (FINAL RULE) Tj ET
+BT 0.96 0.98 1 rg /F1 10 Tf 1 0 0 1 68 126 Tm (If evidence is missing, keep the result labeled Preview and stop the release.) Tj ET
+BT 0.33 0.39 0.44 rg /F1 9 Tf 1 0 0 1 48 70 Tm (Public preview edition 0.2 - August 2026 - Sagar Patel / PS3D Master) Tj ET
+endstream
+endobj
+34 0 obj
+<< /Type /Catalog /Pages 3 0 R /PageLayout /OneColumn >>
+endobj
+35 0 obj
+<< /Title (PS3D Studio Learning and Safe Practice Manual) /Author (Sagar Patel / PS3D Master) /Subject (PS3D CAD learning, safe practice, and MCP connection manual) /Creator (PS3D Studio) >>
+endobj
+xref
+0 36
+0000000000 65535 f 
+0000000015 00000 n 
+0000000085 00000 n 
+0000000160 00000 n 
+0000000314 00000 n 
+0000000450 00000 n 
+0000002358 00000 n 
+0000002494 00000 n 
+0000005326 00000 n 
+0000005462 00000 n 
+0000008731 00000 n 
+0000008869 00000 n 
+0000012021 00000 n 
+0000012159 00000 n 
+0000015308 00000 n 
+0000015446 00000 n 
+0000018642 00000 n 
+0000018780 00000 n 
+0000022151 00000 n 
+0000022289 00000 n 
+0000025119 00000 n 
+0000025257 00000 n 
+0000028618 00000 n 
+0000028756 00000 n 
+0000032180 00000 n 
+0000032318 00000 n 
+0000036126 00000 n 
+0000036264 00000 n 
+0000039760 00000 n 
+0000039898 00000 n 
+0000043746 00000 n 
+0000043884 00000 n 
+0000047494 00000 n 
+0000047632 00000 n 
+0000051460 00000 n 
+0000051533 00000 n 
+trailer
+<< /Size 36 /Root 34 0 R /Info 35 0 R >>
+startxref
+51740
+%%EOF

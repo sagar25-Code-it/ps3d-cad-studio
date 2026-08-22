@@ -1,0 +1,6 @@
+{
+  "name": "@ps3d/solid-manifold-adapter",
+  "version": "0.0.1-phase.0",
+  "private": true,
+  "type": "module"
+}

@@ -1,0 +1,105 @@
+---
+description: Live PS3D language, testing, provenance, and review standards.
+globs:
+alwaysApply: true
+---
+
+# PS3D coding standards
+
+```yaml
+codingStandards:
+  languages:
+    TypeScript:
+      version: "7.0.2"
+      rules:
+        - strict mode with exact optional properties and unchecked-index protection
+        - ES modules with explicit .js import suffixes
+        - immutable readonly domain records unless mutation is private and contained
+        - no any, dynamic evaluation, or silent schema coercion in model boundaries
+    JavaScript:
+      version: ES2023
+      rules:
+        - build and verification scripts use Node built-ins where practical
+    CSS:
+      rules:
+        - original project-owned tokens and responsive accessible layouts
+
+  frameworks:
+    React:
+      version: 19.2.8
+      rules:
+        - functional components and accessible native controls
+        - keep domain logic outside presentation components
+    Three.js:
+      version: 0.185.1
+      rules:
+        - disposable viewport adapter only; never authoritative model state
+    Vite:
+      version: 7.3.6
+      rules:
+        - enforce production geometry and Node-server boundaries and include license artifacts
+    MCP:
+      version: "2.0.0"
+      rules:
+        - keep transport code in apps/mcp-server and pure tool semantics in packages/workbench-mcp
+        - expose no filesystem, network, environment-secret, credential, or hidden-state behavior
+        - require preview, matching receipt, and explicit confirmation before returning a mutated project
+
+  testing:
+    framework: project-owned typed test harness
+    runner: TypeScript compiler followed by Node execution
+    location: tests
+    requirements:
+      - New model, constraint, geometry, persistence, protocol, export, and automation behavior requires independently derived tests
+      - Tests use neutral requirements, mathematics, approved standards, or original synthetic cases
+      - Boundary, failure, retry, determinism, and rollback cases accompany happy paths
+      - Browser-visible workflows receive an executing Chromium smoke test before release review
+    coverage:
+      tool: requirement-traceability plus executed assertions
+      threshold: null
+
+  naming:
+    commits: conventional with accurate Signed-off-by only from the actual contributor
+    packages: workspace packages under packages/*; UI modules under apps/studio-web/src
+    stableIds: lower-case namespace colon identifier
+
+  review:
+    blockingSeverities: [BLOCKER]
+    strictReview: true
+    dimensions:
+      - neutral requirement traceability
+      - independent authorship and provenance
+      - semantic and numerical correctness
+      - worker and transaction safety
+      - security and privacy
+      - accessibility and original UI identity
+      - performance and resource limits
+      - determinism and reproducibility
+      - maintainability and entropy
+    securityChecks:
+      - exact schemas and size or count limits on untrusted inputs
+      - no secrets, private keys, credentials, personal data, or .env contents
+      - no dynamic code evaluation, remote code, or unapproved production WASM
+      - dependency, license, integrity, notice, vulnerability, and production-graph reconciliation
+      - exact lockfile-to-provenance inventory reconciliation
+
+  entropy:
+    enabled: true
+    policy: remove-on-touch
+    onChange:
+      - remove unused symbols and commented-out code
+      - delete superseded paths when replacing behavior
+      - remove orphaned tests and configuration keys
+      - keep source modules focused and below 500 lines where practical
+    blockReview:
+      - new commented-out code without a tracked reason
+      - parallel superseded implementation left in the diff
+      - unsupported feature represented as if it were implemented
+      - untraceable generated or copied material
+    reference: INDEPENDENT_DEVELOPMENT.md
+
+  documentation:
+    sdlcArtifacts: docs/sdlc/{workflowId}/
+    projectGuide: CONTRIBUTING.md
+    stackRules: []
+```

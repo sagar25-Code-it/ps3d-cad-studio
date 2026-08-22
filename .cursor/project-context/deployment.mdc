@@ -1,0 +1,69 @@
+---
+description: Live PS3D local, GitHub CI, Vercel, Supabase, and remote MCP deployment context.
+globs:
+alwaysApply: false
+---
+
+# PS3D deployment context
+
+```yaml
+deployment:
+  cloudProvider: Vercel with optional Supabase Marketplace integration
+
+  environments:
+    - name: local-development
+      purpose: developer workstation with Vite hot reload
+      runCommand: pnpm dev
+    - name: local-qualified-build
+      purpose: strict static-server browser and header verification of dist
+      runCommand: pnpm build
+    - name: local-mcp-stdio
+      purpose: stateless model-neutral MCP tools for a local compliant host
+      runCommand: pnpm mcp:stdio
+    - name: github-ci
+      purpose: approved clean environment for frozen install, typecheck, all tests, build, CodeQL, and dependency review
+      runCommand: GitHub Actions workflows under .github/workflows
+    - name: public-preview
+      purpose: reviewed public browser prototype, account portal, learning center, and remote MCP endpoint
+      deployMechanism: Vercel Git import from the new public GitHub repository
+
+  strategy:
+    type: immutable-static-artifact-plus-web-standard-functions
+    featureFlags: workspace capabilities declare implemented, preview, and unavailable states
+    serverBoundary: Vercel serves the browser artifact and api functions; local stdio remains optional; Supabase owns identity and tenant data
+    failClosed: account, token, OAuth consent, and remote MCP routes return configuration errors when required secrets are absent
+
+  rollback:
+    code: redeploy the previously qualified immutable static artifact or revert the reviewed change
+    database: use a reviewed forward migration or restore an owner-controlled Supabase backup; never edit token digests manually
+    config: revert vercel.json or host settings in a dedicated reviewed change
+
+  ci:
+    provider: GitHub Actions
+    prChecks: frozen install, typecheck, deterministic tests, production build, CodeQL, and dependency review
+    workflows:
+      - .github/workflows/ci.yml
+      - .github/workflows/codeql.yml
+      - .github/workflows/dependency-review.yml
+
+  securityHeaders:
+    source: vercel.json and scripts/strict-static-server.mjs
+    policy: restrictive CSP, no framing, strict referrer, HSTS, cross-origin isolation headers, no privileged browser APIs, immutable hashed assets
+
+  observability:
+    apm: TBD
+    logs: Vercel/Supabase platform logs only; no model payload persistence by PS3D functions
+
+  releaseGates:
+    - frozen dependency installation
+    - strict typecheck and executed tests
+    - production build and production-module boundary verification
+    - exact response-header and browser smoke verification
+    - dependency vulnerability, license, integrity, notice, and SBOM review
+    - lock-to-inventory dependency reconciliation and peer dependency check
+    - secret and private-path scans
+    - Supabase RLS, token isolation, expiry, revocation, quota, and verified-email checks
+    - live health, public config, access portal, OAuth metadata, initialize, tools/list, and one read-only MCP call
+    - deterministic build comparison and signed source or build identities
+    - human provenance, accessibility, security, and release approval
+```

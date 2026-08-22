@@ -1,0 +1,6 @@
+{
+  "name": "@ps3d/exchange-3d",
+  "version": "0.2.0-preview.1",
+  "private": true,
+  "type": "module"
+}

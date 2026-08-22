@@ -1,0 +1,129 @@
+---
+description: Live PS3D architecture, boundaries, integrations, and failure model.
+globs:
+alwaysApply: false
+---
+
+# PS3D architecture context
+
+```yaml
+architecture:
+  summary: >-
+    PS3D CAD Studio is an original local-first browser CAD research application.
+    A strict semantic document and revision journal are authoritative; a serial
+    Web Worker evaluates bounded geometry and evidence; IndexedDB stores atomic
+    committed revisions; and a Three.js adapter renders disposable mesh buffers.
+    The Phase 0 worker-qualified slice models one centered-bore bracket. The
+    current public-preview release candidate implements a bounded multi-workbench preview for
+    sketching, parts, assemblies, surfaces, drawings, and consent-gated
+    model-neutral automation. Vercel Web Functions expose account, personal
+    access-token, OAuth metadata/consent, health, and remote HTTPS MCP routes;
+    Supabase Auth and Postgres provide the optional tenant boundary. Preview
+    geometry remains truth-labeled and does not inherit the qualified solid claim.
+
+  style: modular-monolith
+
+  layers:
+    - name: http
+      paths:
+        - apps/studio-web/index.html
+        - apps/studio-web/src/main.tsx
+        - apps/studio-web/src/App.tsx
+        - apps/studio-web/src/styles.css
+        - api
+    - name: business
+      paths:
+        - packages/model-schema/src
+        - packages/commands/src
+        - packages/sketch-kernel/src
+        - packages/solid-kernel-api/src
+        - packages/solid-bracket-kernel/src
+        - packages/evidence/src
+        - packages/import-export/src
+        - packages/workbench-core/src
+        - packages/workbench-sketch/src
+        - packages/workbench-geometry/src
+        - packages/workbench-drawing/src
+        - packages/workbench-mcp/src
+    - name: infrastructure
+      paths:
+        - apps/studio-web/src/worker-client.ts
+        - packages/model-worker/src
+        - packages/worker-protocol/src
+        - packages/persistence/src
+        - packages/viewport-three/src
+        - packages/solid-manifold-adapter/src
+        - apps/mcp-server/src
+        - supabase/migrations
+        - scripts
+
+  boundaries:
+    - The semantic document and journal are authoritative; kernel and renderer state are derived
+    - Geometry evaluation runs serially in a dedicated worker and commits only after validation and persistence
+    - Dependency-specific objects, WASM pointers, mutable meshes, and renderer objects never cross package or worker boundaries
+    - Main-thread code independently verifies correlated worker results before accepting a revision
+    - The viewport receives render artifacts only and must not mutate the model
+    - Native input and automation input use exact bounded schemas and fail closed on unknown fields
+    - Production geometry must remain project-owned until a separately qualified permissive adapter passes all gates
+    - MCP or other automation is read-only by default; mutations require preview, explicit consent, commit, and undo evidence
+    - The official MCP SDK and Zod are Node-only transport dependencies; browser automation uses the pure project-owned handler layer
+    - Cloud sessions are validated server-side; raw personal tokens are shown once, stored only as HMAC-SHA-256 digests, scoped, expiring, revocable, tenant-isolated, and rate-limited
+    - Remote APIs fail closed when required cloud configuration is absent and never expose Supabase administrative credentials to browser code
+
+  integrations:
+    - Browser Web Worker for model evaluation and failure containment
+    - Browser IndexedDB for atomic committed revision persistence
+    - Three.js for disposable 3D visualization and picking
+    - File API and object URLs for bounded native JSON and binary STL exchange
+    - Web Crypto SHA-256 for semantic, journal, evidence, and mesh identities
+    - Vercel static hosting plus Web-standard Node.js functions for authenticated APIs and remote MCP
+    - Supabase Auth and Postgres with forced row-level security and service-only token digest/quota operations
+    - Local Node stdio MCP server plus a pure-handler remote HTTPS MCP transport
+    - OAuth protected-resource metadata and consent bridge for capable AI hosts; scoped personal access tokens remain the explicit fallback
+
+  auth:
+    userFacingPattern: Supabase verified-email password sessions with recovery and browser-session storage
+    partnerPattern: OAuth 2.1-style delegated access where supported, otherwise unique scoped expiring PS3D personal access tokens
+    configPaths:
+      - api/_lib/cloud.ts
+      - api/auth.ts
+      - api/access-tokens.ts
+      - api/oauth-consent.ts
+      - supabase/migrations/202608220001_remote_mcp.sql
+
+  errorHandling:
+    businessException: typed Diagnostic result returned across exact schemas
+    codes:
+      - INVALID_NUMBER
+      - UNIT_MISMATCH
+      - OUTSIDE_SUPPORTED_ENVELOPE
+      - RESOURCE_LIMIT
+      - INVALID_GRAPH
+      - UNDERCONSTRAINED
+      - CONSTRAINT_CONFLICT
+      - DEGENERATE_GEOMETRY
+      - OPEN_PROFILE
+      - SELF_INTERSECTING_PROFILE
+      - AMBIGUOUS_PROFILE
+      - UNSUPPORTED_GEOMETRIC_CASE
+      - INVALID_SOLID_INPUT
+      - INVALID_SOLID_OUTPUT
+      - IDEMPOTENCY_CONFLICT
+      - REVISION_CONFLICT
+      - WORKER_FAILURE
+      - PERSISTENCE_FAILURE
+      - UNSUPPORTED_OR_CORRUPT_FILE
+      - UNSUPPORTED_CAPABILITY
+      - CONFIRMATION_REQUIRED
+      - PREVIEW_RECEIPT_MISMATCH
+
+  diagrams:
+    existing:
+      - docs/architecture/SYSTEM_ARCHITECTURE.md
+      - docs/architecture/NUMERICAL_AND_GEOMETRY_CONTRACT.md
+    preferredFormat: mermaid
+
+  repositoryRelationships:
+    - primary: https://github.com/sagar25-Code-it/ps3d-cad-studio
+      consumes: []
+```

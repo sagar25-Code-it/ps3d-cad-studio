@@ -1,0 +1,5452 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "ps3d-inventory-sbom-generator",
+          "version": "1"
+        }
+      ]
+    },
+    "component": {
+      "type": "application",
+      "bom-ref": "pkg:generic/ps3d-cad-studio@0.2.0-preview.1",
+      "name": "ps3d-cad-studio-original",
+      "version": "0.2.0-preview.1",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ]
+    },
+    "properties": [
+      {
+        "name": "ps3d:inventory-state",
+        "value": "locked-and-license-reviewed"
+      },
+      {
+        "name": "ps3d:metadata-accessed-on",
+        "value": "2026-08-19"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "npm:@dimforge/rapier3d-compat@0.12.0",
+      "group": "@dimforge",
+      "name": "@dimforge/rapier3d-compat",
+      "version": "0.12.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "b9e90819eb72c08828a5f0fdee80cbe4f7de7b3905a4d87097395a11834e03437a82176c3af87f1d88d231e9394363b53d8bd148315ca85549978af8641c0ea3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40dimforge/rapier3d-compat@0.12.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@dimforge/rapier3d-compat/-/rapier3d-compat-0.12.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/aix-ppc64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/aix-ppc64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "5c4c5c3be76f2cabd5b4d4e26d24c17a3d4d0806da1a15a7f56c3564fc7cd2ab1a8613c57bff238163f421c84d7b41771f0914ee7f1e8e11fc6e3a27aa1b7c99"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/aix-ppc64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/aix-ppc64/-/aix-ppc64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/android-arm@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/android-arm",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "9175e888f55519072721818e79aa2fc0e511a678830694aae00d37aa443e04c42ab461ba1d86a9df19def42d4ed72a384d1deac65097e48aaa997e9f168d8baa"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/android-arm@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/android-arm/-/android-arm-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/android-arm64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/android-arm64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e587ca79e23ca967c16485febb6c590b76656f73acfe02d2dac6c428cf88e1939cb169874b658bcac09c4190c0151b250d45393a2ab8e207fa3d8375bc6c06e4"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/android-arm64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/android-arm64/-/android-arm64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/android-x64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/android-x64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "3b7f3b8ad7bb4b353209ccb72505f83f86cbb4403b6cb2e4c7e7acbdee491e7c987cd4f1715a57668f6385d07495328de38833b442d3754ee74bc36bd7a16cd5"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/android-x64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/android-x64/-/android-x64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/darwin-arm64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/darwin-arm64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "9f82aa90e42badac4725c82333546fc1b8a07d028828956933bc69f8ab318b2512ad17485e7b7bdd586b3c0c747d5e388607e62152a3c4c37d275b798f249593"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/darwin-arm64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/darwin-arm64/-/darwin-arm64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/darwin-x64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/darwin-x64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "baaeacb885983f7eeacc675d04a3f0e501103e2e8788b1ac3bb5269297f2698350dc3fab37ac3a59fc07fa7baa7065d6bdac06c31384ae83b86069c587de5acf"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/darwin-x64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/darwin-x64/-/darwin-x64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/freebsd-arm64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/freebsd-arm64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "9fe234053491228cbe77a44f2a7115c2a979530049a25cadbd8e2600e204268aca96a80f208f22c7ab25555adf6794e78fb825219be5a3295b07f1093cc5845f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/freebsd-arm64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/freebsd-arm64/-/freebsd-arm64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/freebsd-x64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/freebsd-x64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "efc5c94c992f3ecd24cf6c3ad77d353c98d797883bab726a898319fccff2548ef710706b0914e0921bbda2a1bbbcfaaaf9aff269d116f1a0fe6a02a5939c6b9a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/freebsd-x64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/freebsd-x64/-/freebsd-x64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/linux-arm@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/linux-arm",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "5e50e7bb6ab9ca8a9e9acfb16b2eb0480720f430c3ecaf512ca64404e3199b7724369241bce5f6d2d49f6f2f0a7ebae120d0f2bfd57661564a63f4a9a06248f3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/linux-arm@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/linux-arm/-/linux-arm-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/linux-arm64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/linux-arm64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "a56e000b43f78adf1cedda3d315338a79d45cc7cdd33f4d9adeaeeae045c1c9d964dad55435088ab5f319dc7e9049c38a23922659aca5b6c8805604ff768fa52"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/linux-arm64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/linux-arm64/-/linux-arm64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/linux-ia32@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/linux-ia32",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "0986e78fbf07b08780f8386050a80509fbcdb131c584c32b8a752b319a435c95ca37c4f75d589367ffb0b47795c44598f1ec12cd314dfa74664b03b6b5968b51"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/linux-ia32@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/linux-ia32/-/linux-ia32-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/linux-loong64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/linux-loong64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "6eec2477c9eca61e11f9a8d1bf0d2a3391e36bf4d7428c37a6dcd63b611b1bf72a70890796846b76506d425b21c98193345bdf91f279b693cb5646380edb0f7d"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/linux-loong64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/linux-loong64/-/linux-loong64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/linux-mips64el@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/linux-mips64el",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "655ca46c3ca4ef9d7d57088d6fd2dc8fd9bc5cceafe55f6e28fbeb10c92411e7557b07fed22b6485a869e070e98044578702d1a56172a6c19b1bf27cb3442324"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/linux-mips64el@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/linux-mips64el/-/linux-mips64el-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/linux-ppc64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/linux-ppc64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "0805e5f83b5df5452e25df2928a77087a30b9b7314322a8c3e6859ded4d25cfa9fc90def0e5e91e6165d67f918a232b8a1f5ed75f4afd6d16af17cd6c7785e35"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/linux-ppc64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/linux-ppc64/-/linux-ppc64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/linux-riscv64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/linux-riscv64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "19e5c27a3e0842d53507e4250d5f16fd146f6f32373bf4adb2cfbf6c25efe25665b3958646dbb66bedc9900de2e2a21494c5e970779b5a917c024261013a30b8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/linux-riscv64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/linux-riscv64/-/linux-riscv64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/linux-s390x@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/linux-s390x",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "dc7d707936193f1b7f58e841caccd06726d2f70e652b3527d450ccb2010285b1d64301d841045f071802719bcf8631df2b22632227afbcc98451ac09add63d0e"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/linux-s390x@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/linux-s390x/-/linux-s390x-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/linux-x64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/linux-x64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e314d9af5154992a105b85c85a68addedcd0ad44d933e3773f45d5f3144e298179d177c8ef178ef74fb56d9bcdc3122e7d0f610d0551247e588603d517c03f1d"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/linux-x64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/netbsd-arm64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/netbsd-arm64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "b120134633de0c1837a5d807a107e8601a1bd752a4d4519af65ba2e51207642a029096bd40a96f977fef2b3daeb02998623b3bca6251ff6367b2a7be1e3b799f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/netbsd-arm64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/netbsd-arm64/-/netbsd-arm64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/netbsd-x64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/netbsd-x64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "96a9f3095fa633480800368a8a188283a89f81f5362f7879137deb35004dd58e0c6951a7cebcb39afbdfed41f1a6ba50744f21a6a2e8949f5197e4a42110e9cb"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/netbsd-x64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/netbsd-x64/-/netbsd-x64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/openbsd-arm64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/openbsd-arm64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "00bdaa2482c7ee5363ac3982403bddc4c7c0508bfc28c3593afaf0010f22f3ffe7b4bf457e584ec8c27c39948c05bf3f0165dedffe6fe52db4cb7cc2a1958aa1"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/openbsd-arm64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/openbsd-arm64/-/openbsd-arm64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/openbsd-x64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/openbsd-x64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "42d8ae3f2b5c851c82e2bc142a17b125d40abc3b99ea15a5a22de282a3d03542424b5feff4488edd44ce5d1e80dc5a0ca387e700a6d625da9a23084ece1f2a13"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/openbsd-x64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/openbsd-x64/-/openbsd-x64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/openharmony-arm64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/openharmony-arm64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "5a48580e6a538cbbc6952700d6bc234549a197893ca174777086eda969842e053f7457871e51259710ef75670d255f6b6f309ec41e6fcfc82d35ec162e0093ed"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/openharmony-arm64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/openharmony-arm64/-/openharmony-arm64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/sunos-x64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/sunos-x64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "18f3129133ad327bf653617c8317b8228eaa995b3e60aca9f37d84b6aab1af48459e0997437af3c32b5e966dc6227ed3e15be245495fdec3a004e89376f69fee"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/sunos-x64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/sunos-x64/-/sunos-x64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/win32-arm64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/win32-arm64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "3c886112413db8f06579106b404269527ecc06789b6736c6cd858f998df1f98a1583ff79cdb8c1e02c4f3ce43c979b5860ce2631a0ad845f3fd4321f05043259"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/win32-arm64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/win32-arm64/-/win32-arm64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/win32-ia32@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/win32-ia32",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "62625b7d396f53b49d9fd041fb83d1112e2807aa71812dfb30038d8fe841aff7295d2d5a04f297c4d9c36eef900963e3d28f5d832c5eabbf60e9ce4ff0a7ae60"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/win32-ia32@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/win32-ia32/-/win32-ia32-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@esbuild/win32-x64@0.28.2",
+      "group": "@esbuild",
+      "name": "@esbuild/win32-x64",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e5e6e9c6bde758cceb2ffae7508ef9e4992e79ed1b1cbfc6ab459317d96f729bfbdf0029e5ebbc31f0548162bd6e15af6638fbc97f1eb5fffcb48f0d7b2ebde6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40esbuild/win32-x64@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@esbuild/win32-x64/-/win32-x64-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@gltf-transform/core@4.4.2",
+      "group": "@gltf-transform",
+      "name": "@gltf-transform/core",
+      "version": "4.4.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "aac58ac0d4b02bedacf37e0cb78c5b61cc87a82ae03453fb848bf9b38f3b27179b9e045f0e07a5a6084d17e912b3019bdbf36e6a96ac7cadd456216848926832"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40gltf-transform/core@4.4.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@gltf-transform/core/-/core-4.4.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@gltf-transform/extensions@4.4.2",
+      "group": "@gltf-transform",
+      "name": "@gltf-transform/extensions",
+      "version": "4.4.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "1c91f514cf9e742e5e36f97ac4ed1239727f8ffde80e82294aed79d0e4dd25a2c1a0cdd380208621f878c32860580a99ae4be01ca5468992b170a5792e480f09"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40gltf-transform/extensions@4.4.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@gltf-transform/extensions/-/extensions-4.4.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@gltf-transform/functions@4.4.2",
+      "group": "@gltf-transform",
+      "name": "@gltf-transform/functions",
+      "version": "4.4.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "75c95782ff53b2131a581a8f0d461de314f0050d8fa6e47ca7463da6892b4731900d43d744fea54c3cdba93d149849b1152bd1c8f263bce5949b37a245a7e9bf"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40gltf-transform/functions@4.4.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@gltf-transform/functions/-/functions-4.4.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@img/colour@1.1.0",
+      "group": "@img",
+      "name": "@img/colour",
+      "version": "1.1.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "4ddefaabb8f9ee8fed2d57604bbe3a7180117d2cb193c8847d1c5ec0bf61e0e3336216d6e1301ca69974993e1ecaa5dd761e8bfe3c2833be66a3b8b16bfa4279"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40img/colour@1.1.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@img/colour/-/colour-1.1.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@jridgewell/resolve-uri@3.1.2",
+      "group": "@jridgewell",
+      "name": "@jridgewell/resolve-uri",
+      "version": "3.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "6d12128022233f6d3fb5b5923d63048b9e1054f45913192e0fd9492fe508c542adc15240f305b54eb6f58ccb354455e8d42053359ff98690bd42f98a59da292b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40jridgewell/resolve-uri@3.1.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@jridgewell/resolve-uri/-/resolve-uri-3.1.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@jridgewell/sourcemap-codec@1.5.5",
+      "group": "@jridgewell",
+      "name": "@jridgewell/sourcemap-codec",
+      "version": "1.5.5",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "71843ddf5d20aeac6e7966e5f96b885086a251a0dc8fb58eab97d58449633558117ce52163d7f2db34ef7e8a96b2779b87c4a5ef45527056c80af2672ca0743a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40jridgewell/sourcemap-codec@1.5.5",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.5.5.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@jridgewell/trace-mapping@0.3.31",
+      "group": "@jridgewell",
+      "name": "@jridgewell/trace-mapping",
+      "version": "0.3.31",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "cf3351f9275048327373c8e869e3fc410a0242bf0db98c76748232b65d507811191c9f6e5ba85e6ecad881bcfc849c1441aa374d608cb667d5f0dbb5b7038b03"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40jridgewell/trace-mapping@0.3.31",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@jridgewell/trace-mapping/-/trace-mapping-0.3.31.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@jscadui/3mf-export@0.5.0",
+      "group": "@jscadui",
+      "name": "@jscadui/3mf-export",
+      "version": "0.5.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "cb9bd992da828f28bbc00dfccea3652c8759508459a0e3bdbc28cbcf098be1b474864ec1fd99b521e7dfcc93c57b5bc57340b5204bf7866f1c683bf7768464f6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40jscadui/3mf-export@0.5.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@jscadui/3mf-export/-/3mf-export-0.5.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@napi-rs/lzma-linux-x64-gnu@1.5.1",
+      "group": "@napi-rs",
+      "name": "@napi-rs/lzma-linux-x64-gnu",
+      "version": "1.5.1",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "a135c42216b84acb97753038232b248f4929771db255776177be5cdafdf11ab1c57d532c6e14cf654fe730f2f8b162a8e290479b76ae70b6aa1a517af7a753c9"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs/lzma-linux-x64-gnu@1.5.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/lzma-linux-x64-gnu/-/lzma-linux-x64-gnu-1.5.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@nodable/entities@3.0.0",
+      "group": "@nodable",
+      "name": "@nodable/entities",
+      "version": "3.0.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "f0bf7115e4d82a19b8f717c8ca9a1ed96e705759bfdd9e7c913fbb911f40f0ec85c5c3ddb88e159b1694310c8a62b4635282cb497bfa10a2880f94ef8fd71457"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40nodable/entities@3.0.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@nodable/entities/-/entities-3.0.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-android-arm-eabi@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-android-arm-eabi",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "46b3e89006fb7666f116878edd3968a87c8e8e0c9ef11901852aa6a786893087b1e1cf6be3a66cb4f9e578340eab5b78e953958f022ec0da2022a6e8755d55be"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-android-arm-eabi@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-android-arm-eabi/-/rollup-android-arm-eabi-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-android-arm64@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-android-arm64",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "24ab8973ea67a64b36a63cbb2ff377bff700919c589679ae6680fce3495d6cc2392836c2e223bd34ac0f29876360508c008225073612147c48255633468dbff0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-android-arm64@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-android-arm64/-/rollup-android-arm64-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-darwin-arm64@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-darwin-arm64",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "92bc39b92d924e6bc9d36c74b935c76ea40dbb3fbd799d62c3ea9793d7665b682f5788d5eceda11283a7ba116ba4e3e27a5d66045b6a6f161966d0b8ea15cb3b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-darwin-arm64@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-darwin-arm64/-/rollup-darwin-arm64-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-darwin-x64@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-darwin-x64",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "c2c4f1b600296f83eb3ac349226d056758775af082fa4f6ec4b27869def9860a12e0d8917acd92a091650c0c8cc22518f08b2c0ea19c1db5ee374b31d6d7c5d4"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-darwin-x64@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-darwin-x64/-/rollup-darwin-x64-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-freebsd-arm64@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-freebsd-arm64",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "1943a7425c997b7c805e158eb4e32c9f9424aefe44e666576b4b616c04568b9122dacce555724542175d6781db03387cabddb0e6dc29f8242fb3f7856a7cfd61"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-freebsd-arm64@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-freebsd-arm64/-/rollup-freebsd-arm64-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-freebsd-x64@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-freebsd-x64",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "fd8edfdd0bb18f33cab2303fadf1036b7fb4bd7ab28e6279d0b9fc74fa4299690a4eb5285871b5716853a9a00c2e86f69b69c4496b82ef21ab444cf4d7d66daa"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-freebsd-x64@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-freebsd-x64/-/rollup-freebsd-x64-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-arm-gnueabihf@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-arm-gnueabihf",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "f35c22897defedaab2f93f9b4fad5327bf3226346abaa1454d36c03edd3c8a67d043390f216f2de9a25b9136a0b420ab5cc35cf43ebafa07aa94aef274b3cda8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-arm-gnueabihf@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-arm-gnueabihf/-/rollup-linux-arm-gnueabihf-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-arm-musleabihf@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-arm-musleabihf",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "f6498322f359a9da0738166036da5305e2d660efcb562a4cdc7fe3eb63fcf38f3f97f54f1102fa377bb153da6f3f5a1902c5f20b63049c53f7a2f463a3b59835"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-arm-musleabihf@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-arm-musleabihf/-/rollup-linux-arm-musleabihf-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-arm64-gnu@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-arm64-gnu",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "09c9d71d69d783af60f835f95562f7147b6cdea311376b951075fe059bc62dd774eff817927dde3e362d3b52c326fc6418a54731c94a0516b54144c7fbab6861"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-arm64-gnu@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-arm64-gnu/-/rollup-linux-arm64-gnu-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-arm64-musl@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-arm64-musl",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "8853a26e21e74d1ba1ad62e546c39015d6492486bb4bc3b0927789af8a1c00b3f5eaee7293a9562c8345c211da12a04532c283519a1f2e41a8b3bf823f3181de"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-arm64-musl@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-arm64-musl/-/rollup-linux-arm64-musl-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-loong64-gnu@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-loong64-gnu",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "5e7598308edeb8795be5af3bd713e36be1a6ec3442154f85191aed4b6b0cabd37c16faada5a814cba803e1839e982e4c464f716e1f3e8d830425b8a0150c2c80"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-loong64-gnu@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-loong64-gnu/-/rollup-linux-loong64-gnu-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-loong64-musl@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-loong64-musl",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "a860c094ed14f3179d09cb1d466f686a8418f03031fd04fbb88c495a109dc7471e2165fbf37502f5049891da7301edbdc0d8957e9db8f9b65d4269f8f68e3949"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-loong64-musl@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-loong64-musl/-/rollup-linux-loong64-musl-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-ppc64-gnu@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-ppc64-gnu",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "aeee07e9ecc3ef2b00e448842baaa491a11be26a1d1fc0937a3ea4532fe0422db4bb7901dc6ed99fcb275d791e25208e14a1bfadb3cfb4cffef5681ab35f7ad7"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-ppc64-gnu@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-ppc64-gnu/-/rollup-linux-ppc64-gnu-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-ppc64-musl@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-ppc64-musl",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "d96e0c3b95905499db25a65dbc36fdae1043b855359ca21ea4f16925406c4e1da4d5863683e383562696bb23808d0e5c38fecdbebbcbceddf0bc73a8880bdcef"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-ppc64-musl@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-ppc64-musl/-/rollup-linux-ppc64-musl-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-riscv64-gnu@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-riscv64-gnu",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "f9fc637eea00995302615e50ca3a08a6ed1ca790ce88e4dea98164d4055ac46afefeb6af58b5fcf577d09a9b6ca1671a572fd319fda17b1cdb50eac24082f509"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-riscv64-gnu@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-riscv64-gnu/-/rollup-linux-riscv64-gnu-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-riscv64-musl@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-riscv64-musl",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "8d39fc25f1c62f87638c5c4fb8cd3a2e6354243b2cb768de565b1df4e9881facdce6c0bd2baac8b8ee186a35dab4b52906604a97a6f7e6ba35419a1c2e2fad70"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-riscv64-musl@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-riscv64-musl/-/rollup-linux-riscv64-musl-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-s390x-gnu@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-s390x-gnu",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "a0224224be295eca0370fd9067e25594f4c845ceb6ebacec21a78926c5889a617b1ced16f276fa1ee4a0665316c49c1a3dff1e85b4b0f32a34114c3ddb984ab0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-s390x-gnu@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-s390x-gnu/-/rollup-linux-s390x-gnu-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-x64-gnu@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-x64-gnu",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "5baf61ba4859dca28d44268c204ccabdc1727b8da1874144d7e62861a7f9f8891a72e7eda1ca3ac8eff1a2ecf485ce5de56fecdf206ba398d18ae104fd0e6f53"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-x64-gnu@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-x64-gnu/-/rollup-linux-x64-gnu-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-linux-x64-musl@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-linux-x64-musl",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "aa25db186da39235e1cd7a6c159491d97a5bf0337f51ac58b1b6ff4936ee47fe9fa5a0e046699aab507f2e6b45db0405385392b0ada3744d116776b4cc79f840"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-linux-x64-musl@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-linux-x64-musl/-/rollup-linux-x64-musl-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-openbsd-x64@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-openbsd-x64",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "9d678cfff871bfc988a3a8c3ec7bb8a38f0356657da5b57a82c29a594fb8345caa1e83cac2b91189918b29484e064f2a3660e6a7016d3ca83cd01a3f4e7e3189"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-openbsd-x64@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-openbsd-x64/-/rollup-openbsd-x64-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-openharmony-arm64@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-openharmony-arm64",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "b3ad9243fbe0b114af3300e43847d3a9f800485d1fdba64d690b9303a02893996b8a47fcf722365b48051ef65bd89a6073a37c26738a66008ada27223b70acc5"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-openharmony-arm64@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-openharmony-arm64/-/rollup-openharmony-arm64-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-win32-arm64-msvc@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-win32-arm64-msvc",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "27ac067fc4d519b5c9abe1c7fadb53beb71f34a3dbb9979c57a293d41f08d7c042e48511521e64978625e4e10fe5e148528239056c42b3260c845b03c7c91e93"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-win32-arm64-msvc@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-win32-arm64-msvc/-/rollup-win32-arm64-msvc-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-win32-ia32-msvc@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-win32-ia32-msvc",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "ce67eb41dff4c2eea826cf15abc2b063f62db0a4ac2ed29efc7c003f85aacbc2e15a3793e797c744090e858435db02376b24b84edd76779083443ecdf7a48061"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-win32-ia32-msvc@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-win32-ia32-msvc/-/rollup-win32-ia32-msvc-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-win32-x64-gnu@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-win32-x64-gnu",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "a8fcc7a9d8fdadf503fb0efd76d134ef38bf905c0ac8226aa65a792b9ca078b4e9ee32e9028735e8e007dfd1d29910bd529a3369e72c95e23cb807448fabf6cb"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-win32-x64-gnu@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-win32-x64-gnu/-/rollup-win32-x64-gnu-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@rollup/rollup-win32-x64-msvc@4.62.4",
+      "group": "@rollup",
+      "name": "@rollup/rollup-win32-x64-msvc",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "cc3e8d75e584072184f5017dbc2ae5279610078a2af6af7590f652dfb2708f984e92f475953052a6c2a1283c38209b5b437e4bb134b51c3f4365818a22c854d5"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40rollup/rollup-win32-x64-msvc@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@rollup/rollup-win32-x64-msvc/-/rollup-win32-x64-msvc-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@tweenjs/tween.js@23.1.3",
+      "group": "@tweenjs",
+      "name": "@tweenjs/tween.js",
+      "version": "23.1.3",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "bc99afbf017162e1a71766b146d3d8a1c6a0e8295b6f9612ee42cbf923bf4de545cc7a83216acd298b5cb0f3226e30f1f4ef9bbbea6c032f4d29f5a495ab2c50"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40tweenjs/tween.js@23.1.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@tweenjs/tween.js/-/tween.js-23.1.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@types/estree@1.0.9",
+      "group": "@types",
+      "name": "@types/estree",
+      "version": "1.0.9",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "1a174f832d5e978fc898fd395f4e54c38730dbf33ddc10949a712f599352b650b310a304e05924f98a680393a21cd426a12ec269f6fc5dadcfc9af26d50af37a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40types/estree@1.0.9",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@types/estree/-/estree-1.0.9.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@types/ndarray@1.0.14",
+      "group": "@types",
+      "name": "@types/ndarray",
+      "version": "1.0.14",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "a00366159327150bdbdb5f52481221235221febe02bc70cece45b2252fd746a90cac61f9fe468f480d61421748073a2e684fb92a913f7f9ca523d72e8e672442"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40types/ndarray@1.0.14",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@types/ndarray/-/ndarray-1.0.14.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@types/react-dom@19.2.4",
+      "group": "@types",
+      "name": "@types/react-dom",
+      "version": "19.2.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "06c73e407829f8ffc5d365c3ccd098f639d934252e2e48b7e8a4fb54aad35d72dd1dffaf1cc3599d6d6b56ee43356feb08af9fc9adc3013c926cb338ca1b4a53"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40types/react-dom@19.2.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "development-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Type declarations for React DOM"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@types/react@19.2.18",
+      "group": "@types",
+      "name": "@types/react",
+      "version": "19.2.18",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "027cdb04446cacb2ad9365d27d36d844b8d03ddcb5d7a4adcb8abe4fe069dc80b897a8cd06fade54f0079a9abdaa15d033b09764f8cb56618cc3db32fa1c50df"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40types/react@19.2.18",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@types/react/-/react-19.2.18.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "development-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Type declarations for React"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@types/stats.js@0.17.4",
+      "group": "@types",
+      "name": "@types/stats.js",
+      "version": "0.17.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "8c806f5964a10af941a8134866dd0a02c856a6f4a3864c2412ee1951c012a00be19ab800508dadd5d5eb8d22f8c5754b0781739cfac8b17de7297165fc3b78bc"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40types/stats.js@0.17.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@types/stats.js/-/stats.js-0.17.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@types/three@0.185.4",
+      "group": "@types",
+      "name": "@types/three",
+      "version": "0.185.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "800b01202d3b34816bc636dfeed1f6b7bd5cdfcbae9457e4fd11680bb14d0528cc44043c275c7f441beeb17d0de4f268b9a60525ac1742a7c243444a531ff59c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40types/three@0.185.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@types/three/-/three-0.185.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "development-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Type declarations for the viewport adapter"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@types/webxr@0.5.24",
+      "group": "@types",
+      "name": "@types/webxr",
+      "version": "0.5.24",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "87c7e011dfc3a684bd081ae31105d1f9d203adaa290047eee30615358dad10fc24eb4b2d3d686f64c7f8168a3915a92e43b1c56686bc59c79a5857abbcad8ebe"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40types/webxr@0.5.24",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@types/webxr/-/webxr-0.5.24.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-aix-ppc64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-aix-ppc64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "31328a91607ba7fd04f718b5775b47b59e4f88b90610c22af3ca4ad82b9b6633ac2ed6132ea8602208bacdea456bef461d9ea1d3934c0a443118a88f5ccc57b5"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-aix-ppc64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-aix-ppc64/-/typescript-aix-ppc64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-darwin-arm64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-darwin-arm64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "828c336abf4cc12fda456a7a7f76b8294ab34630198ceb2618d08ce8b713817ba6f9d05f82c05530df8082f38209b82e5f289c93a2c986906ccf131e6c9f2cc8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-darwin-arm64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-darwin-arm64/-/typescript-darwin-arm64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-darwin-x64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-darwin-x64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "499f716489ea02936534673db345b5552b24b5848e7bd705a8d388aa63751acf129a48ca65816dd35ec6e15c0fc404889ce0ee01d6d35bbb1788551ff3ddd180"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-darwin-x64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-darwin-x64/-/typescript-darwin-x64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-freebsd-arm64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-freebsd-arm64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "5b9347e32fc9d29948212e5bdb1bd312453b245c72a9d3003a07fe225865d2f1d05ca3b9759a3177e0bf8c4b6ae7a738177c24ef5441e013114365dd23e6f061"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-freebsd-arm64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-freebsd-arm64/-/typescript-freebsd-arm64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-freebsd-x64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-freebsd-x64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "50c183c79b13a73370dd688f79b1fb97dd0859f26080477e7a01edfeaea9eff0a6df3aa857b5719065edfb70f13c8c3c09c9af001d23dec5557db857f8ce13a7"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-freebsd-x64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-freebsd-x64/-/typescript-freebsd-x64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-linux-arm@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-linux-arm",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "81f7d3df13f3f6c47b8ff6091319323e7b6b2343f610ff576cec96ced876fc6b3446cb4afbdd1105c3b49dc5e85f2fdb798965d525f0f38e8d7f6cdd9c4cf441"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-linux-arm@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-linux-arm/-/typescript-linux-arm-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-linux-arm64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-linux-arm64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "421e1e538ff2df20e39df8e3c8f62284c8f9fce0c8966b7e073bb5ece23e7e24910d6e7b4265394a237addec4f44d24f294cdc73520d6b535776b27e32a1e351"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-linux-arm64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-linux-arm64/-/typescript-linux-arm64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-linux-loong64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-linux-loong64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "b841dc93d8bc8680335cf8984626f53bb9a23a7cf6dd2c4879597a1782d7a31faaa2fd4adf98c77045ba5472af648fa9caf97b7d910fe0c094e4b62f22ad46b9"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-linux-loong64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-linux-loong64/-/typescript-linux-loong64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-linux-mips64el@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-linux-mips64el",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "4782af00c9c4e375b941ea9bd0bcb9e8ede658c588020b0ccb3dfa0c26b271de676e0ffd9339b4962c3726871f46ac8963428f9b31636ecc28cd7c96d039c860"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-linux-mips64el@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-linux-mips64el/-/typescript-linux-mips64el-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-linux-ppc64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-linux-ppc64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "0ce471e5bdec77fe12ede6b2c66e0542ff80ec2ae45081916878b023ca221d3008d5f00f5a1178274bc09640bc6e20251d2555c31310ded8d9dbf0d56e742288"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-linux-ppc64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-linux-ppc64/-/typescript-linux-ppc64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-linux-riscv64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-linux-riscv64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "c1fd23a840ce8eb3d19cac18472c890d1a35d4a31bbcc16b53eab8cea2b20a1383073be591b84d41f2af2f14027304e974369748765356e8742680ab28250c1d"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-linux-riscv64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-linux-riscv64/-/typescript-linux-riscv64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-linux-s390x@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-linux-s390x",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "224c097372fbca1cad59dfdec23cb13437ce9acc029bd1963094ffb9efdd53869935bc1979801eb6ae365722e6b264a3be85fbcfbe17e996980adcc0af412e1b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-linux-s390x@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-linux-s390x/-/typescript-linux-s390x-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-linux-x64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-linux-x64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "11875fd9c360eeb8025899f109d27e177577f4ef2285bdfb78702ed4b2bca00162ce04d06cf38aef31c75db3edf2b5f6e023aa3835de237b087f47c25c6ec7fc"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-linux-x64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-linux-x64/-/typescript-linux-x64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-netbsd-arm64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-netbsd-arm64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "fa9a25605e0c174e1a3e93b9153907ada9fdc94403497ab2e468920caa6c965e63cb7977fa0f502e1a5fdfd4fe78fb5e7e15cb386acb9744088e440fe959de94"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-netbsd-arm64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-netbsd-arm64/-/typescript-netbsd-arm64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-netbsd-x64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-netbsd-x64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "f18213d041ccff776ad7464e545fc0ee973f61232d6dc79c72de2b5ad7b1ae74821ce3dca42d8a4cb5df4c247abc3a674a2635da178d6f51a237fc2ef93fc5c8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-netbsd-x64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-netbsd-x64/-/typescript-netbsd-x64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-openbsd-arm64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-openbsd-arm64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "00f4fcf829589ee626d6ef7e920197a0c8f65735b37329b087680d4905724877e444318e4d592858b8c298e41268ef8fa2a439ec1d1f951a7d480fbb1a79e4cd"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-openbsd-arm64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-openbsd-arm64/-/typescript-openbsd-arm64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-openbsd-x64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-openbsd-x64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "c97eecf90d03967d03b7db44cd9b008d75d1ffecad04cec096095aab278c3f142ccc9d4986525d67a8cb03e23395d1ed7e55fcd5e9bb9436a8d715eef9a45192"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-openbsd-x64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-openbsd-x64/-/typescript-openbsd-x64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-sunos-x64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-sunos-x64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "74b24319a2d9d43e073d09fadaed67f26043909444c0cb00902764c1de087aac3ec774d4c93b2a634622042b44e87e8ecf38069378ae677bc55914be13cfddd6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-sunos-x64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-sunos-x64/-/typescript-sunos-x64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-win32-arm64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-win32-arm64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "1b2975572e8eb167ac2f39aaf843f415bedbe0d89de76df602f700d9215c758ade95da4db58145a1f3e39edeb6cbd850cbb553699a7ae480898ee01045a55c21"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-win32-arm64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-win32-arm64/-/typescript-win32-arm64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@typescript/typescript-win32-x64@7.0.2",
+      "group": "@typescript",
+      "name": "@typescript/typescript-win32-x64",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "d014371e40071e528b4a9d6a46f7f7494846a46b03ba107f8e0170ef982ecaa6f126a11a4b40b0fd514ef22da71e094953340246d30c47f20100a137113302e2"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40typescript/typescript-win32-x64@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@typescript/typescript-win32-x64/-/typescript-win32-x64-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:anynum@1.0.1",
+      "name": "anynum",
+      "version": "1.0.1",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "37afff14b113fed5d834cfc5e8005c6b5a07e9f581f8a953b7dd3d2dedbc58c0c193ca1a4f8bd8d7b0c2af083632f9aea942addcd8b837974627f12806070ee8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/anynum@1.0.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/anynum/-/anynum-1.0.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:commander@13.1.0",
+      "name": "commander",
+      "version": "13.1.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "feb15e0a934941b852663195c0ef51155df13ea6e71114bc326210cc2b43ff397a82926e57f6cc2ee37dda81b717b77ca031071d1aee8d25cd52bf1fa639ed2b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/commander@13.1.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/commander/-/commander-13.1.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:convert-source-map@2.0.0",
+      "name": "convert-source-map",
+      "version": "2.0.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "2afa78e7d1eb576144275080b22d4abbe318de46ac1f5f53172913cf6c5698c7aae9b936354dd75ef7c9f90eb59b4c64b56c2dfb51d261fdc966c4e6b3769126"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/convert-source-map@2.0.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/convert-source-map/-/convert-source-map-2.0.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:csstype@3.2.3",
+      "name": "csstype",
+      "version": "3.2.3",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "cf51c629c632db103c00641fc2b9f43c0cbe3c1ed7fc64a3dd45495bda8aca7e37c566be825e675e6538aaa2cc4735952c50bc2aeb145fc4ffd240a2398a4021"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/csstype@3.2.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/csstype/-/csstype-3.2.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:cwise-compiler@1.1.3",
+      "name": "cwise-compiler",
+      "version": "1.1.3",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "59794afe6f838bc0cc31c0a3716af88be5f3710adaf5e09d5c826b821e13520874a484bfc8976e2f14bd26079fb0727f6152dd80fb579bdafad96f7632f6a711"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/cwise-compiler@1.1.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/cwise-compiler/-/cwise-compiler-1.1.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:detect-libc@2.1.2",
+      "name": "detect-libc",
+      "version": "2.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "06d8f604e38ef37a375b21f9f5ef0c817b3111055c6ab9143a9118aee6c1d2eaf09cdd74c90dfae2bb22072535d67665a966199b4e62fe87fb8a8e26ce2841b5"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/detect-libc@2.1.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:esbuild@0.28.2",
+      "name": "esbuild",
+      "version": "0.28.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "1ca54b4bc76f208fb1a0a5bd926ab16d12ab9d61177c926bfc56618499a2a880747b4e7740d605a8e068b9330efe4e6c203e0cbc28940afbfc6fd338877db020"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/esbuild@0.28.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/esbuild/-/esbuild-0.28.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:fast-xml-builder@1.3.1",
+      "name": "fast-xml-builder",
+      "version": "1.3.1",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "a4833fd67de7b455ca62b519c16ed008ad20016ed763ec338f560c215ded2c3bcf8ff57ecd31892b97b7ff85897f08f4a96c361253578938b175afd1fb7612ba"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/fast-xml-builder@1.3.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/fast-xml-builder/-/fast-xml-builder-1.3.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:fast-xml-parser@5.11.0",
+      "name": "fast-xml-parser",
+      "version": "5.11.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "f481b132abea2ce9ea3fe1208b59ea0c72afe64f1a67bafd9f9e7c7a7c5cb9c9b254610134f014f8c3a0ffc8cf212eeb3bbb12ab88059b5fe71ed89ab9b32bbb"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/fast-xml-parser@5.11.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/fast-xml-parser/-/fast-xml-parser-5.11.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:fdir@6.5.0",
+      "name": "fdir",
+      "version": "6.5.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "b486d8b596ee70eb340511aa3c992c84951874bf920c7edd54cf208f2f84469dd60148cb105244fb4da46a7c87b708d63a7c2b298062c0098cd29e242c90275e"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/fdir@6.5.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/fdir/-/fdir-6.5.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:fflate@0.8.3",
+      "name": "fflate",
+      "version": "0.8.3",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "b5b64db89acbc06529df3b2106d772e16f8e47166e221f1ae629722044030b9ad8d5fdd4db424caf2d0b977581cd4e7c1192ac12e2455e16f9830bfc0ac3ef80"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/fflate@0.8.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/fflate/-/fflate-0.8.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:fsevents@2.3.3",
+      "name": "fsevents",
+      "version": "2.3.3",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e71a037d7f9f2fb7da0139da82658fa5b16dc21fd1efb5a630caaa1c64bae42defbc1d181eb805f81d58999df8e35b4c8f99fade4d36d765cda09c339617df43"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/fsevents@2.3.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-platform-artifact"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:iota-array@1.0.0",
+      "name": "iota-array",
+      "version": "1.0.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "a59db14fe2ce1dc9026ad190dc3706fdaf90b84aafa31aa488beedbc4f279f7baebbe7fa8b54eda41e7f16d5856f152e56be4f642c7c2ac92e19ab5b2435ce58"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/iota-array@1.0.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/iota-array/-/iota-array-1.0.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:is-buffer@1.1.6",
+      "name": "is-buffer",
+      "version": "1.1.6",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "35c7402f0a579139b966fbdb93ba303944af56f04a0e028fe7f7b07d71339e64057ece194666a739e2814e34558e46b7405a0de9727ef45dd44aa7c7a93694e7"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/is-buffer@1.1.6",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/is-buffer/-/is-buffer-1.1.6.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:is-unsafe@2.0.0",
+      "name": "is-unsafe",
+      "version": "2.0.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "d8b755f36d91fb0988f3aba75c0f775821692fa83e6aff329d69349eb1f226a1a8a79568a1c62c48b16037c8eb7da953ea219e2cd338297b954ac50b3f9de410"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/is-unsafe@2.0.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/is-unsafe/-/is-unsafe-2.0.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:ktx-parse@1.1.0",
+      "name": "ktx-parse",
+      "version": "1.1.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "98aa77cbe15a62047b9975806f2cb3a5afebd730d679aba71fe20d24ee1fa2ede16f8e57b8d4b06abfbb965ad1cafa4c59a7f14888bdf51345274e4c1de75a25"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/ktx-parse@1.1.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/ktx-parse/-/ktx-parse-1.1.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:magic-string@0.30.21",
+      "name": "magic-string",
+      "version": "0.30.21",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "bddd85e1853211728670b1e8abe4c4c828f1b9e49e1e7171cb28cda7cd328345d5e2f5219c37abfe5bef96a33f6ab0796d740de4adbfde88a7c82472c7c4f609"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/magic-string@0.30.21",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/magic-string/-/magic-string-0.30.21.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:manifold-3d@3.5.1",
+      "name": "manifold-3d",
+      "version": "3.5.1",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "ffe9ba93160c3219cfbad710e684a6149889fa0c8fff47e6b9409bf5079aba7bde726fdb7eaa202980c325aaec9d68858a848cb4a85e17e9469929676028a4f6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/manifold-3d@3.5.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/manifold-3d/-/manifold-3d-3.5.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-wasm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "development-direct-evaluation-only"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Development-only qualification candidate for a future general mesh-solid adapter; not reachable from the production browser graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:meshoptimizer@1.1.1",
+      "name": "meshoptimizer",
+      "version": "1.1.1",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "a1114d58944303f593ad58fb356bea6b91ea135b7d3180e3d956968ab402cc20ab01dd861eba91fec41ecc2c625804cf36529371168f4473c9c084683c1029e6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/meshoptimizer@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/meshoptimizer/-/meshoptimizer-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:nanoid@3.3.18",
+      "name": "nanoid",
+      "version": "3.3.18",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "0d38383096c631691f8ba55915d36ddbf71a31b432e0ebbe3a9fe1250bc611672755fa00d5003ec7344a033c3d8c3ebe19538e798aff98872e0d276e83a17afb"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/nanoid@3.3.18",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/nanoid/-/nanoid-3.3.18.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:ndarray-lanczos@0.3.0",
+      "name": "ndarray-lanczos",
+      "version": "0.3.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e64066986dd9bf28fbeeac48002e1014b2ae61d0c8049c021be0ee913ea340735ad45b7be3f84f1f5cf999b41778706df32bc63c1195aebdf010e7493d861962"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/ndarray-lanczos@0.3.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/ndarray-lanczos/-/ndarray-lanczos-0.3.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:ndarray-ops@1.2.2",
+      "name": "ndarray-ops",
+      "version": "1.2.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "069a5600546331817b37fafa21ee75aba0f87ecd2288699e5c8002298eba7cba67c08ba2dd6737097883ff7d2680b6c38cfa522ebb2a729dd9eb6f8870766c0f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/ndarray-ops@1.2.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/ndarray-ops/-/ndarray-ops-1.2.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:ndarray-pixels@5.2.0",
+      "name": "ndarray-pixels",
+      "version": "5.2.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "953878b452b38806ad5536bd72b22c89d5329fe96aba354e429cdf7415af745bb6c28f54a3acf6eb59555fb4a03323fcf711a68f74cc4cf6dbc65f580e757848"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/ndarray-pixels@5.2.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/ndarray-pixels/-/ndarray-pixels-5.2.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:ndarray@1.0.19",
+      "name": "ndarray",
+      "version": "1.0.19",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "078247038bddc99537d042c1c3783bfe9f5b66ea727b0e5aeed5f563f806785da169facf69066182b1907ecbe07d86e0745663630b847276a86de33f58c5be1d"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/ndarray@1.0.19",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/ndarray/-/ndarray-1.0.19.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:path-expression-matcher@1.6.2",
+      "name": "path-expression-matcher",
+      "version": "1.6.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "7a74a56a26add3989ab27ce680dc518fcade15d8f7a6e6364293603f568f21a55f4fa9e7f480ae3e816528793c10ddb61dcc1ec2c84efa63760c66e40843ada9"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/path-expression-matcher@1.6.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/path-expression-matcher/-/path-expression-matcher-1.6.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:picocolors@1.1.1",
+      "name": "picocolors",
+      "version": "1.1.1",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "c5c787dac9e1b5be4cf658aa0ec984c39ea57b7efa993664117fe311bfd1c4d1727a036e97b78db250973fd1438ff2dcbb45fc284c8c71e3f69eda5a1eb0c454"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ],
+      "purl": "pkg:npm/picocolors@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:picomatch@4.0.5",
+      "name": "picomatch",
+      "version": "4.0.5",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "46fc3072bb8d8c8d67713e7145a91ec92f4b7fc95c22dbf7e0a0fe6a27fe547f6476e0327d8062a46875db6ef8c6d7a720f675d7dfd1f4175305af200304a1d0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/picomatch@4.0.5",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/picomatch/-/picomatch-4.0.5.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:postcss@8.5.26",
+      "name": "postcss",
+      "version": "8.5.26",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "bbcd8def82c5cc6f1c6be743f29b8f9e99535e8187e1f4cfa551ae21bb77e86deabcd964bdf0f49440194b16a5cb7297f134bf2f503582c0849af2a605c55b91"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/postcss@8.5.26",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/postcss/-/postcss-8.5.26.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:property-graph@4.1.0",
+      "name": "property-graph",
+      "version": "4.1.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "02f3dc3fb5c408d5b2e0b1a6150efb93bba7e2548a338792dbd3d3bd6e1c93de6e61e2f15cf58933b84bb81a8af7515a1ea09c809bc8502b8d2638f1284ed529"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/property-graph@4.1.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/property-graph/-/property-graph-4.1.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:react-dom@19.2.8",
+      "name": "react-dom",
+      "version": "19.2.8",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "ad5a6b8a67c6046dc347e4ead08406d834f93f12ad8755881839a3e723e6973af86017bbbb213e0eee2856a4c35d948718619746d4c910649278fc9008c06095"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/react-dom@19.2.8",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/react-dom/-/react-dom-19.2.8.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Render the React presentation shell into the browser document"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:react@19.2.8",
+      "name": "react",
+      "version": "19.2.8",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "3d66980352ffabdbb6bbbc58422f98dcbdd87e789eed7c8b79a248095d4c183e8ba6bb01c5c02a1a3632af4798de9f9076c03ec7f22b92de1089ff03eb7f926f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/react@19.2.8",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/react/-/react-19.2.8.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Accessible browser presentation shell"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:rollup@4.62.4",
+      "name": "rollup",
+      "version": "4.62.4",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "4573aac1a3ec0468cc34c6b8b108c38c789e1c46431688ff45daf8ea5d8c5390df12cd7ac0724f0b644f4cf1d684d97e337688e3bd8b2ea16414abade126e53a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/rollup@4.62.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/rollup/-/rollup-4.62.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:scheduler@0.27.0",
+      "name": "scheduler",
+      "version": "0.27.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "78dbfe5ab55b2aed5fdef6d8253ff1b62179b320391cf20cb5ff48818fe72a0d2c5aacc0504bea63fc66ece71973fa9a7cbc7f88ef4580e99e480a78bf9b62fd"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/scheduler@0.27.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/scheduler/-/scheduler-0.27.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:semver@7.8.5",
+      "name": "semver",
+      "version": "7.8.5",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "63bfca0ec6fc2e3a28669c1aa86cae94ee8342592c8029dc7211c693eb19218e1206f52870c044147e54af57c8e1d57e26f974c3a723bee71a222e34a6e462a0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ],
+      "purl": "pkg:npm/semver@7.8.5",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:sharp@0.35.3",
+      "name": "sharp",
+      "version": "0.35.3",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "7a3d33547b991870a20015dc3717988694673cd3c072f6c6f1131d0408430312ca9024554a92b7232bbba9bab0dc9333a23d1111e33a7f7b492ed570974d36dd"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/sharp@0.35.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/sharp/-/sharp-0.35.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:source-map-js@1.2.1",
+      "name": "source-map-js",
+      "version": "1.2.1",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "51758c2a12cec1529bef6f0852d40f5f17d853ebac7726ed52b2bff2e184f0240cbeb84ea70bf30c1c23d108522fb31073bbc8b084811bc550f3e203431a5f40"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "purl": "pkg:npm/source-map-js@1.2.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:strnum@2.4.2",
+      "name": "strnum",
+      "version": "2.4.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "ac31b7021e13574935856bcb4b3919b4c98b37df9e4be877927ab830fe80e36637621e6a18d9ce52cd63264a12afc146e5db0bdbc73b2a0908073484ca4aadbb"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/strnum@2.4.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/strnum/-/strnum-2.4.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:three@0.185.1",
+      "name": "three",
+      "version": "0.185.1",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e5aa231425cac278c1459bd49eddd615f11cbd426090de4b9628d114df7984ccbc595906e08d1035c244f8eb96bee2746ce752b6b6df5e7d2991debf43288096"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/three@0.185.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/three/-/three-0.185.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Disposable viewport rendering adapter only"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:tinyglobby@0.2.17",
+      "name": "tinyglobby",
+      "version": "0.2.17",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "c1747f758a5ca8a99f5a911d66388a24ec023459dd0f40cc9eb5bf7188d51adb449017d581c2c51e836b963e3b9a339589cf72c8dbbae5a96c805e0d4324dada"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/tinyglobby@0.2.17",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/tinyglobby/-/tinyglobby-0.2.17.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:typescript@7.0.2",
+      "name": "typescript",
+      "version": "7.0.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "f0561abbdea8dcd28e85b8ca8bfa8dbc6fd6e63873c646dd9b9b23f406d9ff94f9b16aa7de12602df1b1dbbb11299593bf2cc23fc74b4414dfe6d05349155434"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/typescript@7.0.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/typescript/-/typescript-7.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "development-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Strict static type checking and compilation"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:uniq@1.0.1",
+      "name": "uniq",
+      "version": "1.0.1",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "1b0fb3cf9d1834a3c3297b3ef5df9a2808d5c298cdc2acef3692e2808aee4f81c0f6531935d32ab3dc74ee428707f2fd591ceaa78f83953539b38c06d9eb1da0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/uniq@1.0.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/uniq/-/uniq-1.0.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:vite@7.3.6",
+      "name": "vite",
+      "version": "7.3.6",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "e173fad2ca511a349915fd6a607f9d24890adb39cbdf341f97d2a4395f4c924451ff70e5b34771681b103d396811ce412d758f2fdbec3b1a29c722a83260ee7a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/vite@7.3.6",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/vite/-/vite-7.3.6.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "development-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Static development and production build"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:xml-naming@0.3.0",
+      "name": "xml-naming",
+      "version": "0.3.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "8218a0d93044fc7d7568e56099a840dcc8629af901afa2486249c7fc385d935d275f075b22a049b1b7ccc69bc53c6f1b030efb80ddbd6905af2a9995a0f96f3d"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/xml-naming@0.3.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/xml-naming/-/xml-naming-0.3.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "runtime-or-development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@modelcontextprotocol/core@2.0.0",
+      "group": "@modelcontextprotocol",
+      "name": "@modelcontextprotocol/core",
+      "version": "2.0.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "a49084c061bb2dfafff8f429f594f029735e3b9c336df28bec7dcc6290a8acce28141a10add8e7060128a86f918e1b2f4b514aac36cabb1f8cd478659c65aa70"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40modelcontextprotocol/core@2.0.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@modelcontextprotocol/core/-/core-2.0.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "mcp-server-runtime-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive protocol primitives for the local MCP stdio server"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@modelcontextprotocol/server@2.0.0",
+      "group": "@modelcontextprotocol",
+      "name": "@modelcontextprotocol/server",
+      "version": "2.0.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "6211d67477e914c41f774a6bb049f129e4b7433df2b481a6b12d2cb61e0a0e39da7084fb87193a8571e427d2b2b31964bd333e59902d41b6dc5217683f81efb7"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40modelcontextprotocol/server@2.0.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@modelcontextprotocol/server/-/server-2.0.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "mcp-server-runtime-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Official Model Context Protocol server SDK for the local stdio bridge"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@types/node@24.13.3",
+      "group": "@types",
+      "name": "@types/node",
+      "version": "24.13.3",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "0e1f2f02c577ea2839c1af4e5f8a57bcc73d0f755e89b7f0db08b1d0253060e0cb0fc9e48fd52c2e3012af8f673e0fb678acf184157ebfb2fca57bd3e1eeb7f5"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40types/node@24.13.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@types/node/-/node-24.13.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "development-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Node.js declarations for the local MCP server and verification scripts"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:esbuild-wasm@0.27.3",
+      "name": "esbuild-wasm",
+      "version": "0.27.3",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "0145ee3b1675e39ff9033fa522a93a4dd25bc4a4f20c6917309a5313198175b9c747a9faa80171f85e281bd391a55609f5d41879002acefe754cee0314ab1b5f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/esbuild-wasm@0.27.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/esbuild-wasm/-/esbuild-wasm-0.27.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "development-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Declared peer required by the development-only Manifold candidate; excluded from the production browser graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:undici-types@7.18.2",
+      "name": "undici-types",
+      "version": "7.18.2",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "02cb82cdf7c61c9c9b49a46b9abe5e1ebf359b0254de48f0e8cfaea6b5af09788d78df52386c10dc99fc8dbf26dd9ea2cd58249e7d51d054c21003f642b2d8ff"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/undici-types@7.18.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/undici-types/-/undici-types-7.18.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "development-transitive"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Locked transitive Node.js HTTP type declarations"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:zod@4.4.3",
+      "name": "zod",
+      "version": "4.4.3",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "cad10d163209165d94c1882575eda37215b61f09b818914b0e249759d4eb25004837d15cca9ee7e0387124489634024c575fc1a967d6fe4920ef55037072724d"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/zod@4.4.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/zod/-/zod-4.4.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "mcp-server-runtime-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Runtime schema definitions required by the official local MCP server SDK"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "bom-ref": "npm:pnpm@11.9.0",
+      "name": "pnpm",
+      "version": "11.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "bd682d5d03fe525ef7c9fd6780c6884d1e756ac4c9c9fe00c538782824310dcf90e3ddc4f53835f06dfaebd5085e41855e0bcbb3b60de2ac5bbab89e5036f03b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/pnpm@11.9.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/pnpm/-/pnpm-11.9.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm-package-manager"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "development-tool-external"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Pinned workspace package manager supplied by the authorized bundled runtime"
+        }
+      ]
+    }
+  ]
+}

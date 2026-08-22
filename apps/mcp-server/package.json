@@ -1,0 +1,10 @@
+{
+  "name": "@ps3d/mcp-server",
+  "version": "0.2.0-preview.1",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "zod": "4.4.3"
+  }
+}

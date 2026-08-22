@@ -1,0 +1,156 @@
+@media (max-width: 1220px) {
+  .app-header { grid-template-columns: 205px minmax(220px, 360px) 1fr; }
+  .workbench-grid { grid-template-columns: 235px minmax(380px, 1fr) 315px; }
+  .header-actions button { padding-inline: 0.45rem; }
+  .header-icon-button span { display: none; }
+  .cad-menu > button { padding-inline: 0.42rem; }
+  .quick-command-strip > button > span { display: none; }
+  .status-facts span:nth-child(2) { display: none; }
+}
+
+@media (max-width: 980px) {
+  body { overflow: auto; }
+  .studio-app { height: auto; min-height: 100dvh; grid-template-rows: auto auto auto auto auto 38px; overflow: visible; }
+  .app-header { grid-template-columns: 190px minmax(220px, 1fr); padding-block: 0.55rem; }
+  .header-actions { grid-column: 1 / -1; justify-content: flex-start; overflow-x: auto; padding-bottom: 0.1rem; }
+  .header-icon-button span { display: inline; }
+  .cad-menu-bar { position: sticky; top: 0; min-height: 32px; overflow: visible; }
+  .cad-menu-groups { overflow-x: auto; }
+  .quick-command-strip { display: none; }
+  .workspace-tabs { position: sticky; top: 32px; overflow-x: auto; padding-left: 0.5rem; min-height: 40px; }
+  .command-ribbon { position: sticky; top: 72px; min-height: 100px; }
+  .workspace-health { display: none; }
+  .workbench-grid { display: grid; grid-template-columns: 210px minmax(0, 1fr); grid-template-rows: minmax(600px, 70vh) auto; }
+  .project-tree { grid-column: 1; grid-row: 1 / 3; }
+  .workspace-canvas { grid-column: 2; grid-row: 1; }
+  .inspector-panel { grid-column: 2; grid-row: 2; border-left: 1px solid var(--line); border-top: 1px solid var(--line); }
+  .viewport-controller { left: 0.7rem; right: 0.7rem; max-width: none; transform: none; }
+  .selection-priority button:disabled { display: none; }
+  .navigation-bar > span { display: none; }
+  .app-status { position: sticky; bottom: 0; }
+}
+
+@media (min-width: 701px) and (max-width: 1240px) {
+  .electrical-stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(420px, 1fr) auto auto; overflow: auto; }
+  .electrical-library { position: static; grid-column: 1; grid-row: 1; max-height: none; }
+  .electrical-library > div { grid-auto-flow: column; grid-auto-columns: 150px; overflow-x: auto; }
+  .sheet-view-toolbar { grid-column: 1; grid-row: 2; }
+  .electrical-sheet-viewport { grid-column: 1; grid-row: 3; min-height: 420px; }
+  .electrical-hud { grid-column: 1; grid-row: 4; }
+  .electrical-scope-banner { grid-column: 1; grid-row: 5; }
+}
+
+@media (max-width: 700px) {
+  .app-header { grid-template-columns: 1fr; }
+  .brand-block { padding-inline: 0.15rem; }
+  .project-button { grid-row: 2; }
+  .header-actions { grid-row: 3; }
+  .cad-menu-bar { padding-inline: 0.25rem; }
+  .cad-menu > button { padding-inline: 0.48rem; }
+  .cad-menu > button .command-icon { display: none; }
+  .cad-menu-popover { position: fixed; top: auto; left: 0.4rem; right: 0.4rem; width: auto; }
+  .workspace-tabs > button { padding-inline: 0.6rem; }
+  .workspace-tabs > button { min-width: 72px; }
+  .workspace-tabs > button span { width: 21px; height: 21px; }
+  .ribbon-context { width: 118px; flex-basis: 118px; }
+  .ribbon-project-facts { display: none; }
+  .workbench-grid { display: flex; flex-direction: column; }
+  .project-tree { max-height: 265px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .workspace-canvas { min-height: 590px; }
+  .inspector-panel { border-left: 0; }
+  .drawing-stage { padding-inline: 1rem; }
+  .automate-stage { padding: 0.75rem; }
+  .automation-hero { grid-template-columns: 1fr; }
+  .connection-orbit { display: none; }
+  .automation-flow { grid-template-columns: 1fr 1fr; }
+  .automation-flow.six-step { grid-template-columns: 1fr 1fr; }
+  .automation-flow b { display: none; }
+  .ai-readiness-grid { grid-template-columns: 1fr 1fr; }
+  .ai-command-form { grid-template-columns: 1fr; }
+  .ai-recipe-results, .connection-config-grid { grid-template-columns: 1fr; }
+  .tool-grid { grid-template-columns: 1fr; }
+  .viewport-metrics { grid-template-columns: 1fr; }
+  .viewport-metrics > div { border-right: 0; border-bottom: 1px solid #253e53; }
+  .viewport-metrics > div:last-child { border-bottom: 0; }
+  .viewport-controller { right: 4.7rem; }
+  .controller-group.compact { display: none; }
+  .viewbox { top: 4.2rem; right: 0.35rem; transform: scale(0.82); transform-origin: top right; }
+  .measure-panel { top: 4.4rem; width: min(235px, calc(100% - 5.6rem)); }
+  .navigation-bar { bottom: 9.8rem; max-width: calc(100% - 1.2rem); }
+  .axis-viewer { bottom: 10rem; }
+  .sketch-palette { width: 145px; }
+  .canvas-hud span:nth-child(2) { display: none; }
+  .status-facts { display: none; }
+  .electrical-stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(420px, 62vh) auto auto; overflow: visible; }
+  .electrical-library { position: static; grid-column: 1; grid-row: 1; max-height: none; }
+  .electrical-library > div { grid-auto-flow: column; grid-auto-columns: 138px; overflow-x: auto; }
+  .sheet-view-toolbar { grid-column: 1; grid-row: 2; }
+  .electrical-sheet-viewport { grid-column: 1; grid-row: 3; min-height: 420px; }
+  .electrical-hud { grid-column: 1; grid-row: 4; }
+  .electrical-scope-banner { grid-column: 1; grid-row: 5; }
+  .engineering-review-metrics { grid-template-columns: 1fr 1fr; }
+  .engineering-review-metrics > span:nth-child(2) { border-right: 0; }
+  .engineering-review-metrics > span { border-bottom: 1px solid #315164; }
+  .engineering-review-metrics > span:nth-last-child(-n + 2) { border-bottom: 0; }
+  .engineering-candidate-list,
+  .engineering-route-list { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Keep dense CAD chrome readable at 100% zoom while retaining horizontal overflow. */
+.ribbon-context > small,
+.ribbon-group > small,
+.ribbon-button > strong,
+.ribbon-button > small,
+.ribbon-project-facts,
+.tree-section > summary > strong,
+.tree-item strong,
+.tree-item small,
+.controller-group > span,
+.controller-group button,
+.viewbox > button,
+.viewbox-more button,
+.viewbox > small,
+.axis-viewer b,
+.axis-viewer em,
+.axis-viewer strong,
+.axis-viewer > span,
+.navigation-bar button,
+.navigation-bar > span {
+  font-size: 12px;
+}
+
+/* Essential navigation, editing, disclosure, and safety text never drops below 12 px. */
+.cad-menu > button,
+.cad-menu > button > span,
+.workspace-tabs > button,
+.workspace-tabs > button span,
+.header-actions button,
+.quick-command-strip button,
+.quick-command-strip kbd,
+.project-button strong,
+.project-button small,
+.project-button kbd,
+.inspector-panel :where(button, label, input, select, textarea, small, p, span, strong, dt, dd),
+.exchange-center :where(button, label, input, select, small, p, span, strong, em, dt, dd) {
+  font-size: 12px !important;
+}
+
+.ribbon-context > strong { font-size: 13px; }
+.ribbon-group { grid-template-rows: 66px 16px; row-gap: 4px; }
+.ribbon-group > div { align-items: start; }
+.ribbon-group > small { min-height: 16px; overflow: hidden; line-height: 16px; white-space: nowrap; }
+.ribbon-button { width: 78px; min-width: 78px; height: 66px; grid-template-rows: 28px 18px 16px; padding-block: 2px; }
+.ribbon-button > strong,
+.ribbon-button > small { line-height: 16px; }
+.tree-item { min-height: 44px; }
