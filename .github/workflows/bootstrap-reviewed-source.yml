@@ -47,12 +47,23 @@ jobs:
           ' || { echo "Unsafe archive path rejected." >&2; exit 1; }
 
           unzip -o -q "${BUNDLE_FILE}"
-          rm -f "${BUNDLE_FILE}" .github/workflows/bootstrap-reviewed-source.yml
+          rm -f "${BUNDLE_FILE}"
+
+          importer_copy="${RUNNER_TEMP}/bootstrap-reviewed-source.yml"
+          mv .github/workflows/bootstrap-reviewed-source.yml "${importer_copy}"
 
           node scripts/verify-repository-boundary.mjs
           node scripts/verify-dependency-inventory.mjs
           node scripts/verify-source-identity.mjs
           node scripts/verify-generated-source-set.mjs
+
+          # GitHub App tokens cannot create workflow files. The three reviewed
+          # workflows are committed separately through the authenticated web UI.
+          rm -f \
+            .github/workflows/ci.yml \
+            .github/workflows/codeql.yml \
+            .github/workflows/dependency-review.yml
+          mv "${importer_copy}" .github/workflows/bootstrap-reviewed-source.yml
 
           git add --all
           if git diff --cached --quiet; then
