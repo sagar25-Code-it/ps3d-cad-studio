@@ -169,7 +169,11 @@ export function analyzeElectromechanicalReadiness(
       catalog: byCatalog.get(mappingByComponent.get(item.source.id)!)!
     }));
     for (const item of positioned) {
-      const half = item.catalog.sizeMm.map((size) => size / 2) as Vec3;
+      const half: Vec3 = [
+        item.catalog.sizeMm[0] / 2,
+        item.catalog.sizeMm[1] / 2,
+        item.catalog.sizeMm[2] / 2
+      ];
       const clearance = item.catalog.planningClearanceMm;
       if (Math.abs(item.position[0]) + half[0] + clearance[0] > target[0] / 2
         || Math.abs(item.position[1]) + half[1] + clearance[1] > target[1] / 2
@@ -516,7 +520,9 @@ export function electromechanicalTerminalWorldPoint(
 ): Vec3 | undefined {
   const terminal = catalog.terminals.find((item) => item.name === terminalName);
   if (terminal === undefined) return undefined;
-  const [rx, ry, rz] = body.rotationDeg.map((value) => value * Math.PI / 180) as Vec3;
+  const rx = body.rotationDeg[0] * Math.PI / 180;
+  const ry = body.rotationDeg[1] * Math.PI / 180;
+  const rz = body.rotationDeg[2] * Math.PI / 180;
   const [x0, y0, z0] = terminal.positionMm;
   const x1 = x0;
   const y1 = y0 * Math.cos(rx) - z0 * Math.sin(rx);

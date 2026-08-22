@@ -102,8 +102,10 @@ function validateVehicle(value: unknown): WorkbenchResult<VehicleIntent> {
     || !Array.isArray(value.notes) || value.notes.length < 1 || value.notes.length > 8 || value.notes.some((note) => !shortText(note, 1, 320))) {
     return invalid("The vehicle intent is invalid or has unsupported fields.");
   }
+  const parameterRecord = value.parameters as Readonly<Record<string, unknown>>;
+  const layerRecord = value.layers as Readonly<Record<string, unknown>>;
   const parameterKeys = Object.keys(VEHICLE_PARAMETER_RANGES) as VehicleParameterKey[];
-  const unknownParameterKeys = Object.keys(value.parameters).filter((key) => !parameterKeys.includes(key as VehicleParameterKey));
+  const unknownParameterKeys = Object.keys(parameterRecord).filter((key) => !parameterKeys.includes(key as VehicleParameterKey));
   if (unknownParameterKeys.length > 0) return invalid("The vehicle parameter set contains unsupported fields.");
   const legacyDefaultableKeys: readonly VehicleParameterKey[] = [
     "casterRad", "kingpinInclinationRad", "scrubRadiusM", "toeRad", "ackermannPercent",
@@ -111,10 +113,10 @@ function validateVehicle(value: unknown): WorkbenchResult<VehicleIntent> {
     "rearShockUpperHeightM", "rearShockArmRatio", "frontSuspensionInboardHalfTrackM",
     "frontLowerArmHeightM", "frontUpperArmHeightM"
   ];
-  const missingParameterKeys = parameterKeys.filter((key) => !Object.hasOwn(value.parameters, key));
+  const missingParameterKeys = parameterKeys.filter((key) => !Object.hasOwn(parameterRecord, key));
   if (missingParameterKeys.some((key) => !legacyDefaultableKeys.includes(key))) return invalid("The vehicle parameter set is incomplete; only documented schema-1 geometry fields may be migrated from template defaults.");
   const defaults = createVehicleTemplate(value.template as VehicleIntent["template"]).parameters;
-  const parameters = { ...defaults, ...value.parameters } as unknown as VehicleIntent["parameters"];
+  const parameters = { ...defaults, ...parameterRecord } as unknown as VehicleIntent["parameters"];
   for (const key of parameterKeys) {
     const range = VEHICLE_PARAMETER_RANGES[key];
     if (!finiteRange(parameters[key], range[0], range[1])) return invalid(`Vehicle parameter ${key} is outside its supported SI envelope.`);
@@ -154,7 +156,7 @@ function validateVehicle(value: unknown): WorkbenchResult<VehicleIntent> {
     || parameters.frontUpperArmHeightM <= parameters.frontLowerArmHeightM + 0.05
     || parameters.wheelbaseM / Math.tan(parameters.steeringAngleRad) <= parameters.trackM / 2 + 0.05)) return invalid("Tadpole front-suspension or Ackermann target controls are geometrically inconsistent.");
   const layerKeys: readonly VehicleLayerId[] = ["skeleton", "hardpoints", "envelopes", "wheels", "chassis", "suspension", "steering", "brakes", "powertrain", "cg-loads"];
-  if (!exactKeys(value.layers, layerKeys) || layerKeys.some((key) => typeof value.layers[key] !== "boolean")) return invalid("Vehicle layers are invalid or incomplete.");
+  if (!exactKeys(layerRecord, layerKeys) || layerKeys.some((key) => typeof layerRecord[key] !== "boolean")) return invalid("Vehicle layers are invalid or incomplete.");
   const normalized = { ...value, parameters, inputStatus: missingParameterKeys.length > 0 ? "illustrative-unvalidated" : value.inputStatus } as unknown as VehicleIntent;
   for (const state of ["full-droop", "design-ride", "full-bump"] as const) {
     const geometry = solveVehicleGeometry({ ...normalized, state });

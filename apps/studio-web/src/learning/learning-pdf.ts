@@ -21,7 +21,10 @@ export function buildLearningManualPdf(manual: LearningManual): Blob {
   const infoId = objects.length + 2;
   objects.push(ascii("<< /Type /Catalog /Pages 3 0 R /PageLayout /OneColumn >>"));
   objects.push(ascii(`<< /Title (${pdfText(manual.title)}) /Author (${pdfText(manual.owner)}) /Subject (PS3D CAD learning, safe practice, and MCP connection manual) /Creator (PS3D Studio) >>`));
-  return new Blob([assemblePdf(objects, catalogId, infoId)], { type: "application/pdf" });
+  const pdf = assemblePdf(objects, catalogId, infoId);
+  const blobBytes = new Uint8Array(pdf.byteLength);
+  blobBytes.set(pdf);
+  return new Blob([blobBytes.buffer], { type: "application/pdf" });
 }
 
 function coverPage(manual: LearningManual): string {

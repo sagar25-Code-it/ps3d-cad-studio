@@ -187,7 +187,7 @@ deployment, release, or legal clearance.
   directory at any depth, plus this self-referential record. Symbolic links are
   rejected.
 - Canonical source-set hash:
-  `eefdd6bcf95d6c73d1bf83cb3f73ef9590c538b9d1cd4cf70c537d60ba0e6e44`
+  `ff163db39588d7353972085769b3a1fa286f0aa8e18104891bf7ba1dd6ce61b4`
 - Canonical source-set file count: 283
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
@@ -210,12 +210,13 @@ browser bundle and real MCP stdio exchange completed before the current
   and 48/48 runs remain historical evidence for their recorded revisions. The
   current browser-safe gates passed 6/6 vehicle groups and 76/76 broader cases.
   Six vehicle-domain groups and three public-release security/manual cases are
-  included in 86 authored cases. A final clean typecheck, all 86
-  authored typed-suite cases,
-production build, and nested-process verification
-were not rerun after this delta because the nested-process attempt was stopped
-after enterprise endpoint protection raised an alert while Codex attempted to
-launch the local MCP verifier child process. No protection was bypassed. A
-fresh frozen install, build, stdio check, and two-build comparison must run in
-the approved GitHub Actions environment; Supabase auth/token and remote MCP must
-also pass live integration checks before the Preview label changes.
+  included in 86 authored cases. After the first hosted CI run exposed strict
+  TypeScript contract errors, the corrected source passed a direct local
+  TypeScript 7.0.2 no-emit check and all 86/86 typed-suite cases through the
+  existing bundled Node runtime. The production build and nested-process MCP
+  verification were not rerun locally because the earlier nested-process
+  attempt caused enterprise endpoint protection to raise an alert. No
+  protection was bypassed. A fresh frozen install, build, stdio check, and
+  two-build comparison must run in the approved GitHub Actions environment;
+  Supabase auth/token and remote MCP must also pass live integration checks
+  before the Preview label changes.

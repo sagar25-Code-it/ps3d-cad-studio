@@ -15,7 +15,7 @@ import {
   validateWorkbenchProject
 } from "../packages/workbench-core/src/index.js";
 import { createElectricalSchematic } from "../packages/workbench-electrical/src/index.js";
-import { buildAssemblyPreview, findAssemblyInterference } from "../packages/workbench-geometry/src/index.js";
+import { buildAssemblyPreview, findAssemblyInterference, type PreviewPrimitive } from "../packages/workbench-geometry/src/index.js";
 import { handleWorkbenchMcpTool } from "../packages/workbench-mcp/src/index.js";
 import { assert, equal, type TestCase } from "./test-kit.js";
 
@@ -64,7 +64,6 @@ export const workbenchElectromechanicalTests: readonly TestCase[] = [
       })), "every conductor segment should be orthogonal");
       const tooManyDevices = {
         ...electrical,
-        id: "electrical:test-panel-capacity",
         components: Array.from({ length: 17 }, (_, index) => createElectricalComponentInstance("fuse", `electrical-component:capacity-${index + 1}`, `F${index + 1}`, [100 + index * 40, 100])),
         nets: []
       };
@@ -94,7 +93,9 @@ export const workbenchElectromechanicalTests: readonly TestCase[] = [
       const routeLanes = generated.value.electricalRoutes!.map((route) => route.pointsMm[2]![2]).sort((left, right) => left - right);
       equal(new Set(routeLanes).size, routeLanes.length, "each automatic conductor path should use one unique panel-depth lane");
       assert(routeLanes[0]! >= 50 && routeLanes.slice(1).every((lane, index) => lane - routeLanes[index]! >= 14), "conductor lanes should clear duct covers and adjacent maximum-radius conductors");
-      const conductorPrimitives = scene.primitives.filter((primitive) => primitive.kind === "line" && primitive.radiusMm !== undefined);
+      const conductorPrimitives = scene.primitives.filter(
+        (primitive): primitive is Extract<PreviewPrimitive, { readonly kind: "line" }> => primitive.kind === "line" && primitive.radiusMm !== undefined
+      );
       assert(conductorPrimitives.every((primitive) => primitive.segmentsMm !== undefined && primitive.segmentsMm.length % 6 === 0), "solid conductor previews should expose an explicit deduplicated branch graph");
       assert(conductorPrimitives.some((primitive) => primitive.segmentsMm!.length < Math.max(0, primitive.pointsMm.length / 3 - 1) * 6), "a multidrop conductor should remove retraced branch segments before solid rendering");
       assert(conductorPrimitives.every((primitive) => {
@@ -103,7 +104,6 @@ export const workbenchElectromechanicalTests: readonly TestCase[] = [
       }), "deduplicated conductor previews should never contain duplicate undirected segments");
       const nearLimitElectrical = {
         ...createElectricalTemplate("dc-control"),
-        id: "electrical:test-detail-priority",
         components: Array.from({ length: 16 }, (_, index) => createElectricalComponentInstance("inverter", `electrical-component:detail-${index + 1}`, `PCS${index + 1}`, [100 + index * 40, 100])),
         nets: []
       };

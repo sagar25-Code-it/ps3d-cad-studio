@@ -274,7 +274,7 @@ export async function handleWorkbenchMcpTool(name: string, args: unknown): Promi
     if (!exactKeys(args, ["project"])) return error("INVALID_PARAMS", "Expected only the project argument.");
     const report = analyzeDesignHealth(args.project);
     if (!report.ok) return diagnostics(report.diagnostics);
-    return success(`Design health ${report.value.overallStatus} at ${report.value.score}/100 with ${report.value.errors} blocking and ${report.value.warnings} review finding(s).`, report.value);
+    return success(`Design health ${report.value.overallStatus} at ${report.value.score}/100 with ${report.value.errors} blocking and ${report.value.warnings} review finding(s).`, { ...report.value });
   }
   if (name === "ps3d_analyze_vehicle") {
     if (!exactKeys(args, ["project"])) return error("INVALID_PARAMS", "Expected only the project argument.");

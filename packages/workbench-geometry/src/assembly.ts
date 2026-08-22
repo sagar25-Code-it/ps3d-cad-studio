@@ -10,18 +10,20 @@ import type { InterferenceCandidate, PreviewBounds, PreviewPrimitive, PreviewSce
 export function buildAssemblyPreview(assembly: AssemblyIntent): PreviewScene {
   const componentPrimitives = assembly.components.filter((component) => component.visible).map((component) => componentPrimitive(component, assembly.explodeMm));
   const routesStale = assembly.electromechanicalSource?.status === "stale";
-  const routePrimitives = (assembly.explodeMm > 0 ? [] : assembly.electricalRoutes ?? []).map((route) => ({
-    id: route.id,
-    name: `${route.name} · unsized conductor visualization`,
-    color: routesStale ? "#d39a4f" : routeColor(route.class),
-    opacity: routesStale ? 0.48 : 0.92,
-    selectable: false,
-    kind: "line" as const,
-    pointsMm: route.pointsMm.flatMap((point) => point),
-    segmentsMm: uniqueRouteSegments(route.pointsMm),
-    dashed: routesStale,
-    radiusMm: routesStale ? undefined : conductorRadius(route.class)
-  }));
+  const routePrimitives = (assembly.explodeMm > 0 ? [] : assembly.electricalRoutes ?? []).map((route): PreviewPrimitive => {
+    const primitive = {
+      id: route.id,
+      name: `${route.name} · unsized conductor visualization`,
+      color: routesStale ? "#d39a4f" : routeColor(route.class),
+      opacity: routesStale ? 0.48 : 0.92,
+      selectable: false,
+      kind: "line" as const,
+      pointsMm: route.pointsMm.flatMap((point) => point),
+      segmentsMm: uniqueRouteSegments(route.pointsMm),
+      dashed: routesStale
+    };
+    return routesStale ? primitive : { ...primitive, radiusMm: conductorRadius(route.class) };
+  });
   const detailPrimitives = assembly.explodeMm > 0 ? [] : panelDetailPrimitives(assembly);
   const primitives = [...componentPrimitives, ...detailPrimitives, ...routePrimitives];
   const bounds = primitives.flatMap((primitive) => primitiveBounds(primitive));
