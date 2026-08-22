@@ -1,0 +1,38 @@
+{
+  "name": "ps3d-cad-studio-original",
+  "version": "0.2.0-preview.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @ps3d/studio-web dev",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "mcp:build": "tsc -p tsconfig.mcp.json",
+    "mcp:stdio": "pnpm mcp:build && node apps/mcp-server/dist/apps/mcp-server/src/server.js",
+    "verify:deps": "node scripts/verify-dependency-inventory.mjs",
+    "verify:repo": "node scripts/verify-repository-boundary.mjs",
+    "sbom:generate": "node scripts/generate-sbom.mjs",
+    "sbom:check": "node scripts/generate-sbom.mjs --check",
+    "test": "pnpm verify:deps && pnpm verify:repo && pnpm sbom:check && tsc -p tsconfig.tests.json && node .test-dist/tests/run.js && pnpm mcp:build && node scripts/verify-mcp.mjs && node scripts/verify-source-identity.mjs && node scripts/verify-generated-source-set.mjs",
+    "build": "pnpm verify:deps && pnpm verify:repo && pnpm sbom:check && pnpm --filter @ps3d/studio-web build && node scripts/verify-build.mjs",
+    "clean:test": "node -e \"for(const path of ['.test-dist','.mcp-dist','apps/mcp-server/dist'])require('node:fs').rmSync(path,{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@types/three": "0.185.4",
+    "esbuild-wasm": "catalog:",
+    "manifold-3d": "3.5.1",
+    "typescript": "7.0.2",
+    "vite": "7.3.6"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "outDir": "apps/mcp-server/dist",
+    "rootDir": ".",
+    "declaration": false,
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": [
+    "apps/mcp-server/**/*.ts",
+    "packages/workbench-core/**/*.ts",
+    "packages/workbench-sketch/**/*.ts",
+    "packages/workbench-mcp/**/*.ts"
+  ]
+}
