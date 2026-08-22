@@ -187,7 +187,7 @@ deployment, release, or legal clearance.
   directory at any depth, plus this self-referential record. Symbolic links are
   rejected.
 - Canonical source-set hash:
-  `f33930117f82d08f77e3af869a9286e0d566f24521f628f1b4be0b8a1d9c14e2`
+  `8b5a921c88d7c0d19a89d2336c4aa8ec7386772cdbb6194dd5ec63218402e525`
 - Canonical source-set file count: 283
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
@@ -220,7 +220,13 @@ browser bundle and real MCP stdio exchange completed before the current
   the complete ten-tool legacy initialize, inspect, health, vehicle,
   electromechanical, preview, rejection, apply, and exact-retry lifecycle was
   verified locally through the SDK's in-memory transport without starting a
-  child process. The production build and nested-process MCP verification were
+  child process. The next hosted production build exposed a bundle-policy
+  false positive: the unbounded, case-insensitive `McpServer` marker also
+  matched the plural client configuration key `mcpServers` shown in the MCP
+  access guide. The marker now requires identifier boundaries, so it continues
+  to reject the server SDK class while allowing model-neutral client
+  configuration examples; the rebuilt production bundle passes that policy
+  locally. The nested-process MCP verification was
   not rerun locally because the earlier nested-process attempt caused
   enterprise endpoint protection to raise an alert. No protection was
   bypassed. A fresh frozen install, build, stdio check, and two-build comparison
