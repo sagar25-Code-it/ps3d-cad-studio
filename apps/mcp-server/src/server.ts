@@ -13,7 +13,7 @@ import {
 
 const workspaceSchema = z.enum(["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"]);
 const projectSchema = z.object({
-  format: z.string(), schemaVersion: z.string(), applicationVersion: z.string(), id: z.string(), name: z.string(),
+  format: z.string(), schemaVersion: z.literal(1), applicationVersion: z.string(), id: z.string(), name: z.string(),
   revision: z.number().int().nonnegative(), unit: z.literal("mm"), activeWorkspace: workspaceSchema,
   sketch: z.record(z.string(), z.unknown()), part: z.record(z.string(), z.unknown()), assembly: z.record(z.string(), z.unknown()),
   surface: z.record(z.string(), z.unknown()), drawing: z.record(z.string(), z.unknown()), electrical: z.record(z.string(), z.unknown()),

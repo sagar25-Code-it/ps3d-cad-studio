@@ -187,7 +187,7 @@ deployment, release, or legal clearance.
   directory at any depth, plus this self-referential record. Symbolic links are
   rejected.
 - Canonical source-set hash:
-  `ff163db39588d7353972085769b3a1fa286f0aa8e18104891bf7ba1dd6ce61b4`
+  `f33930117f82d08f77e3af869a9286e0d566f24521f628f1b4be0b8a1d9c14e2`
 - Canonical source-set file count: 283
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
@@ -213,10 +213,17 @@ browser bundle and real MCP stdio exchange completed before the current
   included in 86 authored cases. After the first hosted CI run exposed strict
   TypeScript contract errors, the corrected source passed a direct local
   TypeScript 7.0.2 no-emit check and all 86/86 typed-suite cases through the
-  existing bundled Node runtime. The production build and nested-process MCP
-  verification were not rerun locally because the earlier nested-process
-  attempt caused enterprise endpoint protection to raise an alert. No
-  protection was bypassed. A fresh frozen install, build, stdio check, and
-  two-build comparison must run in the approved GitHub Actions environment;
+  existing bundled Node runtime. The next hosted frozen run passed typecheck
+  and all 86 authored cases, then exposed a server-boundary mismatch where the
+  numeric project schema version was incorrectly declared as a string in the
+  MCP SDK input schema. That contract is now the exact numeric literal `1`;
+  the complete ten-tool legacy initialize, inspect, health, vehicle,
+  electromechanical, preview, rejection, apply, and exact-retry lifecycle was
+  verified locally through the SDK's in-memory transport without starting a
+  child process. The production build and nested-process MCP verification were
+  not rerun locally because the earlier nested-process attempt caused
+  enterprise endpoint protection to raise an alert. No protection was
+  bypassed. A fresh frozen install, build, stdio check, and two-build comparison
+  must run in the approved GitHub Actions environment;
   Supabase auth/token and remote MCP must also pass live integration checks
   before the Preview label changes.
