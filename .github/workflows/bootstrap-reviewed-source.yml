@@ -26,8 +26,8 @@ jobs:
       - name: Verify, extract, and commit the reviewed source
         shell: bash
         env:
-          BUNDLE_FILE: ps3d-reviewed-source.zip
-          BUNDLE_SHA256: bcf2cca2fea4d5dd68b06d19090c8f6723fc34fef40b34b7bbc02a25d8a9e114
+          BUNDLE_FILE: ps3d-reviewed-source-fix1.zip
+          BUNDLE_SHA256: 2191c767c34fb456904286b60a2af7a6657c639dd1d0c98fe7c50ab4c438aa29
           BUNDLE_ENTRY_COUNT: "284"
         run: |
           set -euo pipefail
@@ -57,15 +57,16 @@ jobs:
           node scripts/verify-source-identity.mjs
           node scripts/verify-generated-source-set.mjs
 
-          # GitHub App tokens cannot create workflow files. The three reviewed
-          # workflows are committed separately through the authenticated web UI.
-          rm -f \
-            .github/workflows/ci.yml \
-            .github/workflows/codeql.yml \
-            .github/workflows/dependency-review.yml
-          mv "${importer_copy}" .github/workflows/bootstrap-reviewed-source.yml
+          # GitHub App tokens cannot modify workflow files. The authenticated
+          # repository versions are restored after verification and excluded
+          # from the bot-authored source correction commit.
+          git restore --source=HEAD --staged --worktree -- .github/workflows
 
           git add --all
+          if ! git diff --cached --quiet -- .github/workflows; then
+            echo "Workflow changes must be committed through the authenticated web UI." >&2
+            exit 1
+          fi
           if git diff --cached --quiet; then
             echo "No reviewed source changes were staged." >&2
             exit 1
