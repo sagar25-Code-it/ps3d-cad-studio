@@ -26,8 +26,8 @@ jobs:
       - name: Verify, extract, and commit the reviewed source
         shell: bash
         env:
-          BUNDLE_FILE: ps3d-reviewed-source-fix1.zip
-          BUNDLE_SHA256: 2191c767c34fb456904286b60a2af7a6657c639dd1d0c98fe7c50ab4c438aa29
+          BUNDLE_FILE: ps3d-reviewed-source-fix2.zip
+          BUNDLE_SHA256: a8fb36a9dbf4c03c18fe5ba05e3eaa93b166ba5ac86a7caeeed6be54880cdff4
           BUNDLE_ENTRY_COUNT: "284"
         run: |
           set -euo pipefail
