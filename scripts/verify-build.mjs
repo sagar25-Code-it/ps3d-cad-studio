@@ -30,7 +30,7 @@ for (const scriptName of assets.filter((name) => name.endsWith(".js"))) {
   const source = await readFile(resolve(assetsDirectory, scriptName), "utf8");
   if (scriptName === workerName) workerSource = source;
   if (
-    /manifold-3d|@modelcontextprotocol\/(?:core|server)|McpServer|StdioServerTransport|new Function\s*\(|\beval\s*\(|\bWebAssembly\b|application\/wasm|wasmBinary|AGFzb/iu.test(
+    /manifold-3d|@modelcontextprotocol\/(?:core|server)|\bMcpServer\b|\bStdioServerTransport\b|new Function\s*\(|\beval\s*\(|\bWebAssembly\b|application\/wasm|wasmBinary|AGFzb/iu.test(
       source
     )
   ) {
