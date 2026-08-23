@@ -2,11 +2,13 @@ import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { assertProductionModuleAllowed } from "./production-boundary.mjs";
 import { verifyEvaluatorSourceIdentity } from "./verify-source-identity.mjs";
-import { verifyGeneratedSourceSetHash } from "./verify-generated-source-set.mjs";
+import { verifyGeneratedSourceSetHash, verifyVercelPreinstallSourceSet } from "./verify-generated-source-set.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const evaluatorSourceHash = await verifyEvaluatorSourceIdentity();
-const generatedSourceSet = await verifyGeneratedSourceSetHash();
+const generatedSourceSet = process.env.VERCEL === "1"
+  ? await verifyVercelPreinstallSourceSet()
+  : await verifyGeneratedSourceSetHash();
 for (const forbiddenImport of ["manifold-3d", "@modelcontextprotocol/server", "zod"]) {
   let syntheticBoundaryRejected = false;
   try {
