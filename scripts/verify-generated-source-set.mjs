@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const recordRelativePath = "provenance/GENERATED_MATERIAL.md";
-const excludedDirectories = new Set([".git", "node_modules", "dist", ".test-dist", ".mcp-dist"]);
+const excludedDirectories = new Set([".git", "node_modules", ".pnpm-store", "dist", ".test-dist", ".mcp-dist"]);
 
 export async function calculateGeneratedSourceSetHash() {
   const paths = await listFiles(root, "");
