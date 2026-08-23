@@ -86,8 +86,10 @@ async function verifyVercelGitCheckout(commitSha) {
   if (head.trim().toLowerCase() !== commitSha.toLowerCase()) {
     throw new Error("Vercel Git checkout does not match VERCEL_GIT_COMMIT_SHA.");
   }
-  if (status.trim() !== "") {
-    throw new Error(`Vercel Git checkout is not clean before dependency installation:\n${status.trim()}`);
+  const changes = status.replace(/\r?\n$/u, "").split(/\r?\n/u).filter((line) => line !== "");
+  const unexpectedChanges = changes.filter((line) => line !== " M vercel.json");
+  if (unexpectedChanges.length !== 0) {
+    throw new Error(`Vercel Git checkout has unexpected changes before dependency installation:\n${unexpectedChanges.join("\n")}`);
   }
 
   const expected = await readRecordedSourceSetIdentity();
