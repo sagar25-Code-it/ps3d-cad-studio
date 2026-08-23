@@ -2,7 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const excludedDirectories = new Set([".git", "node_modules", ".pnpm-store", "dist", ".test-dist", ".mcp-dist"]);
+const excludedDirectories = new Set([".git", ".vercel", "node_modules", ".pnpm-store", "dist", ".test-dist", ".mcp-dist"]);
 const reviewedImageExtensions = new Set([".jpg", ".jpeg", ".png"]);
 const reviewedBinaryFiles = new Map([
   ["artifacts/screenshots/01-part-workspace.jpg", "jpeg"],

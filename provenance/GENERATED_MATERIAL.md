@@ -183,11 +183,11 @@ deployment, release, or legal clearance.
 - Canonical source-set hash algorithm: SHA-256 over a sorted sequence of UTF-8
   repository-relative paths normalized to `/` separators, a NUL byte, file
   bytes, and a trailing NUL byte.
-- Exclusions: any `.git`, `node_modules`, `.pnpm-store`, `dist`, `.test-dist`, or `.mcp-dist`
+- Exclusions: any `.git`, `.vercel`, `node_modules`, `.pnpm-store`, `dist`, `.test-dist`, or `.mcp-dist`
   directory at any depth, plus this self-referential record. Symbolic links are
   rejected.
 - Canonical source-set hash:
-  `85eb23da78328626f54b35904079b907674cf8f4549cd16e1907e71a4d7bf889`
+  `94f5e1b3ae2ea90610ba0a024803bda5143becaa7e5c2b029a8b2c2b28e18d2f`
 - Canonical source-set file count: 283
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
@@ -199,7 +199,7 @@ deployment, release, or legal clearance.
   from all 140 recorded components.
 - Human-authored changes after generation: the reviewed pnpm dependency-build
   policy explicitly allows only `esbuild`, which is required by Vite's fresh
-  production install. Repository verification also excludes the generated `.pnpm-store` cache, consistent with `.gitignore`; no generated CAD design source changed.
+  production install. Repository verification also excludes the generated `.pnpm-store` cache,  and Vercel-generated `.vercel` deployment metadataconsistent with `.gitignore`; no generated CAD design source changed.
 - Required reviewer: project provenance owner plus a technical maintainer.
 - Reviewer/date/disposition: pending.
 
