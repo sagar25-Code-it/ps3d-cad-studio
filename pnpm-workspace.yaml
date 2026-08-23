@@ -9,7 +9,8 @@ autoInstallPeers: false
 ignoredOptionalDependencies:
   - "@img/sharp-*"
 
-onlyBuiltDependencies: []
+allowBuilds:
+  esbuild: true
 
 catalog:
   esbuild-wasm: 0.27.3

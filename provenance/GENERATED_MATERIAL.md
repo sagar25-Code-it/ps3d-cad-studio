@@ -187,7 +187,7 @@ deployment, release, or legal clearance.
   directory at any depth, plus this self-referential record. Symbolic links are
   rejected.
 - Canonical source-set hash:
-  `8b5a921c88d7c0d19a89d2336c4aa8ec7386772cdbb6194dd5ec63218402e525`
+  `26a5c37a6dcef2efffae6ea6951d73ed680903920999040a2f0cae4a0f15585b`
 - Canonical source-set file count: 283
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
@@ -197,7 +197,9 @@ deployment, release, or legal clearance.
   in the existing in-app runtime and matched exactly.
 - CycloneDX artifact: `artifacts/sbom/ps3d.cdx.json`, deterministically derived
   from all 140 recorded components.
-- Human-authored changes after generation: none recorded at creation time.
+- Human-authored changes after generation: the reviewed pnpm dependency-build
+  policy explicitly allows only `esbuild`, which is required by Vite's fresh
+  production install; no generated CAD design source changed.
 - Required reviewer: project provenance owner plus a technical maintainer.
 - Reviewer/date/disposition: pending.
 
