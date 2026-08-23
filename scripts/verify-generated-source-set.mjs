@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
 
 const root = resolve(import.meta.dirname, "..");
+const execFileAsync = promisify(execFile);
 const recordRelativePath = "provenance/GENERATED_MATERIAL.md";
 const vercelMarkerRelativePath = ".vercel/ps3d-source-set-preverified.json";
 const excludedDirectories = new Set([".git", ".vercel", "node_modules", ".pnpm-store", "dist", ".test-dist", ".mcp-dist"]);
@@ -30,12 +33,14 @@ export async function verifyGeneratedSourceSetHash() {
 }
 
 export async function markVercelPreinstallSourceSet() {
-  const verified = await verifyGeneratedSourceSetHash();
   const commitSha = readVercelCommitSha();
+  const verified = process.env.VERCEL === "1"
+    ? await verifyVercelGitCheckout(commitSha)
+    : await verifyGeneratedSourceSetHash();
   await mkdir(resolve(root, ".vercel"), { recursive: true });
   await writeFile(
     resolve(root, ...vercelMarkerRelativePath.split("/")),
-    `${JSON.stringify({ schemaVersion: 1, ...verified, commitSha }, null, 2)}\n`,
+    `${JSON.stringify({ schemaVersion: 2, ...verified, commitSha }, null, 2)}\n`,
     "utf8"
   );
   return { ...verified, commitSha };
@@ -46,7 +51,7 @@ export async function verifyVercelPreinstallSourceSet() {
   const expected = await readRecordedSourceSetIdentity();
   const commitSha = readVercelCommitSha();
   if (
-    marker.schemaVersion !== 1 ||
+    marker.schemaVersion !== 2 ||
     marker.hash !== expected.hash ||
     marker.fileCount !== expected.fileCount ||
     marker.commitSha !== commitSha
@@ -54,6 +59,42 @@ export async function verifyVercelPreinstallSourceSet() {
     throw new Error("Vercel pre-install source-set marker is missing, stale, or bound to a different Git commit.");
   }
   return { hash: marker.hash, fileCount: marker.fileCount };
+}
+
+async function verifyVercelGitCheckout(commitSha) {
+  if (commitSha === null) {
+    throw new Error("VERCEL_GIT_COMMIT_SHA is required for hosted source verification.");
+  }
+
+  let head;
+  let status;
+  try {
+    ({ stdout: head } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true
+    }));
+    ({ stdout: status } = await execFileAsync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true
+    }));
+  } catch (error) {
+    throw new Error("Vercel source verification requires an intact Git checkout.", { cause: error });
+  }
+
+  if (head.trim().toLowerCase() !== commitSha.toLowerCase()) {
+    throw new Error("Vercel Git checkout does not match VERCEL_GIT_COMMIT_SHA.");
+  }
+  if (status.trim() !== "") {
+    throw new Error(`Vercel Git checkout is not clean before dependency installation:\n${status.trim()}`);
+  }
+
+  const expected = await readRecordedSourceSetIdentity();
+  if (expected.hash === undefined || expected.fileCount === undefined) {
+    throw new Error("Recorded canonical source-set identity is missing or invalid.");
+  }
+  return expected;
 }
 
 async function readRecordedSourceSetIdentity() {

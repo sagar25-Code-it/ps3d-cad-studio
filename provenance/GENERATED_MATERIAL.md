@@ -188,7 +188,7 @@ deployment, release, or legal clearance.
   self-referential record.
   Symbolic links are rejected.
 - Canonical source-set hash:
-  `78f0c516c5594146ccf3b04d84f676345c3ee85c5cd6d5b239e7c98808b58f9d`
+  `d60b9f6cf32e322a79e85fa4055bc82b648c7152a9223f856bb149458cc426d7`
 - Canonical source-set file count: 283
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
@@ -202,9 +202,11 @@ deployment, release, or legal clearance.
   policy explicitly allows only `esbuild`, which is required by Vite's fresh
   production install. Repository verification also excludes the generated
   `.pnpm-store` cache and Vercel-generated `.vercel` deployment metadata,
-  consistent with `.gitignore`. Hosted builds verify the source identity before
-  dependency installation and carry a Git-commit-bound marker into the
-  post-build gate; no generated CAD design source changed.
+  consistent with `.gitignore`. Hosted builds verify the exact Vercel commit
+  identity and a clean Git checkout before dependency installation, then carry
+  that Git-commit-bound source marker into the post-build gate. Local and CI
+  verification retains the byte-level canonical source hash; no generated CAD
+  design source changed.
 - Required reviewer: project provenance owner plus a technical maintainer.
 - Reviewer/date/disposition: pending.
 
