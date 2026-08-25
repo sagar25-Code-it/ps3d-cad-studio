@@ -57,7 +57,9 @@ export const PS3D_SUPPORTED_PROTOCOL_REVISIONS = ["2026-07-28", "2025-11-25", "2
 
 export const PS3D_OPERATION_KINDS = [
   "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
-  "set-sketch-dimension", "toggle-sketch-construction", "set-part-parameter", "set-assembly-explode", "apply-assembly-template",
+  "set-sketch-dimension", "toggle-sketch-construction", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
+  "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
+  "isolate-part-preview-body", "set-part-preview-bodies-visibility", "set-assembly-explode", "apply-assembly-template",
   "add-assembly-component", "delete-assembly-component", "set-component-translation", "toggle-component-grounded",
   "toggle-component-visibility", "set-surface-mode", "set-surface-parameter", "set-drawing-sheet", "set-drawing-projection",
   "set-drawing-scale", "set-drawing-dimensions", "set-drawing-view-preset", "set-drawing-display-style", "set-drawing-section-view",
