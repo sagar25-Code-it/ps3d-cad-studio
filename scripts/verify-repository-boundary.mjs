@@ -5,6 +5,7 @@ const root = resolve(import.meta.dirname, "..");
 const excludedDirectories = new Set([".git", ".vercel", "node_modules", ".pnpm-store", "dist", ".test-dist", ".mcp-dist"]);
 const reviewedImageExtensions = new Set([".jpg", ".jpeg", ".png"]);
 const reviewedBinaryFiles = new Map([
+  ["apps/studio-web/public/ps3d-master-logo.png", "png"],
   ["artifacts/screenshots/01-part-workspace.jpg", "jpeg"],
   ["artifacts/screenshots/02-sketch-workspace.jpg", "jpeg"],
   ["artifacts/screenshots/03-assembly-workspace.jpg", "jpeg"],
@@ -58,8 +59,34 @@ const reviewedBinaryFiles = new Map([
   ["docs/screenshots/53-learning-manual-cover.png", "png"],
   ["docs/screenshots/54-learning-manual-module.png", "png"],
   ["docs/screenshots/55-learning-manual-checklist.png", "png"],
+  ["docs/screenshots/56-professional-sketch-profile-extrude.jpg", "jpeg"],
+  ["docs/screenshots/57-sketch-linked-qualified-part.jpg", "jpeg"],
+  ["docs/screenshots/58-part-snapshot-in-assembly.jpg", "jpeg"],
+  ["docs/screenshots/59-light-cad-gray-part.jpg", "jpeg"],
+  ["docs/screenshots/60-part-display-shading-color.jpg", "jpeg"],
+  ["docs/screenshots/61-custom-red-body-appearance.jpg", "jpeg"],
+  ["docs/screenshots/62-feature-wireframe-display.jpg", "jpeg"],
+  ["docs/screenshots/63-ui-aligned-part-workspace.jpg", "jpeg"],
+  ["docs/screenshots/64-ui-aligned-drawing-workspace.jpg", "jpeg"],
+  ["docs/screenshots/65-ui-aligned-sketch-workspace.jpg", "jpeg"],
+  ["docs/screenshots/66-ui-aligned-assembly-workspace.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/01-fastener-socket-head.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/02-bearings-bushings.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/03-gears.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/04-chain-sprockets.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/05-belts-pulleys.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/06-o-rings-seals.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/07-linear-motion.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/08-hose-fittings.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/09-tube-fittings.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/10-hand-tools.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/11-configured-m10-fastener.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/12-assembly-grouped-insertion.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/13-assembly-trace-card.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/14-all-commands-catalog.jpg", "jpeg"],
+  ["docs/screenshots/master-cart/15-ps3d-brand-profile.jpg", "jpeg"],
   ["output/pdf/ps3d-exchange-model-package-sample.pdf", "pdf"],
-  ["output/pdf/ps3d-studio-learning-and-safe-practice-manual.pdf", "pdf"]
+  ["output/pdf/ps3d-cad-studio-learning-and-safe-practice-manual.pdf", "pdf"]
 ]);
 const forbiddenCredentialExtensions = new Set([".key", ".pem", ".p12", ".pfx", ".jks", ".kdbx"]);
 const forbiddenPatterns = [
