@@ -156,6 +156,13 @@ function geometryBounds(intent: VehicleIntent, geometry: VehicleGeometryModel, p
       const extentMm = Math.hypot(primitive.radiusMm, primitive.heightMm / 2);
       points.push([(primitive.positionMm[0] - extentMm) / 1_000, (primitive.positionMm[1] - extentMm) / 1_000, (primitive.positionMm[2] - extentMm) / 1_000]);
       points.push([(primitive.positionMm[0] + extentMm) / 1_000, (primitive.positionMm[1] + extentMm) / 1_000, (primitive.positionMm[2] + extentMm) / 1_000]);
+    } else if (primitive.kind === "cone") {
+      const extentMm = Math.hypot(Math.max(primitive.baseRadiusMm, primitive.topRadiusMm), primitive.heightMm / 2);
+      points.push([(primitive.positionMm[0] - extentMm) / 1_000, (primitive.positionMm[1] - extentMm) / 1_000, (primitive.positionMm[2] - extentMm) / 1_000]);
+      points.push([(primitive.positionMm[0] + extentMm) / 1_000, (primitive.positionMm[1] + extentMm) / 1_000, (primitive.positionMm[2] + extentMm) / 1_000]);
+    } else if (primitive.kind === "sphere") {
+      points.push([(primitive.positionMm[0] - primitive.radiusMm) / 1_000, (primitive.positionMm[1] - primitive.radiusMm) / 1_000, (primitive.positionMm[2] - primitive.radiusMm) / 1_000]);
+      points.push([(primitive.positionMm[0] + primitive.radiusMm) / 1_000, (primitive.positionMm[1] + primitive.radiusMm) / 1_000, (primitive.positionMm[2] + primitive.radiusMm) / 1_000]);
     } else {
       const values = primitive.kind === "mesh" ? primitive.positionsMm : primitive.segmentsMm ?? primitive.pointsMm;
       const radiusM = primitive.kind === "line" ? (primitive.radiusMm ?? 0) / 1_000 : 0;
