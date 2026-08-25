@@ -318,6 +318,8 @@ function assertBoundsContainPrimitives(preview: VehiclePreview, label: string): 
   for (const primitive of preview.scene.primitives) {
     if (primitive.kind === "box") assertPoint(primitive.positionMm, Math.hypot(...primitive.sizeMm) / 2, primitive.id);
     else if (primitive.kind === "cylinder") assertPoint(primitive.positionMm, Math.hypot(primitive.radiusMm, primitive.heightMm / 2), primitive.id);
+    else if (primitive.kind === "cone") assertPoint(primitive.positionMm, Math.hypot(Math.max(primitive.baseRadiusMm, primitive.topRadiusMm), primitive.heightMm / 2), primitive.id);
+    else if (primitive.kind === "sphere") assertPoint(primitive.positionMm, primitive.radiusMm, primitive.id);
     else {
       const values = primitive.kind === "mesh" ? primitive.positionsMm : primitive.segmentsMm ?? primitive.pointsMm;
       const extent = primitive.kind === "line" ? primitive.radiusMm ?? 0 : 0;

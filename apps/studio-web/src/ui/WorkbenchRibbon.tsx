@@ -1,5 +1,5 @@
 import type { DisplayUnit } from "../../../../packages/model-schema/src/index.js";
-import type { AssemblyTemplateId, DrawingDatumScheme, DrawingDisplayStyle, DrawingDraftingStandard, DrawingSettings, ElectricalComponentKind, ElectricalStandard, ElectricalTemplateId, SurfaceIntent, VehicleLayerId, VehicleSimulationState, VehicleTemplateId, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
+import type { AssemblyTemplateId, DrawingDatumScheme, DrawingDisplayStyle, DrawingDraftingStandard, DrawingSettings, ElectricalComponentKind, ElectricalStandard, ElectricalTemplateId, PartPreviewBodyShape, SurfaceIntent, VehicleLayerId, VehicleSimulationState, VehicleTemplateId, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { SketchTool } from "../../../../packages/workbench-sketch/src/index.js";
 import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/index.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
@@ -9,10 +9,12 @@ type SurfaceParameter = "widthMm" | "depthMm" | "crownMm" | "twistDeg" | "uSegme
 
 interface WorkbenchRibbonProps {
   readonly project: WorkbenchProject;
+  readonly masterCartOpen: boolean;
   readonly displayUnit: DisplayUnit;
   readonly sketchTool: SketchTool;
   readonly selectedId: string | null;
   readonly onSketchTool: (tool: SketchTool) => void;
+  readonly onFinishSketch: () => void;
   readonly onCancelSketchPoints: () => void;
   readonly onSelect: (id: string | null) => void;
   readonly onFit: () => void;
@@ -24,6 +26,9 @@ interface WorkbenchRibbonProps {
   readonly onDisplayUnit: (unit: DisplayUnit) => void;
   readonly onAssemblyExplode: (valueMm: number) => void;
   readonly onAssemblyTemplate: (template: Exclude<AssemblyTemplateId, "custom" | "electrical-panel">) => void;
+  readonly onInsertPartIntoAssembly: () => void;
+  readonly onCreatePartPreviewBody: (shape: PartPreviewBodyShape) => void;
+  readonly onPartPreviewAction: (operation: "edit-transform" | "edit-size" | "edit-appearance" | "duplicate" | "mirror-x" | "pattern-x" | "toggle-visible" | "delete", commandName: string) => void;
   readonly onInsertComponent: (shape: "box" | "cylinder") => void;
   readonly onDeleteComponent: (componentId: string) => void;
   readonly onToggleGrounded: (componentId: string) => void;
@@ -49,13 +54,18 @@ interface WorkbenchRibbonProps {
   readonly onVehicleTemplate: (template: VehicleTemplateId) => void;
   readonly onVehicleState: (state: VehicleSimulationState) => void;
   readonly onVehicleLayer: (layer: VehicleLayerId) => void;
+  readonly onCloseMasterCart: () => void;
 }
 
 const SKETCH_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; readonly label: string; readonly key: string }[] = [
   { id: "select", icon: "select", label: "Select", key: "V" },
   { id: "line", icon: "line", label: "Line", key: "L" },
-  { id: "rectangle", icon: "rectangle", label: "Rectangle", key: "R" },
-  { id: "circle", icon: "circle", label: "Circle", key: "C" },
+  { id: "rectangle", icon: "rectangle", label: "2-point rectangle", key: "R" },
+  { id: "rectangle-center", icon: "rectangle", label: "Center rectangle", key: "R2" },
+  { id: "rectangle-three-point", icon: "rectangle", label: "3-point rectangle", key: "R3" },
+  { id: "circle", icon: "circle", label: "Center circle", key: "C" },
+  { id: "circle-two-point", icon: "circle", label: "2-point circle", key: "C2" },
+  { id: "circle-three-point", icon: "circle", label: "3-point circle", key: "C3" },
   { id: "arc", icon: "arc", label: "3-point arc", key: "A" }
 ];
 
@@ -73,14 +83,33 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
   return <section className="command-ribbon" role="toolbar" aria-label={`${props.project.activeWorkspace} command ribbon`}>
     <div className="ribbon-context">
       <small>Active workspace</small>
-      <strong>{workspaceLabel(props.project.activeWorkspace)}</strong>
+      <strong>{props.masterCartOpen ? "Master Cart" : workspaceLabel(props.project.activeWorkspace)}</strong>
       <CapabilityBadge level={level} />
     </div>
-    {props.project.activeWorkspace === "sketch" && <>
-      <RibbonGroup label="Create & select">
+    {props.masterCartOpen && <>
+      <RibbonGroup label="Parametric catalog">
+        <RibbonButton icon="master-cart" label="25 families" hint="original PS3D" active />
+        <RibbonButton icon="fastener" label="Fasteners" hint="metric + inch" active />
+        <RibbonButton icon="bearing" label="Bearings" hint="rotary + linear" active />
+        <RibbonButton icon="gear" label="Power transmission" hint="gear · chain · belt" active />
+      </RibbonGroup>
+      <RibbonGroup label="Supplier reference boundary">
+        <RibbonButton icon="shield" label="No copied assets" hint="source links only" active />
+        <RibbonButton icon="dimension" label="Editable sizes" hint="mm internal" active />
+        <RibbonButton icon="assemble" label="Grouped insert" hint="one revision" active />
+      </RibbonGroup>
+      <RibbonGroup label="Return">
+        <RibbonButton icon="assembly" label="Assembly" hint="close catalog" onClick={props.onCloseMasterCart} />
+      </RibbonGroup>
+    </>}
+    {!props.masterCartOpen && props.project.activeWorkspace === "sketch" && <>
+      <RibbonGroup label="Create geometry">
         {SKETCH_TOOLS.map((tool) => <RibbonButton key={tool.id} icon={tool.icon} label={tool.label} hint={tool.key} active={props.sketchTool === tool.id} onClick={() => props.onSketchTool(tool.id)} />)}
+        <RibbonButton icon="spline" label="Spline" hint="solver req." disabled />
+        <RibbonButton icon="insert" label="Point" hint="solver req." disabled />
       </RibbonGroup>
       <RibbonGroup label="Sketch session">
+        <RibbonButton icon="save" label="Finish Sketch" hint="to Part" onClick={props.onFinishSketch} />
         <RibbonButton icon="cancel" label="Cancel points" hint="Esc" onClick={props.onCancelSketchPoints} />
         <RibbonButton icon="plane" label="XY plane" hint={`${props.project.sketch.gridMm} mm`} active />
       </RibbonGroup>
@@ -88,12 +117,42 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="dimension" label="Dimension" hint="bounded" active={props.sketchTool === "select" && props.selectedId?.startsWith("entity:") === true} onClick={() => props.onSketchTool("select")} />
         <RibbonButton icon="trim" label="Trim" hint="exact req." disabled />
         <RibbonButton icon="offset" label="Offset" hint="exact req." disabled />
-        <RibbonButton icon="spline" label="Spline" hint="solver req." disabled />
+        <RibbonButton icon="edge" label="Fillet" hint="exact req." disabled />
+        <RibbonButton icon="edge" label="Chamfer" hint="exact req." disabled />
+        <RibbonButton icon="line" label="Extend" hint="exact req." disabled />
+        <RibbonButton icon="constraint" label="Corner" hint="solver req." disabled />
+        <RibbonButton icon="pattern" label="Pattern" hint="solver req." disabled />
+        <RibbonButton icon="mirror" label="Mirror" hint="solver req." disabled />
+      </RibbonGroup>
+      <RibbonGroup label="Include & solve">
+        <RibbonButton icon="projection" label="Include" hint="topology req." disabled />
+        <RibbonButton icon="fixed" label="Fix Curve" hint="solver req." disabled />
+        <RibbonButton icon="inspect" label="Show Movable" hint="solver req." disabled />
+        <RibbonButton icon="dimension" label="Relax Dimensions" hint="solver req." disabled />
+        <RibbonButton icon="constraint" label="Relax Relations" hint="solver req." disabled />
+        <RibbonButton icon="shield" label="Sketch Checking" hint="solver req." disabled />
+        <RibbonButton icon="display" label="Options" hint="palette" disabled />
       </RibbonGroup>
     </>}
-    {props.project.activeWorkspace === "part" && <>
+    {!props.masterCartOpen && props.project.activeWorkspace === "part" && <>
       <RibbonGroup label="Feature tools">
         {PART_FEATURES.map((feature) => <RibbonButton key={feature.id} icon={feature.icon} label={feature.label} hint={feature.level} active={props.selectedId === feature.id} onClick={() => props.onSelect(feature.id)} />)}
+      </RibbonGroup>
+      <RibbonGroup label="Primitive bodies">
+        <RibbonButton icon="box" label="Block" hint="preview body" onClick={() => props.onCreatePartPreviewBody("block")} />
+        <RibbonButton icon="cylinder" label="Cylinder" hint="preview body" onClick={() => props.onCreatePartPreviewBody("cylinder")} />
+        <RibbonButton icon="cone" label="Cone" hint="preview body" onClick={() => props.onCreatePartPreviewBody("cone")} />
+        <RibbonButton icon="sphere" label="Sphere" hint="preview body" onClick={() => props.onCreatePartPreviewBody("sphere")} />
+      </RibbonGroup>
+      <RibbonGroup label="Direct body edit">
+        <RibbonButton icon="move" label="Move" hint="XYZ / rotate" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-transform", "Move Body")} />
+        <RibbonButton icon="scale" label="Size" hint="dimensions" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-size", "Scale Body")} />
+        <RibbonButton icon="copy" label="Copy" hint="independent" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("duplicate", "Copy Body")} />
+        <RibbonButton icon="pattern" label="Pattern" hint="3 × X" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("pattern-x", "Pattern Body")} />
+        <RibbonButton icon="mirror" label="Mirror" hint="YZ plane" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("mirror-x", "Mirror Body")} />
+        <RibbonButton icon="appearance" label="Appearance" hint="display color" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-appearance", "Edit Object Display")} />
+        <RibbonButton icon="eye-off" label="Hide / show" hint="body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("toggle-visible", "Show / Hide Body")} />
+        <RibbonButton icon="trash" label="Delete" hint="body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("delete", "Delete Body")} />
       </RibbonGroup>
       <RibbonGroup label="Inspect & exchange">
         <RibbonButton icon="fit" label="Fit" hint="view" onClick={props.onFit} />
@@ -102,12 +161,15 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="export" label="Export STL" hint="mesh" onClick={props.onExportStl} />
         <RibbonButton icon="exchange" label="3D Exchange" hint="14 in · 6 out" onClick={props.onExchange} />
       </RibbonGroup>
+      <RibbonGroup label="Downstream">
+        <RibbonButton icon="assemble" label="Insert to assembly" hint="snapshot" onClick={props.onInsertPartIntoAssembly} />
+      </RibbonGroup>
       <RibbonGroup label="Display units">
         <RibbonButton icon="units-mm" label="Millimeter" hint="mm" active={props.displayUnit === "mm"} onClick={() => props.onDisplayUnit("mm")} />
         <RibbonButton icon="units-in" label="Inch" hint="in" active={props.displayUnit === "in"} onClick={() => props.onDisplayUnit("in")} />
       </RibbonGroup>
     </>}
-    {props.project.activeWorkspace === "assembly" && <>
+    {!props.masterCartOpen && props.project.activeWorkspace === "assembly" && <>
       <RibbonGroup label="Auto-generate template">
         <RibbonButton icon="container" label="20 ft cargo" hint="6058 mm nominal" active={props.project.assembly.template === "cargo-20ft"} onClick={() => props.onAssemblyTemplate("cargo-20ft")} />
         <RibbonButton icon="container" label="40 ft high cube" hint="12192 mm nominal" active={props.project.assembly.template === "cargo-40ft-hc"} onClick={() => props.onAssemblyTemplate("cargo-40ft-hc")} />
@@ -134,7 +196,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="exchange" label="3D Exchange" hint="scene out" onClick={props.onExchange} />
       </RibbonGroup>
     </>}
-    {props.project.activeWorkspace === "surface" && <>
+    {!props.masterCartOpen && props.project.activeWorkspace === "surface" && <>
       <RibbonGroup label="Surface creation">
         <RibbonButton icon="bezier" label="Bézier" hint="patch" active={props.project.surface.mode === "bezier"} onClick={() => props.onSurfaceMode("bezier")} />
         <RibbonButton icon="loft" label="Ruled loft" hint="2 profiles" active={props.project.surface.mode === "loft"} onClick={() => props.onSurfaceMode("loft")} />
@@ -146,7 +208,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="exchange" label="3D Exchange" hint="scene out" onClick={props.onExchange} />
       </RibbonGroup>
     </>}
-    {props.project.activeWorkspace === "drawing" && <>
+    {!props.masterCartOpen && props.project.activeWorkspace === "drawing" && <>
       <RibbonGroup label="Automatic drawing">
         <RibbonButton icon="auto-view" label="Base + projections" hint="linked" active={(props.project.drawing.viewPreset ?? "automatic-4-view") === "automatic-4-view"} onClick={() => props.onDrawingViewPreset("automatic-4-view")} />
         <RibbonButton icon="projection" label="3 orthographic" hint="linked" active={props.project.drawing.viewPreset === "orthographic-3-view"} onClick={() => props.onDrawingViewPreset("orthographic-3-view")} />
@@ -171,7 +233,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="download" label="Download" hint="vector" onClick={props.onDrawingDownload} />
       </RibbonGroup>
     </>}
-    {props.project.activeWorkspace === "electrical" && <>
+    {!props.masterCartOpen && props.project.activeWorkspace === "electrical" && <>
       <RibbonGroup label="Auto-generate circuit">
         <RibbonButton icon="battery" label="BESS single-line" hint="DC → PCS → PCC" active={props.project.electrical.template === "bess-single-line"} onClick={() => props.onElectricalTemplate("bess-single-line")} />
         <RibbonButton icon="contactor" label="DC auxiliary" hint="control concept" active={props.project.electrical.template === "dc-control"} onClick={() => props.onElectricalTemplate("dc-control")} />
@@ -196,7 +258,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="circuit-3d" label="Wired mounting plate" hint="DIN + ducts + conductors" onClick={props.onElectricalPhysicalize} />
       </RibbonGroup>
     </>}
-    {props.project.activeWorkspace === "vehicle" && <>
+    {!props.masterCartOpen && props.project.activeWorkspace === "vehicle" && <>
       <RibbonGroup label="Original vehicle templates">
         <RibbonButton icon="vehicle" label="ICE motorcycle" hint="single-track" active={props.project.vehicle.template === "ice-road-motorcycle"} onClick={() => props.onVehicleTemplate("ice-road-motorcycle")} />
         <RibbonButton icon="scooter" label="Scooter" hint="step-through" active={props.project.vehicle.template === "step-through-scooter"} onClick={() => props.onVehicleTemplate("step-through-scooter")} />
@@ -221,7 +283,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="exchange" label="3D Exchange" hint="visible scene" onClick={props.onExchange} />
       </RibbonGroup>
     </>}
-    {props.project.activeWorkspace === "automate" && <>
+    {!props.masterCartOpen && props.project.activeWorkspace === "automate" && <>
       <RibbonGroup label="MCP tool surface">
         {WORKBENCH_MCP_TOOLS.map((tool) => <RibbonButton key={tool.name} icon="mcp" label={tool.title.replace("PS3D ", "")} hint={tool.annotations.readOnlyHint ? "read" : "confirm"} active={props.selectedId === `mcp-tool:${tool.name}`} onClick={() => props.onSelect(`mcp-tool:${tool.name}`)} />)}
       </RibbonGroup>

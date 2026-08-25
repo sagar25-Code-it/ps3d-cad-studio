@@ -28,6 +28,25 @@ export type PreviewPrimitive =
       readonly radialSegments: number;
     }
   | PrimitiveBase & {
+      readonly kind: "cone";
+      readonly positionMm: Vec3;
+      readonly rotationDeg: Vec3;
+      readonly rotationOrder?: "XYZ" | "ZYX";
+      readonly baseRadiusMm: number;
+      readonly topRadiusMm: number;
+      readonly heightMm: number;
+      readonly radialSegments: number;
+    }
+  | PrimitiveBase & {
+      readonly kind: "sphere";
+      readonly positionMm: Vec3;
+      readonly rotationDeg: Vec3;
+      readonly rotationOrder?: "XYZ" | "ZYX";
+      readonly radiusMm: number;
+      readonly widthSegments: number;
+      readonly heightSegments: number;
+    }
+  | PrimitiveBase & {
       readonly kind: "mesh";
       readonly positionsMm: readonly number[];
       readonly indices: readonly number[];
@@ -52,7 +71,7 @@ export interface PreviewBounds {
 
 export interface PreviewScene {
   readonly id: string;
-  readonly kind: "assembly" | "surface";
+  readonly kind: "part" | "assembly" | "surface";
   readonly primitives: readonly PreviewPrimitive[];
   readonly boundsMm: PreviewBounds;
 }

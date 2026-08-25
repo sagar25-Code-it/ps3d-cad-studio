@@ -24,20 +24,20 @@ export function createWorkbenchProject(projectId: string): WorkbenchProject {
       gridMm: 5,
       snapToleranceMm: 0.75,
       entities: [
-        { id: "entity:mounting-outline", kind: "rectangle", center: [0, 0], widthMm: 80, heightMm: 50, rotationDeg: 0, construction: false },
+        { id: "entity:mounting-outline", kind: "rectangle", center: [0, 0], widthMm: 60, heightMm: 40, rotationDeg: 0, construction: false },
+        { id: "entity:centered-bore-profile", kind: "circle", center: [0, 0], radiusMm: 5, construction: false },
         { id: "entity:left-mount", kind: "circle", center: [-27, 0], radiusMm: 4, construction: false },
         { id: "entity:right-mount", kind: "circle", center: [27, 0], radiusMm: 4, construction: false },
-        { id: "entity:center-guide", kind: "line", start: [-40, 0], end: [40, 0], construction: true },
-        { id: "entity:crown-arc", kind: "arc", start: [-18, 25], mid: [0, 34], end: [18, 25], construction: false }
+        { id: "entity:center-guide", kind: "line", start: [-40, 0], end: [40, 0], construction: true }
       ],
       constraints: [
         { id: "constraint:outline-fixed", kind: "fixed", entityIds: ["entity:mounting-outline"] },
+        { id: "constraint:centered-bore-fixed", kind: "fixed", entityIds: ["entity:centered-bore-profile"] },
         { id: "constraint:left-fixed", kind: "fixed", entityIds: ["entity:left-mount"] },
         { id: "constraint:right-fixed", kind: "fixed", entityIds: ["entity:right-mount"] },
         { id: "constraint:mounts-equal", kind: "equal", entityIds: ["entity:left-mount", "entity:right-mount"] },
         { id: "constraint:guide-horizontal", kind: "horizontal", entityIds: ["entity:center-guide"] },
-        { id: "constraint:guide-fixed", kind: "fixed", entityIds: ["entity:center-guide"] },
-        { id: "constraint:crown-fixed", kind: "fixed", entityIds: ["entity:crown-arc"] }
+        { id: "constraint:guide-fixed", kind: "fixed", entityIds: ["entity:center-guide"] }
       ]
     },
     part: {
@@ -49,7 +49,8 @@ export function createWorkbenchProject(projectId: string): WorkbenchProject {
       holeDiameterMm: 10,
       edgeTreatmentMm: 1.5,
       patternCount: 3,
-      revolveAngleDeg: 270
+      revolveAngleDeg: 270,
+      previewBodies: []
     },
     assembly: {
       id: "assembly:fixture-demo",

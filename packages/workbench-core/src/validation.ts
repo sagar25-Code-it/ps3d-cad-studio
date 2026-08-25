@@ -12,6 +12,7 @@ import {
   type ElectricalNet,
   type OperationAuditEntry,
   type PartIntent,
+  type PartPreviewBody,
   type SketchEntity,
   type SurfaceIntent,
   type VehicleIntent,
@@ -32,6 +33,7 @@ import {
   electromechanicalTerminalWorldPoint
 } from "./electromechanical.js";
 import { createVehicleTemplate, solveVehicleGeometry, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
+import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 
 export const WORKBENCH_LIMITS = {
   maxJsonBytes: 1_000_000,
@@ -245,16 +247,42 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
 }
 
 function validatePart(value: unknown): WorkbenchResult<PartIntent> {
-  if (!isRecord(value) || !exactKeys(value, ["id", "name", "widthMm", "heightMm", "thicknessMm", "holeDiameterMm", "edgeTreatmentMm", "patternCount", "revolveAngleDeg"])
+  const required = ["id", "name", "widthMm", "heightMm", "thicknessMm", "holeDiameterMm", "edgeTreatmentMm", "patternCount", "revolveAngleDeg"];
+  if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key))
+    || Object.keys(value).some((key) => !required.includes(key) && key !== "previewBodies")
     || value.id !== "part:mounting-plate" || !shortText(value.name, 1, 120)
     || !finiteRange(value.widthMm, 5, 500) || !finiteRange(value.heightMm, 5, 500)
     || !finiteRange(value.thicknessMm, 1, 100) || !finiteRange(value.holeDiameterMm, 1, 250)
     || !finiteRange(value.edgeTreatmentMm, 0, 25) || !integerRange(value.patternCount, 1, 24)
     || !finiteRange(value.revolveAngleDeg, 1, 360)) return invalid("The part intent is outside its supported envelope.");
+  if (Object.hasOwn(value, "previewBodies") && (!Array.isArray(value.previewBodies) || value.previewBodies.length > 64)) return invalid("The part preview-body collection is invalid.");
+  if (Array.isArray(value.previewBodies)) {
+    const ids = new Set<string>();
+    for (const body of value.previewBodies) {
+      if (!validatePartPreviewBody(body) || ids.has(body.id)) return invalid("A part preview body is invalid or duplicated.");
+      ids.add(body.id);
+    }
+  }
   if ((Math.min(value.widthMm as number, value.heightMm as number) - (value.holeDiameterMm as number)) / 2 < 1) {
     return failure("DEGENERATE_GEOMETRY", "The bore leaves less than the 1 mm wall allowance.", ["part:mounting-plate"], "Reduce the bore or enlarge the plate.");
   }
   return { ok: true, value: value as unknown as PartIntent };
+}
+
+function validatePartPreviewBody(value: unknown): value is PartPreviewBody {
+  if (!isRecord(value) || !exactKeys(value, ["id", "name", "shape", "visible", "color", "translationMm", "rotationDeg", "sizeMm"])
+    || !stableId(value.id) || !shortText(value.name, 1, 120)
+    || !["block", "cylinder", "cone", "sphere"].includes(String(value.shape))
+    || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)
+    || !vec3(value.translationMm) || !vec3(value.rotationDeg, 360)
+    || !Array.isArray(value.sizeMm) || value.sizeMm.length !== 3
+    || !finiteRange(value.sizeMm[0], WORKBENCH_LIMITS.minGeometryMm, 10_000)
+    || !finiteRange(value.sizeMm[1], 0, 10_000)
+    || !finiteRange(value.sizeMm[2], WORKBENCH_LIMITS.minGeometryMm, 10_000)) return false;
+  const [x, y, z] = value.sizeMm;
+  if ((value.shape === "cylinder" || value.shape === "sphere") && Math.abs(x - y) > 1e-9) return false;
+  if (value.shape === "sphere" && Math.abs(x - z) > 1e-9) return false;
+  return true;
 }
 
 function validateAssembly(value: unknown): WorkbenchResult<WorkbenchProject["assembly"]> {
@@ -325,13 +353,35 @@ function validateAssembly(value: unknown): WorkbenchResult<WorkbenchProject["ass
 
 function validateComponent(value: unknown): value is ComponentInstance {
   const required = ["id", "name", "shape", "grounded", "visible", "color", "translationMm", "rotationDeg", "sizeMm", "explosionDirection"];
-  const optional = ["sourceElectricalComponentId", "catalogPartId"];
-  return isRecord(value) && required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key))
-    && stableId(value.id) && shortText(value.name, 1, 120) && ["plate", "spacer", "pin", "cap", "box", "cylinder"].includes(String(value.shape))
-    && typeof value.grounded === "boolean" && typeof value.visible === "boolean" && typeof value.color === "string" && COLOR_PATTERN.test(value.color)
-    && vec3(value.translationMm) && vec3(value.rotationDeg, 360) && vec3(value.sizeMm, 20_000, true) && vec3(value.explosionDirection, 1)
-    && (!Object.hasOwn(value, "sourceElectricalComponentId") || stableId(value.sourceElectricalComponentId))
-    && (!Object.hasOwn(value, "catalogPartId") || stableId(value.catalogPartId));
+  const optional = ["featureCount", "masterCart", "sourceElectricalComponentId", "catalogPartId"];
+  if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key)) || !Object.keys(value).every((key) => required.includes(key) || optional.includes(key))
+    || !stableId(value.id) || !shortText(value.name, 1, 120) || !["plate", "spacer", "pin", "cap", "box", "cylinder", "cone", "sphere", "hex-prism", "ring", "torus", "gear"].includes(String(value.shape))
+    || typeof value.grounded !== "boolean" || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)
+    || !vec3(value.translationMm) || !vec3(value.rotationDeg, 360) || !vec3(value.sizeMm, 20_000, true) || !vec3(value.explosionDirection, 1)
+    || (Object.hasOwn(value, "sourceElectricalComponentId") && !stableId(value.sourceElectricalComponentId))
+    || (Object.hasOwn(value, "catalogPartId") && !stableId(value.catalogPartId))) return false;
+  const [first, second, third] = value.sizeMm as readonly number[];
+  if (["cylinder", "sphere", "hex-prism"].includes(String(value.shape)) && Math.abs(first! - second!) > 1e-9) return false;
+  if (value.shape === "sphere" && Math.abs(first! - third!) > 1e-9) return false;
+  if (value.shape === "cone" && (second! > first! || first! <= 0 || second! <= 0)) return false;
+  if (["ring", "gear"].includes(String(value.shape)) && (second! >= first! || second! <= 0)) return false;
+  if (value.shape === "torus" && (second! >= first! || Math.abs(second! - third!) > 1e-9)) return false;
+  if (Object.hasOwn(value, "featureCount") && (!Number.isSafeInteger(value.featureCount) || (value.featureCount as number) < 3 || (value.featureCount as number) > 240 || value.shape !== "gear")) return false;
+  if (Object.hasOwn(value, "masterCart") && !validateMasterCartTrace(value.masterCart)) return false;
+  return true;
+}
+
+function validateMasterCartTrace(value: unknown): boolean {
+  return isRecord(value)
+    && exactKeys(value, ["instanceId", "templateId", "role", "sizeLabel", "materialLabel", "finishLabel", "parameterSummary", "provenance"])
+    && stableId(value.instanceId)
+    && MASTER_CART_TEMPLATE_IDS.includes(value.templateId as never)
+    && shortText(value.role, 1, 80)
+    && shortText(value.sizeLabel, 1, 100)
+    && shortText(value.materialLabel, 1, 100)
+    && shortText(value.finishLabel, 1, 100)
+    && shortText(value.parameterSummary, 1, 240)
+    && value.provenance === "original-ps3d-parametric-preview";
 }
 
 function validateMate(value: unknown, componentIds: ReadonlySet<string>): value is AssemblyMate {

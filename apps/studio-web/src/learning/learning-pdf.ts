@@ -20,7 +20,7 @@ export function buildLearningManualPdf(manual: LearningManual): Blob {
   const catalogId = objects.length + 1;
   const infoId = objects.length + 2;
   objects.push(ascii("<< /Type /Catalog /Pages 3 0 R /PageLayout /OneColumn >>"));
-  objects.push(ascii(`<< /Title (${pdfText(manual.title)}) /Author (${pdfText(manual.owner)}) /Subject (PS3D CAD learning, safe practice, and MCP connection manual) /Creator (PS3D Studio) >>`));
+  objects.push(ascii(`<< /Title (${pdfText(manual.title)}) /Author (${pdfText(manual.owner)}) /Subject (PS3D CAD learning, safe practice, and MCP connection manual) /Creator (PS3D CAD Studio / PS3D Master) >>`));
   const pdf = assemblePdf(objects, catalogId, infoId);
   const blobBytes = new Uint8Array(pdf.byteLength);
   blobBytes.set(pdf);
@@ -29,7 +29,7 @@ export function buildLearningManualPdf(manual: LearningManual): Blob {
 
 function coverPage(manual: LearningManual): string {
   const out: string[] = [background(), rect(0, 604, PAGE_WIDTH, 238, "0.04 0.11 0.18"), rect(48, 748, 76, 8, "0.10 0.85 0.72")];
-  out.push(text(48, 712, 11, "F2", "PS3D STUDIO / PUBLIC LEARNING SERIES", "0.35 0.93 0.82"));
+  out.push(text(48, 712, 11, "F2", "PS3D MASTER / PUBLIC LEARNING SERIES", "0.35 0.93 0.82"));
   for (const [index, line] of wrap(manual.title, 29).entries()) out.push(text(48, 665 - index * 34, 28, "F2", line, "0.96 0.98 1"));
   out.push(text(48, 554, 13, "F1", manual.edition, "0.08 0.20 0.29"));
   out.push(rect(48, 488, 499, 2, "0.12 0.70 0.61"));
@@ -121,7 +121,7 @@ function pageFrame(titleValue: string, subtitle: string, page: number, total: nu
   const titleLines = wrap(titleValue, 42);
   const titleSize = titleLines.length > 1 ? 16.5 : 21;
   const subtitleY = titleLines.length > 1 ? 670 : 694;
-  const out = [background(), rect(0, 782, PAGE_WIDTH, 60, "0.04 0.11 0.18"), rect(48, 754, 84, 5, "0.10 0.85 0.72"), text(48, 802, 9, "F2", "PS3D STUDIO / LEARNING MANUAL", "0.35 0.93 0.82")];
+  const out = [background(), rect(0, 782, PAGE_WIDTH, 60, "0.04 0.11 0.18"), rect(48, 754, 84, 5, "0.10 0.85 0.72"), text(48, 802, 9, "F2", "PS3D MASTER / CAD LEARNING MANUAL", "0.35 0.93 0.82")];
   titleLines.forEach((line, index) => out.push(text(48, 716 - index * 20, titleSize, "F2", line, "0.06 0.14 0.20")));
   out.push(text(48, subtitleY, 9, "F1", subtitle, "0.32 0.39 0.43"), text(48, 34, 8, "F1", "PS3D public preview - verify truth labels before engineering use", "0.42 0.47 0.50"), text(520, 34, 8, "F2", `${page}/${total}`, "0.12 0.32 0.39"));
   return out;

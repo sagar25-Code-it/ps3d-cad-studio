@@ -1,14 +1,17 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import type {
   NavigationMode,
   SelectionFilter,
   ViewOrientation,
   ViewportMeasurePoint,
+  ViewportBackgroundTone,
+  ViewportShadingMode,
   ViewportViewState,
   ViewProjection
 } from "../../../../packages/viewport-three/src/index.js";
 import type { WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
 import { CommandIcon } from "./CommandIcon.js";
+import { PartAppearanceControls } from "./PartAppearanceControls.js";
 
 interface ViewportChromeProps {
   readonly workspace: Extract<WorkspaceId, "part" | "assembly" | "surface" | "vehicle">;
@@ -20,6 +23,9 @@ interface ViewportChromeProps {
   readonly onProjection: (projection: ViewProjection) => void;
   readonly onGrid: (visible: boolean) => void;
   readonly onAxes: (visible: boolean) => void;
+  readonly onShadingMode: (mode: ViewportShadingMode) => void;
+  readonly onBodyColor: (color: string) => void;
+  readonly onBackgroundTone: (tone: ViewportBackgroundTone) => void;
   readonly onFit: () => void;
   readonly onHome: () => void;
   readonly onClearMeasure: () => void;
@@ -35,6 +41,7 @@ const ORIENTATION_KEYS: readonly { readonly id: Exclude<ViewOrientation, "custom
 ];
 
 export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
+  const [displayOpen, setDisplayOpen] = useState(false);
   const delta = props.measurePoints.length === 2
     ? subtract(props.measurePoints[1]!.pointMm, props.measurePoints[0]!.pointMm)
     : undefined;
@@ -87,8 +94,22 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
       <button onClick={props.onFit} title="Fit all visible geometry (F)"><CommandIcon name="fit" />Fit</button>
       <button className={props.state.gridVisible ? "active" : ""} aria-pressed={props.state.gridVisible} onClick={() => props.onGrid(!props.state.gridVisible)}><CommandIcon name="grid" />Grid</button>
       <button className={props.state.axesVisible ? "active" : ""} aria-pressed={props.state.axesVisible} onClick={() => props.onAxes(!props.state.axesVisible)}><CommandIcon name="axes" />Axes</button>
+      {props.workspace === "part" && <button
+        className={displayOpen ? "active" : ""}
+        aria-expanded={displayOpen}
+        aria-controls="part-display-popover"
+        onClick={() => setDisplayOpen((open) => !open)}
+        title="Part display style and body color"
+      ><CommandIcon name="display" />Display</button>}
       <span>MMB pan · Shift+MMB orbit · wheel zoom</span>
     </div>
+
+    {props.workspace === "part" && displayOpen && <aside id="part-display-popover" className="display-popover" aria-label="Part display settings">
+      <header><div><span>DISPLAY SETTINGS</span><strong>Part appearance</strong></div><button onClick={() => setDisplayOpen(false)} aria-label="Close display settings"><CommandIcon name="cancel" /></button></header>
+      <PartAppearanceControls compact bodyColor={props.state.bodyColor} shadingMode={props.state.shadingMode} onBodyColor={props.onBodyColor} onShadingMode={props.onShadingMode} />
+      <fieldset className="background-tone-controls"><legend>Viewport background</legend>{(["charcoal", "dark-gray", "light-gray", "white"] as const).map((tone) => <button key={tone} className={props.state.backgroundTone === tone ? "active" : ""} aria-pressed={props.state.backgroundTone === tone} onClick={() => props.onBackgroundTone(tone)}><i data-tone={tone} />{tone.replace("-", " ")}</button>)}</fieldset>
+      <small>Display-only settings do not change qualified geometry or mass properties.</small>
+    </aside>}
 
     {props.state.navigationMode === "measure" && <aside className="measure-panel" aria-label="Point to point measurement">
       <header><div><span>INSPECT</span><strong><CommandIcon name="measure" />Measure</strong></div><button onClick={props.onClearMeasure}><CommandIcon name="cancel" />Clear</button></header>

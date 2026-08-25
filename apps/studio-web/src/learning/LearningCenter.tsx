@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { BrandFooter } from "../cloud/BrandFooter.js";
 import { PublicPageHeader } from "../cloud/PublicPageHeader.js";
 import { LEARNING_LEVELS, PS3D_LEARNING_MANUAL, type LearningLevel } from "./learning-content.js";
 import { buildLearningManualPdf } from "./learning-pdf.js";
@@ -28,7 +29,7 @@ export function LearningCenter(): React.JSX.Element {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "ps3d-studio-learning-and-safe-practice-manual.pdf";
+    anchor.download = "ps3d-cad-studio-learning-and-safe-practice-manual.pdf";
     anchor.hidden = true;
     document.body.append(anchor);
     anchor.click();
@@ -61,7 +62,7 @@ export function LearningCenter(): React.JSX.Element {
     {modules.length === 0 && <div className="learning-empty">No module matches this search and level. Clear the filter to see the full curriculum.</div>}
 
     <section className="manual-callout"><div><span className="eyebrow">ONE REVIEWED SOURCE</span><h2>Web curriculum and PDF stay together</h2><p>The downloadable manual is generated from the same module data shown above. That prevents a stale PDF from silently teaching different commands, security rules, or capability claims.</p></div><button onClick={downloadManual}>Download current manual</button></section>
-    <footer className="public-footer"><span>{PS3D_LEARNING_MANUAL.edition}</span><span>Progress is local, non-sensitive, and never uploaded.</span></footer>
+    <BrandFooter note={`${PS3D_LEARNING_MANUAL.edition}. Progress is local, non-sensitive, and never uploaded.`} />
   </main>;
 }
 

@@ -94,6 +94,11 @@
 .scope-note.qualified strong { color: #69d7b3; }
 .scope-note p { margin: 0.32rem 0 0; color: #9b8a70; font-size: 0.56rem; line-height: 1.5; }
 .scope-note.qualified p { color: #799c92; }
+.part-downstream-card { border-color: #315c70; background: linear-gradient(145deg, #0c2431, #08131f 72%); }
+.part-downstream-card > p { margin: 0.55rem 0; color: #7f9cab; font-size: 0.54rem; line-height: 1.45; }
+.part-downstream-card > button { width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.42rem; border-color: #3f8294; color: #9ce5ed; background: #0d303a; font-size: 0.55rem; }
+.part-downstream-card > button:disabled { opacity: 0.38; cursor: not-allowed; }
+.part-downstream-card .command-icon { width: 17px; }
 .property-help { display: block; margin-top: 0.72rem; padding: 0.55rem 0.62rem; border: 1px solid #263e52; border-radius: 5px; color: #6d8495; background: #08131f; font: 0.51rem/1.45 var(--mono); }
 
 .solver-card {

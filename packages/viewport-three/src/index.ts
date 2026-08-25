@@ -14,12 +14,17 @@ export type ViewOrientation = "custom" | "front" | "back" | "left" | "right" | "
 export type ViewProjection = "perspective" | "orthographic";
 export type NavigationMode = "select" | "orbit" | "pan" | "measure";
 export type SelectionFilter = "auto" | "body" | "component";
+export type ViewportShadingMode = "shaded" | "shaded-edges" | "wireframe";
+export type ViewportBackgroundTone = "charcoal" | "dark-gray" | "light-gray" | "white";
 
 export interface ViewportViewState {
   readonly orientation: ViewOrientation;
   readonly projection: ViewProjection;
   readonly navigationMode: NavigationMode;
   readonly selectionFilter: SelectionFilter;
+  readonly shadingMode: ViewportShadingMode;
+  readonly bodyColor: string;
+  readonly backgroundTone: ViewportBackgroundTone;
   readonly gridVisible: boolean;
   readonly axesVisible: boolean;
   readonly azimuthDeg: number;
@@ -39,7 +44,7 @@ export class ThreeViewportAdapter {
   readonly #orthographicCamera = new THREE.OrthographicCamera(-0.1, 0.1, 0.1, -0.1, 0.001, 100);
   readonly #bodyGroup = new THREE.Group();
   readonly #measurementGroup = new THREE.Group();
-  readonly #grid = new THREE.GridHelper(0.24, 24, "#2a73ad", "#18365b");
+  readonly #grid = new THREE.GridHelper(0.24, 24, "#9aa3aa", "#545d64");
   readonly #axes = new THREE.AxesHelper(0.035);
   readonly #raycaster = new THREE.Raycaster();
   readonly #pointer = new THREE.Vector2();
@@ -57,6 +62,11 @@ export class ThreeViewportAdapter {
   #projection: ViewProjection = "perspective";
   #navigationMode: NavigationMode = "select";
   #selectionFilter: SelectionFilter = "auto";
+  #shadingMode: ViewportShadingMode = "shaded-edges";
+  #bodyColor = "#aeb3b8";
+  #backgroundTone: ViewportBackgroundTone = "dark-gray";
+  #qualifiedBody: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
+  #qualifiedEdges: THREE.LineSegments<THREE.EdgesGeometry, THREE.LineBasicMaterial> | undefined;
   #drag: { x: number; y: number; startX: number; startY: number; moved: boolean; mode: NavigationMode } | undefined;
   #frame = 0;
 
@@ -67,9 +77,9 @@ export class ThreeViewportAdapter {
     this.#renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.#renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.#renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.#renderer.toneMappingExposure = 1.05;
-    this.#scene.background = new THREE.Color("#091426");
-    this.#scene.fog = new THREE.Fog("#091426", 0.28, 0.75);
+    this.#renderer.toneMappingExposure = 1;
+    this.#scene.background = new THREE.Color("#30363b");
+    this.#scene.fog = new THREE.Fog("#30363b", 0.28, 0.75);
 
     this.#grid.rotation.x = Math.PI / 2;
     this.#grid.position.z = -0.0052;
@@ -77,11 +87,11 @@ export class ThreeViewportAdapter {
     this.#scene.add(this.#axes);
     this.#scene.add(this.#bodyGroup);
     this.#scene.add(this.#measurementGroup);
-    this.#scene.add(new THREE.HemisphereLight("#d9efff", "#0b1930", 2.1));
-    const key = new THREE.DirectionalLight("#eef8ff", 4.4);
+    this.#scene.add(new THREE.HemisphereLight("#f5f7f8", "#1f2428", 1.35));
+    const key = new THREE.DirectionalLight("#ffffff", 2.35);
     key.position.set(0.12, -0.08, 0.2);
     this.#scene.add(key);
-    const rim = new THREE.DirectionalLight("#35d8f5", 2.2);
+    const rim = new THREE.DirectionalLight("#c7d1d8", 0.85);
     rim.position.set(-0.1, 0.12, 0.08);
     this.#scene.add(rim);
 
@@ -103,6 +113,9 @@ export class ThreeViewportAdapter {
       projection: this.#projection,
       navigationMode: this.#navigationMode,
       selectionFilter: this.#selectionFilter,
+      shadingMode: this.#shadingMode,
+      bodyColor: this.#bodyColor,
+      backgroundTone: this.#backgroundTone,
       gridVisible: this.#grid.visible,
       axesVisible: this.#axes.visible,
       azimuthDeg: Math.round(THREE.MathUtils.radToDeg(this.#azimuth) * 10) / 10,
@@ -138,6 +151,49 @@ export class ThreeViewportAdapter {
 
   setSelectionFilter(filter: SelectionFilter): void {
     this.#selectionFilter = filter;
+    this.#emitViewState();
+  }
+
+  setShadingMode(mode: ViewportShadingMode): void {
+    this.#shadingMode = mode;
+    if (this.#qualifiedBody !== undefined) {
+      this.#qualifiedBody.material.wireframe = false;
+      this.#qualifiedBody.material.transparent = mode === "wireframe";
+      this.#qualifiedBody.material.opacity = mode === "wireframe" ? 0 : 1;
+      this.#qualifiedBody.material.depthWrite = mode !== "wireframe";
+      this.#qualifiedBody.material.needsUpdate = true;
+    }
+    if (this.#qualifiedEdges !== undefined) {
+      this.#qualifiedEdges.visible = mode !== "shaded";
+      this.#qualifiedEdges.material.opacity = mode === "wireframe" ? 1 : 0.82;
+      this.#qualifiedEdges.material.depthTest = mode !== "wireframe";
+      this.#qualifiedEdges.material.color.set(mode === "wireframe" ? "#e1e5e8" : "#3f454a");
+      this.#qualifiedEdges.material.needsUpdate = true;
+      this.#qualifiedEdges.renderOrder = mode === "wireframe" ? 5 : 0;
+    }
+    this.#emitViewState();
+  }
+
+  setBodyColor(color: string): void {
+    if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+    this.#bodyColor = color.toLowerCase();
+    if (this.#qualifiedBody !== undefined) {
+      this.#qualifiedBody.userData["baseColor"] = this.#bodyColor;
+      if (this.#qualifiedBody.userData["semanticId"] !== this.#selectedId) this.#qualifiedBody.material.color.set(this.#bodyColor);
+    }
+    this.#emitViewState();
+  }
+
+  setBackgroundTone(tone: ViewportBackgroundTone): void {
+    const colors: Readonly<Record<ViewportBackgroundTone, string>> = {
+      charcoal: "#171a1d",
+      "dark-gray": "#30363b",
+      "light-gray": "#c7ccd1",
+      white: "#f3f4f5"
+    };
+    this.#backgroundTone = tone;
+    this.#scene.background = new THREE.Color(colors[tone]);
+    if (this.#scene.fog instanceof THREE.Fog) this.#scene.fog.color.set(colors[tone]);
     this.#emitViewState();
   }
 
@@ -180,22 +236,31 @@ export class ThreeViewportAdapter {
     geometry.computeVertexNormals();
     geometry.computeBoundingSphere();
     const material = new THREE.MeshStandardMaterial({
-      color: "#238fd4",
-      roughness: 0.58,
-      metalness: 0.08,
-      emissive: "#06182d",
+      color: this.#bodyColor,
+      roughness: 0.64,
+      metalness: 0.04,
+      emissive: "#08090a",
       side: THREE.FrontSide
     });
     const body = new THREE.Mesh(geometry, material);
     body.userData["semanticId"] = render.bodyId;
     body.userData["selectionKind"] = "body";
-    body.userData["baseColor"] = "#238fd4";
+    body.userData["baseColor"] = this.#bodyColor;
     this.#addObject(body, true);
     const edgeGeometry = new THREE.EdgesGeometry(geometry, 28);
-    const edgeDisplay = new THREE.LineSegments(edgeGeometry, new THREE.LineBasicMaterial({ color: "#bfeaff", transparent: true, opacity: 0.55 }));
+    const edgeDisplay = new THREE.LineSegments(edgeGeometry, new THREE.LineBasicMaterial({ color: "#3f454a", transparent: true, opacity: 0.82 }));
     edgeDisplay.userData["ps3dExchangeHelper"] = true;
     this.#addObject(edgeDisplay, false);
+    this.#qualifiedBody = body;
+    this.#qualifiedEdges = edgeDisplay;
+    this.setShadingMode(this.#shadingMode);
     this.#bodyId = render.bodyId;
+  }
+
+  setArtifactWithScene(render: ModelSuccessResponse["render"], scene: PreviewScene): void {
+    this.setArtifact(render);
+    for (const primitive of scene.primitives) this.#addPrimitive(primitive);
+    this.setSelectedId(this.#selectedId ?? null);
   }
 
   setScene(scene: PreviewScene): void {
@@ -286,8 +351,12 @@ export class ThreeViewportAdapter {
       if (!(object instanceof THREE.Mesh) || !(object.material instanceof THREE.MeshStandardMaterial)) continue;
       const selected = object.userData["semanticId"] === id;
       const baseColor = object.userData["baseColor"] as string | undefined;
-      object.material.color.set(selected ? "#55e2f1" : baseColor ?? "#238fd4");
-      object.material.emissive.set(selected ? "#173f5c" : "#06182d");
+      object.material.color.set(selected ? "#e0646d" : baseColor ?? this.#bodyColor);
+      object.material.emissive.set(selected ? "#351014" : "#08090a");
+    }
+    if (this.#qualifiedEdges !== undefined) {
+      const idleEdgeColor = this.#shadingMode === "wireframe" ? "#e1e5e8" : "#3f454a";
+      this.#qualifiedEdges.material.color.set(id === this.#bodyId ? "#e0646d" : idleEdgeColor);
     }
   }
 
@@ -428,6 +497,8 @@ export class ThreeViewportAdapter {
     this.#objects.length = 0;
     this.#pickable.length = 0;
     this.#selectedId = undefined;
+    this.#qualifiedBody = undefined;
+    this.#qualifiedEdges = undefined;
   }
 
   #clearMeasurements(): void {
@@ -534,6 +605,11 @@ export class ThreeViewportAdapter {
     } else if (primitive.kind === "cylinder") {
       geometry = new THREE.CylinderGeometry(primitive.radiusMm / 1000, primitive.radiusMm / 1000, primitive.heightMm / 1000, primitive.radialSegments);
       geometry.rotateX(Math.PI / 2);
+    } else if (primitive.kind === "cone") {
+      geometry = new THREE.CylinderGeometry(primitive.topRadiusMm / 1000, primitive.baseRadiusMm / 1000, primitive.heightMm / 1000, primitive.radialSegments);
+      geometry.rotateX(Math.PI / 2);
+    } else if (primitive.kind === "sphere") {
+      geometry = new THREE.SphereGeometry(primitive.radiusMm / 1000, primitive.widthSegments, primitive.heightSegments);
     } else {
       geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.BufferAttribute(Float32Array.from(primitive.positionsMm, (value) => value / 1000), 3));
@@ -554,7 +630,7 @@ export class ThreeViewportAdapter {
     mesh.userData["semanticId"] = primitive.id;
     mesh.userData["selectionKind"] = primitive.id.startsWith("component:") ? "component" : "body";
     mesh.userData["baseColor"] = primitive.color;
-    if (primitive.kind === "box" || primitive.kind === "cylinder") {
+    if (primitive.kind !== "mesh") {
       mesh.position.set(primitive.positionMm[0] / 1000, primitive.positionMm[1] / 1000, primitive.positionMm[2] / 1000);
       const [x, y, z] = primitive.rotationDeg.map((value) => value * Math.PI / 180) as [number, number, number];
       mesh.rotation.set(x, y, z, primitive.rotationOrder ?? "XYZ");

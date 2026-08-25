@@ -170,11 +170,14 @@
 .sketch-axis { vector-effect: non-scaling-stroke; stroke-width: 1; }
 .sketch-axis.x { stroke: #db706d80; }
 .sketch-axis.y { stroke: #64bc8980; }
-.sketch-entity { vector-effect: non-scaling-stroke; fill: #2d9eb418; stroke: #76d9e7; stroke-width: 1.2; cursor: pointer; }
+.sketch-profile { vector-effect: non-scaling-stroke; fill: #2f91ad26; stroke: #48bfd056; stroke-width: 0.7; cursor: pointer; transition: fill 120ms ease, stroke 120ms ease; }
+.sketch-profile:hover { fill: #46c3d840; stroke: #8cebf2; }
+.sketch-profile.selected { fill: #f7c35f4f; stroke: #f7c35f; stroke-width: 1.4; }
+.sketch-entity { vector-effect: non-scaling-stroke; fill: none; stroke: #76d9e7; stroke-width: 1.2; cursor: pointer; }
 .sketch-entity:hover { stroke: #f2d08d; stroke-width: 1.6; }
 .sketch-entity.construction { fill: none; stroke: #7a8ca0; stroke-dasharray: 4 3; }
-.sketch-entity.selected { fill: #f2b75e25; stroke: var(--amber); stroke-width: 2; }
-.sketch-canvas.hide-profiles .sketch-entity:not(.selected) { fill: none; }
+.sketch-entity.selected { fill: none; stroke: var(--amber); stroke-width: 2; }
+.sketch-entity.tool-preview { pointer-events: none; stroke: #d8f8fa; stroke-dasharray: 3 2; opacity: 0.72; }
 .pending-point { fill: var(--amber); vector-effect: non-scaling-stroke; stroke: #281b08; stroke-width: 1; }
 .cursor-point { fill: var(--cyan); vector-effect: non-scaling-stroke; stroke: #06131d; stroke-width: 1; }
 
@@ -213,6 +216,42 @@
 .sketch-palette > label { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.34rem 0.12rem; border-bottom: 1px solid #182b3b; color: #859bac; font-size: 0.52rem; }
 .sketch-palette input { accent-color: var(--cyan); }
 .sketch-palette .palette-action { width: 100%; margin-top: 0.48rem; font-size: 0.49rem; }
+.sketch-palette .palette-action.primary { border-color: #f7c35f70; color: #ffe3a4; background: #3a2d142e; }
+
+.profile-controller { display: grid; gap: 0.55rem; }
+.profile-help { margin: 0; color: #7f9bae; font-size: 0.55rem; line-height: 1.45; }
+.profile-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.32rem; }
+.profile-list button { display: grid; min-width: 0; gap: 0.2rem; padding: 0.46rem; border: 1px solid #294257; border-radius: 5px; color: #a8bdc9; background: #0a1a28; text-align: left; }
+.profile-list button:hover { border-color: #56c8d6; background: #0d2534; }
+.profile-list button.selected { border-color: #f7c35f; color: #fff1c7; background: #3b2c1438; box-shadow: inset 3px 0 #f7c35f; }
+.profile-list button span { display: flex; align-items: center; gap: 0.34rem; overflow: hidden; font-size: 0.52rem; white-space: nowrap; text-overflow: ellipsis; }
+.profile-list button b { display: grid; flex: 0 0 20px; width: 20px; height: 20px; place-items: center; border-radius: 4px; color: #06131c; background: #55d4df; font: 800 0.43rem var(--mono); }
+.profile-list button.selected b { background: #f7c35f; }
+.profile-list button small { color: #708c9e; font: 0.44rem var(--mono); }
+
+.extrude-controller { display: grid; gap: 0.42rem; margin-top: 0.18rem; padding: 0.62rem; border: 1px solid #2a465b; border-radius: 7px; background: linear-gradient(145deg, #0c2030, #081824); box-shadow: 0 12px 24px #020a1045; }
+.extrude-controller.ready { border-color: #52d6c875; box-shadow: inset 0 2px #52d6c8, 0 12px 24px #020a1045; }
+.feature-dialog-title { display: flex; align-items: center; gap: 0.48rem; padding-bottom: 0.42rem; border-bottom: 1px solid #20394c; }
+.feature-dialog-title > span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: #05141d; background: linear-gradient(135deg, #5fe2db, #55a9e0); }
+.feature-dialog-title .command-icon { width: 17px; height: 17px; }
+.feature-dialog-title div { display: grid; gap: 0.06rem; }
+.feature-dialog-title small { color: #66d7df; font: 700 0.4rem var(--mono); letter-spacing: 0.1em; }
+.feature-dialog-title strong { color: #edf8fb; font-size: 0.72rem; }
+.extrude-controller > label { display: grid; grid-template-columns: 66px minmax(0, 1fr); align-items: center; gap: 0.42rem; color: #829baa; font-size: 0.5rem; }
+.extrude-controller output,
+.extrude-controller select,
+.extrude-controller input { width: 100%; min-width: 0; height: 28px; padding: 0 0.42rem; border: 1px solid #29465a; border-radius: 4px; color: #dceaf0; background: #071520; font: 0.49rem var(--mono); }
+.extrude-controller output { display: flex; align-items: center; }
+.distance-entry { position: relative; }
+.distance-entry input { padding-right: 28px; }
+.distance-entry small { position: absolute; top: 50%; right: 8px; color: #6d8999; font: 0.43rem var(--mono); transform: translateY(-50%); }
+.profile-readiness { display: flex; align-items: flex-start; gap: 0.38rem; padding: 0.44rem; border-radius: 4px; font-size: 0.48rem; line-height: 1.35; }
+.profile-readiness .command-icon { flex: 0 0 13px; width: 13px; height: 13px; margin-top: 1px; }
+.profile-readiness.ready { color: #aef0dc; background: #12382f; }
+.profile-readiness.blocked { color: #e8bd84; background: #3b2a1838; }
+.extrude-submit { display: flex; align-items: center; justify-content: center; gap: 0.36rem; min-height: 32px; border-color: #54d7ce; color: #031417; background: linear-gradient(135deg, #61ded4, #5dc1dc); font-weight: 800; }
+.extrude-submit:hover:not(:disabled) { filter: brightness(1.08); }
+.extrude-submit .command-icon { width: 14px; height: 14px; }
 
 .canvas-hud {
   position: absolute;
