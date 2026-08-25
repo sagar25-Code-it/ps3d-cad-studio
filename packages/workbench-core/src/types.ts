@@ -166,9 +166,84 @@ export interface PartIntent {
   readonly edgeTreatmentMm: number;
   readonly patternCount: number;
   readonly revolveAngleDeg: number;
+  /**
+   * Independent editable preview bodies. These deliberately remain separate
+   * from the qualified centered-bore body until an exact persistent-topology
+   * kernel can evaluate their Boolean and face-level relationships.
+   * Optional for backward compatibility with earlier workbench/1 documents.
+   */
+  readonly previewBodies?: readonly PartPreviewBody[];
 }
 
-export type ComponentShape = "plate" | "spacer" | "pin" | "cap" | "box" | "cylinder";
+export type PartPreviewBodyShape = "block" | "cylinder" | "cone" | "sphere";
+
+export interface PartPreviewBody {
+  readonly id: string;
+  readonly name: string;
+  readonly shape: PartPreviewBodyShape;
+  readonly visible: boolean;
+  readonly color: string;
+  readonly translationMm: Vec3;
+  readonly rotationDeg: Vec3;
+  /**
+   * Shape parameters encoded as a bounded XYZ tuple:
+   * block = width/depth/height; cylinder = diameter/diameter/height;
+   * cone = base diameter/top diameter/height; sphere = diameter/diameter/diameter.
+   */
+  readonly sizeMm: Vec3;
+}
+
+export type MasterCartTemplateId =
+  | "socket-head-cap-screw"
+  | "hex-head-bolt"
+  | "flat-head-socket-screw"
+  | "shoulder-screw"
+  | "hex-nut"
+  | "flat-washer"
+  | "deep-groove-ball-bearing"
+  | "sleeve-bushing"
+  | "flanged-bushing"
+  | "spur-gear"
+  | "roller-chain-sprocket"
+  | "roller-chain-link"
+  | "timing-belt-pulley"
+  | "timing-belt-loop"
+  | "o-ring"
+  | "linear-bearing"
+  | "linear-shaft"
+  | "acme-lead-screw"
+  | "shaft-collar"
+  | "hydraulic-straight-fitting"
+  | "hydraulic-elbow-fitting"
+  | "tube-compression-union"
+  | "tube-compression-elbow"
+  | "hex-key"
+  | "combination-wrench";
+
+export type ComponentShape =
+  | "plate"
+  | "spacer"
+  | "pin"
+  | "cap"
+  | "box"
+  | "cylinder"
+  | "cone"
+  | "sphere"
+  | "hex-prism"
+  | "ring"
+  | "torus"
+  | "gear";
+
+export interface MasterCartComponentTrace {
+  readonly instanceId: string;
+  readonly templateId: MasterCartTemplateId;
+  readonly role: string;
+  readonly sizeLabel: string;
+  readonly materialLabel: string;
+  readonly finishLabel: string;
+  readonly parameterSummary: string;
+  readonly provenance: "original-ps3d-parametric-preview";
+}
 
 export interface ComponentInstance {
   readonly id: string;
@@ -181,6 +256,10 @@ export interface ComponentInstance {
   readonly rotationDeg: Vec3;
   readonly sizeMm: Vec3;
   readonly explosionDirection: Vec3;
+  /** Optional radial detail used by original PS3D gear and sprocket preview meshes. */
+  readonly featureCount?: number;
+  /** Trace for one grouped, independently generated Master Cart preview item. */
+  readonly masterCart?: MasterCartComponentTrace;
   /** Present only on deterministic schematic-to-assembly package instances. */
   readonly sourceElectricalComponentId?: string;
   readonly catalogPartId?: string;
@@ -679,9 +758,18 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly parameter: "widthMm" | "heightMm" | "thicknessMm" | "holeDiameterMm" | "edgeTreatmentMm" | "patternCount" | "revolveAngleDeg";
       readonly value: number;
     }
+  | { readonly kind: "add-part-preview-bodies"; readonly bodies: readonly PartPreviewBody[] }
+  | { readonly kind: "delete-part-preview-body"; readonly bodyId: string }
+  | { readonly kind: "set-part-preview-body-transform"; readonly bodyId: string; readonly translationMm: Vec3; readonly rotationDeg: Vec3 }
+  | { readonly kind: "set-part-preview-body-size"; readonly bodyId: string; readonly sizeMm: Vec3 }
+  | { readonly kind: "set-part-preview-body-color"; readonly bodyId: string; readonly color: string }
+  | { readonly kind: "toggle-part-preview-body-visibility"; readonly bodyId: string }
+  | { readonly kind: "isolate-part-preview-body"; readonly bodyId: string }
+  | { readonly kind: "set-part-preview-bodies-visibility"; readonly visible: boolean }
   | { readonly kind: "set-assembly-explode"; readonly valueMm: number }
   | { readonly kind: "apply-assembly-template"; readonly template: Exclude<AssemblyTemplateId, "custom" | "electrical-panel"> }
   | { readonly kind: "add-assembly-component"; readonly component: ComponentInstance }
+  | { readonly kind: "add-assembly-components"; readonly components: readonly ComponentInstance[] }
   | { readonly kind: "delete-assembly-component"; readonly componentId: string }
   | { readonly kind: "set-component-translation"; readonly componentId: string; readonly translationMm: Vec3 }
   | { readonly kind: "toggle-component-grounded"; readonly componentId: string }

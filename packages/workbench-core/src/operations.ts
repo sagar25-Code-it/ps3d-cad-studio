@@ -5,6 +5,7 @@ import type {
   ElectricalIntent,
   ElectricalNet,
   PartIntent,
+  PartPreviewBody,
   SketchEntity,
   SurfaceIntent,
   VehicleLayerId,
@@ -18,13 +19,14 @@ import { ELECTRICAL_SHEET_BOUNDS, ELECTROMECHANICAL_CATALOG_REVISION } from "./t
 import { createBessContainerAssembly, createCargoContainerAssembly, createElectricalTemplate } from "./templates.js";
 import { createElectromechanicalAssembly, electricalSignature } from "./electromechanical.js";
 import { createVehicleTemplate, vehicleHardPoints, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
+import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { failure, validateWorkbenchProject, WORKBENCH_LIMITS } from "./validation.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/iu;
 const WORKSPACES: readonly WorkspaceId[] = ["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"];
-const COMPONENT_SHAPES: readonly ComponentInstance["shape"][] = ["plate", "spacer", "pin", "cap", "box", "cylinder"];
-const PART_PARAMETERS: readonly (keyof Omit<PartIntent, "id" | "name">)[] = [
+const COMPONENT_SHAPES: readonly ComponentInstance["shape"][] = ["plate", "spacer", "pin", "cap", "box", "cylinder", "cone", "sphere", "hex-prism", "ring", "torus", "gear"];
+const PART_PARAMETERS: readonly (keyof Pick<PartIntent, "widthMm" | "heightMm" | "thicknessMm" | "holeDiameterMm" | "edgeTreatmentMm" | "patternCount" | "revolveAngleDeg">)[] = [
   "widthMm", "heightMm", "thicknessMm", "holeDiameterMm", "edgeTreatmentMm", "patternCount", "revolveAngleDeg"
 ];
 const SURFACE_PARAMETERS: readonly (keyof Omit<SurfaceIntent, "id" | "name" | "mode">)[] = [
@@ -118,6 +120,28 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
     case "set-part-parameter":
       if (!keys(input, [...common, "parameter", "value"]) || !PART_PARAMETERS.includes(input.parameter as never) || !finite(input.value)) return invalidOperation("The part parameter edit is invalid.");
       break;
+    case "add-part-preview-bodies":
+      if (!keys(input, [...common, "bodies"]) || !Array.isArray(input.bodies) || input.bodies.length < 1 || input.bodies.length > 24
+        || input.bodies.some((body) => !validPartPreviewBodyPayload(body))) return invalidOperation("The preview-body insertion is invalid.");
+      break;
+    case "delete-part-preview-body":
+    case "toggle-part-preview-body-visibility":
+    case "isolate-part-preview-body":
+      if (!keys(input, [...common, "bodyId"]) || !stableId(input.bodyId)) return invalidOperation("The preview-body ID is invalid.");
+      break;
+    case "set-part-preview-bodies-visibility":
+      if (!keys(input, [...common, "visible"]) || typeof input.visible !== "boolean") return invalidOperation("The preview-body visibility value is invalid.");
+      break;
+    case "set-part-preview-body-transform":
+      if (!keys(input, [...common, "bodyId", "translationMm", "rotationDeg"]) || !stableId(input.bodyId)
+        || !vec3(input.translationMm, WORKBENCH_LIMITS.maxCoordinateMm) || !vec3(input.rotationDeg, 360)) return invalidOperation("The preview-body transform is invalid.");
+      break;
+    case "set-part-preview-body-size":
+      if (!keys(input, [...common, "bodyId", "sizeMm"]) || !stableId(input.bodyId) || !partPreviewSize(input.sizeMm)) return invalidOperation("The preview-body size is invalid.");
+      break;
+    case "set-part-preview-body-color":
+      if (!keys(input, [...common, "bodyId", "color"]) || !stableId(input.bodyId) || typeof input.color !== "string" || !COLOR_PATTERN.test(input.color)) return invalidOperation("The preview-body color is invalid.");
+      break;
     case "set-assembly-explode":
       if (!keys(input, [...common, "valueMm"]) || !finite(input.valueMm)) return invalidOperation("The assembly explode value is invalid.");
       break;
@@ -126,6 +150,11 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "add-assembly-component":
       if (!keys(input, [...common, "component"]) || !validComponentPayload(input.component)) return invalidOperation("The assembly component payload is invalid.");
+      break;
+    case "add-assembly-components":
+      if (!keys(input, [...common, "components"]) || !Array.isArray(input.components) || input.components.length < 1 || input.components.length > 32
+        || input.components.some((component) => !validComponentPayload(component))
+        || new Set(input.components.map((component) => component.id)).size !== input.components.length) return invalidOperation("The grouped assembly-component payload is invalid or duplicated.");
       break;
     case "delete-assembly-component":
       if (!keys(input, [...common, "componentId"]) || !stableId(input.componentId)) return invalidOperation("The component ID is invalid.");
@@ -318,6 +347,82 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "set-part-parameter":
       return changed({ ...project, part: { ...project.part, [operation.parameter]: operation.value } }, [project.part.id], `Set ${humanize(operation.parameter)} to ${formatNumber(operation.value)}.`);
+    case "add-part-preview-bodies": {
+      const currentBodies = project.part.previewBodies ?? [];
+      if (currentBodies.length + operation.bodies.length > 64) {
+        return failure("RESOURCE_LIMIT", "The part reached its 64-body preview limit.", [project.part.id], "Delete or hide unnecessary preview bodies before creating another pattern.");
+      }
+      const incomingIds = new Set(operation.bodies.map((body) => body.id));
+      if (incomingIds.size !== operation.bodies.length || operation.bodies.some((body) => currentBodies.some((currentBody) => currentBody.id === body.id))) {
+        return invalidOperation("A preview-body ID is duplicated or already exists.");
+      }
+      return changed(
+        { ...project, part: { ...project.part, previewBodies: [...currentBodies, ...operation.bodies] } },
+        operation.bodies.map((body) => body.id),
+        `Created ${operation.bodies.length} independent preview ${operation.bodies.length === 1 ? "body" : "bodies"}.`
+      );
+    }
+    case "delete-part-preview-body": {
+      const currentBodies = project.part.previewBodies ?? [];
+      const target = currentBodies.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The preview body does not exist.");
+      return changed({ ...project, part: { ...project.part, previewBodies: currentBodies.filter((body) => body.id !== target.id) } }, [target.id], `Deleted preview body ${target.name}.`);
+    }
+    case "set-part-preview-body-transform": {
+      const currentBodies = project.part.previewBodies ?? [];
+      const target = currentBodies.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The preview body does not exist.");
+      return changed({
+        ...project,
+        part: { ...project.part, previewBodies: currentBodies.map((body) => body.id === target.id ? { ...body, translationMm: operation.translationMm, rotationDeg: operation.rotationDeg } : body) }
+      }, [target.id], `Moved ${target.name} to ${operation.translationMm.map(formatNumber).join(", ")} mm.`);
+    }
+    case "set-part-preview-body-size": {
+      const currentBodies = project.part.previewBodies ?? [];
+      const target = currentBodies.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The preview body does not exist.");
+      const resized = normalizePartPreviewSize(target.shape, operation.sizeMm);
+      if (resized === undefined) return invalidOperation(`The ${target.shape} size tuple is invalid.`);
+      return changed({
+        ...project,
+        part: { ...project.part, previewBodies: currentBodies.map((body) => body.id === target.id ? { ...body, sizeMm: resized } : body) }
+      }, [target.id], `Resized ${target.name} to ${resized.map(formatNumber).join(" Ã— ")} mm.`);
+    }
+    case "set-part-preview-body-color": {
+      const currentBodies = project.part.previewBodies ?? [];
+      const target = currentBodies.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The preview body does not exist.");
+      return changed({
+        ...project,
+        part: { ...project.part, previewBodies: currentBodies.map((body) => body.id === target.id ? { ...body, color: operation.color.toLowerCase() } : body) }
+      }, [target.id], `Changed ${target.name} appearance to ${operation.color.toLowerCase()}.`);
+    }
+    case "toggle-part-preview-body-visibility": {
+      const currentBodies = project.part.previewBodies ?? [];
+      const target = currentBodies.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The preview body does not exist.");
+      return changed({
+        ...project,
+        part: { ...project.part, previewBodies: currentBodies.map((body) => body.id === target.id ? { ...body, visible: !body.visible } : body) }
+      }, [target.id], `${target.visible ? "Hid" : "Showed"} ${target.name}.`);
+    }
+    case "isolate-part-preview-body": {
+      const currentBodies = project.part.previewBodies ?? [];
+      const target = currentBodies.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The preview body does not exist.");
+      return changed({
+        ...project,
+        part: { ...project.part, previewBodies: currentBodies.map((body) => ({ ...body, visible: body.id === target.id })) }
+      }, currentBodies.map((body) => body.id), `Isolated ${target.name}; the qualified base body remains visible.`);
+    }
+    case "set-part-preview-bodies-visibility": {
+      const currentBodies = project.part.previewBodies ?? [];
+      if (currentBodies.every((body) => body.visible === operation.visible)) return changed(project, [], `All independent preview bodies are already ${operation.visible ? "shown" : "hidden"}.`);
+      return changed({
+        ...project,
+        part: { ...project.part, previewBodies: currentBodies.map((body) => ({ ...body, visible: operation.visible })) }
+      }, currentBodies.map((body) => body.id), `${operation.visible ? "Showed" : "Hid"} all independent preview bodies.`);
+    }
     case "set-assembly-explode":
       return changed({ ...project, assembly: { ...project.assembly, explodeMm: operation.valueMm } }, [project.assembly.id], `Set exploded distance to ${formatNumber(operation.valueMm)} mm.`);
     case "apply-assembly-template": { 
@@ -334,51 +439,70 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
         assembly: { ...project.assembly, components: [...project.assembly.components, operation.component] }
       }, [operation.component.id], `Inserted ${operation.component.name}.`);
     }
+    case "add-assembly-components": {
+      if (project.assembly.components.length + operation.components.length > WORKBENCH_LIMITS.maxComponents) {
+        return failure("RESOURCE_LIMIT", `This grouped item needs ${operation.components.length} preview bodies, but the assembly limit is ${WORKBENCH_LIMITS.maxComponents}.`, [project.assembly.id], "Delete unused components or choose a simpler catalog item before inserting it.");
+      }
+      const existingIds = new Set(project.assembly.components.map((component) => component.id));
+      if (operation.components.some((component) => existingIds.has(component.id))) return invalidOperation("A grouped assembly component ID already exists.");
+      const label = operation.components[0]?.masterCart?.templateId.replaceAll("-", " ") ?? `${operation.components.length}-body item`;
+      return changed({
+        ...project,
+        assembly: { ...project.assembly, components: [...project.assembly.components, ...operation.components] }
+      }, operation.components.map((component) => component.id), `Inserted ${label} as one grouped ${operation.components.length}-body Master Cart item.`);
+    }
     case "delete-assembly-component": {
       const target = project.assembly.components.find((component) => component.id === operation.componentId);
       if (target === undefined) return broken(operation.componentId, "The assembly component does not exist.");
       if (project.assembly.electromechanicalSource !== undefined && target.id.startsWith("component:em-")) {
         return invalidOperation("A generated panel package or mounting-infrastructure body cannot be deleted directly. Regenerate from the source schematic or replace the complete assembly through the reviewed workflow.");
       }
-      if (project.assembly.components.length === 1) return invalidOperation("An assembly must retain at least one component.");
-      const removedMates = project.assembly.mates.filter((mate) => mate.componentIds.includes(operation.componentId));
+      const removedIds = new Set(target.masterCart === undefined
+        ? [operation.componentId]
+        : project.assembly.components.filter((component) => component.masterCart?.instanceId === target.masterCart?.instanceId).map((component) => component.id));
+      if (project.assembly.components.length - removedIds.size < 1) return invalidOperation("An assembly must retain at least one component.");
+      const removedMates = project.assembly.mates.filter((mate) => mate.componentIds.some((componentId) => removedIds.has(componentId)));
       return changed({
         ...project,
         assembly: {
           ...project.assembly,
-          components: project.assembly.components.filter((component) => component.id !== operation.componentId),
-          mates: project.assembly.mates.filter((mate) => !mate.componentIds.includes(operation.componentId))
+          components: project.assembly.components.filter((component) => !removedIds.has(component.id)),
+          mates: project.assembly.mates.filter((mate) => !mate.componentIds.some((componentId) => removedIds.has(componentId)))
         }
-      }, [operation.componentId, ...removedMates.map((mate) => mate.id)], `Deleted ${target.name} and ${removedMates.length} dependent mate(s).`);
+      }, [...removedIds, ...removedMates.map((mate) => mate.id)], `Deleted ${target.masterCart === undefined ? target.name : `${target.masterCart.templateId.replaceAll("-", " ")} grouped item (${removedIds.size} bodies)`} and ${removedMates.length} dependent mate(s).`);
     }
     case "set-component-translation": {
       const target = project.assembly.components.find((component) => component.id === operation.componentId);
       if (target === undefined) return broken(operation.componentId, "The assembly component does not exist.");
       const source = project.assembly.electromechanicalSource;
+      const delta: readonly [number, number, number] = [operation.translationMm[0] - target.translationMm[0], operation.translationMm[1] - target.translationMm[1], operation.translationMm[2] - target.translationMm[2]];
+      const movedIds = project.assembly.components.filter((component) => target.masterCart === undefined ? component.id === target.id : component.masterCart?.instanceId === target.masterCart.instanceId).map((component) => component.id);
       return changed({
         ...project,
         assembly: {
           ...project.assembly,
-          components: project.assembly.components.map((component) => component.id === operation.componentId ? { ...component, translationMm: operation.translationMm } : component),
+          components: project.assembly.components.map((component) => movedIds.includes(component.id) ? { ...component, translationMm: [component.translationMm[0] + delta[0], component.translationMm[1] + delta[1], component.translationMm[2] + delta[2]] } : component),
           ...(source === undefined ? {} : { electromechanicalSource: { ...source, status: "stale" as const } })
         }
-      }, [operation.componentId], `Moved ${target.name} to ${operation.translationMm.map(formatNumber).join(", ")} mm.`);
+      }, movedIds, `Moved ${target.masterCart === undefined ? target.name : `${target.masterCart.templateId.replaceAll("-", " ")} grouped item`} to ${operation.translationMm.map(formatNumber).join(", ")} mm.`);
     }
     case "toggle-component-grounded": {
       const target = project.assembly.components.find((component) => component.id === operation.componentId);
       if (target === undefined) return broken(operation.componentId, "The assembly component does not exist.");
+      const groupedIds = project.assembly.components.filter((component) => target.masterCart === undefined ? component.id === target.id : component.masterCart?.instanceId === target.masterCart.instanceId).map((component) => component.id);
       return changed({
         ...project,
-        assembly: { ...project.assembly, components: project.assembly.components.map((component) => component.id === operation.componentId ? { ...component, grounded: !component.grounded } : component) }
-      }, [operation.componentId], `${target.grounded ? "Released" : "Grounded"} ${target.name}.`);
+        assembly: { ...project.assembly, components: project.assembly.components.map((component) => groupedIds.includes(component.id) ? { ...component, grounded: !target.grounded } : component) }
+      }, groupedIds, `${target.grounded ? "Released" : "Grounded"} ${target.masterCart === undefined ? target.name : `${target.masterCart.templateId.replaceAll("-", " ")} grouped item`}.`);
     }
     case "toggle-component-visibility": {
       const target = project.assembly.components.find((component) => component.id === operation.componentId);
       if (target === undefined) return broken(operation.componentId, "The assembly component does not exist.");
+      const groupedIds = project.assembly.components.filter((component) => target.masterCart === undefined ? component.id === target.id : component.masterCart?.instanceId === target.masterCart.instanceId).map((component) => component.id);
       return changed({
         ...project,
-        assembly: { ...project.assembly, components: project.assembly.components.map((component) => component.id === operation.componentId ? { ...component, visible: !component.visible } : component) }
-      }, [operation.componentId], `${target.visible ? "Hid" : "Showed"} ${target.name}.`);
+        assembly: { ...project.assembly, components: project.assembly.components.map((component) => groupedIds.includes(component.id) ? { ...component, visible: !target.visible } : component) }
+      }, groupedIds, `${target.visible ? "Hid" : "Showed"} ${target.masterCart === undefined ? target.name : `${target.masterCart.templateId.replaceAll("-", " ")} grouped item`}.`);
     }
     case "set-surface-mode":
       return changed({ ...project, surface: { ...project.surface, mode: operation.mode } }, [project.surface.id], `Switched to ${operation.mode === "bezier" ? "bicubic Bézier" : "ruled loft"} preview.`);
@@ -532,18 +656,63 @@ function vec3(value: unknown, maximum: number, positive = false): value is reado
     && value.every((coordinate) => finiteRange(coordinate, positive ? WORKBENCH_LIMITS.minGeometryMm : -maximum, maximum));
 }
 
+function partPreviewSize(value: unknown): value is readonly [number, number, number] {
+  return Array.isArray(value) && value.length === 3
+    && finiteRange(value[0], WORKBENCH_LIMITS.minGeometryMm, 10_000)
+    && finiteRange(value[1], 0, 10_000)
+    && finiteRange(value[2], WORKBENCH_LIMITS.minGeometryMm, 10_000);
+}
+
+function validPartPreviewBodyPayload(value: unknown): value is PartPreviewBody {
+  if (!isRecord(value)
+    || !keys(value, ["id", "name", "shape", "visible", "color", "translationMm", "rotationDeg", "sizeMm"])
+    || !stableId(value.id) || !shortText(value.name, 1, 120)
+    || !["block", "cylinder", "cone", "sphere"].includes(String(value.shape))
+    || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)
+    || !vec3(value.translationMm, WORKBENCH_LIMITS.maxCoordinateMm) || !vec3(value.rotationDeg, 360)
+    || !partPreviewSize(value.sizeMm)) return false;
+  const [x, y] = value.sizeMm;
+  if ((value.shape === "cylinder" || value.shape === "sphere") && Math.abs(x - y) > 1e-9) return false;
+  if (value.shape === "sphere" && Math.abs(x - value.sizeMm[2]) > 1e-9) return false;
+  return true;
+}
+
+function normalizePartPreviewSize(shape: PartPreviewBody["shape"], size: readonly [number, number, number]): readonly [number, number, number] | undefined {
+  if (!partPreviewSize(size)) return undefined;
+  if (shape === "cylinder") return [size[0], size[0], size[2]];
+  if (shape === "sphere") return [size[0], size[0], size[0]];
+  if (shape === "cone" && size[0] <= 0 && size[1] <= 0) return undefined;
+  return [size[0], size[1], size[2]];
+}
+
 function validComponentPayload(value: unknown): value is ComponentInstance {
+  const required = ["id", "name", "shape", "grounded", "visible", "color", "translationMm", "rotationDeg", "sizeMm", "explosionDirection"];
+  const optional = ["featureCount", "masterCart", "sourceElectricalComponentId", "catalogPartId"];
+  if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
+    || !stableId(value.id) || !shortText(value.name, 1, 120) || !COMPONENT_SHAPES.includes(value.shape as ComponentInstance["shape"])
+    || typeof value.grounded !== "boolean" || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)
+    || !vec3(value.translationMm, WORKBENCH_LIMITS.maxCoordinateMm) || !vec3(value.rotationDeg, 360) || !vec3(value.sizeMm, 20_000, true) || !vec3(value.explosionDirection, 1)
+    || (Object.hasOwn(value, "sourceElectricalComponentId") && !stableId(value.sourceElectricalComponentId))
+    || (Object.hasOwn(value, "catalogPartId") && !stableId(value.catalogPartId))) return false;
+  const [first, second, third] = value.sizeMm as readonly number[];
+  if (["cylinder", "sphere", "hex-prism"].includes(String(value.shape)) && Math.abs(first! - second!) > 1e-9) return false;
+  if (value.shape === "sphere" && Math.abs(first! - third!) > 1e-9) return false;
+  if (value.shape === "cone" && (second! <= 0 || second! > first!)) return false;
+  if (["ring", "gear"].includes(String(value.shape)) && (second! <= 0 || second! >= first!)) return false;
+  if (value.shape === "torus" && (second! >= first! || Math.abs(second! - third!) > 1e-9)) return false;
+  if (Object.hasOwn(value, "featureCount") && (!Number.isSafeInteger(value.featureCount) || (value.featureCount as number) < 3 || (value.featureCount as number) > 240 || value.shape !== "gear")) return false;
+  if (Object.hasOwn(value, "masterCart") && !validMasterCartTrace(value.masterCart)) return false;
+  return true;
+}
+
+function validMasterCartTrace(value: unknown): boolean {
   return isRecord(value)
-    && keys(value, ["id", "name", "shape", "grounded", "visible", "color", "translationMm", "rotationDeg", "sizeMm", "explosionDirection"])
-    && stableId(value.id)
-    && typeof value.name === "string" && value.name.length >= 1 && value.name.length <= 120
-    && COMPONENT_SHAPES.includes(value.shape as ComponentInstance["shape"])
-    && typeof value.grounded === "boolean" && typeof value.visible === "boolean"
-    && typeof value.color === "string" && COLOR_PATTERN.test(value.color)
-    && vec3(value.translationMm, WORKBENCH_LIMITS.maxCoordinateMm)
-    && vec3(value.rotationDeg, 360)
-    && vec3(value.sizeMm, 20_000, true)
-    && vec3(value.explosionDirection, 1);
+    && keys(value, ["instanceId", "templateId", "role", "sizeLabel", "materialLabel", "finishLabel", "parameterSummary", "provenance"])
+    && stableId(value.instanceId)
+    && MASTER_CART_TEMPLATE_IDS.includes(value.templateId as never)
+    && shortText(value.role, 1, 80) && shortText(value.sizeLabel, 1, 100) && shortText(value.materialLabel, 1, 100)
+    && shortText(value.finishLabel, 1, 100) && shortText(value.parameterSummary, 1, 240)
+    && value.provenance === "original-ps3d-parametric-preview";
 }
 
 function validElectricalComponentPayload(value: unknown): value is ElectricalComponent {
