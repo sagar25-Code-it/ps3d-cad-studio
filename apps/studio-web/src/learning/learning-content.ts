@@ -24,7 +24,7 @@ export interface LearningManual {
 export const LEARNING_LEVELS: readonly LearningLevel[] = ["Beginner", "Student", "Professional", "Advanced"];
 
 export const PS3D_LEARNING_MANUAL: LearningManual = {
-  title: "PS3D Studio Learning and Safe Practice Manual",
+  title: "PS3D CAD Studio Learning and Safe Practice Manual",
   edition: "Public preview edition 0.2 - August 2026",
   owner: "Sagar Patel / PS3D Master",
   introduction: "A progressive, evidence-aware path from first navigation to multidisciplinary CAD review and secure AI collaboration. Every exercise distinguishes qualified geometry, deterministic engineering assistance, illustrative previews, and unavailable professional-kernel behavior.",
@@ -143,4 +143,3 @@ export const PS3D_LEARNING_MANUAL: LearningManual = {
 function module(id: string, number: string, level: LearningLevel, workspace: string, title: string, summary: string, outcomes: readonly string[], practice: readonly string[], verification: readonly string[], boundary: string): LearningModule {
   return { id, number, level, workspace, title, summary, outcomes, practice, verification, boundary };
 }
-
