@@ -17,7 +17,7 @@ export function buildPdfModelPackage(input: PdfModelPackageInput): Blob {
     image,
     embedded,
     ascii(`<< /Type /Filespec /F (ps3d-model.glb) /UF (ps3d-model.glb) /EF << /F 8 0 R /UF 8 0 R >> /AFRelationship /Data /Desc (${pdfString("Embedded GLB runtime model")}) >>`),
-    ascii(`<< /Title (${pdfString(input.title)}) /Subject (${pdfString("PS3D PDF model package with attached GLB")}) /Creator (PS3D Studio) /Producer (PS3D original browser PDF writer) /CreationDate (${pdfDate(date)}) >>`)
+    ascii(`<< /Title (${pdfString(input.title)}) /Subject (${pdfString("PS3D PDF model package with attached GLB")}) /Creator (PS3D CAD Studio / PS3D Master) /Producer (PS3D original browser PDF writer) /CreationDate (${pdfDate(date)}) >>`)
   ];
   return new Blob([copyToArrayBuffer(assemblePdf(objects, 1, 10))], { type: "application/pdf" });
 }
@@ -35,7 +35,7 @@ export function buildInteractive3dPdf(input: Interactive3dPdfInput): Blob {
     streamObject("", ascii(content)),
     model,
     ascii(`<< /Type /Annot /Subtype /3D /Rect [35 118 807 500] /3DD 7 0 R /3DA << /A /PO /DIS /I >> /Border [0 0 1] /Contents (${pdfString(`Embedded ${input.subtype} 3D annotation`)}) >>`),
-    ascii(`<< /Title (${pdfString(input.title)}) /Subject (${pdfString(`Interactive ${input.subtype} 3D PDF pass-through`)}) /Creator (PS3D Studio) /Producer (PS3D original browser PDF writer) /CreationDate (${pdfDate(date)}) >>`)
+    ascii(`<< /Title (${pdfString(input.title)}) /Subject (${pdfString(`Interactive ${input.subtype} 3D PDF pass-through`)}) /Creator (PS3D CAD Studio / PS3D Master) /Producer (PS3D original browser PDF writer) /CreationDate (${pdfDate(date)}) >>`)
   ];
   return new Blob([copyToArrayBuffer(assemblePdf(objects, 1, 9))], { type: "application/pdf" });
 }
