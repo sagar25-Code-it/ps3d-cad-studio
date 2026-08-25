@@ -20,6 +20,7 @@ import {
   type McpTokenRecord,
   type PublicCloudConfig
 } from "./auth-client.js";
+import { BrandFooter } from "./BrandFooter.js";
 import { PublicPageHeader } from "./PublicPageHeader.js";
 
 type AuthMode = "sign-in" | "sign-up";
@@ -202,7 +203,7 @@ export function AccessPortal(): React.JSX.Element {
 
       <section className="token-list-card"><header><div><span className="step-index">03</span><h3>Active and recent tokens</h3></div><span>{tokens.filter((token) => token.revoked_at === null && new Date(token.expires_at).getTime() > Date.now()).length} active</span></header>{tokens.length === 0 ? <div className="empty-tokens">No tokens yet. Create a separate token for each AI tool or device.</div> : <div className="token-table" role="table">{tokens.map((record) => <div className={`token-row ${record.revoked_at === null ? "" : "revoked"}`} role="row" key={record.id}><div><strong>{record.name}</strong><code>{record.token_prefix}</code></div><div><span>{record.scopes.map(scopeLabel).join(" · ")}</span><small>Expires {formatDate(record.expires_at)} · {record.last_used_at === null ? "never used" : `used ${formatDate(record.last_used_at)}`}</small></div><div>{record.revoked_at === null && new Date(record.expires_at).getTime() > Date.now() ? <button className="danger-outline" onClick={() => void revoke(record)} disabled={busy}>Revoke</button> : <span className="token-state">{record.revoked_at === null ? "Expired" : "Revoked"}</span>}</div></div>)}</div>}</section>
     </section>}
-    <footer className="public-footer"><span>PS3D Master · MIT-licensed source</span><span>Passwords and raw personal tokens are never stored in the project repository.</span></footer>
+    <BrandFooter note="MIT-licensed source. Passwords and raw personal tokens are never stored in the project repository." />
   </main>;
 }
 
@@ -248,4 +249,3 @@ function formatDate(value: string): string {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date) : "unknown";
 }
-
