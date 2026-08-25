@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SketchEntity, SketchConstraintKind, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
-import { analyzeWorkbenchSketch, buildSketchEntity, requiredSketchPoints, snapSketchPoint, type SketchTool } from "../../../../packages/workbench-sketch/src/index.js";
+import {
+  analyzeWorkbenchSketch,
+  buildSketchEntity,
+  detectSketchProfiles,
+  requiredSketchPoints,
+  resolveQualifiedExtrusion,
+  sketchToolLabel,
+  snapSketchPoint,
+  type SketchProfile,
+  type SketchTool
+} from "../../../../packages/workbench-sketch/src/index.js";
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 
@@ -18,6 +28,8 @@ interface SketchWorkspaceProps {
   readonly onDeleteConstraint: (id: string) => void;
   readonly onSetDimension: (entityId: string, dimension: DrivingDimension, valueMm: number) => void;
   readonly onToggleConstruction: (entityId: string) => void;
+  readonly onExtrudeProfiles: (profileIds: readonly string[], distanceMm: number) => Promise<void>;
+  readonly working: boolean;
   readonly onMessage: (message: string) => void;
 }
 
@@ -30,17 +42,29 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [showProfiles, setShowProfiles] = useState(true);
   const [showDimensions, setShowDimensions] = useState(true);
   const [showConstraints, setShowConstraints] = useState(true);
+  const [selectedProfileIds, setSelectedProfileIds] = useState<readonly string[]>([]);
+  const [extrudeDistance, setExtrudeDistance] = useState("10");
   const analysis = useMemo(() => analyzeWorkbenchSketch(props.sketch), [props.sketch]);
+  const profiles = useMemo(() => detectSketchProfiles(props.sketch), [props.sketch]);
   const view = expandedView(analysis.boundsMm.min, analysis.boundsMm.size);
   const selectedEntity = props.sketch.entities.find((entity) => entity.id === selectionIds.at(-1));
   const selectedEntities = selectionIds.map((id) => props.sketch.entities.find((entity) => entity.id === id)).filter((entity): entity is SketchEntity => entity !== undefined);
   const selectedConstraints = props.sketch.constraints.filter((constraint) => constraint.entityIds.some((id) => selectionIds.includes(id)));
+  const previewEntity = useMemo(() => {
+    if (props.tool === "select" || pending.length !== requiredSketchPoints(props.tool) - 1) return undefined;
+    const preview = buildSketchEntity(props.tool, [...pending, cursor], "entity:tool-preview");
+    return preview.ok ? preview.value : undefined;
+  }, [cursor, pending, props.tool]);
+  const distanceMm = Number(extrudeDistance);
+  const extrusion = useMemo(() => resolveQualifiedExtrusion(props.sketch, selectedProfileIds, distanceMm), [distanceMm, props.sketch, selectedProfileIds]);
 
   useEffect(() => setPending([]), [props.tool, props.cancelVersion]);
   useEffect(() => {
-    if (props.selectedId === null) setSelectionIds([]);
+    if (props.selectedId === null || props.selectedId.startsWith("profile:")) setSelectionIds([]);
     else setSelectionIds((current) => current.includes(props.selectedId!) ? current : [props.selectedId!]);
-  }, [props.selectedId]);
+    if (props.selectedId?.startsWith("profile:") === true && profiles.some((profile) => profile.id === props.selectedId)) setSelectedProfileIds([props.selectedId]);
+  }, [profiles, props.selectedId]);
+  useEffect(() => setSelectedProfileIds((current) => current.filter((id) => profiles.some((profile) => profile.id === id))), [profiles]);
 
   const pointer = (event: React.PointerEvent<SVGSVGElement>, commit: boolean): void => {
     const point = eventPoint(event, view);
@@ -49,13 +73,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (!commit) return;
     if (props.tool === "select") {
       setSelectionIds([]);
+      setSelectedProfileIds([]);
       props.onSelect(null);
       return;
     }
     const points = [...pending, snapped.point];
     if (points.length < requiredSketchPoints(props.tool)) {
       setPending(points);
-      props.onMessage(`${props.tool}: point ${points.length} accepted${snapped.snapped ? ` (${snapped.kind} snap)` : ""}.`);
+      props.onMessage(`${sketchToolLabel(props.tool)}: point ${points.length} accepted${snapped.snapped ? ` (${snapped.kind} snap)` : ""}.`);
       return;
     }
     const built = buildSketchEntity(props.tool, points, `entity:user-${crypto.randomUUID()}`);
@@ -66,17 +91,28 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     }
     props.onAddEntity(built.value);
     setPending([]);
-    props.onMessage(`Added ${props.tool} with stable ID ${built.value.id}.`);
+    props.onMessage(`Added ${sketchToolLabel(props.tool)} with stable ID ${built.value.id}.`);
   };
 
   const selectEntity = (id: string, additive: boolean): void => {
     if (!additive) {
       setSelectionIds([id]);
+      setSelectedProfileIds([]);
       props.onSelect(id);
       return;
     }
     setSelectionIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current.slice(-1), id]);
     props.onMessage("Multi-selection updated. Pair constraints accept up to two entities.");
+  };
+
+  const selectProfile = (profile: SketchProfile, additive: boolean): void => {
+    setSelectionIds([]);
+    const next = additive
+      ? selectedProfileIds.includes(profile.id) ? selectedProfileIds.filter((id) => id !== profile.id) : [...selectedProfileIds, profile.id]
+      : [profile.id];
+    setSelectedProfileIds(next);
+    if (!additive) props.onSelect(profile.id);
+    props.onMessage(`${next.length} closed sketch profile${next.length === 1 ? "" : "s"} selected for a feature.`);
   };
 
   const constrain = (kind: SketchConstraintKind): void => {
@@ -99,6 +135,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       <svg
         className={`sketch-canvas ${showProfiles ? "show-profiles" : "hide-profiles"}`}
         viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
+        preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label={`XY sketch with ${props.sketch.entities.length} entities and ${analysis.degreesOfFreedom} estimated degrees of freedom`}
         onPointerMove={(event) => pointer(event, false)}
@@ -106,13 +143,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       >
         <defs><pattern id="minor-grid" width={props.sketch.gridMm} height={props.sketch.gridMm} patternUnits="userSpaceOnUse"><path d={`M ${props.sketch.gridMm} 0 L 0 0 0 ${props.sketch.gridMm}`} fill="none" stroke="#1d3c58" strokeWidth="0.18" /></pattern></defs>
         {gridVisible && <rect x={view.x} y={view.y} width={view.width} height={view.height} fill="url(#minor-grid)" />}
-        <g transform="scale(1,-1)">
-          <line x1={view.x} y1="0" x2={view.x + view.width} y2="0" className="sketch-axis x" />
-          <line x1="0" y1={-view.y - view.height} x2="0" y2={-view.y} className="sketch-axis y" />
-          {props.sketch.entities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} selected={selectionIds.includes(entity.id)} onSelect={(additive) => selectEntity(entity.id, additive)} />)}
-          {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r="1.1" className="pending-point" />)}
-          {props.tool !== "select" && <circle cx={cursor[0]} cy={-cursor[1]} r="0.8" className="cursor-point" />}
-        </g>
+        {showProfiles && profiles.map((profile) => <SketchProfileShape key={profile.id} profile={profile} selected={selectedProfileIds.includes(profile.id)} {...(props.tool === "select" ? { onSelect: (additive: boolean) => selectProfile(profile, additive) } : {})} />)}
+        <line x1={view.x} y1="0" x2={view.x + view.width} y2="0" className="sketch-axis x" />
+        <line x1="0" y1={view.y} x2="0" y2={view.y + view.height} className="sketch-axis y" />
+        {props.sketch.entities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} selected={selectionIds.includes(entity.id)} {...(props.tool === "select" ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive) } : {})} />)}
+        {previewEntity !== undefined && <SketchEntityShape entity={previewEntity} selected={false} preview />}
+        {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r="1.1" className="pending-point" />)}
+        {props.tool !== "select" && <circle cx={cursor[0]} cy={-cursor[1]} r="0.8" className="cursor-point" />}
         {showDimensions && props.sketch.entities.map((entity) => <SketchDimensionGlyph key={`dimension:${entity.id}`} entity={entity} />)}
         {showConstraints && props.sketch.constraints.map((constraint) => <ConstraintGlyph key={constraint.id} constraint={constraint} entities={props.sketch.entities} />)}
       </svg>
@@ -125,9 +162,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
         <PaletteToggle label="Constraints" active={showConstraints} onToggle={setShowConstraints} />
         <button className="palette-action" disabled={selectedEntity === undefined} onClick={() => selectedEntity !== undefined && props.onToggleConstruction(selectedEntity.id)}><CommandIcon name={selectedEntity?.construction === true ? "rectangle" : "construction"} />{selectedEntity?.construction === true ? "Profile geometry" : "Construction"}</button>
+        <button className="palette-action primary" disabled={selectedProfileIds.length === 0} onClick={() => props.onMessage(extrusion.ok ? "Closed profiles are ready. Confirm the extrusion in the inspector." : extrusion.diagnostics[0]?.message ?? "Select a closed profile.")}><CommandIcon name="extrude" />Extrude profiles</button>
       </div>
 
-      <div className="canvas-hud"><span>XY plane</span><span>Tool {props.tool}</span><span>Grid {gridVisible ? `${props.sketch.gridMm} mm` : "off"}</span><span>Snap {snapEnabled ? `${props.sketch.snapToleranceMm} mm` : "off"}</span><strong>{analysis.classification.replace("-", " ")}</strong></div>
+      <div className="canvas-hud"><span>XY plane</span><span>{sketchToolLabel(props.tool)}</span><span>Grid {gridVisible ? `${props.sketch.gridMm} mm` : "off"}</span><span>Snap {snapEnabled ? `${props.sketch.snapToleranceMm} mm` : "off"}</span><span>{profiles.length} closed profiles</span><strong>{analysis.classification.replace("-", " ")}</strong></div>
     </section>
 
     <aside className="inspector-panel" aria-label="Sketch inspector">
@@ -160,6 +198,21 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
       {selectedEntity !== undefined && <section className="inspector-section dimension-controller"><header><strong>Driving dimensions</strong><span>mm</span></header><EntityDimensions entity={selectedEntity} onApply={(dimension, value) => props.onSetDimension(selectedEntity.id, dimension, value)} /></section>}
 
+      <section className="inspector-section profile-controller"><header><strong>Closed profiles</strong><span>{profiles.length} found</span></header>
+        <p className="profile-help">Click inside a shaded region. Shift-click adds the concentric bore profile.</p>
+        <div className="profile-list">{profiles.map((profile, index) => <button key={profile.id} className={selectedProfileIds.includes(profile.id) ? "selected" : ""} onClick={(event) => selectProfile(profile, event.shiftKey || event.ctrlKey || event.metaKey)}><span><b>P{index + 1}</b>{profileLabel(profile)}</span><small>{format(profile.areaMm2)} mm²</small></button>)}</div>
+        <form className={`extrude-controller ${extrusion.ok ? "ready" : "needs-input"}`} onSubmit={(event) => { event.preventDefault(); if (extrusion.ok && !props.working) void props.onExtrudeProfiles(selectedProfileIds, distanceMm); }}>
+          <div className="feature-dialog-title"><span><CommandIcon name="extrude" /></span><div><small>SOLID / CREATE</small><strong>Extrude</strong></div></div>
+          <label><span>Profiles</span><output>{selectedProfileIds.length === 0 ? "Select in canvas" : `${selectedProfileIds.length} selected`}</output></label>
+          <label><span>Start</span><select aria-label="Extrude start" defaultValue="profile"><option value="profile">Profile plane</option></select></label>
+          <label><span>Direction</span><select aria-label="Extrude direction" defaultValue="symmetric"><option value="symmetric">Symmetric</option></select></label>
+          <label><span>Distance</span><div className="distance-entry"><input aria-label="Extrude distance in millimeters" inputMode="decimal" value={extrudeDistance} onChange={(event) => setExtrudeDistance(event.target.value)} /><small>mm</small></div></label>
+          <label><span>Operation</span><select aria-label="Extrude operation" defaultValue="new-body"><option value="new-body">New body</option></select></label>
+          <div className={`profile-readiness ${extrusion.ok ? "ready" : "blocked"}`}><CommandIcon name={extrusion.ok ? "cube-check" : "inspect"} /><span>{extrusion.ok ? `Qualified rectangle + bore · ${format(extrusion.value.widthMm)} × ${format(extrusion.value.heightMm)} × ${format(extrusion.value.distanceMm)} mm` : extrusion.diagnostics[0]?.message ?? "Select a profile."}</span></div>
+          <button className="extrude-submit" type="submit" disabled={!extrusion.ok || props.working}><CommandIcon name="extrude" />{props.working ? "Regenerating…" : "Finish sketch & extrude"}</button>
+        </form>
+      </section>
+
       <section className="inspector-section"><header><strong>Constraint records</strong><span>{props.sketch.constraints.length}</span></header>
         <div className="record-list">{props.sketch.constraints.slice(-10).reverse().map((constraint) => <button key={constraint.id} onClick={() => props.onDeleteConstraint(constraint.id)} title="Delete this constraint"><CommandIcon name={constraint.dimension === undefined ? constraint.kind : "dimension"} /><span>{constraint.kind}{constraint.dimension === undefined ? "" : ` · ${constraint.dimension}`}</span><small>{constraint.valueMm === undefined ? shortId(constraint.id) : `${format(constraint.valueMm)} mm`}</small></button>)}</div>
       </section>
@@ -187,13 +240,30 @@ function DimensionField({ label, dimension, value, onApply }: { readonly label: 
   </form>;
 }
 
-function SketchEntityShape({ entity, selected, onSelect }: { readonly entity: SketchEntity; readonly selected: boolean; readonly onSelect: (additive: boolean) => void }): React.JSX.Element {
-  const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""}`;
-  const common = { className, onPointerDown: (event: React.PointerEvent) => { event.stopPropagation(); onSelect(event.shiftKey || event.ctrlKey || event.metaKey); } };
+function SketchEntityShape({ entity, selected, onSelect, preview = false }: { readonly entity: SketchEntity; readonly selected: boolean; readonly onSelect?: (additive: boolean) => void; readonly preview?: boolean }): React.JSX.Element {
+  const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""} ${preview ? "tool-preview" : ""}`;
+  const common = {
+    className,
+    style: onSelect === undefined ? { pointerEvents: "none" as const } : undefined,
+    onPointerDown: preview || onSelect === undefined ? undefined : (event: React.PointerEvent) => { event.stopPropagation(); onSelect(event.shiftKey || event.ctrlKey || event.metaKey); }
+  };
   if (entity.kind === "line") return <line {...common} x1={entity.start[0]} y1={-entity.start[1]} x2={entity.end[0]} y2={-entity.end[1]} />;
   if (entity.kind === "rectangle") return <rect {...common} x={entity.center[0] - entity.widthMm / 2} y={-entity.center[1] - entity.heightMm / 2} width={entity.widthMm} height={entity.heightMm} transform={`rotate(${-entity.rotationDeg} ${entity.center[0]} ${-entity.center[1]})`} />;
   if (entity.kind === "circle") return <circle {...common} cx={entity.center[0]} cy={-entity.center[1]} r={entity.radiusMm} />;
   return <path {...common} d={`M ${entity.start[0]} ${-entity.start[1]} Q ${entity.mid[0]} ${-entity.mid[1]} ${entity.end[0]} ${-entity.end[1]}`} />;
+}
+
+function SketchProfileShape({ profile, selected, onSelect }: { readonly profile: SketchProfile; readonly selected: boolean; readonly onSelect?: (additive: boolean) => void }): React.JSX.Element {
+  const common = {
+    className: `sketch-profile ${selected ? "selected" : ""}`,
+    style: onSelect === undefined ? { pointerEvents: "none" as const } : undefined,
+    onPointerDown: onSelect === undefined ? undefined : (event: React.PointerEvent) => { event.stopPropagation(); onSelect(event.shiftKey || event.ctrlKey || event.metaKey); },
+    "aria-label": `${profileLabel(profile)} closed profile`
+  };
+  if (profile.boundary.kind === "rectangle") return <rect {...common} x={profile.boundary.center[0] - profile.boundary.widthMm / 2} y={-profile.boundary.center[1] - profile.boundary.heightMm / 2} width={profile.boundary.widthMm} height={profile.boundary.heightMm} transform={`rotate(${-profile.boundary.rotationDeg} ${profile.boundary.center[0]} ${-profile.boundary.center[1]})`} />;
+  if (profile.boundary.kind === "circle") return <circle {...common} cx={profile.boundary.center[0]} cy={-profile.boundary.center[1]} r={profile.boundary.radiusMm} />;
+  const path = profile.boundary.points.map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${-point[1]}`).join(" ");
+  return <path {...common} d={`${path} Z`} />;
 }
 
 function SketchDimensionGlyph({ entity }: { readonly entity: SketchEntity }): React.JSX.Element {
@@ -228,9 +298,18 @@ function expandedView(min: Vec2, size: Vec2): { x: number; y: number; width: num
 
 function eventPoint(event: React.PointerEvent<SVGSVGElement>, view: { x: number; y: number; width: number; height: number }): Vec2 {
   const rect = event.currentTarget.getBoundingClientRect();
-  const x = view.x + (event.clientX - rect.left) / rect.width * view.width;
-  const svgY = view.y + (event.clientY - rect.top) / rect.height * view.height;
+  const scale = Math.min(rect.width / view.width, rect.height / view.height);
+  const renderedWidth = view.width * scale;
+  const renderedHeight = view.height * scale;
+  const offsetX = (rect.width - renderedWidth) / 2;
+  const offsetY = (rect.height - renderedHeight) / 2;
+  const x = view.x + (event.clientX - rect.left - offsetX) / scale;
+  const svgY = view.y + (event.clientY - rect.top - offsetY) / scale;
   return [x, -svgY];
+}
+
+function profileLabel(profile: SketchProfile): string {
+  return profile.boundary.kind === "rectangle" ? "Rectangle region" : profile.boundary.kind === "circle" ? "Circle region" : "Closed line loop";
 }
 
 function shortId(id: string): string {
