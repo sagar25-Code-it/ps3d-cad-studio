@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/index.js";
 import { vehicleHardPoints, type WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { DesignHealthReport } from "../../../../packages/workbench-health/src/index.js";
+import { detectSketchProfiles } from "../../../../packages/workbench-sketch/src/index.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, inferCommandIcon } from "./CommandIcon.js";
 
@@ -43,6 +44,9 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
   const drawingDimensionCount = project.drawing.showDimensions ? (drawingHasTop ? (drawingHasDatumFrame ? 6 : 4) : 3) : 0;
   const drawingGdtCount = (project.drawing.showGdt ?? false) ? (drawingHasDatumFrame ? 3 : 1) : 0;
   const vehiclePoints = project.activeWorkspace === "vehicle" ? vehicleHardPoints(project.vehicle) : [];
+  const sketchProfiles = detectSketchProfiles(project.sketch);
+  const linkedOutline = project.sketch.entities.find((entity) => entity.kind === "rectangle" && !entity.construction && Math.abs(entity.widthMm - project.part.widthMm) < 1e-6 && Math.abs(entity.heightMm - project.part.heightMm) < 1e-6);
+  const linkedBore = project.sketch.entities.find((entity) => entity.kind === "circle" && !entity.construction && Math.hypot(entity.center[0] - (linkedOutline?.kind === "rectangle" ? linkedOutline.center[0] : 0), entity.center[1] - (linkedOutline?.kind === "rectangle" ? linkedOutline.center[1] : 0)) < 0.01 && Math.abs(entity.radiusMm * 2 - project.part.holeDiameterMm) < 1e-6);
   return <aside ref={treeRef} className="project-tree" aria-label="Model browser and feature history">
     <div className="panel-title model-browser-title"><p>Model browser</p><h2>{project.name}</h2><div><span>Revision {project.revision}</span><strong>{project.activeWorkspace}</strong></div></div>
     <TreeSection title="Document" badge="preview" initiallyOpen={false}>
@@ -57,19 +61,21 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
       <TreeItem kind="datum" id="datum:yz" label="YZ plane" meta="reference" selectedId={selectedId} onSelect={onSelect} indent />
       <TreeItem kind="datum" id="datum:xz" label="XZ plane" meta="reference" selectedId={selectedId} onSelect={onSelect} indent />
     </TreeSection>}
-    {showSketch && <TreeSection title={`Sketches · ${project.sketch.entities.length} entities`} badge="preview">
+    {showSketch && <TreeSection title={`Sketches · ${project.sketch.entities.length} entities · ${sketchProfiles.length} profiles`} badge="preview">
       <TreeItem kind="sketch" id={project.sketch.id} label={project.sketch.name} meta={`${project.sketch.constraints.length} constraints`} selectedId={selectedId} onSelect={onSelect} />
       {project.activeWorkspace === "sketch" && project.sketch.entities.map((entity) => <TreeItem key={entity.id} kind="sketch" id={entity.id} label={entityLabel(entity.kind)} meta={shortId(entity.id)} selectedId={selectedId} onSelect={onSelect} indent />)}
+      {project.activeWorkspace === "sketch" && sketchProfiles.map((profile, index) => <TreeItem key={profile.id} kind="sketch" id={profile.id} label={`Profile P${index + 1}`} meta={`${profile.boundary.kind.replaceAll("-", " ")} · ${formatArea(profile.areaMm2)} mm²`} selectedId={selectedId} onSelect={onSelect} indent />)}
     </TreeSection>}
     {showPartHistory && <TreeSection title="Feature history" badge="preview">
-      <TreeItem kind="feature" id="feature:plate-extrusion" label="Base extrusion" meta="qualified" selectedId={selectedId} onSelect={onSelect} />
-      <TreeItem kind="feature" id="feature:centered-through-hole" label="Centered bore" meta="qualified" selectedId={selectedId} onSelect={onSelect} />
+      <TreeItem kind="feature" id="feature:plate-extrusion" label="Base extrusion" meta={`${project.part.widthMm} × ${project.part.heightMm} × ${project.part.thicknessMm} mm · ${linkedOutline === undefined ? "parameter driven" : "sketch linked"}`} selectedId={selectedId} onSelect={onSelect} />
+      <TreeItem kind="feature" id="feature:centered-through-hole" label="Centered bore" meta={`Ø${project.part.holeDiameterMm} mm · through all · ${linkedBore === undefined ? "parameter driven" : "sketch linked"}`} selectedId={selectedId} onSelect={onSelect} />
       <TreeItem kind="feature" id="feature:edge-treatment" label="Edge treatment" meta={`${project.part.edgeTreatmentMm} mm · preview`} selectedId={selectedId} onSelect={onSelect} />
       <TreeItem kind="feature" id="feature:linear-pattern" label="Linear pattern" meta={`${project.part.patternCount} instances · preview`} selectedId={selectedId} onSelect={onSelect} />
       <TreeItem kind="feature" id="feature:revolve-study" label="Revolve study" meta={`${project.part.revolveAngleDeg}° · preview`} selectedId={selectedId} onSelect={onSelect} />
     </TreeSection>}
     {showBodies && <TreeSection title="Bodies" badge={project.activeWorkspace === "part" ? "qualified" : "preview"}>
       <TreeItem kind="body" id="body:bracket" label="Mounting plate" meta="closed manifold mesh" selectedId={selectedId} onSelect={onSelect} />
+      {project.activeWorkspace === "part" && (project.part.previewBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.shape} · ${body.visible ? "shown" : "hidden"} · preview`} selectedId={selectedId} onSelect={onSelect} indent />)}
       {project.activeWorkspace === "surface" && <TreeItem kind="surface" id={project.surface.id} label={project.surface.name} meta={`${project.surface.mode} · open preview`} selectedId={selectedId} onSelect={onSelect} />}
     </TreeSection>}
     {project.activeWorkspace === "assembly" && <>
@@ -194,4 +200,8 @@ function formatKind(kind: string): string {
 
 function capitalizeWords(value: string): string {
   return value.split("-").map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`).join(" ");
+}
+
+function formatArea(value: number): string {
+  return String(Number(value.toFixed(2)));
 }

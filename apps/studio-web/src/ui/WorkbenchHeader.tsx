@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { WorkspaceId, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { DesignHealthStatus } from "../../../../packages/workbench-health/src/index.js";
+import { PS3D_BRAND } from "../brand.js";
+import { BrandLogo } from "./BrandLogo.js";
 import { CommandIcon } from "./CommandIcon.js";
 
 const WORKSPACES: readonly { id: WorkspaceId; label: string; icon: string }[] = [
@@ -16,8 +18,10 @@ const WORKSPACES: readonly { id: WorkspaceId; label: string; icon: string }[] = 
 
 interface WorkbenchHeaderProps {
   readonly project: WorkbenchProject;
+  readonly masterCartOpen: boolean;
   readonly status: "starting" | "ready" | "working" | "error";
   readonly onWorkspace: (workspace: WorkspaceId) => void;
+  readonly onMasterCart: () => void;
   readonly onCommandPalette: () => void;
   readonly onDesignHealth: () => void;
   readonly onExchange: () => void;
@@ -57,7 +61,7 @@ interface MenuDefinition {
 export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLElement>(null);
-  const is3d = props.project.activeWorkspace === "part" || props.project.activeWorkspace === "assembly" || props.project.activeWorkspace === "surface" || props.project.activeWorkspace === "vehicle";
+  const is3d = !props.masterCartOpen && (props.project.activeWorkspace === "part" || props.project.activeWorkspace === "assembly" || props.project.activeWorkspace === "surface" || props.project.activeWorkspace === "vehicle");
 
   useEffect(() => {
     if (openMenu === null) return;
@@ -84,6 +88,7 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
       { label: "Sketch tools", icon: "sketch", action: () => props.onWorkspace("sketch") },
       { label: "Part features", icon: "extrude", action: () => props.onWorkspace("part") },
       { label: "Assembly components", icon: "assembly", action: () => props.onWorkspace("assembly") },
+      { label: "Master Cart component library", icon: "master-cart", action: props.onMasterCart },
       { label: "Surface tools", icon: "surface", action: () => props.onWorkspace("surface") },
       { label: "Electrical schematic", icon: "electrical", action: () => props.onWorkspace("electrical") },
       { label: "Vehicle engineering", icon: "vehicle", action: () => props.onWorkspace("vehicle") }
@@ -123,10 +128,10 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
 
   return <>
     <header className="app-header">
-      <div className="brand-block">
-        <span className="brand-mark" aria-hidden="true"><i>P</i><i>3</i><b /></span>
-        <div><strong>PS3D Studio</strong><small>Precision design workbench</small></div>
-      </div>
+      <a className="brand-block" href="/about" aria-label={`About ${PS3D_BRAND.name}`}>
+        <BrandLogo decorative />
+        <div><strong>{PS3D_BRAND.productName}</strong><small>{PS3D_BRAND.name} engineering suite</small></div>
+      </a>
       <button className="project-button" onClick={props.onCommandPalette} aria-label="Open command launcher">
         <span className="project-command-icon"><CommandIcon name="command" /></span>
         <span><strong>{props.project.name}</strong><small>Revision {props.project.revision} · local project</small></span>
@@ -173,12 +178,13 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
     <nav className="workspace-tabs" aria-label="CAD workspaces" role="tablist">
       {WORKSPACES.map((workspace) => <button
         key={workspace.id}
-        className={props.project.activeWorkspace === workspace.id ? "active" : ""}
+        className={!props.masterCartOpen && props.project.activeWorkspace === workspace.id ? "active" : ""}
         data-workspace={workspace.id}
         role="tab"
-        aria-selected={props.project.activeWorkspace === workspace.id}
+        aria-selected={!props.masterCartOpen && props.project.activeWorkspace === workspace.id}
         onClick={() => props.onWorkspace(workspace.id)}
       ><span aria-hidden="true"><CommandIcon name={workspace.icon} /></span>{workspace.label}</button>)}
+      <button className={props.masterCartOpen ? "active master-cart-tab" : "master-cart-tab"} data-workspace="master-cart" role="tab" aria-selected={props.masterCartOpen} onClick={props.onMasterCart}><span aria-hidden="true"><CommandIcon name="master-cart" /></span>Master Cart</button>
       <div className="workspace-health"><button className={`design-health-status ${props.designHealthStatus}`} onClick={props.onDesignHealth} aria-label={`Design health ${props.designHealthStatus}, score ${props.designHealthScore}`}><span className={`health-dot ${props.designHealthStatus}`} />design {props.designHealthStatus} · {props.designHealthScore}</button></div>
     </nav>
   </>;

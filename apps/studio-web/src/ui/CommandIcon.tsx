@@ -23,6 +23,11 @@ export function CommandIcon({ name, className = "" }: CommandIconProps): React.J
 export function inferCommandIcon(text: string, workspace = ""): string {
   const source = `${text} ${workspace}`.toLowerCase();
   const rules: readonly (readonly [string, string])[] = [
+    ["finish sketch", "save"], ["sketch options", "display"],
+    ["immediate hide", "eye-off"], ["show and hide", "eye"], ["clip section", "section"],
+    ["global finish", "appearance"], ["object display", "appearance"], ["appearance management", "appearance"],
+    ["preferences", "display"], ["theme", "display"], ["background", "display"],
+    ["studio", "shaded-edges"], ["immersive", "view"], ["omniverse", "view"],
     ["rectangle", "rectangle"], ["circle", "circle"], ["arc", "arc"],
     ["line", "line"], ["spline", "spline"], ["select", "select"],
     ["horizontal", "horizontal"], ["vertical", "vertical"], ["parallel", "parallel"],
@@ -38,10 +43,17 @@ export function inferCommandIcon(text: string, workspace = ""): string {
     ["interference", "interference"], ["fit", "fit"], ["home", "home"],
     ["orbit", "orbit"], ["pan", "pan"], ["orthographic", "projection"],
     ["perspective", "projection"], ["grid", "grid"], ["axis", "axes"],
+    ["shaded with edges", "shaded-edges"], ["wireframe", "wireframe"],
+    ["shaded", "shaded"], ["appearance", "appearance"], ["display", "display"],
     ["3d pdf", "pdf-3d"], ["pdf", "pdf-package"], ["exchange", "exchange"],
     ["import", "import"], ["export", "export"], ["download", "download"], ["open", "open"],
     ["save", "save"], ["json", "json"], ["insert", "insert"],
-    ["component", "box"], ["cylinder", "cylinder"], ["box", "box"],
+    ["sphere", "sphere"], ["cone", "cone"], ["copy", "copy"], ["mirror", "mirror"],
+    ["master cart", "master-cart"], ["fastener", "fastener"], ["bolt", "fastener"], ["screw", "fastener"],
+    ["bearing", "bearing"], ["bushing", "bushing"], ["sprocket", "sprocket"], ["gear", "gear"],
+    ["roller chain", "chain"], ["timing belt", "belt"], ["o-ring", "o-ring"], ["linear motion", "linear-motion"],
+    ["hose fitting", "hose-fitting"], ["tube fitting", "tube-fitting"], ["hand tool", "hand-tool"], ["wrench", "hand-tool"],
+    ["component", "box"], ["cylinder", "cylinder"], ["block", "box"], ["box", "box"],
     ["assemble", "assemble"], ["explode", "explode"], ["move", "move"],
     ["ground", "ground"], ["hide", "eye-off"], ["show", "eye"],
     ["delete", "trash"], ["mate", "mate"], ["joint", "joint"],
@@ -65,9 +77,9 @@ export function inferCommandIcon(text: string, workspace = ""): string {
 }
 
 export function iconTone(name: string): "create" | "modify" | "inspect" | "data" | "danger" | "neutral" {
-  if (["line", "rectangle", "circle", "arc", "extrude", "bore", "box", "cylinder", "insert", "bezier", "loft", "battery", "fuse", "breaker", "disconnect", "contactor", "inverter", "transformer", "motor", "sensor", "wire", "container", "vehicle", "scooter", "three-wheel", "wheel", "chassis"].includes(name)) return "create";
+  if (["line", "rectangle", "circle", "arc", "extrude", "bore", "box", "cylinder", "cone", "sphere", "insert", "bezier", "loft", "battery", "fuse", "breaker", "disconnect", "contactor", "inverter", "transformer", "motor", "sensor", "wire", "container", "vehicle", "scooter", "three-wheel", "wheel", "chassis", "master-cart", "fastener", "bearing", "bushing", "gear", "chain", "sprocket", "belt", "o-ring", "linear-motion", "hose-fitting", "tube-fitting", "hand-tool"].includes(name)) return "create";
   if (["trim", "offset", "spline", "edge", "pattern", "revolve", "sweep", "shell", "boolean", "move", "ground", "explode", "flatten", "canopy", "stitch", "thicken"].includes(name)) return "modify";
-  if (["measure", "fit", "home", "orbit", "pan", "projection", "grid", "axes", "interference", "section", "detail", "dimension", "constraint", "horizontal", "vertical", "parallel", "perpendicular", "collinear", "concentric", "equal", "tangent", "fixed", "auto-view", "tolerance", "datum", "gdt-position", "flatness", "hardpoint", "suspension", "steering", "brake", "cg"].includes(name)) return "inspect";
+  if (["measure", "fit", "home", "orbit", "pan", "projection", "grid", "axes", "display", "shaded", "shaded-edges", "wireframe", "appearance", "interference", "section", "detail", "dimension", "constraint", "horizontal", "vertical", "parallel", "perpendicular", "collinear", "concentric", "equal", "tangent", "fixed", "auto-view", "tolerance", "datum", "gdt-position", "flatness", "hardpoint", "suspension", "steering", "brake", "cg"].includes(name)) return "inspect";
   if (["json", "open", "save", "import", "export", "download", "exchange", "cube-file", "scene-file", "mesh-file", "triangle-file", "points-file", "package-file", "pdf-package", "pdf-3d", "matrix", "link-file", "mcp", "python", "bom", "circuit-3d"].includes(name)) return "data";
   if (["trash", "cancel", "eye-off"].includes(name)) return "danger";
   return "neutral";
@@ -118,6 +130,11 @@ function geometry(name: string): React.ReactNode {
     case "measure": return <><path d="m5 17 12-12 3 3L8 20z" /><path d="m9 15 2 2m1-5 2 2m1-5 2 2" /></>;
     case "projection": return <><path d="m4 8 8-4 8 4-8 4zM4 8v8l8 4 8-4V8M12 12v8" /><path d="M2 4h3M19 20h3" /></>;
     case "axes": return <><path d="M6 18 18 6M6 18h12M6 18V6" /><path d="m18 6-4 1 3 3M18 18l-3-2v4M6 6 4 9h4" /></>;
+    case "display": return <><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6" /><circle cx="12" cy="12" r="3" /><path d="M18.5 5.5 20 4m-1.5 14.5L20 20" /></>;
+    case "shaded": return <><circle cx="12" cy="12" r="8" /><path d="M12 4a8 8 0 0 0 0 16c3-4 3-12 0-16Z" fill="currentColor" opacity=".32" /></>;
+    case "shaded-edges": return <><path d="m4 8 8-4 8 4-8 4zM4 8v8l8 4 8-4V8M12 12v8" /><path d="m4 8 8 4 8-4" fill="currentColor" opacity=".28" /></>;
+    case "wireframe": return <><path d="m4 8 8-4 8 4-8 4zM4 8v8l8 4 8-4V8M12 12v8" /><path d="M4 16 12 4l8 12" opacity=".7" /></>;
+    case "appearance": return <><circle cx="12" cy="12" r="8" /><path d="M12 4a8 8 0 0 1 8 8h-8z" fill="currentColor" opacity=".38" /><circle cx="9" cy="9" r="1" fill="currentColor" /></>;
     case "json": return <><path d="M9 4H6v6l-2 2 2 2v6h3M15 4h3v6l2 2-2 2v6h-3" /><circle cx="12" cy="9" r=".7" fill="currentColor" stroke="none" /><circle cx="12" cy="15" r=".7" fill="currentColor" stroke="none" /></>;
     case "open": return <><path d="M4 7h6l2 2h8v10H4z" /><path d="m11 15 4-4m0 0h-3m3 0v3" /></>;
     case "save": return <><path d="M5 4h12l2 2v14H5z" /><path d="M8 4v6h8V4M8 20v-6h8v6" /></>;
@@ -145,6 +162,23 @@ function geometry(name: string): React.ReactNode {
     case "units-in": return <><path d="M6 6h12v12H6zM10 6v3m4-3v2m4 2h-3m3 4h-2m-6 4v-3m4 3v-2M6 10h3m-3 4h2" /></>;
     case "box": case "part": return <><path d="m4 8 8-4 8 4-8 4zM4 8v8l8 4 8-4V8M12 12v8" /></>;
     case "cylinder": return <><ellipse cx="12" cy="6" rx="6" ry="3" /><path d="M6 6v12c0 1.7 2.7 3 6 3s6-1.3 6-3V6" /><path d="M6 18c0 1.7 2.7 3 6 3s6-1.3 6-3" /></>;
+    case "cone": return <><ellipse cx="12" cy="18" rx="7" ry="3" /><path d="M5 18 10 5M19 18 14 5" /><ellipse cx="12" cy="5" rx="2" ry="1" /></>;
+    case "sphere": return <><circle cx="12" cy="12" r="8" /><ellipse cx="12" cy="12" rx="3.4" ry="8" /><path d="M4 12h16" /></>;
+    case "master-cart": return <><path d="M3 5h2l2 10h11l2-7H7" /><circle cx="9" cy="19" r="1.5" /><circle cx="17" cy="19" r="1.5" /><path d="m10 7 3-1.5L16 7l-3 1.5zM10 7v4l3 1.5 3-1.5V7M13 8.5v4" /></>;
+    case "fastener": return <><path d="m5 7 3-3h4l3 3-3 3H8z" /><path d="M10 10v10M7.5 13h5M7.5 16h5M7.5 19h5" /></>;
+    case "bearing": return <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="5.8" r="1" fill="currentColor" /><circle cx="18.2" cy="12" r="1" fill="currentColor" /><circle cx="12" cy="18.2" r="1" fill="currentColor" /><circle cx="5.8" cy="12" r="1" fill="currentColor" /></>;
+    case "bushing": return <><ellipse cx="12" cy="7" rx="7" ry="3" /><ellipse cx="12" cy="7" rx="3" ry="1.2" /><path d="M5 7v10c0 1.7 3.1 3 7 3s7-1.3 7-3V7M9 7v9c0 .7 1.3 1.2 3 1.2s3-.5 3-1.2V7" /></>;
+    case "gear": return <><path d="m10 3 1-2h2l1 2 2 .8 2-.8 1.4 1.4-.8 2 1 2 2 .6v2l-2 .7v2l1.1 1.8-1.5 1.5-2-.8-2 .9-.7 2h-2l-.8-2-2-.8-1.9.8-1.5-1.5 1-2-.9-2-2-.7v-2l2-.7.8-2-.8-1.9L6 3l2 .8z" /><circle cx="12" cy="11" r="3.2" /></>;
+    case "sprocket": return <><circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2.5" /><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1M18.4 5.6l-2.1 2.1m-8.6 8.6-2.1 2.1" /><circle cx="4" cy="19" r="1.5" /><circle cx="8" cy="19" r="1.5" /><path d="M5.5 19h1" /></>;
+    case "chain": return <><rect x="2.5" y="7" width="11" height="6" rx="3" transform="rotate(-25 8 10)" /><rect x="10.5" y="11" width="11" height="6" rx="3" transform="rotate(-25 16 14)" /><path d="m9 12 6-3" /></>;
+    case "belt": return <><circle cx="7" cy="12" r="4" /><circle cx="17" cy="12" r="4" /><path d="M7 8h10M7 16h10" /><path d="M5 12h4m6 0h4" /></>;
+    case "o-ring": return <><circle cx="12" cy="12" r="8" strokeWidth="3" /><path d="M6.5 6.5c3-3 8-3 11 0" opacity=".5" /></>;
+    case "linear-motion": return <><path d="M3 12h18" strokeWidth="3" /><rect x="8" y="6" width="8" height="12" rx="2" /><circle cx="12" cy="12" r="2" /><path d="m18 8 3 4-3 4" /></>;
+    case "hose-fitting": return <><path d="M6 19V9a4 4 0 0 1 4-4h8" strokeWidth="3" /><path d="m3 19 3 2 3-2M18 2l2 3-2 3" /><path d="M3 14h6M13 2v6" /></>;
+    case "tube-fitting": return <><path d="M3 12h6m6 0h6" strokeWidth="2.5" /><path d="m9 7 3-2 3 2v10l-3 2-3-2z" /><path d="M6 9v6m12-6v6" /></>;
+    case "hand-tool": return <><path d="M14 4a5 5 0 0 0-6 6L3 15l6 6 5-5a5 5 0 0 0 6-6l-3 3-4-4z" /><circle cx="7" cy="17" r="1.5" /></>;
+    case "copy": return <><rect x="7" y="7" width="12" height="12" rx="1.5" /><path d="M5 16H4V4h12v1" /></>;
+    case "mirror": return <><path d="M12 3v18" /><path d="m9 7-5 3v8l5-3zm6 0 5 3v8l-5-3z" /></>;
     case "assemble": case "mate": return <><path d="M4 8h7v8H4zM13 8h7v8h-7z" /><path d="M9 12h6m-2-2 2 2-2 2" /></>;
     case "explode": return <><path d="m8 9 4-2 4 2-4 2zM8 15l4-2 4 2-4 2z" /><path d="M4 12H1m3 0-2-2m2 2-2 2M20 12h3m-3 0 2-2m-2 2 2 2" /></>;
     case "move": return <><path d="M12 3v18M3 12h18" /><path d="m9 6 3-3 3 3m0 12-3 3-3-3M6 9l-3 3 3 3m12 0 3-3-3-3" /></>;
