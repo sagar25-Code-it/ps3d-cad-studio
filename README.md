@@ -1,10 +1,17 @@
 # PS3D CAD Studio
 
+<img src="apps/studio-web/public/ps3d-master-logo.png" alt="PS3D Master - Precision CAD Design & Mechanical Services" width="360" />
+
+**A PS3D Master Digital Engineering Suite tool**  
+Precision CAD Design & Mechanical Services  
+*Engineering intelligence for precision motion systems.*
+
 PS3D CAD Studio is an independent, original, local-first browser CAD research
 project. The current repository is a working 0.2 public-release candidate:
 one semantic project across Sketch, Part, Assembly, Surface, Drawing,
-Electrical, Vehicle, and Automate workspaces, plus a Learning Center, secure
-account portal, and authenticated remote MCP transport.
+Electrical, Vehicle, and Automate workspaces, plus the original Master Cart
+parametric component studio, a Learning Center, secure account portal, and
+authenticated remote MCP transport.
 
 It is not copied from PartMode or another CAD codebase. The project has its own
 requirements, architecture, source, interface, examples, tests, provenance
@@ -12,6 +19,8 @@ record, and MIT License. Independent development reduces copyright risk but is
 not a legal opinion or a patent, trademark, or freedom-to-operate clearance.
 
 Canonical public source: [sagar25-Code-it/ps3d-cad-studio](https://github.com/sagar25-Code-it/ps3d-cad-studio).
+
+Official PS3D Master links: [Engineering calculator](https://stepper-calculator.onrender.com/) · [Portfolio](https://sagar-portfolio-v1.vercel.app/) · [LinkedIn](https://www.linkedin.com/in/sagar-patel-1b6522100) · [Instagram @ps3dmaster](https://www.instagram.com/ps3dmaster) · [Email](mailto:sagarpatel25121995.sp@gmail.com)
 
 ## What works locally
 
@@ -21,6 +30,7 @@ Canonical public source: [sagar25-Code-it/ps3d-cad-studio](https://github.com/sa
 | Part | Qualified + preview | Worker-qualified centered-bore manifold mesh-solid; named views, orbit/pan/zoom/fit, perspective/orthographic cameras, view box, WCS axis viewer, selection priority, point measurement, and bounded feature intent |
 | 3D exchange | Preview | Local reference import for 14 scene/mesh/toolpath/point-cloud families; visible-scene export to GLB, glTF, OBJ, STL, PLY, and USDZ; PDF model package with attached GLB; U3D/PRC interactive-PDF pass-through |
 | Assembly | Preview | Insert/delete box and cylinder components, edit XYZ position, hide/show, ground/release, fixed/origin/axis mate records, exploded state, deterministic transforms, conservative AABB interference candidates, original 20 ft/40 ft high-cube cargo planning frames, and a non-certified 20 ft high-cube BESS equipment arrangement |
+| Master Cart | Preview | 25 original standards-oriented parametric families across fasteners, bearings/bushings, gears, chain/sprockets, timing belts/pulleys, O-rings, linear motion, hydraulic hose fittings, tube fittings, and hand tools; interactive 3D regeneration, metric/inch filters, editable material/finish/envelope fields, dimension tables, and coherent grouped Assembly insertion |
 | Surface | Preview | Bicubic Bézier patch, ruled loft, editable controls, deterministic tessellation, area/boundary/normal metrics |
 | Drawing | Preview | Descriptive front base view with aligned first/third-angle top and right projections; optional full section A-A and reference isometric; hidden-edge and center-line control; selective non-duplicated dimensions; user-defined general tolerances kept independent from explicit datum/position/flatness/perpendicularity inputs; A4/A3 zones, revision table, projection symbol, release-marked original title block, and SVG output |
 | Electrical | Preview | Original vector component library, stable references and terminals, named pin-to-pin AC/DC/control/ground nets, automatic BESS single-line/DC auxiliary/motor-starter concepts, live structural ERC, concept BOM, SVG output, and review-gated conversion into one traceable mounting plate with DIN rails, ducts, panel-scale generic packages, terminal detail, and unsized orthogonal conductor visualization |
@@ -38,7 +48,7 @@ the same reviewed source content.
 The shell also provides an original color-wheel workspace system, a functional
 File/Edit/Create/View/Inspect/Automate/Help menu bar, a context-sensitive top
 command ribbon with project-owned inline SVG symbols, a keyboard-navigable and
-workspace-filtered 119-command original CAD catalog with explicit capability
+workspace-filtered 330-command original CAD catalog with explicit capability
 levels, a persistent
 model browser with Origin/Sketches/Feature History/Bodies/revision timeline,
 workspace-preserving selection, revision audit,
@@ -51,6 +61,9 @@ The palette, command-symbol, menu, and responsive rules are recorded in
 [`docs/product/UI_COLOR_AND_COMMAND_SYSTEM.md`](docs/product/UI_COLOR_AND_COMMAND_SYSTEM.md).
 The exact exchange format matrix, unit rules, PDF boundary, and security model are
 in [`docs/product/3D_EXCHANGE_AND_PDF.md`](docs/product/3D_EXCHANGE_AND_PDF.md).
+The Master Cart families, grouped assembly semantics, supplier-reference
+boundary, engineering exclusions, and brand contract are in
+[`docs/product/MASTER_CART_PARAMETRIC_LIBRARY.md`](docs/product/MASTER_CART_PARAMETRIC_LIBRARY.md).
 The automatic view, dimension, general-tolerance, datum, and GD&T review boundary is
 in [`docs/product/AUTOMATIC_DRAWING_AND_TOLERANCE.md`](docs/product/AUTOMATIC_DRAWING_AND_TOLERANCE.md).
 The nominal container templates, non-certified BESS arrangement boundary,
