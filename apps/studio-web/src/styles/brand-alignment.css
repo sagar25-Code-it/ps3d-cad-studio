@@ -1,0 +1,202 @@
+:root {
+  --ps3d-deep-indigo: #17386d;
+  --ps3d-blueprint: #071d35;
+  --ps3d-engineering-blue: #1f6fca;
+  --ps3d-signal-cyan: #32b9ee;
+  --ps3d-steel: #879daf;
+  --ps3d-pale-blue: #eaf5fb;
+}
+
+.ps3d-brand-logo {
+  display: block;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+.studio-app {
+  --cyan: var(--ps3d-engineering-blue);
+  --cyan-strong: #1559a7;
+  --cyan-faint: #1f6fca17;
+  --action-create: var(--ps3d-engineering-blue);
+  --action-data: #237fa9;
+  --workspace-accent: var(--ps3d-engineering-blue);
+  --workspace-faint: #1f6fca16;
+}
+
+.studio-app[data-workspace] {
+  --workspace-accent: var(--ps3d-engineering-blue);
+  --workspace-faint: #1f6fca16;
+  --item-accent: var(--ps3d-engineering-blue);
+}
+
+.studio-app .brand-block {
+  color: inherit;
+  text-decoration: none;
+}
+.studio-app .brand-block .ps3d-brand-logo { width: 60px; height: 46px; flex: 0 0 60px; }
+.studio-app .brand-block strong { color: #17345e; }
+.studio-app .brand-block small { color: #557084; }
+.studio-app .app-header::after { background: linear-gradient(90deg, var(--ps3d-deep-indigo), var(--ps3d-signal-cyan) 36%, transparent 76%); }
+.studio-app button:focus-visible,
+.studio-app input:focus-visible,
+.studio-app select:focus-visible,
+.studio-app textarea:focus-visible { outline-color: var(--ps3d-engineering-blue); }
+.studio-app button.primary,
+.studio-app .header-actions .header-icon-button.primary {
+  border-color: #1559a7;
+  background: linear-gradient(180deg, #2c82d8, #1762b8);
+  box-shadow: inset 0 1px 0 #7acbf2, 0 3px 9px #1559a733;
+}
+.studio-app button.primary:hover:not(:disabled),
+.studio-app .header-actions .header-icon-button.primary:hover:not(:disabled) { border-color: #104986; background: linear-gradient(180deg, #2474c7, #1356a2); }
+.studio-app .project-command-icon { border-color: #9fcce9; color: #155ead; background: #eaf6fc; }
+.studio-app .cad-menu > button:hover:not(:disabled),
+.studio-app .cad-menu > button.active { color: #14559c; background: #eaf5fb; }
+.studio-app .cad-menu > button.active .command-icon { color: var(--ps3d-engineering-blue); }
+.studio-app .cad-menu-popover > button:hover:not(:disabled) { border-color: #9fcce9; background: #eaf6fc; }
+.studio-app .workspace-tabs > button.active { color: #114c8d; }
+.studio-app .workspace-tabs > button.active span,
+.studio-app .controller-group button.active,
+.studio-app .viewbox > button.active,
+.studio-app .viewbox-more button.active { border-color: #1559a7; color: #fff; background: var(--ps3d-engineering-blue); box-shadow: none; }
+.studio-app .workspace-tabs > button.active::after { background: var(--ps3d-signal-cyan); }
+.studio-app .ribbon-context { box-shadow: inset 4px 0 0 var(--ps3d-engineering-blue); }
+.studio-app .ribbon-button.active { border-color: var(--ps3d-engineering-blue); background: linear-gradient(180deg, #f4fbff, #dceef9); box-shadow: inset 0 -3px 0 var(--ps3d-engineering-blue), 0 1px 3px #1559a722; }
+.studio-app .ribbon-button.active > span { color: #155ead; }
+.studio-app .panel-title p,
+.studio-app .inspector-title p,
+.studio-app .sketch-palette header span { color: #155ead; }
+.studio-app .sketch-palette .palette-action.primary { border-color: #9fc8e4; color: #155ead; background: #eaf5fb; }
+.studio-app .parameter-control > div > button::before { color: #155ead; }
+.studio-app .tree-item.selected,
+.studio-app .profile-list button.selected,
+.studio-app .preview-body-list > button.active,
+.studio-app .assembly-template-card > div > button.active { border-color: #9fc8e4; background: #eaf5fb; box-shadow: inset 3px 0 0 var(--ps3d-engineering-blue); }
+.studio-app .tree-item.selected .tree-glyph,
+.studio-app .appearance-modes button.active .command-icon { border-color: #1762b8; color: #1762b8; }
+.studio-app .parameter-control > div:focus-within { border-color: var(--ps3d-engineering-blue); box-shadow: 0 0 0 2px #1f6fca15; }
+.studio-app .selection-chips b,
+.studio-app .profile-list button.selected b { color: #fff; background: var(--ps3d-engineering-blue); }
+.studio-app .profile-list button b { background: var(--ps3d-engineering-blue); }
+.studio-app .profile-list button.selected { color: #14559c; background: #eaf5fb; }
+.studio-app .feature-dialog-title > span,
+.studio-app .extrude-submit { border-color: #1559a7; color: #fff; background: linear-gradient(135deg, #2c82d8, #1559a7); }
+.studio-app .appearance-modes button.active,
+.studio-app .background-tone-controls button.active { border-color: var(--ps3d-engineering-blue); color: #14559c; background: #eaf5fb; box-shadow: inset 0 -2px 0 var(--ps3d-engineering-blue); }
+.studio-app .appearance-swatches button.active { box-shadow: 0 0 0 2px var(--ps3d-engineering-blue); }
+.studio-app .preview-body-editor-title > span { border-color: var(--ps3d-engineering-blue); color: #14559c; background: #eaf5fb; }
+.app-brand-credit { color: #155ead; font-weight: 800; text-decoration: none; white-space: nowrap; }
+.app-brand-credit:hover { color: #0d447f; text-decoration: underline; }
+.studio-app .status-copy.ready > span { background: var(--ps3d-signal-cyan); }
+.studio-app .status-copy.starting > span,
+.studio-app .status-copy.working > span { background: #d59b4b; }
+.studio-app .status-copy.error > span { background: #c62836; }
+
+.public-page {
+  --public-navy: var(--ps3d-deep-indigo);
+  --public-deep: var(--ps3d-blueprint);
+  --public-teal: var(--ps3d-engineering-blue);
+  --public-mint: var(--ps3d-signal-cyan);
+  --public-blue: var(--ps3d-engineering-blue);
+  --public-ink: #172a43;
+  --public-muted: #5c7082;
+  --public-line: #c8d9e6;
+  background:
+    linear-gradient(#1f6fca10 1px, transparent 1px),
+    linear-gradient(90deg, #1f6fca10 1px, transparent 1px),
+    radial-gradient(circle at 7% 2%, #32b9ee24 0 10rem, transparent 28rem),
+    #eff5f8;
+  background-size: 32px 32px, 32px 32px, auto, auto;
+}
+.public-page-header { color: #f4f9fd; background: #071d35ed; border-bottom-color: #32b9ee55; }
+.public-brand .ps3d-brand-logo { width: 68px; height: 54px; flex: 0 0 68px; }
+.public-brand strong { color: #fff; }
+.public-brand small { color: #82cbed; }
+.public-page-header nav a.active { box-shadow: inset 0 -2px var(--ps3d-signal-cyan); }
+.public-page button.primary,
+.public-page .link-button.primary { border-color: #1559a7; color: #fff; background: linear-gradient(135deg, #1f6fca, #279bd6); box-shadow: 0 8px 24px #1f6fca30; }
+.public-page button:hover:not(:disabled) { border-color: var(--ps3d-engineering-blue); background: #edf7fc; }
+.public-page input:focus-visible,
+.public-page select:focus-visible,
+.public-page button:focus-visible,
+.public-page a:focus-visible { outline-color: var(--ps3d-signal-cyan); }
+
+.brand-footer { display: grid; grid-template-columns: minmax(260px, auto) minmax(280px, 1fr) auto; align-items: center; gap: 1.25rem; }
+.brand-footer-lockup { display: flex; align-items: center; gap: 0.7rem; color: inherit; text-decoration: none; }
+.brand-footer-lockup .ps3d-brand-logo { width: 64px; height: 46px; flex: 0 0 64px; }
+.brand-footer-lockup > span,
+.brand-footer-copy { display: grid; gap: 0.2rem; }
+.brand-footer-lockup strong,
+.brand-footer-copy strong { color: #17345e; }
+.brand-footer-lockup small,
+.brand-footer-copy small { color: #63798b; line-height: 1.35; }
+.brand-footer nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.55rem; }
+.brand-footer nav a { color: #155ead; font-weight: 750; text-decoration: none; }
+.brand-footer nav a:hover { text-decoration: underline; }
+
+.brand-profile-hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 430px); gap: 3rem; align-items: center; max-width: 1320px; margin: 0 auto; padding: 4.5rem 4.5vw 3rem; }
+.brand-profile-hero h1 { margin: 0.45rem 0 0; color: var(--ps3d-deep-indigo); font-size: clamp(3rem, 7vw, 6.5rem); line-height: 0.95; letter-spacing: -0.06em; }
+.brand-profile-hero h2 { margin: 0.7rem 0 0; color: var(--ps3d-engineering-blue); font-size: clamp(1.2rem, 2vw, 2rem); }
+.brand-profile-hero p { margin: 1rem 0 0; color: #526a7d; font-size: 1.12rem; }
+.brand-profile-hero aside { display: grid; gap: 0.8rem; justify-items: center; padding: 1.5rem; border: 1px solid #b7d5e8; border-radius: 18px; background: #fff; box-shadow: 0 22px 50px #17386d1c; }
+.brand-profile-hero aside .ps3d-brand-logo { width: min(100%, 390px); }
+.brand-profile-hero aside span { color: #607789; font: 700 0.68rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.brand-expertise,
+.brand-suite,
+.brand-founder { max-width: 1180px; margin: 0 auto 1.4rem; padding: 1.6rem; border: 1px solid #c4d9e7; border-radius: 14px; background: #ffffffed; box-shadow: 0 14px 34px #17386d0e; }
+.brand-expertise > header h2,
+.brand-suite > header h2,
+.brand-founder h2 { margin: 0.3rem 0; color: #17345e; font-size: clamp(1.7rem, 3vw, 2.6rem); }
+.brand-suite > header p { color: #5d7487; }
+.brand-expertise-grid,
+.brand-tool-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; margin-top: 1.1rem; }
+.brand-expertise-grid article,
+.brand-tool-grid article { position: relative; display: grid; align-content: start; gap: 0.45rem; min-height: 175px; padding: 1.2rem; border: 1px solid #c9dce9; border-radius: 10px; background: #f8fbfd; }
+.brand-expertise-grid b,
+.brand-tool-grid article > span { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: var(--ps3d-engineering-blue); font: 800 0.74rem var(--mono); }
+.brand-expertise-grid h3,
+.brand-tool-grid h3 { margin: 0.25rem 0 0; color: #1b304d; }
+.brand-expertise-grid p,
+.brand-tool-grid p { margin: 0; color: #5c7182; line-height: 1.5; }
+.brand-tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.brand-tool-grid small { color: var(--ps3d-engineering-blue); font-weight: 850; letter-spacing: 0.07em; text-transform: uppercase; }
+.brand-tool-grid a { align-self: end; color: #155ead; font-weight: 800; }
+.brand-tool-grid article > b { align-self: end; color: #6e7f8d; font-size: 0.72rem; text-transform: uppercase; }
+.brand-founder { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; color: #edf8ff; border-color: #245189; background: var(--ps3d-deep-indigo); }
+.brand-founder h2,
+.brand-founder strong { color: #fff; }
+.brand-founder p { color: #b9d2e4; }
+.brand-founder dl { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; margin: 0; }
+.brand-founder dl > div { padding: 0.8rem; border: 1px solid #ffffff25; border-radius: 8px; background: #071d353d; }
+.brand-founder dt { color: #74cff4; font: 800 0.65rem var(--mono); text-transform: uppercase; }
+.brand-founder dd { margin: 0.35rem 0 0; overflow-wrap: anywhere; color: #fff; }
+.brand-founder a { color: #8bdcff; }
+
+.audit-hero { border-top-color: var(--ps3d-engineering-blue); }
+.audit-brand-lockup { width: max-content; display: flex; align-items: center; gap: 0.55rem; margin-bottom: 0.3rem; color: inherit; text-decoration: none; }
+.audit-brand-lockup .ps3d-brand-logo { width: 76px; height: 50px; flex: 0 0 76px; }
+.audit-brand-lockup > span { display: grid; gap: 0.12rem; }
+.audit-brand-lockup strong { color: var(--ps3d-deep-indigo); font-size: 0.92rem; }
+.audit-brand-lockup small { color: #597185; font: 700 0.58rem var(--mono); }
+.audit-hero span,
+.audit-results-title span,
+.audit-method .command-icon,
+.audit-command > header > span,
+.audit-footer strong { color: #155ead; }
+.audit-hero nav a:first-child { border-color: var(--ps3d-engineering-blue); background: var(--ps3d-engineering-blue); }
+.audit-controls button.active { border-color: var(--ps3d-engineering-blue); color: #14559c; background: #eaf5fb; box-shadow: inset 0 -2px 0 var(--ps3d-engineering-blue); }
+
+@media (max-width: 900px) {
+  .brand-footer { grid-template-columns: 1fr; }
+  .brand-footer nav { justify-content: flex-start; }
+  .brand-profile-hero,
+  .brand-founder { grid-template-columns: 1fr; }
+  .brand-expertise-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 620px) {
+  .public-brand .ps3d-brand-logo { width: 52px; height: 42px; flex-basis: 52px; }
+  .brand-tool-grid { grid-template-columns: 1fr; }
+  .brand-founder dl { grid-template-columns: 1fr; }
+}
