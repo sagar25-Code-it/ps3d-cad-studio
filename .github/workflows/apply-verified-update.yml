@@ -1,0 +1,42 @@
+name: Apply verified PS3D update
+
+on:
+  push:
+    branches:
+      - ps3d-final-mcp-20260826
+    paths:
+      - .github/workflows/apply-verified-update.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the review branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ps3d-final-mcp-20260826
+          fetch-depth: 0
+
+      - name: Verify the bounded update archive
+        shell: bash
+        run: |
+          echo "463beeb20b2b8db8b36dfa4a22bae186dab066a7ffcf64bed83ae2f4fce4f536  ps3d-final-update-20260826.zip" | sha256sum -c -
+          test "$(unzip -Z1 ps3d-final-update-20260826.zip | sed '/\/$/d' | wc -l)" -eq 61
+
+      - name: Apply, clean, and commit the verified source set
+        shell: bash
+        run: |
+          unzip -o ps3d-final-update-20260826.zip -d .
+          rm -f ps3d-final-update-20260826.zip .github/workflows/apply-verified-update.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The verified archive produced no repository changes."
+            exit 1
+          fi
+          git commit -m "feat: sync verified local command and MCP release"
+          git push origin HEAD:ps3d-final-mcp-20260826
