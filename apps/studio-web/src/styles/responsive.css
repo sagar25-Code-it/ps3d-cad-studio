@@ -154,3 +154,532 @@
 .ribbon-button > strong,
 .ribbon-button > small { line-height: 16px; }
 .tree-item { min-height: 44px; }
+
+/*
+ * Responsive stability contract
+ * -----------------------------
+ * Keep every route inside the visual viewport, then let deliberately dense CAD
+ * regions (ribbon, workbench, tables and code samples) own their scrolling.
+ * This prevents browser zoom and narrow windows from separating labels, fields
+ * and button artwork while retaining every command.
+ */
+:where(.studio-app, .public-page, .command-audit-page),
+:where(.studio-app, .public-page, .command-audit-page) * {
+  min-width: 0;
+}
+
+:where(.studio-app, .public-page, .command-audit-page) :where(p, small, code, dd, a, label) {
+  overflow-wrap: break-word;
+}
+
+.studio-app,
+.studio-app > :where(header, nav, section, footer),
+.public-page,
+.command-audit-page {
+  width: 100%;
+  max-width: 100%;
+}
+
+.studio-app {
+  overflow-x: hidden;
+}
+
+.studio-app .app-header,
+.studio-app .cad-menu-bar,
+.studio-app .workspace-tabs,
+.studio-app .command-ribbon,
+.studio-app .workbench-grid,
+.studio-app .app-status {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.studio-app .app-header > *,
+.studio-app .header-actions,
+.studio-app .cad-menu-groups,
+.studio-app .quick-command-strip,
+.studio-app .workspace-tabs,
+.studio-app .command-ribbon,
+.studio-app .workbench-grid > * {
+  min-width: 0;
+}
+
+.studio-app .header-actions,
+.studio-app .cad-menu-groups,
+.studio-app .quick-command-strip,
+.studio-app .workspace-tabs,
+.studio-app .command-ribbon,
+.studio-app .viewport-controller,
+.studio-app .navigation-bar {
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.studio-app .controller-group,
+.studio-app .controller-group button,
+.studio-app .navigation-bar button {
+  flex: 0 0 auto;
+}
+
+.studio-app .workbench-context-menu {
+  width: min(278px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+}
+
+.studio-app :where(.engineering-confirmation-backdrop, .command-palette-backdrop) {
+  padding: clamp(8px, 2vw, 20px);
+}
+
+.studio-app :where(.engineering-confirmation-dialog, .command-palette) {
+  width: min(980px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+}
+
+@media (max-width: 1220px) {
+  .studio-app .app-header {
+    grid-template-columns: minmax(178px, 205px) minmax(220px, 1fr) minmax(0, 1.2fr);
+  }
+
+  .studio-app .header-actions {
+    justify-content: flex-end;
+    overflow-x: auto;
+    padding-block: 3px;
+  }
+
+  .studio-app[data-workspace] .workbench-grid {
+    grid-template-columns: clamp(190px, 20vw, 225px) minmax(0, 1fr) clamp(285px, 30vw, 310px);
+  }
+
+  .studio-app .ribbon-context {
+    width: 150px;
+    flex-basis: 150px;
+  }
+
+  .studio-app .ribbon-button {
+    width: 80px;
+    min-width: 80px;
+  }
+
+  .master-cart-workspace {
+    min-width: 0;
+    grid-template-columns: 190px minmax(220px, 0.66fr) minmax(360px, 1.34fr);
+    grid-template-rows: minmax(430px, 1fr) max-content;
+    overflow: auto;
+  }
+
+  .master-cart-categories { grid-column: 1; grid-row: 1; }
+  .master-cart-library { grid-column: 2; grid-row: 1; }
+  .master-cart-preview { grid-column: 3; grid-row: 1; }
+  .master-cart-config { grid-column: 1 / -1; grid-row: 2; overflow: visible; }
+  .master-cart-template-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+}
+
+@media (max-width: 980px) {
+  body { overflow: auto; }
+
+  .studio-app {
+    height: 100dvh;
+    min-height: 0;
+    grid-template-rows: auto 32px 40px 108px minmax(0, 1fr) 34px;
+    overflow: hidden;
+  }
+
+  .studio-app .app-header {
+    grid-template-columns: minmax(170px, 0.8fr) minmax(220px, 1.2fr);
+    gap: 0.45rem 0.65rem;
+    padding-block: 0.45rem;
+  }
+
+  .studio-app .header-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .studio-app .cad-menu-bar,
+  .studio-app .workspace-tabs,
+  .studio-app .command-ribbon {
+    position: relative;
+    top: auto;
+  }
+
+  .studio-app .cad-menu-bar,
+  .studio-app .workspace-tabs {
+    overflow: hidden;
+  }
+
+  .studio-app .cad-menu-groups,
+  .studio-app .workspace-tabs {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .studio-app .command-ribbon {
+    height: 108px;
+    min-height: 108px;
+    padding-block: 4px 8px;
+  }
+
+  .studio-app .workbench-grid,
+  .studio-app[data-workspace] .workbench-grid {
+    height: 100%;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: clamp(180px, 24vw, 210px) minmax(0, 1fr);
+    grid-template-rows: minmax(480px, 1fr) max-content;
+    align-content: start;
+    overflow: auto;
+  }
+
+  .studio-app .project-tree {
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+  }
+
+  .studio-app .project-tree .tree-section > summary .capability-badge {
+    display: none;
+  }
+
+  .studio-app .project-tree .tree-section > summary > strong,
+  .studio-app .project-tree .tree-item :where(strong, small) {
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+
+  .studio-app .workspace-canvas {
+    grid-column: 2;
+    grid-row: 1;
+    min-height: 480px;
+  }
+
+  .studio-app .inspector-panel {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    max-height: none;
+    height: max-content;
+    align-self: start;
+    overflow: visible;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .studio-app .app-status {
+    position: relative;
+    bottom: auto;
+  }
+
+  .master-cart-workspace {
+    grid-template-columns: clamp(160px, 24vw, 190px) minmax(0, 1fr);
+    grid-template-rows: max-content 440px max-content;
+  }
+
+  .master-cart-categories { grid-column: 1; grid-row: 1 / 3; }
+  .master-cart-library { grid-column: 2; grid-row: 1; max-height: 320px; }
+  .master-cart-preview { grid-column: 2; grid-row: 2; min-height: 440px; }
+  .master-cart-config { grid-column: 1 / -1; grid-row: 3; }
+
+  .audit-summary,
+  .audit-method,
+  .audit-controls,
+  .audit-results-title,
+  .audit-command-grid {
+    margin-inline: 1rem;
+  }
+}
+
+@media (max-width: 700px) {
+  .studio-app {
+    grid-template-rows: auto 32px 40px 104px minmax(0, 1fr) 34px;
+  }
+
+  .studio-app .app-header {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.4rem;
+    padding: 0.5rem 0.65rem;
+  }
+
+  .studio-app .project-button,
+  .studio-app .header-actions {
+    width: 100%;
+  }
+
+  .studio-app .header-actions {
+    display: flex;
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .studio-app .header-icon-button > span { display: none; }
+  .studio-app .header-icon-button.primary > span { display: inline; }
+
+  .studio-app .workspace-tabs > button {
+    min-width: max-content;
+    padding-inline: 0.55rem;
+  }
+
+  .studio-app .command-ribbon {
+    height: 104px;
+    min-height: 104px;
+  }
+
+  .studio-app .ribbon-context {
+    width: 126px;
+    flex-basis: 126px;
+    padding-inline: 0.55rem;
+  }
+
+  .studio-app .ribbon-group {
+    grid-template-rows: 66px 16px;
+  }
+
+  .studio-app .ribbon-button {
+    width: 78px;
+    min-width: 78px;
+    height: 66px;
+    grid-template-rows: 24px 28px 11px;
+    padding-inline: 4px;
+  }
+
+  .studio-app .workbench-grid,
+  .studio-app[data-workspace] .workbench-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 240px minmax(500px, 66vh) max-content;
+  }
+
+  .studio-app .project-tree {
+    grid-column: 1;
+    grid-row: 1;
+    height: 240px;
+    min-height: 240px;
+    max-height: 240px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .studio-app .workspace-canvas {
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 500px;
+  }
+
+  .studio-app .inspector-panel {
+    grid-column: 1;
+    grid-row: 3;
+    height: max-content;
+    align-self: start;
+  }
+
+  .studio-app .viewport-controller {
+    top: 0.5rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    width: auto;
+    max-width: none;
+    justify-content: flex-start;
+    overflow-x: auto;
+    transform: none;
+  }
+
+  .studio-app .viewbox {
+    top: 4.1rem;
+    right: 0.35rem;
+    width: 132px;
+    height: 167px;
+    transform: none;
+  }
+
+  .studio-app .navigation-bar {
+    right: 0.5rem;
+    left: 0.5rem;
+    max-width: none;
+    justify-content: flex-start;
+    overflow-x: auto;
+    transform: none;
+  }
+
+  .studio-app .measure-panel {
+    top: 11.2rem;
+    left: 0.5rem;
+    width: min(255px, calc(100% - 1rem));
+    max-height: calc(100% - 9rem);
+    overflow: auto;
+  }
+
+  .studio-app .viewport-metrics,
+  .studio-app .electrical-hud,
+  .studio-app .realization-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .studio-app .viewport-metrics > div:nth-child(2n),
+  .studio-app .electrical-hud > span:nth-child(2n),
+  .studio-app .realization-facts > span:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .master-cart-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 250px max-content 480px max-content;
+  }
+
+  .master-cart-categories,
+  .master-cart-library,
+  .master-cart-preview,
+  .master-cart-config {
+    grid-column: 1;
+  }
+
+  .master-cart-categories { grid-row: 1; max-height: 250px; }
+  .master-cart-library { grid-row: 2; max-height: 390px; }
+  .master-cart-preview { grid-row: 3; min-height: 480px; }
+  .master-cart-config { grid-row: 4; }
+  .master-cart-search { grid-template-columns: 1fr; align-items: stretch; }
+  .master-cart-template-grid { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); }
+  .master-cart-preview-facts { justify-content: flex-start; overflow-x: auto; }
+  .master-cart-preview-facts > span { min-width: 86px; }
+
+  .public-page-header nav {
+    width: 100%;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
+
+  .public-page-header nav a {
+    flex: 0 0 auto;
+  }
+
+  .public-page-header nav a:last-child { display: block; }
+  .public-hero { padding: 2.25rem 1rem 2rem; }
+  .public-hero h1 { font-size: clamp(2.15rem, 11vw, 3.25rem); line-height: 1; }
+  .public-hero p { font-size: 1rem; line-height: 1.55; }
+  .portal-feedback { grid-template-columns: 1fr; }
+  .portal-feedback button { justify-self: start; }
+  .auth-layout { padding-inline: 1rem; }
+  .auth-card, .security-card, .consent-card, .consent-shell > aside { padding: 1rem; }
+  .public-footer { display: grid; grid-template-columns: 1fr; }
+
+  .audit-hero { gap: 1rem; }
+  .audit-hero nav { width: 100%; flex-wrap: wrap; }
+  .audit-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .audit-summary > div:nth-child(2n) { border-right: 0; }
+  .audit-controls label { grid-template-columns: 1fr; }
+  .audit-controls > div > span { width: 100%; }
+  .audit-results-title { align-items: flex-start; flex-direction: column; }
+  .audit-footer { align-items: flex-start; flex-wrap: wrap; }
+  .audit-footer a { margin-left: 0; }
+}
+
+@media (max-width: 480px) {
+  .studio-app .brand-block .ps3d-brand-logo {
+    width: 48px;
+    height: 38px;
+    flex-basis: 48px;
+  }
+
+  .studio-app .brand-block small { display: none; }
+  .studio-app .project-button small { font-size: 10px; }
+
+  .studio-app .ribbon-context {
+    width: 112px;
+    flex-basis: 112px;
+  }
+
+  .studio-app .ribbon-button {
+    width: 72px;
+    min-width: 72px;
+  }
+
+  .studio-app .controller-group > span { display: none; }
+  .studio-app .viewbox { right: 0.2rem; }
+
+  .studio-app :where(.profile-list, .constraint-buttons, .component-position-editor > div, .component-actions, .tolerance-grid, .gdt-list, .electrical-position-editor) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .studio-app :where(.field-row, .mate-builder > label, .extrude-controller > label, .gdt-spec-grid label, .master-cart-editable label) {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .studio-app .ai-readiness-grid,
+  .studio-app .automation-flow,
+  .studio-app .automation-flow.six-step,
+  .studio-app .automation-flow.seven-step,
+  .studio-app .engineering-review-metrics,
+  .studio-app .viewport-metrics,
+  .studio-app .electrical-hud,
+  .studio-app .realization-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .studio-app .engineering-confirmation-dialog > header,
+  .studio-app .engineering-confirmation-dialog > footer {
+    flex-wrap: wrap;
+  }
+
+  .studio-app .engineering-confirmation-dialog > footer > button {
+    flex: 1 1 130px;
+  }
+
+  .master-cart-template-grid { grid-template-columns: 1fr; }
+  .master-cart-editable label { grid-template-columns: 1fr; }
+  .master-cart-view-controls button span { display: none; }
+  .master-cart-axis { top: 3.25rem; }
+
+  .public-page-header { padding-inline: 1rem; }
+  .public-brand small { font-size: 0.62rem; }
+  .hero-actions > * { width: 100%; justify-content: center; }
+  .auth-tabs { grid-template-columns: 1fr; }
+  .account-console,
+  .learning-controls,
+  .module-grid,
+  .manual-callout,
+  .portal-notice,
+  .portal-feedback { margin-inline: 0.75rem; }
+  .account-console > header { padding-inline: 0; }
+  .consent-card footer { align-items: stretch; flex-direction: column-reverse; }
+
+  .audit-summary,
+  .audit-method,
+  .audit-controls,
+  .audit-results-title,
+  .audit-command-grid { margin-inline: 0.75rem; }
+  .audit-summary { grid-template-columns: 1fr; }
+  .audit-summary > div { border-right: 0; border-bottom: 1px solid #d4d8db; }
+  .audit-summary > div:last-child { border-bottom: 0; }
+  .audit-command > header { grid-template-columns: 34px minmax(0, 1fr); }
+  .audit-command > header b { grid-column: 1 / -1; justify-self: start; }
+  .audit-command > footer { align-items: flex-start; flex-direction: column; }
+}
+
+@media (max-height: 700px) {
+  .studio-app {
+    grid-template-rows: auto 30px 38px 92px minmax(0, 1fr) 32px;
+  }
+
+  .studio-app .app-header { padding-block: 0.3rem; }
+  .studio-app .brand-block small,
+  .studio-app .project-button small { display: none; }
+  .studio-app .project-button { height: 34px; }
+  .studio-app .command-ribbon { height: 92px; min-height: 92px; }
+  .studio-app .ribbon-context { padding-block: 0.2rem; }
+  .studio-app .ribbon-group { grid-template-rows: 58px 14px; }
+  .studio-app .ribbon-button { height: 58px; grid-template-rows: 22px 23px 10px; }
+  .studio-app .ribbon-button > span { height: 22px; }
+}
+
+@media (pointer: coarse) {
+  .studio-app :where(.cad-menu > button, .workspace-tabs > button, .controller-group button, .navigation-bar button),
+  .public-page :where(button, a, input, select) {
+    min-height: 40px;
+  }
+}
