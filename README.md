@@ -35,7 +35,7 @@ Official PS3D Master links: [Engineering calculator](https://stepper-calculator.
 | Drawing | Preview | Descriptive front base view with aligned first/third-angle top and right projections; optional full section A-A and reference isometric; hidden-edge and center-line control; selective non-duplicated dimensions; user-defined general tolerances kept independent from explicit datum/position/flatness/perpendicularity inputs; A4/A3 zones, revision table, projection symbol, release-marked original title block, and SVG output |
 | Electrical | Preview | Original vector component library, stable references and terminals, named pin-to-pin AC/DC/control/ground nets, automatic BESS single-line/DC auxiliary/motor-starter concepts, live structural ERC, concept BOM, SVG output, and review-gated conversion into one traceable mounting plate with DIN rails, ducts, panel-scale generic packages, terminal detail, and unsized orthogonal conductor visualization |
 | Vehicle | Preview | Five original topology-specific motorcycle/scooter/EV/three-wheel packages; one authoritative SI hardpoint/member graph for 3D and orthographic projection; fork, swingarm, unit-swing and front-view wishbone state constraints; Ackermann targets; brake/tyre, road-load, operating-point and support-polygon screens; visible invariant gate; full-droop/design/full-bump states; and explicit safety boundaries |
-| Automate | Preview | Ten model-neutral local and authenticated remote MCP tools, machine-readable collaboration guide, deterministic plain-language command finder, all-workspace Design Health analysis, scoped receipt-gated previews, OAuth/personal-token access, and a dependency-free Python client |
+| Automate | Preview | Eleven model-neutral local and authenticated remote MCP tools, machine-readable collaboration guide, experience-adapted stateless coordination agent, deterministic plain-language command finder, all-workspace Design Health analysis, scoped receipt-gated previews, OAuth/personal-token access, and a dependency-free Python client |
 
 The public account portal supports verified-email sign-up, sign-in, sign-out,
 password recovery, tab-scoped sessions, and up to five unique expiring MCP
@@ -48,7 +48,7 @@ the same reviewed source content.
 The shell also provides an original color-wheel workspace system, a functional
 File/Edit/Create/View/Inspect/Automate/Help menu bar, a context-sensitive top
 command ribbon with project-owned inline SVG symbols, a keyboard-navigable and
-workspace-filtered 330-command original CAD catalog with explicit capability
+workspace-filtered 331-command original CAD catalog with explicit capability
 levels, a persistent
 model browser with Origin/Sketches/Feature History/Bodies/revision timeline,
 workspace-preserving selection, revision audit,
@@ -161,9 +161,11 @@ Example host adapter after cloning, installing, and building:
 ```
 
 The server supports modern MCP `2026-07-28` discovery and 2025-era legacy
-initialization over local stdio. Start with `ps3d_guide`; use
+initialization over local stdio. Start with `ps3d_guide`, then call
+`ps3d_agent_handshake` to configure a stateless host-AI/PS3D working contract,
+experience-level explanation depth, and correction feedback. Use
 `ps3d_find_commands` to map a plain-language goal to a bounded recipe without
-executing it. The ten tools are `ps3d_guide`, `ps3d_find_commands`,
+executing it. The eleven tools are `ps3d_guide`, `ps3d_agent_handshake`, `ps3d_find_commands`,
 `ps3d_capabilities`, `ps3d_inspect_project`, `ps3d_design_health`,
 `ps3d_analyze_vehicle`, `ps3d_electromechanical_catalog`,
 `ps3d_preview_electromechanical`, `ps3d_preview_operation`, and
@@ -204,6 +206,9 @@ history, 3D Exchange Center, imported reference, PDF workflow, layered
 vehicle-engineering layouts, and Design Health Center, are
 under [`docs/screenshots`](docs/screenshots). Local
 qualification evidence is recorded in `docs/PHASE_1_LOCAL_EVIDENCE.md`.
+The current command/MCP verification matrix, executed browser checks, and
+truthful unavailable boundaries are recorded in
+[`docs/COMMAND_MCP_VERIFICATION.md`](docs/COMMAND_MCP_VERIFICATION.md).
 Dependencies and assisted material are deny-by-default and recorded in
 [`provenance`](provenance); no key, token, `.env` file, private path, user data,
 or copied CAD asset belongs in the repository.
