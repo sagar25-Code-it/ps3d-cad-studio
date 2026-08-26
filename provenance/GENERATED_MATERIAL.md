@@ -226,7 +226,7 @@ deployment, release, or legal clearance.
   self-referential record.
   Symbolic links are rejected.
 - Canonical source-set hash:
-  `d727bc040e4a3661746b954c4e83ffb17f3f5652e932070c29f772541f86b268`
+  `7d53301ddb99da25e80c175ea8fb9890c1469aaa05da5804c9226c51f73ebfab`
 - Canonical source-set file count: 330
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in

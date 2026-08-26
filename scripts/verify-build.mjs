@@ -67,6 +67,16 @@ if (htmlCache !== "no-cache, must-revalidate") throw new Error("HTML and SPA rou
 const assetHeaders = hosting.headers.find((entry) => entry.source === "/assets/(.*)")?.headers ?? [];
 const assetCache = assetHeaders.find((header) => header.key === "Cache-Control")?.value;
 if (assetCache !== "public, max-age=31536000, immutable") throw new Error("Content-hashed assets must retain immutable caching.");
+const expectedSpaRoutes = ["/access", "/learn", "/about", "/command-audit", "/oauth/consent"];
+for (const route of expectedSpaRoutes) {
+  const rewrite = hosting.rewrites.find((entry) => entry.source === route);
+  if (rewrite?.destination !== "/") {
+    throw new Error(`Public SPA route ${route} must rewrite to the clean root document.`);
+  }
+}
+if (hosting.rewrites.some((entry) => entry.destination === "/index.html")) {
+  throw new Error("Vercel rewrites must not target /index.html while cleanUrls is enabled.");
+}
 
 process.stdout.write(`Verified production boundary: ${assets.length} assets, strict CSP, no Node MCP SDK/WASM/Manifold/dynamic-eval path.\n`);
 process.stdout.write(`Verified bundled evaluator source identity: ${evaluatorSourceHash}.\n`);
