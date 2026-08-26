@@ -2,6 +2,7 @@ export * from "./types.js";
 export * from "./capabilities.js";
 export * from "./commands.js";
 export * from "./reference-command-terms.js";
+export * from "./context-commands.js";
 export * from "./defaults.js";
 export * from "./templates.js";
 export * from "./electromechanical.js";

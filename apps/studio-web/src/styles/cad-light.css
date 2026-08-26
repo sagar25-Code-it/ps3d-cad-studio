@@ -423,6 +423,8 @@
 .studio-app .distance-entry small { color: #697178; }
 .studio-app .profile-readiness.ready { color: #176b4b; background: #e9f5ef; }
 .studio-app .profile-readiness.blocked { color: #7b5413; background: #fff5df; }
+.studio-app .kernel-boundary { border-color: #d4b36b; color: #6e4f13; background: #fff7e5; }
+.studio-app .kernel-boundary span { color: #705a2f; }
 .studio-app .extrude-submit { border-color: #a71d29; color: #ffffff; background: linear-gradient(180deg, #d43a47, #b9202d); }
 .studio-app .dimension-controller { border-color: #d1b26f; background: #fffaf0; }
 .studio-app .dimension-field > label { color: #4d555c; }

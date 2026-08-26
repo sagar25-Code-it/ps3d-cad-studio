@@ -8,12 +8,13 @@ export interface ViewportOptions {
   readonly onSelectBody: (bodyId: string | null) => void;
   readonly onViewChange?: (state: ViewportViewState) => void;
   readonly onMeasurePoint?: (point: ViewportMeasurePoint) => void;
+  readonly onContextMenu?: (request: ViewportContextMenuRequest) => void;
 }
 
 export type ViewOrientation = "custom" | "front" | "back" | "left" | "right" | "top" | "bottom" | "isometric";
 export type ViewProjection = "perspective" | "orthographic";
 export type NavigationMode = "select" | "orbit" | "pan" | "measure";
-export type SelectionFilter = "auto" | "body" | "component";
+export type SelectionFilter = "auto" | "body" | "component" | "sketch-curve" | "profile" | "connected" | "tangent";
 export type ViewportShadingMode = "shaded" | "shaded-edges" | "wireframe";
 export type ViewportBackgroundTone = "charcoal" | "dark-gray" | "light-gray" | "white";
 
@@ -34,6 +35,68 @@ export interface ViewportViewState {
 export interface ViewportMeasurePoint {
   readonly pointMm: readonly [number, number, number];
   readonly semanticId: string | null;
+}
+
+export interface ViewportContextMenuRequest {
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly semanticId: string | null;
+  readonly selectionKind: string | null;
+}
+
+export interface ProjectedAxis {
+  /** Horizontal screen component, positive to the right. */
+  readonly x: number;
+  /** Vertical SVG component, positive down. */
+  readonly y: number;
+  /** Camera-facing depth. Positive means the world axis points toward the camera. */
+  readonly depth: number;
+}
+
+export interface CameraBasisProjection {
+  readonly x: ProjectedAxis;
+  readonly y: ProjectedAxis;
+  readonly z: ProjectedAxis;
+}
+
+const ORIENTATION_ANGLES: Readonly<Record<Exclude<ViewOrientation, "custom">, readonly [number, number]>> = {
+  front: [-90, 0],
+  back: [90, 0],
+  left: [180, 0],
+  right: [0, 0],
+  top: [-90, 89.994],
+  bottom: [-90, -89.994],
+  isometric: [45, Math.asin(1 / Math.sqrt(3)) * 180 / Math.PI]
+};
+
+export function viewAnglesForOrientation(orientation: Exclude<ViewOrientation, "custom">): readonly [number, number] {
+  return ORIENTATION_ANGLES[orientation];
+}
+
+/** Fusion-style drag convention: right drag rotates the view to the right; up drag raises it. */
+export function orbitViewAngles(azimuthDeg: number, elevationDeg: number, deltaX: number, deltaY: number, degreesPerPixel = 0.46): readonly [number, number] {
+  const azimuth = normalizeDegrees(azimuthDeg + deltaX * degreesPerPixel);
+  const elevation = THREE.MathUtils.clamp(elevationDeg - deltaY * degreesPerPixel, -87.1, 87.1);
+  return [azimuth, elevation];
+}
+
+/**
+ * Projects the document WCS into screen space using the exact camera convention
+ * used by ThreeViewportAdapter. ViewCube faces and the WCS triad both consume
+ * this result, so they cannot drift into independent orientations.
+ */
+export function projectWorldAxes(azimuthDeg: number, elevationDeg: number): CameraBasisProjection {
+  const azimuth = THREE.MathUtils.degToRad(azimuthDeg);
+  const elevation = THREE.MathUtils.degToRad(elevationDeg);
+  const backward = normalize3([Math.cos(elevation) * Math.cos(azimuth), Math.cos(elevation) * Math.sin(azimuth), Math.sin(elevation)]);
+  const referenceUp: Vec3Tuple = Math.abs(Math.cos(elevation)) < 0.01 ? [0, 1, 0] : [0, 0, 1];
+  const right = normalize3(cross3(referenceUp, backward));
+  const up = normalize3(cross3(backward, right));
+  return {
+    x: projectAxis([1, 0, 0], right, up, backward),
+    y: projectAxis([0, 1, 0], right, up, backward),
+    z: projectAxis([0, 0, 1], right, up, backward)
+  };
 }
 
 export class ThreeViewportAdapter {
@@ -102,7 +165,7 @@ export class ThreeViewportAdapter {
     canvas.addEventListener("pointerup", this.#onPointerUp);
     canvas.addEventListener("pointercancel", this.#onPointerUp);
     canvas.addEventListener("wheel", this.#onWheel, { passive: false });
-    canvas.addEventListener("contextmenu", this.#preventContext);
+    canvas.addEventListener("contextmenu", this.#onContextMenu);
     this.fit();
     this.#animate();
   }
@@ -124,17 +187,34 @@ export class ThreeViewportAdapter {
   }
 
   setOrientation(orientation: Exclude<ViewOrientation, "custom">): void {
-    const orientations: Record<Exclude<ViewOrientation, "custom">, readonly [number, number]> = {
-      front: [-Math.PI / 2, 0],
-      back: [Math.PI / 2, 0],
-      left: [Math.PI, 0],
-      right: [0, 0],
-      top: [-Math.PI / 2, Math.PI / 2 - 0.0001],
-      bottom: [-Math.PI / 2, -Math.PI / 2 + 0.0001],
-      isometric: [Math.PI / 4, Math.asin(1 / Math.sqrt(3))]
-    };
-    [this.#azimuth, this.#elevation] = orientations[orientation];
+    const [azimuthDeg, elevationDeg] = viewAnglesForOrientation(orientation);
+    this.#azimuth = THREE.MathUtils.degToRad(azimuthDeg);
+    this.#elevation = THREE.MathUtils.degToRad(elevationDeg);
     this.#orientation = orientation;
+    this.#updateCamera();
+  }
+
+  setViewAngles(azimuthDeg: number, elevationDeg: number): void {
+    if (!Number.isFinite(azimuthDeg) || !Number.isFinite(elevationDeg)) return;
+    this.#azimuth = THREE.MathUtils.degToRad(normalizeDegrees(azimuthDeg));
+    this.#elevation = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(elevationDeg, -87.1, 87.1));
+    this.#orientation = "custom";
+    this.#updateCamera();
+  }
+
+  restoreViewState(state: ViewportViewState): void {
+    this.#azimuth = THREE.MathUtils.degToRad(normalizeDegrees(state.azimuthDeg));
+    this.#elevation = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(state.elevationDeg, -87.1, 87.1));
+    this.#orientation = state.orientation;
+    this.#projection = state.projection;
+    this.#navigationMode = state.navigationMode;
+    this.#selectionFilter = state.selectionFilter;
+    this.#grid.visible = state.gridVisible;
+    this.#axes.visible = state.axesVisible;
+    this.setBackgroundTone(state.backgroundTone);
+    this.setBodyColor(state.bodyColor);
+    this.setShadingMode(state.shadingMode);
+    this.#canvas.style.cursor = state.navigationMode === "orbit" ? "grab" : state.navigationMode === "pan" ? "move" : state.navigationMode === "measure" ? "crosshair" : "default";
     this.#updateCamera();
   }
 
@@ -368,7 +448,7 @@ export class ThreeViewportAdapter {
     this.#canvas.removeEventListener("pointerup", this.#onPointerUp);
     this.#canvas.removeEventListener("pointercancel", this.#onPointerUp);
     this.#canvas.removeEventListener("wheel", this.#onWheel);
-    this.#canvas.removeEventListener("contextmenu", this.#preventContext);
+    this.#canvas.removeEventListener("contextmenu", this.#onContextMenu);
     this.#clearBody();
     this.#clearMeasurements();
     this.#grid.geometry.dispose();
@@ -381,10 +461,11 @@ export class ThreeViewportAdapter {
   }
 
   readonly #onPointerDown = (event: PointerEvent): void => {
+    if (event.button === 2) return;
     this.#canvas.setPointerCapture(event.pointerId);
     const mode: NavigationMode = event.button === 1
       ? event.shiftKey ? "orbit" : "pan"
-      : event.button === 2 ? "orbit" : this.#navigationMode;
+      : this.#navigationMode;
     this.#drag = { x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, moved: false, mode };
   };
 
@@ -396,8 +477,14 @@ export class ThreeViewportAdapter {
     this.#drag.x = event.clientX;
     this.#drag.y = event.clientY;
     if (this.#drag.mode === "orbit") {
-      this.#azimuth -= dx * 0.008;
-      this.#elevation = THREE.MathUtils.clamp(this.#elevation + dy * 0.008, -1.52, 1.52);
+      const [azimuthDeg, elevationDeg] = orbitViewAngles(
+        THREE.MathUtils.radToDeg(this.#azimuth),
+        THREE.MathUtils.radToDeg(this.#elevation),
+        dx,
+        dy
+      );
+      this.#azimuth = THREE.MathUtils.degToRad(azimuthDeg);
+      this.#elevation = THREE.MathUtils.degToRad(elevationDeg);
       this.#orientation = "custom";
     } else if (this.#drag.mode === "pan") {
       const scale = this.#radius / Math.max(this.#canvas.clientHeight, 1);
@@ -424,18 +511,33 @@ export class ThreeViewportAdapter {
     this.#updateCamera();
   };
 
-  readonly #preventContext = (event: Event): void => event.preventDefault();
+  readonly #onContextMenu = (event: MouseEvent): void => {
+    event.preventDefault();
+    const hit = this.#hitObject(event.clientX, event.clientY);
+    const semanticId = typeof hit?.userData["semanticId"] === "string" ? hit.userData["semanticId"] as string : null;
+    const selectionKind = typeof hit?.userData["selectionKind"] === "string" ? hit.userData["selectionKind"] as string : null;
+    if (semanticId !== null) {
+      this.setSelectedId(semanticId);
+      this.#options.onSelectBody(semanticId);
+    }
+    this.#options.onContextMenu?.({ clientX: event.clientX, clientY: event.clientY, semanticId, selectionKind });
+  };
 
   #pick(event: PointerEvent): void {
     if (this.#pickable.length === 0) return;
-    const rect = this.#canvas.getBoundingClientRect();
-    this.#pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
-    this.#raycaster.setFromCamera(this.#pointer, this.#activeCamera());
-    const hit = this.#raycaster.intersectObjects(this.#pickable, false).find((entry) => this.#selectionAllows(entry.object))?.object;
+    const hit = this.#hitObject(event.clientX, event.clientY);
     const id = typeof hit?.userData["semanticId"] === "string" ? hit.userData["semanticId"] as string : null;
     const next = id === this.#selectedId ? null : id;
     this.setSelectedId(next);
     this.#options.onSelectBody(next);
+  }
+
+  #hitObject(clientX: number, clientY: number): THREE.Object3D | undefined {
+    if (this.#pickable.length === 0) return undefined;
+    const rect = this.#canvas.getBoundingClientRect();
+    this.#pointer.set((clientX - rect.left) / rect.width * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.#raycaster.setFromCamera(this.#pointer, this.#activeCamera());
+    return this.#raycaster.intersectObjects(this.#pickable, false).find((entry) => this.#selectionAllows(entry.object))?.object;
   }
 
   #measurePick(event: PointerEvent): void {
@@ -642,4 +744,32 @@ export class ThreeViewportAdapter {
     edges.rotation.copy(mesh.rotation);
     this.#addObject(edges, false);
   }
+}
+
+type Vec3Tuple = readonly [number, number, number];
+
+function normalizeDegrees(value: number): number {
+  const wrapped = ((value + 180) % 360 + 360) % 360 - 180;
+  return Math.abs(wrapped + 180) < 1e-9 ? 180 : wrapped;
+}
+
+function normalize3(value: Vec3Tuple): Vec3Tuple {
+  const length = Math.hypot(...value);
+  return length < 1e-12 ? [0, 0, 0] : [value[0] / length, value[1] / length, value[2] / length];
+}
+
+function cross3(left: Vec3Tuple, right: Vec3Tuple): Vec3Tuple {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0]
+  ];
+}
+
+function dot3(left: Vec3Tuple, right: Vec3Tuple): number {
+  return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+function projectAxis(axis: Vec3Tuple, right: Vec3Tuple, up: Vec3Tuple, backward: Vec3Tuple): ProjectedAxis {
+  return { x: dot3(axis, right), y: -dot3(axis, up), depth: dot3(axis, backward) };
 }

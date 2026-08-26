@@ -10,7 +10,8 @@ The client in `sdk/python` implements:
 - modern `server/discover` negotiation in a disposable probe process plus
   2025-era initialize/initialized fallback;
 - `tools/list` and `tools/call` over newline-framed JSON-RPC stdio;
-- ten typed tool helpers for the AI guide, deterministic command discovery,
+- eleven typed tool helpers for the AI guide, stateless collaboration-agent
+  handshake, deterministic command discovery,
   capabilities, project inspection, all-workspace design health, read-only vehicle analysis, generic
   operation preview, electromechanical catalog inspection,
   circuit-to-linked-3D preview, and confirmed apply;
@@ -18,6 +19,10 @@ The client in `sdk/python` implements:
 - explicit argv with `shell=False` and a non-secret environment allowlist.
 
 The project and operation remain complete in-memory JSON values. The
+`agent_handshake(...)` helper sets the explanation level, checks the user goal
+against bounded recipes, validates optional proposed tool/recipe stable IDs,
+and returns correction feedback without executing a command or persisting a
+session. The
 electromechanical helper returns the exact generated operation and receipt but
 does not apply it. Every mutation remains receipt-gated and requires
 `confirmed=True`. That Boolean is a caller assertion, not cryptographic proof

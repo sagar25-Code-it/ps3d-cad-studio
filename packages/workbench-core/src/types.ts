@@ -96,6 +96,7 @@ export type SketchEntity =
       readonly start: Vec2;
       readonly end: Vec2;
       readonly construction: boolean;
+      readonly visible?: boolean;
     }
   | {
       readonly id: string;
@@ -105,6 +106,7 @@ export type SketchEntity =
       readonly heightMm: number;
       readonly rotationDeg: number;
       readonly construction: boolean;
+      readonly visible?: boolean;
     }
   | {
       readonly id: string;
@@ -112,6 +114,7 @@ export type SketchEntity =
       readonly center: Vec2;
       readonly radiusMm: number;
       readonly construction: boolean;
+      readonly visible?: boolean;
     }
   | {
       readonly id: string;
@@ -120,6 +123,7 @@ export type SketchEntity =
       readonly mid: Vec2;
       readonly end: Vec2;
       readonly construction: boolean;
+      readonly visible?: boolean;
     };
 
 export type SketchConstraintKind =
@@ -753,6 +757,7 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "delete-sketch-constraint"; readonly constraintId: string }
   | { readonly kind: "set-sketch-dimension"; readonly entityId: string; readonly dimension: "length" | "width" | "height" | "radius"; readonly valueMm: number }
   | { readonly kind: "toggle-sketch-construction"; readonly entityId: string }
+  | { readonly kind: "toggle-sketch-entity-visibility"; readonly entityId: string }
   | {
       readonly kind: "set-part-parameter";
       readonly parameter: "widthMm" | "heightMm" | "thicknessMm" | "holeDiameterMm" | "edgeTreatmentMm" | "patternCount" | "revolveAngleDeg";
@@ -774,6 +779,8 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "set-component-translation"; readonly componentId: string; readonly translationMm: Vec3 }
   | { readonly kind: "toggle-component-grounded"; readonly componentId: string }
   | { readonly kind: "toggle-component-visibility"; readonly componentId: string }
+  | { readonly kind: "add-assembly-mate"; readonly mate: AssemblyMate }
+  | { readonly kind: "delete-assembly-mate"; readonly mateId: string }
   | { readonly kind: "set-surface-mode"; readonly mode: "bezier" | "loft" }
   | {
       readonly kind: "set-surface-parameter";
@@ -813,6 +820,33 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly replaceMode: "replace-assembly";
     }
 );
+
+/**
+ * Canonical runtime operation registry shared by validation, MCP discovery,
+ * documentation, and verification. `satisfies` rejects unknown entries while
+ * the completeness assignment below makes TypeScript fail if a new operation
+ * union member is added without updating this registry.
+ */
+export const WORKBENCH_OPERATION_KINDS = [
+  "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
+  "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
+  "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
+  "isolate-part-preview-body", "set-part-preview-bodies-visibility", "set-assembly-explode", "apply-assembly-template",
+  "add-assembly-component", "add-assembly-components", "delete-assembly-component", "set-component-translation", "toggle-component-grounded",
+  "toggle-component-visibility", "add-assembly-mate", "delete-assembly-mate", "set-surface-mode", "set-surface-parameter", "set-drawing-sheet", "set-drawing-projection",
+  "set-drawing-scale", "set-drawing-dimensions", "set-drawing-view-preset", "set-drawing-display-style", "set-drawing-section-view",
+  "set-drawing-drafting-standard", "set-drawing-gdt", "set-drawing-datum-scheme", "set-drawing-gdt-specification",
+  "set-drawing-general-tolerance", "set-drawing-notes", "apply-electrical-template", "set-electrical-standard",
+  "set-electrical-component-position", "add-electrical-component", "delete-electrical-component", "add-electrical-net",
+  "delete-electrical-net", "set-electrical-notes", "apply-vehicle-template", "set-vehicle-parameter",
+  "set-vehicle-simulation-state", "toggle-vehicle-layer", "generate-electromechanical-realization"
+] as const satisfies readonly WorkbenchOperation["kind"][];
+
+const WORKBENCH_OPERATION_KIND_COMPLETENESS: Record<
+  Exclude<WorkbenchOperation["kind"], (typeof WORKBENCH_OPERATION_KINDS)[number]>,
+  never
+> = {};
+void WORKBENCH_OPERATION_KIND_COMPLETENESS;
 
 export interface AppliedWorkbenchOperation {
   readonly project: WorkbenchProject;

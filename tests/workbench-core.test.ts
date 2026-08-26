@@ -1,5 +1,6 @@
 import {
   applyWorkbenchOperation,
+  auditCadCommandSurface,
   CAD_COMMANDS,
   commandsForWorkspace,
   createWorkbenchProject,
@@ -262,6 +263,25 @@ export const workbenchCoreTests: readonly TestCase[] = [
       assert(construction.ok, "profile geometry should toggle to construction geometry");
       equal(construction.value.project.sketch.entities.find((entity) => entity.id === "entity:mounting-outline")?.construction, true, "construction state should persist");
 
+      const hidden = applyWorkbenchOperation(construction.value.project, {
+        kind: "toggle-sketch-entity-visibility",
+        operationId: "operation:test-hide-outline",
+        expectedRevision: 2,
+        entityId: "entity:mounting-outline"
+      });
+      assert(hidden.ok, "a sketch entity should support persisted visibility");
+      equal(hidden.value.project.sketch.entities.find((entity) => entity.id === "entity:mounting-outline")?.visible, false, "the entity should be hidden without deleting geometry");
+      equal(hidden.value.project.revision, 3, "visibility should create one audited revision");
+
+      const shown = applyWorkbenchOperation(hidden.value.project, {
+        kind: "toggle-sketch-entity-visibility",
+        operationId: "operation:test-show-outline",
+        expectedRevision: 3,
+        entityId: "entity:mounting-outline"
+      });
+      assert(shown.ok, "a hidden sketch entity should be restorable");
+      equal(shown.value.project.sketch.entities.find((entity) => entity.id === "entity:mounting-outline")?.visible, true, "show should restore the same stable entity");
+
       const incompatible = applyWorkbenchOperation(project, {
         kind: "set-sketch-dimension",
         operationId: "operation:test-invalid-radius",
@@ -288,6 +308,11 @@ export const workbenchCoreTests: readonly TestCase[] = [
       assert(CAD_COMMANDS.some((command) => command.level === "qualified"), "qualified commands should remain distinguishable");
       assert(CAD_COMMANDS.some((command) => command.level === "unavailable"), "planned exact-kernel commands should remain visibly unavailable");
       assert(CAD_COMMANDS.every((command) => command.guide.selection.length > 0 && command.guide.steps.length >= 3 && command.guide.boundary.length > 0), "every command should explain selection, workflow, and its verification boundary");
+      const audit = auditCadCommandSurface();
+      assert(audit.passed, `machine command audit should pass: ${audit.issues.map((issue) => `${issue.commandId}:${issue.code}`).join(", ")}`);
+      equal(audit.total, CAD_COMMANDS.length, "audit should cover every catalog entry");
+      equal(audit.executable + audit.truthfullyBlocked, CAD_COMMANDS.length, "every command should be either executable or truthfully blocked");
+      assert(audit.actionKindsCovered.length >= 25, "the UI dispatcher contract should cover the complete bounded action family");
     }
   },
   {
@@ -303,7 +328,7 @@ export const workbenchCoreTests: readonly TestCase[] = [
       });
       equal(REFERENCE_IMAGE_COMMAND_TERMS.length, 230, "the screenshot transcription should retain all 230 unique reference terms");
       equal(missing.join(", "), "", "every supplied reference-image command term should remain discoverable without implying execution");
-      equal(CAD_COMMANDS.length, 330, "the audited catalog count should remain synchronized with release copy and evidence");
+      equal(CAD_COMMANDS.length, 331, "the audited catalog count should remain synchronized with release copy and evidence");
     }
   }
 ];

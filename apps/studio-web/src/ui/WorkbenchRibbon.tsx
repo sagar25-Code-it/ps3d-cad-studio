@@ -12,8 +12,11 @@ interface WorkbenchRibbonProps {
   readonly masterCartOpen: boolean;
   readonly displayUnit: DisplayUnit;
   readonly sketchTool: SketchTool;
+  readonly sketchDimensionMode: boolean;
   readonly selectedId: string | null;
   readonly onSketchTool: (tool: SketchTool) => void;
+  readonly onSketchDimension: () => void;
+  readonly onToggleSketchEntityVisibility: (entityId: string) => void;
   readonly onFinishSketch: () => void;
   readonly onCancelSketchPoints: () => void;
   readonly onSelect: (id: string | null) => void;
@@ -80,6 +83,7 @@ const PART_FEATURES = [
 export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element {
   const level = props.project.activeWorkspace === "part" ? "qualified" : "preview";
   const selectedComponent = props.project.assembly.components.find((component) => component.id === props.selectedId);
+  const selectedSketchEntity = props.project.sketch.entities.find((entity) => entity.id === props.selectedId);
   return <section className="command-ribbon" role="toolbar" aria-label={`${props.project.activeWorkspace} command ribbon`}>
     <div className="ribbon-context">
       <small>Active workspace</small>
@@ -114,7 +118,8 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="plane" label="XY plane" hint={`${props.project.sketch.gridMm} mm`} active />
       </RibbonGroup>
       <RibbonGroup label="Dimension & modify">
-        <RibbonButton icon="dimension" label="Dimension" hint="bounded" active={props.sketchTool === "select" && props.selectedId?.startsWith("entity:") === true} onClick={() => props.onSketchTool("select")} />
+        <RibbonButton icon="dimension" label="Dimension" hint="points / curve" active={props.sketchDimensionMode} onClick={props.onSketchDimension} />
+        <RibbonButton icon={selectedSketchEntity?.visible === false ? "eye" : "eye-off"} label={selectedSketchEntity?.visible === false ? "Show" : "Hide"} hint="sketch entity" disabled={selectedSketchEntity === undefined} onClick={() => { if (selectedSketchEntity !== undefined) props.onToggleSketchEntityVisibility(selectedSketchEntity.id); }} />
         <RibbonButton icon="trim" label="Trim" hint="exact req." disabled />
         <RibbonButton icon="offset" label="Offset" hint="exact req." disabled />
         <RibbonButton icon="edge" label="Fillet" hint="exact req." disabled />

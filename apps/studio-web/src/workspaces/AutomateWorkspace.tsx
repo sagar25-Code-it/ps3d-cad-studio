@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { WorkbenchOperation, WorkbenchProject, WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
-import { WORKBENCH_MCP_TOOLS, handleWorkbenchMcpTool, type WorkbenchMcpResult } from "../../../../packages/workbench-mcp/src/index.js";
+import { WORKBENCH_MCP_TOOLS, handleWorkbenchMcpTool, type Ps3dExperienceLevel, type WorkbenchMcpResult } from "../../../../packages/workbench-mcp/src/index.js";
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 
 interface AutomateWorkspaceProps {
@@ -40,13 +40,13 @@ const COMMON_HOST_ADAPTER = JSON.stringify({
   }
 }, null, 2);
 const STARTER_PROMPT = `Use the connected PS3D MCP server.
-1. Call ps3d_guide first.
-2. Inspect the complete project I provide.
-3. Call ps3d_design_health to review dependencies, detached links, and engineering findings.
-4. Use ps3d_find_commands to choose only a bounded recipe.
+1. Call ps3d_guide first, read the complete result, and retain its manifestSha256 as guideAcknowledgement with understood:true.
+2. Call ps3d_agent_handshake with my exact request and experience level. Resolve every correction or clarification before continuing.
+3. Inspect the complete project I provide and call ps3d_design_health to review dependencies, detached links, and engineering findings.
+4. Use ps3d_find_commands to choose only a bounded recipe and exact stable IDs.
 5. Preview every change and show the exact candidate project, changed IDs, warnings, base/candidate references, and receipt.
 6. Wait for my approval before apply.
-Never claim that PS3D modified a live browser session or wrote a file.`;
+Treat every diagnostic as feedback to correct and revalidate. Never invent a command, selection, mate, sketch relation, geometry result, approval, live-browser mutation, or file write.`;
 const PYTHON_EXAMPLE = `from pathlib import Path
 from ps3d_client import Ps3dClient
 
@@ -58,6 +58,14 @@ with Ps3dClient(
 ) as client:
     print(client.protocol_info())
     guide = client.guide()
+    guide_acknowledgement = {
+        "manifestSha256": guide["manifestSha256"],
+        "understood": True,
+    }
+    coordination = client.agent_handshake(
+        "change motorcycle wheelbase", "engineer",
+        workspace="vehicle", client_name="my-ai-host",
+    )
     matches = client.find_commands("change motorcycle wheelbase", workspace="vehicle")
     print(guide["workflow"])
     print(matches["matches"])
@@ -65,15 +73,17 @@ with Ps3dClient(
     # project_mapping is a complete caller-owned project value.
     # summary = client.inspect(project_mapping)
     # health = client.design_health(project_mapping)
-    # preview = client.preview(project_mapping, operation_mapping)
+    # preview = client.preview(project_mapping, operation_mapping, guide_acknowledgement)
     # Show preview["candidateProject"], references, warnings, and receipt.
     # After exact user approval only:
     # returned = client.apply(
-    #     project_mapping, operation_mapping, preview["receipt"], confirmed=True
+    #     project_mapping, operation_mapping, preview["receipt"], confirmed=True,
+    #     guide_acknowledgement=guide_acknowledgement
     # )`;
 
 const FRIENDLY_TOOL_LABELS: Readonly<Record<string, string>> = {
   ps3d_guide: "See what AI can do",
+  ps3d_agent_handshake: "Activate collaboration agent",
   ps3d_find_commands: "Find the right CAD command",
   ps3d_capabilities: "Check qualified capabilities",
   ps3d_inspect_project: "Understand current project",
@@ -98,9 +108,15 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("setup");
   const [goal, setGoal] = useState("connect AI and explain available commands");
   const [goalWorkspace, setGoalWorkspace] = useState<WorkspaceId>(props.project.activeWorkspace);
+  const [experienceLevel, setExperienceLevel] = useState<Ps3dExperienceLevel>("engineer");
   const [demoIntent, setDemoIntent] = useState<DemoIntent>("surface-crown");
+  const [guideAcknowledgement, setGuideAcknowledgement] = useState<Readonly<Record<string, unknown>>>();
   const demoOperation = useMemo(() => createDemoOperation(props.project, demoIntent), [demoIntent, props.project]);
-  const matches = Array.isArray(result?.structuredContent["matches"]) ? result.structuredContent["matches"] as readonly Readonly<Record<string, unknown>>[] : [];
+  const agentIntent = result?.structuredContent["intent"] !== null && typeof result?.structuredContent["intent"] === "object" ? result.structuredContent["intent"] as Readonly<Record<string, unknown>> : undefined;
+  const matches = Array.isArray(result?.structuredContent["matches"])
+    ? result.structuredContent["matches"] as readonly Readonly<Record<string, unknown>>[]
+    : Array.isArray(agentIntent?.["matches"]) ? agentIntent["matches"] as readonly Readonly<Record<string, unknown>>[] : [];
+  const agentFeedback = Array.isArray(result?.structuredContent["feedback"]) ? result.structuredContent["feedback"] as readonly Readonly<Record<string, unknown>>[] : [];
 
   useEffect(() => {
     if (selected.name !== "ps3d_preview_operation" && selected.name !== "ps3d_apply_preview") setPending(undefined);
@@ -122,21 +138,30 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
       let next: WorkbenchMcpResult;
       if (selected.name === "ps3d_guide" || selected.name === "ps3d_capabilities" || selected.name === "ps3d_electromechanical_catalog") {
         next = await handleWorkbenchMcpTool(selected.name, {});
+        if (selected.name === "ps3d_guide") rememberGuide(next);
+      } else if (selected.name === "ps3d_agent_handshake") {
+        next = await handleWorkbenchMcpTool(selected.name, { request: goal, experienceLevel, workspace: goalWorkspace, clientName: "PS3D browser workbench", projectRevision: props.project.revision });
       } else if (selected.name === "ps3d_find_commands") {
         next = await handleWorkbenchMcpTool(selected.name, { query: goal, workspace: goalWorkspace, limit: 6 });
       } else if (selected.name === "ps3d_inspect_project" || selected.name === "ps3d_design_health" || selected.name === "ps3d_analyze_vehicle") {
         next = await handleWorkbenchMcpTool(selected.name, { project: props.project });
       } else if (selected.name === "ps3d_preview_electromechanical") {
         setPending(undefined);
-        next = await handleWorkbenchMcpTool(selected.name, { project: props.project });
+        next = guideAcknowledgement === undefined
+          ? localError("INSTRUCTION_ACKNOWLEDGEMENT_REQUIRED", "Run See what AI can do and read the current PS3D guide before previewing a change.")
+          : await handleWorkbenchMcpTool(selected.name, { project: props.project, guideAcknowledgement });
       } else if (selected.name === "ps3d_preview_operation") {
-        next = await handleWorkbenchMcpTool(selected.name, { project: props.project, operation: demoOperation });
+        next = guideAcknowledgement === undefined
+          ? localError("INSTRUCTION_ACKNOWLEDGEMENT_REQUIRED", "Run See what AI can do and read the current PS3D guide before previewing a change.")
+          : await handleWorkbenchMcpTool(selected.name, { project: props.project, operation: demoOperation, guideAcknowledgement });
         const receipt = next.structuredContent["receipt"];
         if (typeof receipt === "string") setPending({ operation: demoOperation, receipt, projectRevision: props.project.revision });
       } else if (pending === undefined) {
         next = localError("PREVIEW_REQUIRED", "Run Preview an exact CAD change first for this project revision.");
       } else {
-        next = await handleWorkbenchMcpTool(selected.name, { project: props.project, operation: pending.operation, receipt: pending.receipt, confirmed: true });
+        next = guideAcknowledgement === undefined
+          ? localError("INSTRUCTION_ACKNOWLEDGEMENT_REQUIRED", "Read the current PS3D guide again before applying this preview.")
+          : await handleWorkbenchMcpTool(selected.name, { project: props.project, operation: pending.operation, receipt: pending.receipt, confirmed: true, guideAcknowledgement });
         const applied = next.structuredContent["project"];
         if (next.isError !== true && applied !== null && typeof applied === "object") {
           props.onApplyProject(applied as WorkbenchProject, "Applied the locally confirmed preview as one returned project revision.");
@@ -156,10 +181,24 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
     publishResult(next);
   };
 
+  const runAgentHandshake = async (): Promise<void> => {
+    props.onSelect("mcp-tool:ps3d_agent_handshake");
+    setConnectionStatus("testing");
+    const next = await handleWorkbenchMcpTool("ps3d_agent_handshake", { request: goal, experienceLevel, workspace: goalWorkspace, clientName: "PS3D browser workbench", projectRevision: props.project.revision });
+    publishResult(next);
+  };
+
   const runGuide = async (): Promise<void> => {
     props.onSelect("mcp-tool:ps3d_guide");
     setConnectionStatus("testing");
-    publishResult(await handleWorkbenchMcpTool("ps3d_guide", {}));
+    const next = await handleWorkbenchMcpTool("ps3d_guide", {});
+    rememberGuide(next);
+    publishResult(next);
+  };
+
+  const rememberGuide = (guide: WorkbenchMcpResult): void => {
+    const manifestSha256 = guide.structuredContent["manifestSha256"];
+    if (typeof manifestSha256 === "string") setGuideAcknowledgement({ manifestSha256, understood: true });
   };
 
   const copyText = async (value: string, label: string): Promise<void> => {
@@ -185,13 +224,13 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
 
       <div className="ai-readiness-grid" aria-label="AI integration readiness">
         <div><span className="ready-dot" /><small>Protocol</small><strong>2026 + legacy</strong></div>
+        <div><span className="ready-dot" /><small>PS3D agent</small><strong>{result?.structuredContent["schema"] === "ps3d-agent-handshake/1" ? "request coordinated" : "stateless ready"}</strong></div>
         <div><span className="ready-dot" /><small>Local transport</small><strong>stdio available</strong></div>
         <div><span className="deferred-dot" /><small>Live browser bridge</small><strong>not connected</strong></div>
-        <div><span className="deferred-dot" /><small>Public remote MCP</small><strong>security gate</strong></div>
       </div>
 
-      <div className="automation-flow six-step" aria-label="Guided AI collaboration flow">
-        {["Connect", "Discover", "Understand", "Preview", "Confirm", "Apply / import"].map((label, index) => <div key={label}><span>{String(index + 1).padStart(2, "0")}</span><strong>{label}</strong><small>{["explicit local server", "guide + command finder", "caller-owned project", "candidate + receipt", "exact revision approval", "returned project copy"][index]}</small></div>)}
+      <div className="automation-flow seven-step" aria-label="Guided AI collaboration flow">
+        {["Connect", "Read guide", "Coordinate", "Understand", "Preview", "Confirm", "Apply / import"].map((label, index) => <div key={label}><span>{String(index + 1).padStart(2, "0")}</span><strong>{label}</strong><small>{["explicit local server", "current contract hash", "agent feedback + level", "project + health + recipe", "candidate + receipt", "exact revision approval", "returned project copy"][index]}</small></div>)}
       </div>
 
       {view === "guided" ? <>
@@ -200,8 +239,10 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
           <div className="ai-command-form">
             <label><span>Engineering goal</span><input value={goal} maxLength={160} onChange={(event) => setGoal(event.target.value)} placeholder="Example: set full-bump vehicle state" /></label>
             <label><span>Workspace</span><select value={goalWorkspace} onChange={(event) => setGoalWorkspace(event.target.value as WorkspaceId)}>{WORKSPACES.map((workspace) => <option key={workspace} value={workspace}>{workspace}</option>)}</select></label>
-            <button className="primary" disabled={goal.trim().length < 2} onClick={() => void runSearch()}>Find bounded commands</button>
+            <label><span>Explanation level</span><select value={experienceLevel} onChange={(event) => setExperienceLevel(event.target.value as Ps3dExperienceLevel)}><option value="child">Child</option><option value="beginner">Beginner</option><option value="engineer">Engineer</option><option value="advanced">Advanced</option><option value="phd">PhD / research</option></select></label>
+            <div className="ai-command-actions"><button disabled={goal.trim().length < 2} onClick={() => void runAgentHandshake()}>Coordinate request</button><button className="primary" disabled={goal.trim().length < 2} onClick={() => void runSearch()}>Find commands</button></div>
           </div>
+          {result?.structuredContent["schema"] === "ps3d-agent-handshake/1" && <section className={`agent-contract-summary ${String(result.structuredContent["status"])}`} aria-label="PS3D collaboration agent result"><header><div><span>STATELESS COLLABORATION AGENT</span><strong>{String(result.structuredContent["status"]).replaceAll("-", " ")}</strong></div><b>{experienceLevel}</b></header><p>The host AI handles conversation and judgment; PS3D validates registered commands, stable IDs, project contracts, and recovery steps. No hidden model or CAD change ran during this handshake.</p>{agentFeedback.length > 0 && <ul>{agentFeedback.map((item, index) => <li key={`${String(item["code"])}-${index}`}><strong>{String(item["code"])}</strong><span>{String(item["message"])}</span><small>{String(item["recovery"])}</small></li>)}</ul>}</section>}
           {matches.length > 0 && <div className="ai-recipe-results">{matches.map((match) => <article key={String(match["id"])}><header><strong>{String(match["title"])}</strong><span>{String(match["previewPolicy"])}</span></header><p>{String(match["intent"])}</p><dl><div><dt>Tool</dt><dd>{String(match["mcpTool"])}</dd></div><div><dt>Workspace</dt><dd>{String(match["workspace"])}</dd></div></dl><pre>{JSON.stringify(match["argumentTemplate"], null, 2)}</pre><small>{String(match["note"])}</small></article>)}</div>}
         </section>
 

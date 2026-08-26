@@ -155,6 +155,7 @@ export const workbenchElectromechanicalTests: readonly TestCase[] = [
   {
     name: "current ECAD to MCAD trace rejects cross-domain corruption and ambiguous ERC input",
     run: async () => {
+      const guideAcknowledgement = await currentGuideAcknowledgement();
       const electrical = createElectricalTemplate("bess-single-line");
       const generated = createElectromechanicalAssembly(electrical, "panel-backplate", defaultElectromechanicalMappings(electrical));
       assert(generated.ok, "the built-in realization should generate");
@@ -179,13 +180,14 @@ export const workbenchElectromechanicalTests: readonly TestCase[] = [
       const ambiguous = { ...electrical, components: electrical.components.map((component, index) => index === 1 ? { ...component, reference: electrical.components[0]!.reference } : component) };
       equal(analyzeElectromechanicalReadiness(ambiguous).status, "blocked", "duplicate references must block realization in core");
       const ambiguousProject = { ...createWorkbenchProject("project:test-em-erc"), electrical: ambiguous };
-      const preview = await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project: ambiguousProject });
+      const preview = await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project: ambiguousProject, guideAcknowledgement });
       assert(preview.isError === true, "MCP must not receipt-gate an electrically ambiguous realization");
     }
   },
   {
     name: "electromechanical generation and dedicated MCP receipts are deterministic",
     run: async () => {
+      const guideAcknowledgement = await currentGuideAcknowledgement();
       const electrical = createElectricalTemplate("dc-control");
       const mappings = defaultElectromechanicalMappings(electrical);
       const first = createElectromechanicalAssembly(electrical, "panel-backplate", mappings);
@@ -193,33 +195,34 @@ export const workbenchElectromechanicalTests: readonly TestCase[] = [
       assert(first.ok && second.ok, "both deterministic realizations should generate");
       equal(JSON.stringify(first.value), JSON.stringify(second.value), "mapping input order must not change realization bytes");
       const project = { ...createWorkbenchProject("project:test-em-determinism"), electrical };
-      const previewA = await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project });
-      const previewB = await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project });
+      const previewA = await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project, guideAcknowledgement });
+      const previewB = await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project, guideAcknowledgement });
       equal(previewA.structuredContent["receipt"], previewB.structuredContent["receipt"], "identical project inputs must produce identical realization receipts");
       const blockedSource = createElectricalComponentInstance("fuse", "electrical-component:mcp-blocked-source", "F82", [1_050, 200]);
       const blockedTarget = createElectricalComponentInstance("fuse", "electrical-component:mcp-blocked-target", "F83", [900, 500]);
       const blockedElectrical = { ...electrical, components: [blockedSource, blockedTarget], nets: [{ id: "electrical-net:mcp-blocked", name: "MCP BLOCKED ROUTE", class: "control" as const, endpoints: [{ componentId: blockedSource.id, terminal: "2" }, { componentId: blockedTarget.id, terminal: "1" }] }] };
-      const blockedPreview = await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project: { ...createWorkbenchProject("project:test-em-mcp-blocked"), electrical: blockedElectrical } });
+      const blockedPreview = await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project: { ...createWorkbenchProject("project:test-em-mcp-blocked"), electrical: blockedElectrical }, guideAcknowledgement });
       assert(blockedPreview.isError === true && blockedPreview.content.some((item) => item.type === "text" && item.text.includes("no clear orthogonal sheet route")), "the dedicated MCP preview must enforce the same blocked-route invariant as direct core generation");
     }
   },
   {
     name: "MCP exposes local catalog and a receipt-gated realization preview",
     run: async () => {
+      const guideAcknowledgement = await currentGuideAcknowledgement();
       const catalog = await handleWorkbenchMcpTool("ps3d_electromechanical_catalog", {});
       assert(catalog.isError !== true, "catalog discovery should be read-only and callable");
       equal((catalog.structuredContent["parts"] as readonly unknown[]).length, ELECTROMECHANICAL_CATALOG.length, "MCP catalog should match the in-process catalog");
       const project = createWorkbenchProject("project:test-em-mcp");
-      const preview = await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project });
+      const preview = await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project, guideAcknowledgement });
       assert(preview.isError !== true, "MCP should prepare a deterministic realization preview");
       assert(typeof preview.structuredContent["receipt"] === "string", "preview should return a receipt");
       equal((preview.structuredContent["operation"] as { kind: string }).kind, "generate-electromechanical-realization", "preview should return the exact bounded operation");
       assert((preview.structuredContent["replacementScope"] as { candidateAssembly?: unknown }).candidateAssembly !== undefined, "dedicated preview should expose the full replacement candidate");
       assert((preview.structuredContent["replacementScope"] as { removedAssembly?: unknown }).removedAssembly !== undefined, "dedicated preview should expose the complete prior Assembly snapshot");
       assert(Array.isArray((preview.structuredContent["erc"] as { issues?: unknown }).issues), "dedicated preview should expose every ERC issue");
-      const generic = await handleWorkbenchMcpTool("ps3d_preview_operation", { project, operation: preview.structuredContent["operation"] });
+      const generic = await handleWorkbenchMcpTool("ps3d_preview_operation", { project, operation: preview.structuredContent["operation"], guideAcknowledgement });
       equal(generic.structuredContent["code"], "DEDICATED_PREVIEW_REQUIRED", "generic preview must not bypass electromechanical disclosure");
-      const applied = await handleWorkbenchMcpTool("ps3d_apply_preview", { project, operation: preview.structuredContent["operation"], receipt: preview.structuredContent["receipt"], confirmed: true });
+      const applied = await handleWorkbenchMcpTool("ps3d_apply_preview", { project, operation: preview.structuredContent["operation"], receipt: preview.structuredContent["receipt"], confirmed: true, guideAcknowledgement });
       assert(applied.isError !== true, "the dedicated disclosure receipt should gate confirmed apply");
     }
   },
@@ -309,3 +312,10 @@ export const workbenchElectromechanicalTests: readonly TestCase[] = [
     }
   }
 ];
+
+async function currentGuideAcknowledgement(): Promise<Readonly<Record<string, unknown>>> {
+  const guide = await handleWorkbenchMcpTool("ps3d_guide", {});
+  const manifestSha256 = guide.structuredContent["manifestSha256"];
+  assert(typeof manifestSha256 === "string", "guide should provide a manifest digest");
+  return { manifestSha256, understood: true };
+}

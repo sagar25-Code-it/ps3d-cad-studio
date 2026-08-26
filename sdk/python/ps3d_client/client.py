@@ -199,6 +199,40 @@ class Ps3dClient:
         """Return PS3D's machine-readable AI collaboration contract."""
         return _structured(self.call_tool("ps3d_guide", {}))
 
+    def guide_acknowledgement(self) -> JsonObject:
+        """Read the current guide and build the required mutation acknowledgement."""
+        guide = self.guide()
+        digest = guide.get("manifestSha256")
+        if not isinstance(digest, str) or len(digest) != 64:
+            raise McpProtocolError("ps3d_guide returned no valid manifestSha256")
+        return {"manifestSha256": digest, "understood": True}
+
+    def agent_handshake(
+        self,
+        request: str,
+        experience_level: str,
+        *,
+        workspace: str | None = None,
+        client_name: str | None = None,
+        project_revision: int | None = None,
+        proposed_tool: str | None = None,
+        proposed_recipe_id: str | None = None,
+    ) -> JsonObject:
+        """Configure one stateless host-AI/PS3D coordination and correction pass."""
+        arguments: JsonObject = {
+            "request": request,
+            "experienceLevel": experience_level,
+        }
+        optional = {
+            "workspace": workspace,
+            "clientName": client_name,
+            "projectRevision": project_revision,
+            "proposedTool": proposed_tool,
+            "proposedRecipeId": proposed_recipe_id,
+        }
+        arguments.update({key: value for key, value in optional.items() if value is not None})
+        return _structured(self.call_tool("ps3d_agent_handshake", arguments))
+
     def find_commands(
         self,
         query: str,
@@ -228,16 +262,35 @@ class Ps3dClient:
     def electromechanical_catalog(self) -> JsonObject:
         return _structured(self.call_tool("ps3d_electromechanical_catalog", {}))
 
-    def preview_electromechanical(self, project: Mapping[str, Any]) -> JsonObject:
+    def preview_electromechanical(
+        self,
+        project: Mapping[str, Any],
+        guide_acknowledgement: Mapping[str, Any],
+    ) -> JsonObject:
         return _structured(
-            self.call_tool("ps3d_preview_electromechanical", {"project": dict(project)})
+            self.call_tool(
+                "ps3d_preview_electromechanical",
+                {
+                    "project": dict(project),
+                    "guideAcknowledgement": dict(guide_acknowledgement),
+                },
+            )
         )
 
-    def preview(self, project: Mapping[str, Any], operation: Mapping[str, Any]) -> JsonObject:
+    def preview(
+        self,
+        project: Mapping[str, Any],
+        operation: Mapping[str, Any],
+        guide_acknowledgement: Mapping[str, Any],
+    ) -> JsonObject:
         return _structured(
             self.call_tool(
                 "ps3d_preview_operation",
-                {"project": dict(project), "operation": dict(operation)},
+                {
+                    "project": dict(project),
+                    "operation": dict(operation),
+                    "guideAcknowledgement": dict(guide_acknowledgement),
+                },
             )
         )
 
@@ -248,6 +301,7 @@ class Ps3dClient:
         receipt: str,
         *,
         confirmed: bool,
+        guide_acknowledgement: Mapping[str, Any],
     ) -> JsonObject:
         if confirmed is not True:
             raise ValueError("confirmed=True is required to call ps3d_apply_preview")
@@ -259,6 +313,7 @@ class Ps3dClient:
                     "operation": dict(operation),
                     "receipt": receipt,
                     "confirmed": True,
+                    "guideAcknowledgement": dict(guide_acknowledgement),
                 },
             )
         )

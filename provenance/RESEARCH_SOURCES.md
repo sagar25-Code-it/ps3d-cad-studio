@@ -309,6 +309,43 @@ artifact change.
   standard text, or documentation wording was copied. PS3D's source, SVG
   geometry, controls, tests, and sheet layout are original.
 
+## User-supplied supplementary interaction references
+
+These documents were supplied by the project owner for research. They are not
+dependencies, redistribution assets, or primary proof of current product
+behavior. PS3D records only general workflow observations and does not copy or
+ship their pages, text, figures, screenshots, tutorial models, or trade dress.
+
+### RS-023 - Autodesk Fusion 360: EAE Training Module - Model
+
+- **Author:** Timera Hart
+- **Document date:** 2014
+- **Accessed:** 2026-08-26 from the owner-supplied PDF
+- **Facts used:** The illustrated workflow selects one or more closed sketch
+  profiles in the shared canvas, starts Extrude directly, uses extent and
+  direction controls plus a manipulator, toggles sketch visibility in the
+  browser, invokes Extrude from a contextual menu, orients with the ViewCube,
+  and edits downstream results through chronological history.
+- **Informed:** Confirmation of the PS3D profile-to-extrude handoff, tree
+  visibility, contextual commands, ViewCube, and feature-history interaction
+  contract.
+- **Use limit:** Research observations only. No document content or tutorial
+  geometry was reproduced.
+
+### RS-024 - Autodesk Fusion 360 Black Book preview
+
+- **Author/publisher:** Gaurav Verma / BPB Publications
+- **Edition/ISBN:** First edition, 2018 / 978-93-8728-440-1
+- **Accessed:** 2026-08-26 from the owner-supplied preview PDF
+- **Facts used:** The preview describes a navigation bar with Look At, orbit,
+  pan, zoom, window zoom, and Fit; a draggable six-face ViewCube with standard
+  views; middle-button pan and Shift+middle-button orbit; display controls; a
+  chronological editable timeline; and component/joint assembly topics.
+- **Informed:** Confirmation of the shared camera/WCS, Sketch orbit, bottom
+  navigation bar, timeline, component, and mate interaction requirements.
+- **Use limit:** Copyrighted supplementary reference only. No prose, image,
+  icon, UI asset, tutorial example, or page is included in PS3D.
+
 ## Test-tool license research
 
 ### RS-018 - Vitest official repository and license

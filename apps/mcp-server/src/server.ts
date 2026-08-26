@@ -12,6 +12,7 @@ import {
 } from "../../../packages/workbench-mcp/src/index.js";
 
 const workspaceSchema = z.enum(["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"]);
+const experienceLevelSchema = z.enum(["child", "beginner", "engineer", "advanced", "phd"]);
 const projectSchema = z.object({
   format: z.string(), schemaVersion: z.literal(1), applicationVersion: z.string(), id: z.string(), name: z.string(),
   revision: z.number().int().nonnegative(), unit: z.literal("mm"), activeWorkspace: workspaceSchema,
@@ -24,6 +25,10 @@ const operationSchema = z.object({
   expectedRevision: z.number().int().nonnegative(),
   kind: z.enum(PS3D_OPERATION_KINDS)
 }).catchall(z.unknown());
+const guideAcknowledgementSchema = z.object({
+  manifestSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  understood: z.literal(true)
+}).strict();
 const structuredOutputSchema = z.record(z.string(), z.unknown());
 
 export function createPs3dMcpServer(): McpServer {
@@ -51,6 +56,22 @@ export function createPs3dMcpServer(): McpServer {
     outputSchema: structuredOutputSchema,
     annotations: { title: "PS3D AI collaboration guide", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async () => toSdkResult(await handleWorkbenchMcpTool("ps3d_guide", {})));
+
+  server.registerTool("ps3d_agent_handshake", {
+    title: "PS3D collaboration agent handshake",
+    description: "Configure a stateless host-AI/PS3D coordination pass, match bounded commands, and return correction feedback without executing CAD changes.",
+    inputSchema: z.object({
+      request: z.string().min(2).max(500),
+      experienceLevel: experienceLevelSchema,
+      workspace: workspaceSchema.optional(),
+      clientName: z.string().min(1).max(80).optional(),
+      projectRevision: z.number().int().nonnegative().optional(),
+      proposedTool: z.string().min(1).max(80).optional(),
+      proposedRecipeId: z.string().min(1).max(100).optional()
+    }).strict(),
+    outputSchema: structuredOutputSchema,
+    annotations: { title: "PS3D collaboration agent handshake", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  }, async (args) => toSdkResult(await handleWorkbenchMcpTool("ps3d_agent_handshake", args)));
 
   server.registerTool("ps3d_find_commands", {
     title: "Find PS3D command recipes",
@@ -103,18 +124,18 @@ export function createPs3dMcpServer(): McpServer {
   server.registerTool("ps3d_preview_electromechanical", {
     title: "Preview linked 3D realization",
     description: "Return a deterministic generic-envelope realization operation and receipt without applying it or controlling a live browser session.",
-    inputSchema: z.object({ project: projectSchema }).strict(),
+    inputSchema: z.object({ project: projectSchema, guideAcknowledgement: guideAcknowledgementSchema }).strict(),
     outputSchema: structuredOutputSchema,
     annotations: { title: "Preview linked 3D realization", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  }, async ({ project }) => toSdkResult(await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project })));
+  }, async ({ project, guideAcknowledgement }) => toSdkResult(await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project, guideAcknowledgement })));
 
   server.registerTool("ps3d_preview_operation", {
     title: "Preview PS3D operation",
     description: "Return a validated diff and receipt without mutating the supplied project.",
-    inputSchema: z.object({ project: projectSchema, operation: operationSchema }).strict(),
+    inputSchema: z.object({ project: projectSchema, operation: operationSchema, guideAcknowledgement: guideAcknowledgementSchema }).strict(),
     outputSchema: structuredOutputSchema,
     annotations: { title: "Preview PS3D operation", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  }, async ({ project, operation }) => toSdkResult(await handleWorkbenchMcpTool("ps3d_preview_operation", { project, operation })));
+  }, async ({ project, operation, guideAcknowledgement }) => toSdkResult(await handleWorkbenchMcpTool("ps3d_preview_operation", { project, operation, guideAcknowledgement })));
 
   server.registerTool("ps3d_apply_preview", {
     title: "Apply confirmed PS3D preview",
@@ -123,11 +144,12 @@ export function createPs3dMcpServer(): McpServer {
       project: projectSchema,
       operation: operationSchema,
       receipt: z.string().regex(/^[a-f0-9]{64}$/u),
-      confirmed: z.literal(true)
+      confirmed: z.literal(true),
+      guideAcknowledgement: guideAcknowledgementSchema
     }).strict(),
     outputSchema: structuredOutputSchema,
     annotations: { title: "Apply confirmed PS3D preview", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-  }, async ({ project, operation, receipt, confirmed }) => toSdkResult(await handleWorkbenchMcpTool("ps3d_apply_preview", { project, operation, receipt, confirmed })));
+  }, async ({ project, operation, receipt, confirmed, guideAcknowledgement }) => toSdkResult(await handleWorkbenchMcpTool("ps3d_apply_preview", { project, operation, receipt, confirmed, guideAcknowledgement })));
 
   server.registerResource("ps3d-ai-collaboration-guide", "ps3d://ai/collaboration-guide", {
     title: "PS3D AI collaboration guide",
@@ -148,7 +170,7 @@ export function createPs3dMcpServer(): McpServer {
       role: "user" as const,
       content: {
         type: "text" as const,
-        text: `${PS3D_MCP_INSTRUCTIONS}\n\nUser goal: ${request}\nWorkspace: ${workspace ?? "not specified"}\nProject revision: ${projectRevision ?? "not supplied"}\nFirst call ps3d_find_commands. Do not invent fields or claim a live-browser mutation.`
+        text: `${PS3D_MCP_INSTRUCTIONS}\n\nUser goal: ${request}\nWorkspace: ${workspace ?? "not specified"}\nProject revision: ${projectRevision ?? "not supplied"}\nAfter reading ps3d_guide, call ps3d_agent_handshake and then ps3d_find_commands. Do not invent fields or claim a live-browser mutation.`
       }
     }]
   }));

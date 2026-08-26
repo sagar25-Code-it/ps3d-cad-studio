@@ -54,6 +54,33 @@ export interface CadCommandRecord {
   readonly guide: CadCommandGuide;
 }
 
+export interface CadCommandAuditIssue {
+  readonly code: string;
+  readonly commandId: string;
+  readonly message: string;
+}
+
+export interface CadCommandAuditReport {
+  readonly schema: "ps3d-command-surface-audit/1";
+  readonly passed: boolean;
+  readonly total: number;
+  readonly executable: number;
+  readonly truthfullyBlocked: number;
+  readonly byLevel: Readonly<Record<CapabilityLevel, number>>;
+  readonly byWorkspace: Readonly<Record<string, Readonly<Record<CapabilityLevel | "total", number>>>>;
+  readonly actionKindsCovered: readonly string[];
+  readonly issues: readonly CadCommandAuditIssue[];
+}
+
+export const CAD_EXECUTABLE_ACTION_KINDS = [
+  "open-workspace", "finish-sketch", "activate-sketch-tool", "select-record", "insert-current-part-into-assembly",
+  "create-part-preview-body", "selected-part-preview-body-action", "set-part-preview-bodies-visibility", "insert-component",
+  "apply-assembly-template", "selected-component-action", "set-surface-mode", "fit-view", "set-view-orientation",
+  "set-view-projection", "set-shading-mode", "set-background-tone", "set-navigation-mode", "set-selection-filter",
+  "open-exchange-center", "open-design-health", "apply-electrical-template", "insert-electrical-component",
+  "generate-electromechanical-realization", "apply-vehicle-template", "set-vehicle-state", "toggle-vehicle-layer"
+] as const;
+
 export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   command("command:sketch-select", "sketch", "inspect", "Select", "Select sketch entities by stable ID.", "preview", { kind: "activate-sketch-tool", tool: "select" }, ["cursor", "pick"], "V"),
   command("command:sketch-line", "sketch", "create", "Line", "Create a bounded two-point line.", "preview", { kind: "activate-sketch-tool", tool: "line" }, ["segment", "profile"], "L"),
@@ -384,6 +411,7 @@ command("command:electrical-to-3d", "electrical", "automate", "Circuit to wired 
   unavailable("command:vehicle-homologation", "vehicle", "document", "Roadworthiness and homologation release", "Requires current jurisdiction requirements, accredited test evidence, configuration control, and qualified sign-off.", ["certification", "regulation", "approval"]),
 
   command("command:automate-guide", "automate", "automate", "AI collaboration guide", "Open the model-neutral connection, discovery, preview, confirmation, and returned-project contract.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_guide" }, ["ai", "mcp", "connect", "help", "workflow"]),
+  command("command:automate-agent", "automate", "automate", "Collaboration agent handshake", "Configure a stateless host-AI and PS3D coordination pass with experience-level guidance, bounded recipe matching, stable-ID checks, and correction feedback before execution.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_agent_handshake" }, ["ai", "agent", "collaborate", "coordinate", "beginner", "phd", "feedback", "validate"]),
   command("command:automate-design-health", "automate", "inspect", "Design Health Center", "Analyze all workspaces, actual associativity, deterministic rebuild order, and release boundaries.", "preview", { kind: "open-design-health" }, ["health", "rebuild", "dependency", "associativity", "quality", "readiness"], "Ctrl+Shift+H"),
   command("command:automate-find", "automate", "automate", "Smart command finder", "Match a plain-language engineering goal to bounded command recipes without executing it.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_find_commands" }, ["ai", "intent", "natural language", "recipe", "command"]),
   command("command:automate-capabilities", "automate", "automate", "MCP capability matrix", "List qualified, preview, and unavailable capabilities.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_capabilities" }, ["ai", "tools", "schema"]),
@@ -391,11 +419,51 @@ command("command:electrical-to-3d", "electrical", "automate", "Circuit to wired 
   command("command:automate-preview", "automate", "automate", "MCP preview operation", "Validate intent and issue a deterministic receipt.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_preview_operation" }, ["diff", "receipt"]),
   command("command:automate-apply", "automate", "automate", "MCP apply confirmed preview", "Return a new project only after matching receipt and confirmation.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_apply_preview" }, ["confirm", "mutation"]),
   command("command:automate-python", "automate", "automate", "Python SDK", "Connect standard-library Python to the local MCP stdio server.", "preview", { kind: "select-record", selectionId: "automation:python-sdk" }, ["script", "client", "stdlib"]),
-  unavailable("command:automate-remote", "automate", "automate", "Remote authenticated MCP", "Requires OAuth, tenant isolation, rate limits, Origin validation, and deployment review.", ["http", "cloud", "oauth"])
+  command("command:automate-remote", "automate", "automate", "Remote authenticated MCP", "Review the deployed /api/mcp OAuth or expiring-token connection contract and current guide acknowledgement requirement.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_guide" }, ["http", "cloud", "oauth", "token", "remote"])
 ] as const;
 
 export function commandsForWorkspace(workspace: WorkspaceId): readonly CadCommandRecord[] {
   return CAD_COMMANDS.filter((record) => record.workspace === workspace);
+}
+
+export function auditCadCommandSurface(commands: readonly CadCommandRecord[] = CAD_COMMANDS): CadCommandAuditReport {
+  const issues: CadCommandAuditIssue[] = [];
+  const ids = new Set<string>();
+  const shortcuts = new Set<string>();
+  const executableKinds = new Set<string>(CAD_EXECUTABLE_ACTION_KINDS);
+  for (const record of commands) {
+    if (!/^command:[a-z0-9][a-z0-9-]*$/u.test(record.id)) issues.push({ code: "INVALID_COMMAND_ID", commandId: record.id, message: "Command IDs must use the stable command:<kebab-case> namespace." });
+    if (ids.has(record.id)) issues.push({ code: "DUPLICATE_COMMAND_ID", commandId: record.id, message: "Command IDs must be globally unique." });
+    ids.add(record.id);
+    if (record.name.trim().length === 0 || record.description.trim().length === 0 || record.keywords.length === 0) issues.push({ code: "INCOMPLETE_DISCOVERY_TEXT", commandId: record.id, message: "Name, description, and at least one search keyword are required." });
+    if (record.guide.selection.trim().length === 0 || record.guide.steps.length < 3 || record.guide.result.trim().length === 0 || record.guide.boundary.trim().length === 0) issues.push({ code: "INCOMPLETE_TRIAL_CONTRACT", commandId: record.id, message: "Selection, at least three trial steps, expected result, and verification boundary are required." });
+    if ((record.action.kind === "unavailable") !== (record.level === "unavailable")) issues.push({ code: "CAPABILITY_LABEL_MISMATCH", commandId: record.id, message: "Unavailable execution and capability labels must agree exactly." });
+    if (record.action.kind !== "unavailable" && !executableKinds.has(record.action.kind)) issues.push({ code: "UNREGISTERED_ACTION_HANDLER", commandId: record.id, message: `No audited UI action-handler contract is registered for ${record.action.kind}.` });
+    if (record.action.kind === "select-record" && record.action.selectionId.trim().length === 0) issues.push({ code: "EMPTY_SELECTION_ID", commandId: record.id, message: "Selection commands require a non-empty stable selection ID." });
+    if (record.shortcut !== undefined) {
+      const key = `${record.workspace}:${record.shortcut.toLowerCase()}`;
+      if (shortcuts.has(key)) issues.push({ code: "DUPLICATE_WORKSPACE_SHORTCUT", commandId: record.id, message: `Shortcut ${record.shortcut} is already assigned in ${record.workspace}.` });
+      shortcuts.add(key);
+    }
+  }
+  const levels: readonly CapabilityLevel[] = ["qualified", "preview", "unavailable"];
+  const workspaces: readonly WorkspaceId[] = ["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"];
+  const byLevel = Object.fromEntries(levels.map((level) => [level, commands.filter((record) => record.level === level).length])) as Record<CapabilityLevel, number>;
+  const byWorkspace = Object.fromEntries(workspaces.map((workspace) => {
+    const scoped = commands.filter((record) => record.workspace === workspace);
+    return [workspace, { total: scoped.length, ...Object.fromEntries(levels.map((level) => [level, scoped.filter((record) => record.level === level).length])) }];
+  })) as Record<string, Record<CapabilityLevel | "total", number>>;
+  return {
+    schema: "ps3d-command-surface-audit/1",
+    passed: issues.length === 0,
+    total: commands.length,
+    executable: commands.filter((record) => record.action.kind !== "unavailable").length,
+    truthfullyBlocked: commands.filter((record) => record.action.kind === "unavailable").length,
+    byLevel,
+    byWorkspace,
+    actionKindsCovered: [...new Set(commands.filter((record) => record.action.kind !== "unavailable").map((record) => record.action.kind))].sort(),
+    issues
+  };
 }
 
 function command(

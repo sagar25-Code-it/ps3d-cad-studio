@@ -357,11 +357,101 @@ export function entityPoints(entity: SketchEntity): readonly Vec2[] {
   return [entity.start, entity.mid, entity.end];
 }
 
+/** Returns the complete topological curve component that contains the seed. */
+export function selectConnectedSketchEntities(sketch: WorkbenchSketch, seedId: string, toleranceMm = sketch.snapToleranceMm): readonly string[] {
+  const seed = sketch.entities.find((entity) => entity.id === seedId);
+  if (seed === undefined) return [];
+  const curveEntities = sketch.entities.filter((entity) => !entity.construction);
+  const selected = new Set<string>();
+  const queue = [seed.id];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (selected.has(id)) continue;
+    const entity = curveEntities.find((candidate) => candidate.id === id);
+    if (entity === undefined) continue;
+    selected.add(id);
+    const endpoints = curveEndpoints(entity);
+    if (endpoints.length === 0) continue;
+    for (const candidate of curveEntities) {
+      if (selected.has(candidate.id) || candidate.id === id) continue;
+      if (endpoints.some((endpoint) => curveEndpoints(candidate).some((other) => distance(endpoint, other) <= toleranceMm))) queue.push(candidate.id);
+    }
+  }
+  return [...selected].sort();
+}
+
+/** Selects only endpoint-connected entities that are tangent within tolerance. */
+export function selectTangentSketchEntities(sketch: WorkbenchSketch, seedId: string, angularToleranceDeg = 2, toleranceMm = sketch.snapToleranceMm): readonly string[] {
+  const seed = sketch.entities.find((entity) => entity.id === seedId);
+  if (seed === undefined) return [];
+  if (curveEndpoints(seed).length === 0) return [seed.id];
+  const curveEntities = sketch.entities.filter((entity) => !entity.construction);
+  const cosineTolerance = Math.cos(angularToleranceDeg * Math.PI / 180);
+  const selected = new Set<string>();
+  const queue = [seed.id];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (selected.has(id)) continue;
+    const entity = curveEntities.find((candidate) => candidate.id === id);
+    if (entity === undefined) continue;
+    selected.add(id);
+    for (const candidate of curveEntities) {
+      if (selected.has(candidate.id) || candidate.id === id) continue;
+      if (curvesShareTangent(entity, candidate, toleranceMm, cosineTolerance)) queue.push(candidate.id);
+    }
+  }
+  return [...selected].sort();
+}
+
+/** Counts branch endpoints so the UI can disclose ambiguous chain intent. */
+export function sketchChainBranchCount(sketch: WorkbenchSketch, entityIds: readonly string[], toleranceMm = sketch.snapToleranceMm): number {
+  const endpoints = entityIds.flatMap((id) => {
+    const entity = sketch.entities.find((candidate) => candidate.id === id);
+    return entity === undefined ? [] : curveEndpoints(entity);
+  });
+  return endpoints.filter((point, index) => endpoints.filter((candidate, candidateIndex) => candidateIndex !== index && distance(point, candidate) <= toleranceMm).length > 2).length;
+}
+
 function baseFreedom(entity: SketchEntity): number {
   if (entity.kind === "line") return 4;
   if (entity.kind === "rectangle") return 5;
   if (entity.kind === "circle") return 3;
   return 6;
+}
+
+function curveEndpoints(entity: SketchEntity): readonly Vec2[] {
+  if (entity.kind === "line" || entity.kind === "arc") return [entity.start, entity.end];
+  return [];
+}
+
+function curvesShareTangent(left: SketchEntity, right: SketchEntity, toleranceMm: number, cosineTolerance: number): boolean {
+  for (const leftEnd of curveEndTangents(left)) {
+    for (const rightEnd of curveEndTangents(right)) {
+      if (distance(leftEnd.point, rightEnd.point) > toleranceMm) continue;
+      const dot = Math.abs(leftEnd.tangent[0] * rightEnd.tangent[0] + leftEnd.tangent[1] * rightEnd.tangent[1]);
+      if (dot >= cosineTolerance) return true;
+    }
+  }
+  return false;
+}
+
+function curveEndTangents(entity: SketchEntity): readonly { readonly point: Vec2; readonly tangent: Vec2 }[] {
+  if (entity.kind === "line") {
+    const tangent = normalize2([entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]]);
+    return [{ point: entity.start, tangent }, { point: entity.end, tangent }];
+  }
+  if (entity.kind === "arc") {
+    return [
+      { point: entity.start, tangent: normalize2([entity.mid[0] - entity.start[0], entity.mid[1] - entity.start[1]]) },
+      { point: entity.end, tangent: normalize2([entity.end[0] - entity.mid[0], entity.end[1] - entity.mid[1]]) }
+    ];
+  }
+  return [];
+}
+
+function normalize2(value: Vec2): Vec2 {
+  const length = Math.hypot(...value);
+  return length < 1e-12 ? [0, 0] : [value[0] / length, value[1] / length];
 }
 
 function reduce(freedom: Map<string, number>, ids: readonly string[], amount: number): void {

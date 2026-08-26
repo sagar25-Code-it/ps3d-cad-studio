@@ -121,7 +121,7 @@ export const PS3D_LEARNING_MANUAL: LearningManual = {
     ], ["External buffers and unsafe paths are rejected.", "Unsupported STEP/IGES/native formats remain unavailable rather than silently degraded.", "Export filenames are fixed and sanitized."], "The public browser app cannot honestly support every 3D format without licensed or server-side translators; native CAD associativity is not reconstructed from meshes."),
     module("mcp", "11", "Advanced", "AI / MCP", "Secure model-neutral AI collaboration", "Connect any compatible AI host through OAuth 2.1 or one expiring personal token, then use deterministic discovery, inspect, preview, receipt review, and confirmed-return workflow.", [
       "Sign in with email and password, verify the account, and create one scoped token per client when OAuth is unavailable.",
-      "Call initialize, tools/list, ps3d_guide, ps3d_find_commands, inspect, preview, and only then the receipt-gated apply tool.",
+      "Use server/discover for modern MCP or initialize for a supported legacy host, then call tools/list, ps3d_guide, ps3d_agent_handshake, inspect, design health, command search, preview, and only then the receipt-gated apply tool.",
       "Keep project ownership with the caller: the remote server reads only request payloads, stores no project, and writes no browser or filesystem state."
     ], [
       "Prefer a client that follows protected-resource metadata and OAuth 2.1 automatically.",

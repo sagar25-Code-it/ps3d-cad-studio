@@ -36,7 +36,7 @@ export const WORKBENCH_CAPABILITIES: readonly CapabilityRecord[] = [
   { id: "capability:python-sdk", workspace: "automate", name: "Python MCP client", level: "preview", summary: "Standard-library dual-era Python client for an explicitly configured direct local MCP stdio command." },
   { id: "capability:exact-brep", workspace: "part", name: "Exact B-rep and NURBS", level: "unavailable", summary: "Requires a separately qualified exact kernel and topology contract." },
   { id: "capability:proprietary-cad-import", workspace: "part", name: "Native proprietary CAD import", level: "unavailable", summary: "STEP/IGES exact conversion and native vendor formats require reviewed kernels, authorized SDKs, or upstream neutral export." },
-  { id: "capability:remote-mcp", workspace: "automate", name: "Remote authenticated MCP", level: "unavailable", summary: "Requires OAuth, tenancy, rate limits, privacy, and deployment review." }
+  { id: "capability:remote-mcp", workspace: "automate", name: "Remote authenticated MCP", level: "preview", summary: "Deployed /api/mcp transport with OAuth or expiring bearer tokens, tenant-scoped permissions, Origin validation, a 1 MB body cap, and identity rate limiting; availability still depends on valid cloud configuration." }
 ];
 
 export function capabilitiesForWorkspace(workspace: CapabilityRecord["workspace"]): readonly CapabilityRecord[] {

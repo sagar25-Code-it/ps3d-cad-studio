@@ -11,6 +11,7 @@ import { parseNativeRevisionText, serializeNativeRevision } from "../../../packa
 import {
   applyWorkbenchOperation,
   buildMasterCartItem,
+  classifyWorkbenchSelection,
   createElectricalComponentInstance,
   createElectromechanicalAssembly,
   createWorkbenchProject,
@@ -19,6 +20,7 @@ import {
   isElectricalSheetPositionAvailable,
   parseWorkbenchProjectText,
   preferredElectromechanicalLayout,
+  resolveWorkbenchContextCommands,
   validateWorkbenchProject,
   type AssemblyTemplateId,
   type CadCommandRecord,
@@ -35,6 +37,7 @@ import {
   type VehicleTemplateId,
   type WorkbenchOperation,
   type WorkbenchProject,
+  type WorkbenchSelectionKind,
   type WorkbenchSketchConstraint,
   type Vec3,
   type WorkspaceId
@@ -59,6 +62,7 @@ import {
 import { resolveQualifiedExtrusion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import {
   ThreeViewportAdapter,
+  viewAnglesForOrientation,
   type NavigationMode,
   type SelectionFilter,
   type ViewOrientation,
@@ -77,7 +81,9 @@ import { CommandPalette } from "./ui/CommandPalette.js";
 import { ExchangeCenter } from "./ui/ExchangeCenter.js";
 import { ViewportChrome } from "./ui/ViewportChrome.js";
 import { DesignHealthCenter } from "./ui/DesignHealthCenter.js";
-import { SketchWorkspace } from "./workspaces/SketchWorkspace.js";
+import { WorkbenchContextMenu } from "./ui/WorkbenchContextMenu.js";
+import { selectWorkbenchHistoryLane } from "./ui/history-lane.js";
+import { SketchWorkspace, type SketchExtrudeOperation } from "./workspaces/SketchWorkspace.js";
 import { PartInspector } from "./workspaces/PartInspector.js";
 import { ImportedModelInspector } from "./workspaces/ImportedModelInspector.js";
 import { AssemblyInspector } from "./workspaces/AssemblyInspector.js";
@@ -94,6 +100,7 @@ type OperationIntent = WithoutEnvelope<WorkbenchOperation>;
 type PartParameter = Extract<WorkbenchOperation, { kind: "set-part-parameter" }>["parameter"];
 type ReplaceableAssemblyTemplate = Exclude<AssemblyTemplateId, "custom" | "electrical-panel">;
 type UiDiagnostic = Pick<Diagnostic, "code" | "message" | "recovery"> | { readonly code: string; readonly message: string; readonly recovery: string };
+interface OpenContextMenu { readonly x: number; readonly y: number; readonly selectionId: string | null; readonly selectionKind: WorkbenchSelectionKind; }
 
 const QUALIFIED_PART_KEYS: Readonly<Partial<Record<PartParameter, ParameterKey>>> = {
   widthMm: "width",
@@ -151,8 +158,10 @@ export function App(): React.JSX.Element {
   const activeImportRef = useRef<ExchangeImportResult | undefined>(undefined);
   const [sketchTool, setSketchTool] = useState<SketchTool>("select");
   const [sketchCancelVersion, setSketchCancelVersion] = useState(0);
+  const [sketchDimensionMode, setSketchDimensionMode] = useState(false);
   const [viewportState, setViewportState] = useState<ViewportViewState>(DEFAULT_VIEWPORT_STATE);
   const [measurePoints, setMeasurePoints] = useState<readonly ViewportMeasurePoint[]>([]);
+  const [contextMenu, setContextMenu] = useState<OpenContextMenu>();
   const clientRef = useRef<GeometryWorkerClient | undefined>(undefined);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
@@ -348,18 +357,22 @@ export function App(): React.JSX.Element {
   const acceptMeasurePoint = useCallback((point: ViewportMeasurePoint): void => {
     setMeasurePoints((current) => current.length >= 2 ? [point] : [...current, point]);
   }, []);
+  const openContextMenu = useCallback((clientX: number, clientY: number, selectionId: string | null, selectionKind?: WorkbenchSelectionKind): void => {
+    if (selectionId !== null) setSelectedId(selectionId);
+    setContextMenu({ x: clientX, y: clientY, selectionId, selectionKind: selectionKind ?? classifyWorkbenchSelection(selectionId) });
+  }, []);
   useEffect(() => {
     if (masterCartOpen || !isThreeDimensional || canvasRef.current === null) return;
     const viewport = new ThreeViewportAdapter(canvasRef.current, {
       onSelectBody: setSelectedId,
       onViewChange: setViewportState,
-      onMeasurePoint: acceptMeasurePoint
+      onMeasurePoint: acceptMeasurePoint,
+      onContextMenu: (request) => openContextMenu(request.clientX, request.clientY, request.semanticId, request.selectionKind === "body" || request.selectionKind === "component" ? request.selectionKind : undefined)
     });
-    viewport.setShadingMode(viewportState.shadingMode);
-    viewport.setBodyColor(viewportState.bodyColor);
+    viewport.restoreViewState(viewportState);
     viewportRef.current = viewport;
     return () => { viewport.dispose(); viewportRef.current = undefined; };
-  }, [acceptMeasurePoint, isThreeDimensional, masterCartOpen, project.activeWorkspace]);
+  }, [acceptMeasurePoint, isThreeDimensional, masterCartOpen, openContextMenu, project.activeWorkspace]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -375,8 +388,10 @@ export function App(): React.JSX.Element {
 
   const switchWorkspace = (workspace: WorkspaceId): void => {
     setMasterCartOpen(false);
+    setContextMenu(undefined);
     setSelectedId(null);
     setMeasurePoints([]);
+    if (workspace !== "sketch") setViewportState((current) => ["sketch-curve", "profile", "connected", "tangent"].includes(current.selectionFilter) ? { ...current, selectionFilter: "auto" } : current);
     const current = projectRef.current;
     if (workspace === current.activeWorkspace) return;
     const next = { ...current, activeWorkspace: workspace };
@@ -612,18 +627,19 @@ export function App(): React.JSX.Element {
   };
 
   const executeCadCommand = (command: CadCommandRecord): void => {
-    if (command.action.kind === "open-design-health") {
+    const action = command.action;
+    if (action.kind === "open-design-health") {
       openDesignHealth();
       return;
     }
     switchWorkspace(command.workspace);
-    if (command.action.kind === "unavailable") {
+    if (action.kind === "unavailable") {
       setSelectedId(command.id);
       setStatus("ready");
       setStatusText(`${command.name} is cataloged but unavailable: ${command.description}`);
       return;
     }
-    switch (command.action.kind) {
+    switch (action.kind) {
       case "open-workspace":
         setStatusText(`Opened ${command.name}. ${command.description}`);
         break;
@@ -636,48 +652,48 @@ export function App(): React.JSX.Element {
         setExchangeFeedback("Choose a local import, export, or PDF delivery workflow.");
         break;
       case "apply-electrical-template":
-        requestElectricalTemplate(command.action.template);
+        requestElectricalTemplate(action.template);
         break;
       case "insert-electrical-component":
-        insertElectricalComponent(command.action.componentKind);
+        insertElectricalComponent(action.componentKind);
         break;
       case "generate-electromechanical-realization":
         requestElectromechanicalAssembly();
         break;
       case "apply-vehicle-template":
-        requestVehicleTemplate(command.action.template);
+        requestVehicleTemplate(action.template);
         break;
       case "set-vehicle-state":
-        applyProjectOperation({ kind: "set-vehicle-simulation-state", state: command.action.state });
+        applyProjectOperation({ kind: "set-vehicle-simulation-state", state: action.state });
         break;
       case "toggle-vehicle-layer":
-        applyProjectOperation({ kind: "toggle-vehicle-layer", layer: command.action.layer });
+        applyProjectOperation({ kind: "toggle-vehicle-layer", layer: action.layer });
         break;
       case "activate-sketch-tool":
-        setSketchTool(command.action.tool);
+        setSketchTool(action.tool);
         setStatusText(`${command.name} tool active from the command launcher.`);
         break;
       case "select-record":
-        setSelectedId(command.action.selectionId);
+        setSelectedId(action.selectionId);
         setStatusText(`${command.name} selected. ${command.description}`);
         break;
       case "create-part-preview-body":
-        createPartPreviewBody(command.action.shape);
+        createPartPreviewBody(action.shape);
         break;
       case "selected-part-preview-body-action":
-        runSelectedPartPreviewAction(command.action.operation, command.name);
+        runSelectedPartPreviewAction(action.operation, command.name);
         break;
       case "set-part-preview-bodies-visibility":
-        applyProjectOperation({ kind: "set-part-preview-bodies-visibility", visible: command.action.visible });
+        applyProjectOperation({ kind: "set-part-preview-bodies-visibility", visible: action.visible });
         break;
       case "insert-component":
-        insertAssemblyComponent(command.action.shape);
+        insertAssemblyComponent(action.shape);
         break;
       case "insert-current-part-into-assembly":
         insertCurrentPartIntoAssembly();
         break;
       case "apply-assembly-template":
-        requestAssemblyTemplate(command.action.template);
+        requestAssemblyTemplate(action.template);
         break;
       case "selected-component-action": {
         const componentId = selectedId?.startsWith("component:") === true ? selectedId : undefined;
@@ -685,37 +701,39 @@ export function App(): React.JSX.Element {
           setStatusText(`Select a component before running ${command.name}.`);
           break;
         }
-        if (command.action.operation === "delete") deleteAssemblyComponent(componentId);
-        if (command.action.operation === "toggle-grounded") applyProjectOperation({ kind: "toggle-component-grounded", componentId });
-        if (command.action.operation === "toggle-visible") applyProjectOperation({ kind: "toggle-component-visibility", componentId });
+        if (action.operation === "delete") deleteAssemblyComponent(componentId);
+        if (action.operation === "toggle-grounded") applyProjectOperation({ kind: "toggle-component-grounded", componentId });
+        if (action.operation === "toggle-visible") applyProjectOperation({ kind: "toggle-component-visibility", componentId });
         break;
       }
       case "set-surface-mode":
-        applyProjectOperation({ kind: "set-surface-mode", mode: command.action.mode });
+        applyProjectOperation({ kind: "set-surface-mode", mode: action.mode });
         break;
       case "fit-view":
         fitViewport();
         break;
       case "set-view-orientation":
-        setViewportOrientation(command.action.orientation);
+        setViewportOrientation(action.orientation);
         break;
       case "set-view-projection":
-        setViewportProjection(command.action.projection);
+        setViewportProjection(action.projection);
         break;
       case "set-shading-mode":
-        viewportRef.current?.setShadingMode(command.action.mode);
+        viewportRef.current?.setShadingMode(action.mode);
         setStatusText(`${command.name} display mode active.`);
         break;
       case "set-background-tone":
-        viewportRef.current?.setBackgroundTone(command.action.tone);
+        viewportRef.current?.setBackgroundTone(action.tone);
         setStatusText(`${command.name} viewport background active.`);
         break;
       case "set-navigation-mode":
-        setViewportNavigation(command.action.mode);
+        setViewportNavigation(action.mode);
         break;
       case "set-selection-filter":
-        setViewportSelectionFilter(command.action.filter);
+        setViewportSelectionFilter(action.filter);
         break;
+      default:
+        assertNever(action);
     }
   };
 
@@ -738,7 +756,12 @@ export function App(): React.JSX.Element {
     if (response !== undefined) acceptResponse(response);
   };
 
-  const extrudeSketchProfiles = async (profileIds: readonly string[], distanceMm: number): Promise<void> => {
+  const extrudeSketchProfiles = async (profileIds: readonly string[], distanceMm: number, operation: SketchExtrudeOperation): Promise<void> => {
+    if (operation !== "new-body" && operation !== "new-component") {
+      setStatus("error");
+      setStatusText("Join, Cut and Intersect require persistent B-rep topology and an overlap preview; no Boolean was attempted.");
+      return;
+    }
     const resolved = resolveQualifiedExtrusion(projectRef.current.sketch, profileIds, distanceMm);
     if (!resolved.ok) {
       const first = resolved.diagnostics[0];
@@ -770,10 +793,28 @@ export function App(): React.JSX.Element {
       }).catch(() => undefined);
       if (response === undefined || !acceptResponse(response)) return;
     }
-    switchWorkspace("part");
-    setSelectedId("feature:plate-extrusion");
+    if (operation === "new-component") {
+      const component: ComponentInstance = {
+        id: `component:sketch-extrusion-${crypto.randomUUID()}`,
+        name: `${projectRef.current.sketch.name} extrusion`,
+        shape: "plate",
+        grounded: false,
+        visible: true,
+        color: "#aeb3b8",
+        translationMm: [0, 0, resolved.value.distanceMm / 2],
+        rotationDeg: [0, 0, 0],
+        sizeMm: [resolved.value.widthMm, resolved.value.heightMm, resolved.value.distanceMm],
+        explosionDirection: [0.2, -0.14, 0.65]
+      };
+      if (!applyProjectOperation({ kind: "add-assembly-component", component })) return;
+      switchWorkspace("assembly");
+      setSelectedId(component.id);
+    } else {
+      switchWorkspace("part");
+      setSelectedId("feature:plate-extrusion");
+    }
     setStatus("ready");
-    setStatusText(`Created qualified ${resolved.value.widthMm} × ${resolved.value.heightMm} × ${resolved.value.distanceMm} mm extrusion with Ø${resolved.value.holeDiameterMm} mm through-bore from the selected sketch profiles.`);
+    setStatusText(`Created qualified ${resolved.value.widthMm} × ${resolved.value.heightMm} × ${resolved.value.distanceMm} mm ${operation === "new-component" ? "component" : "body"} with Ø${resolved.value.holeDiameterMm} mm through-bore from associative sketch profiles.`);
   };
 
   const changeUnit = async (unit: DisplayUnit): Promise<void> => {
@@ -987,29 +1028,107 @@ export function App(): React.JSX.Element {
   };
 
   const setViewportNavigation = (mode: NavigationMode): void => {
-    viewportRef.current?.setNavigationMode(mode);
+    if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, navigationMode: mode }));
+    else viewportRef.current.setNavigationMode(mode);
     setStatusText(mode === "measure" ? "Measure active: pick two visible model points." : `${mode[0]!.toUpperCase()}${mode.slice(1)} navigation active.`);
   };
 
   const setViewportSelectionFilter = (filter: SelectionFilter): void => {
-    viewportRef.current?.setSelectionFilter(filter);
+    if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, selectionFilter: filter }));
+    else viewportRef.current.setSelectionFilter(filter);
     setStatusText(`${filter === "auto" ? "Automatic" : filter} selection priority active.`);
   };
 
   const setViewportOrientation = (orientation: Exclude<ViewOrientation, "custom">): void => {
-    viewportRef.current?.setOrientation(orientation);
+    if (viewportRef.current === undefined) {
+      const [azimuthDeg, elevationDeg] = viewAnglesForOrientation(orientation);
+      setViewportState((current) => ({ ...current, orientation, azimuthDeg, elevationDeg }));
+    } else viewportRef.current.setOrientation(orientation);
     setStatusText(`${orientation[0]!.toUpperCase()}${orientation.slice(1)} view active.`);
   };
 
   const setViewportProjection = (projection: ViewProjection): void => {
-    viewportRef.current?.setProjection(projection);
+    if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, projection }));
+    else viewportRef.current.setProjection(projection);
     setStatusText(`${projection === "orthographic" ? "Orthographic" : "Perspective"} projection active.`);
+  };
+
+  const setViewportAngles = (azimuthDeg: number, elevationDeg: number): void => {
+    if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, orientation: "custom", azimuthDeg, elevationDeg }));
+    else viewportRef.current.setViewAngles(azimuthDeg, elevationDeg);
+  };
+
+  const setViewportGrid = (visible: boolean): void => {
+    if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, gridVisible: visible }));
+    else viewportRef.current.setGridVisible(visible);
+  };
+
+  const setViewportAxes = (visible: boolean): void => {
+    if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, axesVisible: visible }));
+    else viewportRef.current.setAxesVisible(visible);
   };
 
   const homeViewport = (): void => {
     viewportRef.current?.setOrientation("isometric");
+    if (viewportRef.current === undefined) setViewportOrientation("isometric");
     fitViewport();
     setStatusText("Isometric home view fitted to visible geometry.");
+  };
+
+  const runContextCommand = (commandId: string): void => {
+    const selectionId = contextMenu?.selectionId ?? selectedId;
+    setContextMenu(undefined);
+    if (commandId === "history.undo") { void moveHistory("undo"); return; }
+    if (commandId === "history.redo") { void moveHistory("redo"); return; }
+    if (commandId === "view.fit") { fitViewport(); return; }
+    if (commandId === "view.home") { homeViewport(); return; }
+    if (commandId === "view.look-at" || commandId === "sketch.look-at") { setViewportOrientation(selectionId === "datum:yz" ? "right" : selectionId === "datum:xz" ? "front" : "top"); return; }
+    if (commandId === "inspect.measure") { setViewportNavigation("measure"); return; }
+    if (commandId === "sketch.create" || commandId === "sketch.edit") { switchWorkspace("sketch"); if (selectionId !== null) setSelectedId(selectionId); return; }
+    if (commandId === "sketch.finish") { switchWorkspace("part"); return; }
+    if (commandId === "sketch.select-profile") { setViewportSelectionFilter("profile"); return; }
+    if (commandId === "sketch.select-curve") { setViewportSelectionFilter("sketch-curve"); return; }
+    if (commandId === "sketch.select-connected") { setViewportSelectionFilter("connected"); return; }
+    if (commandId === "sketch.select-tangent") { setViewportSelectionFilter("tangent"); return; }
+    if (commandId === "sketch.dimension") {
+      setSketchTool("select");
+      setSketchDimensionMode(true);
+      setViewportNavigation("select");
+      setViewportSelectionFilter("sketch-curve");
+      if (selectionId !== null) setSelectedId(selectionId);
+      setStatusText("Sketch Dimension active: select a curve or two displayed definition points, then edit the driving value in the inspector.");
+      return;
+    }
+    if (commandId === "feature.extrude") { switchWorkspace("sketch"); if (selectionId !== null) setSelectedId(selectionId); setStatusText("Extrude ready: review the selected closed profile and operation in the right inspector."); return; }
+    if (commandId === "feature.edit" || commandId === "body.appearance" || commandId === "body.move") { switchWorkspace("part"); if (selectionId !== null) setSelectedId(selectionId); return; }
+    if (commandId === "feature.reveal-inputs") { switchWorkspace("sketch"); setSelectedId(projectRef.current.sketch.id); setTreeRevealRequest((request) => request + 1); return; }
+    if (commandId === "body.create-component") { insertCurrentPartIntoAssembly(); return; }
+    if (commandId === "component.move" || commandId === "mate.create" || commandId === "mate.edit") { switchWorkspace("assembly"); if (selectionId !== null) setSelectedId(selectionId); return; }
+    if (commandId === "component.ground" && selectionId !== null) { applyProjectOperation({ kind: "toggle-component-grounded", componentId: selectionId }); return; }
+    if (commandId === "selection.toggle-visibility" && selectionId !== null) {
+      if (selectionId.startsWith("entity:")) applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId: selectionId });
+      else if (selectionId.startsWith("component:")) applyProjectOperation({ kind: "toggle-component-visibility", componentId: selectionId });
+      else if (selectionId.startsWith("part-body:")) applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId: selectionId });
+      return;
+    }
+    if (commandId === "selection.isolate" && selectionId?.startsWith("part-body:") === true) { applyProjectOperation({ kind: "isolate-part-preview-body", bodyId: selectionId }); return; }
+    if (commandId === "selection.delete" && selectionId !== null) {
+      if (selectionId.startsWith("entity:")) applyProjectOperation({ kind: "delete-sketch-entity", entityId: selectionId });
+      else if (selectionId.startsWith("part-body:")) applyProjectOperation({ kind: "delete-part-preview-body", bodyId: selectionId });
+      else if (selectionId.startsWith("component:")) deleteAssemblyComponent(selectionId);
+      else if (selectionId.startsWith("mate:")) applyProjectOperation({ kind: "delete-assembly-mate", mateId: selectionId });
+      setSelectedId(null);
+      return;
+    }
+    if (commandId === "mate.select-components" && selectionId !== null) {
+      const mate = projectRef.current.assembly.mates.find((candidate) => candidate.id === selectionId);
+      setSelectedId(mate?.componentIds[0] ?? null);
+      setTreeRevealRequest((request) => request + 1);
+      setStatusText(mate === undefined ? "Mate relationship is no longer available." : `Selected the first component of ${mate.name}; ${mate.componentIds.length} component reference(s) are shown in Selection relationships.`);
+      return;
+    }
+    if (commandId === "sketch.toggle-construction" && selectionId?.startsWith("entity:") === true) { applyProjectOperation({ kind: "toggle-sketch-construction", entityId: selectionId }); return; }
+    setStatusText(`${commandId.replaceAll(".", " ")} is available through the active inspector or is truth-labeled as unavailable in this preview.`);
   };
 
   const openDesignHealth = useCallback((): void => {
@@ -1021,7 +1140,7 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     const listener = (event: KeyboardEvent): void => {
-      if (!isThreeDimensional || isEditableTarget(event.target) || globalThis.document.querySelector('[role="dialog"]') !== null) return;
+      if (!(isThreeDimensional || projectRef.current.activeWorkspace === "sketch") || isEditableTarget(event.target) || globalThis.document.querySelector('[role="dialog"]') !== null) return;
       const key = event.key.toLowerCase();
       if (key === "f") fitViewport();
       if (key === "1") setViewportOrientation("front");
@@ -1050,18 +1169,24 @@ export function App(): React.JSX.Element {
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
   }, [openDesignHealth]);
-  const canUndo = project.activeWorkspace === "part" ? undoDepth > 0 : projectUndoDepth > 0;
-  const canRedo = project.activeWorkspace === "part" ? redoDepth > 0 : projectRedoDepth > 0;
+  const undoLane = selectWorkbenchHistoryLane(project.activeWorkspace, undoDepth, projectUndoDepth);
+  const redoLane = selectWorkbenchHistoryLane(project.activeWorkspace, redoDepth, projectRedoDepth);
+  const canUndo = undoLane !== null;
+  const canRedo = redoLane !== null;
+  const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo });
 
   return <main className="studio-app" data-workspace={masterCartOpen ? "master-cart" : project.activeWorkspace} aria-busy={status === "working"}>
-    <WorkbenchHeader project={project} masterCartOpen={masterCartOpen} status={status} onWorkspace={switchWorkspace} onMasterCart={openMasterCart} onCommandPalette={() => setPaletteOpen(true)} onDesignHealth={openDesignHealth} onExchange={() => setExchangeOpen(true)} onLearning={() => window.location.assign("/learn")} onAccess={() => window.location.assign("/access")} onSave={() => void saveAll()} onDownload={downloadProject} onOpen={() => projectInputRef.current?.click()} onUndo={() => void moveHistory("undo")} onRedo={() => void moveHistory("redo")} onFit={fitViewport} onHome={homeViewport} onToggleGrid={() => viewportRef.current?.setGridVisible(!viewportState.gridVisible)} onMeasure={() => setViewportNavigation("measure")} gridVisible={viewportState.gridVisible} canUndo={canUndo} canRedo={canRedo} designHealthStatus={designHealth.overallStatus} designHealthScore={designHealth.score} />
+    <WorkbenchHeader project={project} masterCartOpen={masterCartOpen} status={status} onWorkspace={switchWorkspace} onMasterCart={openMasterCart} onCommandPalette={() => setPaletteOpen(true)} onDesignHealth={openDesignHealth} onExchange={() => setExchangeOpen(true)} onLearning={() => window.location.assign("/learn")} onAccess={() => window.location.assign("/access")} onSave={() => void saveAll()} onDownload={downloadProject} onOpen={() => projectInputRef.current?.click()} onUndo={() => undoLane === "qualified-part" ? void moveHistory("undo") : moveProjectHistory("undo")} onRedo={() => redoLane === "qualified-part" ? void moveHistory("redo") : moveProjectHistory("redo")} onFit={fitViewport} onHome={homeViewport} onToggleGrid={() => setViewportGrid(!viewportState.gridVisible)} onMeasure={() => setViewportNavigation("measure")} gridVisible={viewportState.gridVisible} canUndo={canUndo} canRedo={canRedo} designHealthStatus={designHealth.overallStatus} designHealthScore={designHealth.score} />
     <WorkbenchRibbon
       project={project}
       masterCartOpen={masterCartOpen}
       displayUnit={document.displayUnit}
       sketchTool={sketchTool}
+      sketchDimensionMode={sketchDimensionMode}
       selectedId={selectedId}
-      onSketchTool={(tool) => { setSketchTool(tool); setStatusText(`${sketchToolLabel(tool)} tool active in the top ribbon.`); }}
+      onSketchTool={(tool) => { setSketchTool(tool); setSketchDimensionMode(false); setStatusText(`${sketchToolLabel(tool)} tool active in the top ribbon.`); }}
+      onSketchDimension={() => { setSketchTool("select"); setSketchDimensionMode(true); setViewportNavigation("select"); setViewportSelectionFilter("sketch-curve"); setStatusText("Sketch Dimension active: select a curve or two displayed definition points."); }}
+      onToggleSketchEntityVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })}
       onFinishSketch={() => { switchWorkspace("part"); setStatusText("Sketch session finished. Revisioned sketch geometry remains linked to the Part workspace."); }}
       onCancelSketchPoints={() => { setSketchCancelVersion((version) => version + 1); setStatusText("Pending sketch points cleared from the top ribbon."); }}
       onSelect={setSelectedId}
@@ -1108,8 +1233,8 @@ export function App(): React.JSX.Element {
     <input ref={nativeInputRef} type="file" accept="application/json,.json" className="visually-hidden" aria-label="Open qualified PS3D native part revision" tabIndex={-1} onChange={(event) => void openNative(event)} />
     <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
-      {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={setSelectedId} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onExtrudeProfiles={extrudeSketchProfiles} working={status === "working"} onMessage={setStatusText} />}
+      {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={setSelectedId} onContextMenu={openContextMenu} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} onExtrudeProfiles={extrudeSketchProfiles} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} onFit={() => setStatusText("Sketch fit is already bounded to all visible entities.")} onHome={homeViewport} onContextMenu={openContextMenu} working={status === "working"} onMessage={setStatusText} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <ViewportChrome
@@ -1119,9 +1244,10 @@ export function App(): React.JSX.Element {
           onNavigationMode={setViewportNavigation}
           onSelectionFilter={setViewportSelectionFilter}
           onOrientation={setViewportOrientation}
+          onViewAngles={setViewportAngles}
           onProjection={setViewportProjection}
-          onGrid={(visible) => viewportRef.current?.setGridVisible(visible)}
-          onAxes={(visible) => viewportRef.current?.setAxesVisible(visible)}
+          onGrid={setViewportGrid}
+          onAxes={setViewportAxes}
           onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)}
           onBodyColor={(color) => viewportRef.current?.setBodyColor(color)}
           onBackgroundTone={(tone: ViewportBackgroundTone) => viewportRef.current?.setBackgroundTone(tone)}
@@ -1134,7 +1260,7 @@ export function App(): React.JSX.Element {
       {!masterCartOpen && <>
       {project.activeWorkspace === "part" && activeImport === undefined && <PartInspector part={project.part} model={model} working={status === "working"} bodyColor={viewportState.bodyColor} shadingMode={viewportState.shadingMode} selectedId={selectedId} onSelect={setSelectedId} onBodyColor={(color) => viewportRef.current?.setBodyColor(color)} onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)} onCommit={(parameter, value) => void commitPartParameter(parameter, value)} onInsertIntoAssembly={insertCurrentPartIntoAssembly} onCreatePreviewBody={createPartPreviewBody} onPreviewBodyTransform={(bodyId, translationMm, rotationDeg) => applyProjectOperation({ kind: "set-part-preview-body-transform", bodyId, translationMm, rotationDeg })} onPreviewBodySize={(bodyId, sizeMm) => applyProjectOperation({ kind: "set-part-preview-body-size", bodyId, sizeMm })} onPreviewBodyColor={(bodyId, color) => applyProjectOperation({ kind: "set-part-preview-body-color", bodyId, color })} onPreviewBodyVisibility={(bodyId) => applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId })} onPreviewBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId })) setSelectedId(null); }} />}
       {project.activeWorkspace === "part" && activeImport !== undefined && <ImportedModelInspector result={activeImport} onExchange={() => setExchangeOpen(true)} onClear={clearActiveImport} />}
-      {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={project.assembly} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplode={(valueMm) => applyProjectOperation({ kind: "set-assembly-explode", valueMm })} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
+      {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={project.assembly} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplode={(valueMm) => applyProjectOperation({ kind: "set-assembly-explode", valueMm })} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onAddMate={(mate) => applyProjectOperation({ kind: "add-assembly-mate", mate })} onDeleteMate={(mateId) => { if (applyProjectOperation({ kind: "delete-assembly-mate", mateId })) setSelectedId(null); }} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
       {project.activeWorkspace === "surface" && <SurfaceInspector surface={project.surface} metrics={surfacePreview.metrics} onParameter={(parameter, value) => applyProjectOperation({ kind: "set-surface-parameter", parameter, value })} />}
       {project.activeWorkspace === "drawing" && <DrawingWorkspace settings={project.drawing} artifact={drawing} onSheet={(sheet) => applyProjectOperation({ kind: "set-drawing-sheet", sheet })} onProjection={(projection) => applyProjectOperation({ kind: "set-drawing-projection", projection })} onScale={(scale) => applyProjectOperation({ kind: "set-drawing-scale", scale })} onDimensions={(show) => applyProjectOperation({ kind: "set-drawing-dimensions", show })} onViewPreset={(preset) => applyProjectOperation({ kind: "set-drawing-view-preset", preset })} onDisplayStyle={(style) => applyProjectOperation({ kind: "set-drawing-display-style", style })} onSectionView={(show) => applyProjectOperation({ kind: "set-drawing-section-view", show })} onDraftingStandard={(standard) => applyProjectOperation({ kind: "set-drawing-drafting-standard", standard })} onGdt={(show) => applyProjectOperation({ kind: "set-drawing-gdt", show })} onDatumScheme={(scheme) => applyProjectOperation({ kind: "set-drawing-datum-scheme", scheme })} onGdtSpecification={(positionMm, flatnessMm, perpendicularityMm) => applyProjectOperation({ kind: "set-drawing-gdt-specification", positionMm, flatnessMm, perpendicularityMm })} onGeneralTolerance={(linearMm, angularDeg) => applyProjectOperation({ kind: "set-drawing-general-tolerance", linearMm, angularDeg })} onNotes={(notes) => applyProjectOperation({ kind: "set-drawing-notes", notes })} />}
       {project.activeWorkspace === "electrical" && <ElectricalWorkspace intent={project.electrical} artifact={electrical} selectedId={selectedId} onSelect={setSelectedId} onTemplate={requestElectricalTemplate} onStandard={(standard) => applyProjectOperation({ kind: "set-electrical-standard", standard })} onInsertComponent={insertElectricalComponent} onMoveComponent={(componentId, position) => applyProjectOperation({ kind: "set-electrical-component-position", componentId, position })} onDeleteComponent={(componentId) => { if (applyProjectOperation({ kind: "delete-electrical-component", componentId })) setSelectedId(null); }} onAddNet={addElectricalNet} onDeleteNet={(netId) => { if (applyProjectOperation({ kind: "delete-electrical-net", netId })) setSelectedId(null); }} onNotes={(notes) => applyProjectOperation({ kind: "set-electrical-notes", notes })} onPhysicalize={requestElectromechanicalAssembly} onDownload={() => downloadBlob(new Blob([electrical.svg], { type: "image/svg+xml" }), "ps3d-electrical-concept.svg")} />}
@@ -1142,6 +1268,7 @@ export function App(): React.JSX.Element {
       {project.activeWorkspace === "automate" && <AutomateWorkspace project={project} selectedId={selectedId} onSelect={setSelectedId} onApplyProject={(next, message) => { const valid = validateWorkbenchProject(next); if (valid.ok) { pushProject(valid.value); setStatusText(message); } }} onReviewElectromechanical={requestElectromechanicalAssembly} onMessage={setStatusText} />}
       </>}
     </section>
+    {contextMenu !== undefined && <WorkbenchContextMenu x={contextMenu.x} y={contextMenu.y} selectionLabel={contextMenu.selectionId ?? `${project.activeWorkspace} canvas`} commands={contextCommands} onRun={runContextCommand} onClose={() => setContextMenu(undefined)} />}
     <footer className="app-status"><div className={`status-copy ${status}`} role="status" aria-live="polite"><span />{statusText}</div><div className="status-facts"><a className="app-brand-credit" href="/about" title={`${PS3D_BRAND.name} - ${PS3D_BRAND.serviceLine}`}>{PS3D_BRAND.name}</a><button className={`status-health ${designHealth.overallStatus}`} onClick={openDesignHealth}>health {designHealth.score}</button><span>{document.displayUnit}</span><span>{selectedId === null ? "0 selected" : "1 selected"}</span><span>{masterCartOpen ? "parametric preview" : isThreeDimensional ? viewportState.selectionFilter : project.activeWorkspace === "electrical" ? `ERC ${electrical.erc.status}` : "local"}</span><span>{masterCartOpen ? "master-cart" : project.activeWorkspace}</span></div>{diagnostic !== undefined && <div className="diagnostic-toast" role="alert"><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span><small>{diagnostic.recovery}</small><button onClick={() => setDiagnostic(undefined)} aria-label="Dismiss diagnostic">×</button></div>}</footer>
     {electromechanicalReviewOpen && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog exact-candidate" role="dialog" aria-modal="true" aria-labelledby="electromechanical-review-title" aria-describedby="electromechanical-review-description">
         <header><div><span>EXACT CANDIDATE REPLACEMENT REVIEW</span><h2 id="electromechanical-review-title">Circuit → wired mounting plate</h2></div><button data-dialog-initial-focus onClick={() => { setElectromechanicalReviewOpen(false); setElectromechanicalAcknowledged(false); }} aria-label="Close circuit to mounting plate review">×</button></header>
@@ -1272,4 +1399,8 @@ function nextElectricalPosition(positions: readonly (readonly [number, number])[
     }
   }
   return undefined;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled CAD command action: ${JSON.stringify(value)}`);
 }
