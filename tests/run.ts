@@ -13,6 +13,7 @@ import { workbenchElectromechanicalTests } from "./workbench-electromechanical.t
 import { workbenchVehicleTests } from "./workbench-vehicle.test.js";
 import { workbenchHealthTests } from "./workbench-health.test.js";
 import { workbenchMasterCartTests } from "./workbench-master-cart.test.js";
+import { workbenchInteractionTests } from "./workbench-interaction.test.js";
 import { publicReleaseTests } from "./public-release.test.js";
 import type { TestCase } from "./test-kit.js";
 
@@ -31,6 +32,7 @@ const tests: readonly TestCase[] = [
   ...workbenchVehicleTests,
   ...workbenchHealthTests,
   ...workbenchMasterCartTests,
+  ...workbenchInteractionTests,
   ...workbenchMcpTests,
   ...publicReleaseTests
 ];

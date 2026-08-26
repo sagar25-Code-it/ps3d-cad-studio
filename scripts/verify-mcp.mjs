@@ -5,11 +5,11 @@ import { resolve } from "node:path";
 import { createWorkbenchProject } from "../apps/mcp-server/dist/packages/workbench-core/src/index.js";
 
 const serverPath = resolve("apps/mcp-server/dist/apps/mcp-server/src/server.js");
-const expectedTools = "ps3d_guide,ps3d_find_commands,ps3d_capabilities,ps3d_inspect_project,ps3d_design_health,ps3d_analyze_vehicle,ps3d_electromechanical_catalog,ps3d_preview_electromechanical,ps3d_preview_operation,ps3d_apply_preview";
+const expectedTools = "ps3d_guide,ps3d_agent_handshake,ps3d_find_commands,ps3d_capabilities,ps3d_inspect_project,ps3d_design_health,ps3d_analyze_vehicle,ps3d_electromechanical_catalog,ps3d_preview_electromechanical,ps3d_preview_operation,ps3d_apply_preview";
 
 await verifyModernDiscovery();
 await verifyLegacyLifecycle();
-process.stdout.write("Verified direct-Node MCP stdio launch, modern discovery, legacy initialization, ten schemas, design health, guide/resource/prompt discovery, command matching, candidate disclosure, receipt rejection, exact retry, and confirmed apply.\n");
+process.stdout.write("Verified direct-Node MCP stdio launch, modern discovery, legacy initialization, eleven schemas, collaboration-agent correction, design health, guide/resource/prompt discovery, command matching, candidate disclosure, receipt rejection, exact retry, and confirmed apply.\n");
 
 async function verifyModernDiscovery() {
   const session = createSession();
@@ -21,15 +21,21 @@ async function verifyModernDiscovery() {
 
     const listed = await session.request("tools/list", { _meta: meta });
     assertToolCatalog(listed.result?.tools);
+    assert(listed.result?.ttlMs === 300_000 && listed.result?.cacheScope === "private", "Modern tools/list omitted required cache hints.");
     const guide = await session.callTool("ps3d_guide", {}, meta);
-    assert(guide.structuredContent?.schema === "ps3d-ai-collaboration/1", "Modern guide returned the wrong schema.");
+    assert(guide.structuredContent?.schema === "ps3d-ai-collaboration/3", "Modern guide returned the wrong schema.");
     assert(typeof guide.structuredContent?.manifestSha256 === "string", "Modern guide omitted its deterministic digest.");
     assert(hasJsonTextFallback(guide), "Modern guide omitted its serialized JSON text compatibility block.");
 
     const resources = await session.request("resources/list", { _meta: meta });
     assert(resources.result?.resources?.some((resource) => resource.uri === "ps3d://ai/collaboration-guide"), "Modern resource discovery omitted the AI guide.");
+    assert(resources.result?.ttlMs === 300_000 && resources.result?.cacheScope === "private", "Modern resources/list omitted required cache hints.");
+    const resource = await session.request("resources/read", { uri: "ps3d://ai/collaboration-guide", _meta: meta });
+    assert(JSON.parse(resource.result?.contents?.[0]?.text ?? "{}").schema === "ps3d-ai-collaboration/3", "Modern collaboration resource returned the wrong schema.");
+    assert(resource.result?.ttlMs === 300_000 && resource.result?.cacheScope === "private", "Modern resources/read omitted required cache hints.");
     const prompts = await session.request("prompts/list", { _meta: meta });
     assert(prompts.result?.prompts?.some((prompt) => prompt.name === "ps3d-guided-change"), "Modern prompt discovery omitted the guided-change prompt.");
+    assert(prompts.result?.ttlMs === 300_000 && prompts.result?.cacheScope === "private", "Modern prompts/list omitted required cache hints.");
   } finally {
     await session.close();
   }
@@ -50,9 +56,14 @@ async function verifyLegacyLifecycle() {
     assertToolCatalog(listed.result?.tools);
 
     const guide = await session.callTool("ps3d_guide", {});
-    assert(guide.structuredContent?.schema === "ps3d-ai-collaboration/1", "Guide tool returned the wrong schema.");
+    assert(guide.structuredContent?.schema === "ps3d-ai-collaboration/3", "Guide tool returned the wrong schema.");
     assert(guide.structuredContent?.protocol?.preferredRevision === "2026-07-28", "Guide omitted the preferred modern revision.");
     assert(guide.structuredContent?.state?.browserSessionConnected === false, "Guide must preserve the detached-browser boundary.");
+    const guideAcknowledgement = { manifestSha256: guide.structuredContent?.manifestSha256, understood: true };
+
+    const coordinated = await session.callTool("ps3d_agent_handshake", { request: "change motorcycle wheelbase", experienceLevel: "engineer", workspace: "vehicle", clientName: "ps3d-mcp-verifier", proposedTool: "ps3d_preview_operation", proposedRecipeId: "ai-command:vehicle-parameter" });
+    assert(coordinated.structuredContent?.schema === "ps3d-agent-handshake/1" && coordinated.structuredContent?.status === "ready-to-inspect", "Collaboration agent did not validate the bounded host proposal.");
+    assert(coordinated.structuredContent?.proposal?.executionPerformed === false, "Collaboration handshake must never execute the proposed command.");
 
     const found = await session.callTool("ps3d_find_commands", { query: "change motorcycle wheelbase", workspace: "vehicle", limit: 4 });
     assert(found.structuredContent?.schema === "ps3d-command-search/1" && found.structuredContent?.executionPerformed === false, "Command finder must be deterministic and read-only.");
@@ -79,26 +90,26 @@ async function verifyLegacyLifecycle() {
     const catalog = await session.callTool("ps3d_electromechanical_catalog", {});
     assert(catalog.structuredContent?.schema === "ps3d-electromechanical-catalog/1" && catalog.structuredContent?.constructionReady === false, "Electromechanical catalog returned the wrong safety contract.");
 
-    const electromechanical = await session.callTool("ps3d_preview_electromechanical", { project });
+    const electromechanical = await session.callTool("ps3d_preview_electromechanical", { project, guideAcknowledgement });
     assert(electromechanical.structuredContent?.schema === "ps3d-electromechanical-preview/1", "Electromechanical preview returned the wrong schema.");
     assert(typeof electromechanical.structuredContent?.receipt === "string" && electromechanical.structuredContent?.operation?.kind === "generate-electromechanical-realization", "Electromechanical preview omitted its canonical operation and receipt.");
 
     const operation = { operationId: "operation:mcp-crown", expectedRevision: 0, kind: "set-surface-parameter", parameter: "crownMm", value: 28 };
-    const preview = await session.callTool("ps3d_preview_operation", { project, operation });
+    const preview = await session.callTool("ps3d_preview_operation", { project, operation, guideAcknowledgement });
     const receipt = preview.structuredContent?.receipt;
     assert(typeof receipt === "string" && /^[a-f0-9]{64}$/u.test(receipt), "Preview tool did not return a SHA-256 receipt.");
     assert(preview.structuredContent?.nextRevision === 1 && preview.structuredContent?.candidateProject?.surface?.crownMm === 28, "Preview omitted the exact candidate project.");
     assert(preview.structuredContent?.receiptInfo?.signed === false && preview.structuredContent?.receiptInfo?.approvalProof === false, "Receipt boundary is not explicit.");
 
-    const rejected = await session.callTool("ps3d_apply_preview", { project, operation, receipt: "0".repeat(64), confirmed: true });
+    const rejected = await session.callTool("ps3d_apply_preview", { project, operation, receipt: "0".repeat(64), confirmed: true, guideAcknowledgement });
     assert(rejected.isError === true && rejected.structuredContent?.code === "PREVIEW_RECEIPT_MISMATCH", "Apply accepted a mismatched receipt.");
 
-    const applied = await session.callTool("ps3d_apply_preview", { project, operation, receipt, confirmed: true });
+    const applied = await session.callTool("ps3d_apply_preview", { project, operation, receipt, confirmed: true, guideAcknowledgement });
     assert(applied.isError !== true && applied.structuredContent?.schema === "ps3d-applied-operation/1", "Confirmed apply failed.");
     const nextProject = applied.structuredContent?.project;
     assert(nextProject?.revision === 1 && nextProject?.surface?.crownMm === 28, "Confirmed apply returned the wrong project.");
 
-    const retry = await session.callTool("ps3d_preview_operation", { project: nextProject, operation });
+    const retry = await session.callTool("ps3d_preview_operation", { project: nextProject, operation, guideAcknowledgement });
     assert(retry.structuredContent?.exactRetry === true, "Exact idempotent retry was not labeled.");
     assert(retry.structuredContent?.baseRevision === 1 && retry.structuredContent?.nextRevision === 1, "Exact retry reported a false base revision.");
     assert(retry.structuredContent?.receiptInfo?.disposition === "exact-retry", "Exact retry receipt omitted its disposition.");
@@ -162,9 +173,15 @@ function modernMeta() {
 }
 
 function assertToolCatalog(tools) {
-  assert(Array.isArray(tools) && tools.length === 10, "MCP server must list exactly ten bounded tools.");
+  assert(Array.isArray(tools) && tools.length === 11, "MCP server must list exactly eleven bounded tools.");
   assert(tools.map((tool) => tool.name).join(",") === expectedTools, "MCP tool ordering or names changed.");
   assert(tools.every((tool) => tool.inputSchema?.type === "object" && tool.outputSchema?.type === "object"), "Every MCP tool must advertise object input and output schemas.");
+  const inspect = tools.find((tool) => tool.name === "ps3d_inspect_project");
+  assert(JSON.stringify(inspect?.inputSchema?.required) === JSON.stringify(["project"]), "Inspect schema disagrees with its handler.");
+  const electromechanical = tools.find((tool) => tool.name === "ps3d_preview_electromechanical");
+  assert(JSON.stringify(electromechanical?.inputSchema?.required) === JSON.stringify(["project", "guideAcknowledgement"]), "Electromechanical preview schema omitted its guide acknowledgement.");
+  const agent = tools.find((tool) => tool.name === "ps3d_agent_handshake");
+  assert(JSON.stringify(agent?.inputSchema?.required) === JSON.stringify(["request", "experienceLevel"]), "Collaboration-agent schema omitted required inputs.");
 }
 
 function hasJsonTextFallback(result) {

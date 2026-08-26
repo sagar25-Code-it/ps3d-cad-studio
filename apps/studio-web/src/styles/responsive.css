@@ -63,7 +63,7 @@
   .automation-hero { grid-template-columns: 1fr; }
   .connection-orbit { display: none; }
   .automation-flow { grid-template-columns: 1fr 1fr; }
-  .automation-flow.six-step { grid-template-columns: 1fr 1fr; }
+  .automation-flow.six-step, .automation-flow.seven-step { grid-template-columns: 1fr 1fr; }
   .automation-flow b { display: none; }
   .ai-readiness-grid { grid-template-columns: 1fr 1fr; }
   .ai-command-form { grid-template-columns: 1fr; }

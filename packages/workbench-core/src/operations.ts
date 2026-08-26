@@ -1,5 +1,6 @@
 import type {
   AppliedWorkbenchOperation,
+  AssemblyMate,
   ComponentInstance,
   ElectricalComponent,
   ElectricalIntent,
@@ -117,6 +118,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
     case "toggle-sketch-construction":
       if (!keys(input, [...common, "entityId"]) || !stableId(input.entityId)) return invalidOperation("The sketch entity ID is invalid.");
       break;
+    case "toggle-sketch-entity-visibility":
+      if (!keys(input, [...common, "entityId"]) || !stableId(input.entityId)) return invalidOperation("The sketch entity ID is invalid.");
+      break;
     case "set-part-parameter":
       if (!keys(input, [...common, "parameter", "value"]) || !PART_PARAMETERS.includes(input.parameter as never) || !finite(input.value)) return invalidOperation("The part parameter edit is invalid.");
       break;
@@ -167,6 +171,12 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "toggle-component-visibility":
       if (!keys(input, [...common, "componentId"]) || !stableId(input.componentId)) return invalidOperation("The component ID is invalid.");
+      break;
+    case "add-assembly-mate":
+      if (!keys(input, [...common, "mate"]) || !validAssemblyMatePayload(input.mate)) return invalidOperation("The assembly mate payload is invalid.");
+      break;
+    case "delete-assembly-mate":
+      if (!keys(input, [...common, "mateId"]) || !stableId(input.mateId)) return invalidOperation("The mate ID is invalid.");
       break;
     case "set-surface-mode":
       if (!keys(input, [...common, "mode"]) || !["bezier", "loft"].includes(String(input.mode))) return invalidOperation("The surface mode is invalid.");
@@ -345,6 +355,15 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
         sketch: { ...project.sketch, entities: project.sketch.entities.map((entity) => entity.id === target.id ? { ...entity, construction: !entity.construction } : entity) }
       }, [target.id], `${target.construction ? "Returned" : "Converted"} ${target.id} ${target.construction ? "to profile geometry" : "to construction geometry"}.`);
     }
+    case "toggle-sketch-entity-visibility": {
+      const target = project.sketch.entities.find((entity) => entity.id === operation.entityId);
+      if (target === undefined) return broken(operation.entityId, "The sketch entity does not exist.");
+      const visible = target.visible !== false;
+      return changed({
+        ...project,
+        sketch: { ...project.sketch, entities: project.sketch.entities.map((entity) => entity.id === target.id ? { ...entity, visible: !visible } : entity) }
+      }, [target.id], `${visible ? "Hid" : "Showed"} sketch entity ${target.id}.`);
+    }
     case "set-part-parameter":
       return changed({ ...project, part: { ...project.part, [operation.parameter]: operation.value } }, [project.part.id], `Set ${humanize(operation.parameter)} to ${formatNumber(operation.value)}.`);
     case "add-part-preview-bodies": {
@@ -386,7 +405,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       return changed({
         ...project,
         part: { ...project.part, previewBodies: currentBodies.map((body) => body.id === target.id ? { ...body, sizeMm: resized } : body) }
-      }, [target.id], `Resized ${target.name} to ${resized.map(formatNumber).join(" Ã— ")} mm.`);
+      }, [target.id], `Resized ${target.name} to ${resized.map(formatNumber).join(" × ")} mm.`);
     }
     case "set-part-preview-body-color": {
       const currentBodies = project.part.previewBodies ?? [];
@@ -503,6 +522,20 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
         ...project,
         assembly: { ...project.assembly, components: project.assembly.components.map((component) => groupedIds.includes(component.id) ? { ...component, visible: !target.visible } : component) }
       }, groupedIds, `${target.visible ? "Hid" : "Showed"} ${target.masterCart === undefined ? target.name : `${target.masterCart.templateId.replaceAll("-", " ")} grouped item`}.`);
+    }
+    case "add-assembly-mate": {
+      if (project.assembly.mates.length >= WORKBENCH_LIMITS.maxMates) return failure("RESOURCE_LIMIT", "The assembly reached its mate-record limit.", [project.assembly.id], "Delete an unused mate before creating another one.");
+      if (project.assembly.mates.some((mate) => mate.id === operation.mate.id)) return invalidOperation("The assembly mate ID already exists.");
+      const componentIds = new Set(project.assembly.components.map((component) => component.id));
+      if (operation.mate.componentIds.some((componentId) => !componentIds.has(componentId))) return invalidOperation("The assembly mate references a missing component.");
+      if (new Set(operation.mate.componentIds).size !== operation.mate.componentIds.length) return invalidOperation("A mate cannot reference the same component twice.");
+      return changed({ ...project, assembly: { ...project.assembly, mates: [...project.assembly.mates, operation.mate] } }, [operation.mate.id, ...operation.mate.componentIds], `Created ${operation.mate.name} as a validated direct-mate record.`);
+    }
+    case "delete-assembly-mate": {
+      const target = project.assembly.mates.find((mate) => mate.id === operation.mateId);
+      if (target === undefined) return broken(operation.mateId, "The assembly mate does not exist.");
+      if (project.assembly.electromechanicalSource !== undefined && target.id.startsWith("mate:em-")) return invalidOperation("Generated electromechanical mates must be replaced through the reviewed realization workflow.");
+      return changed({ ...project, assembly: { ...project.assembly, mates: project.assembly.mates.filter((mate) => mate.id !== target.id) } }, [target.id], `Deleted mate ${target.name}.`);
     }
     case "set-surface-mode":
       return changed({ ...project, surface: { ...project.surface, mode: operation.mode } }, [project.surface.id], `Switched to ${operation.mode === "bezier" ? "bicubic Bézier" : "ruled loft"} preview.`);
@@ -703,6 +736,15 @@ function validComponentPayload(value: unknown): value is ComponentInstance {
   if (Object.hasOwn(value, "featureCount") && (!Number.isSafeInteger(value.featureCount) || (value.featureCount as number) < 3 || (value.featureCount as number) > 240 || value.shape !== "gear")) return false;
   if (Object.hasOwn(value, "masterCart") && !validMasterCartTrace(value.masterCart)) return false;
   return true;
+}
+
+function validAssemblyMatePayload(value: unknown): value is AssemblyMate {
+  if (!isRecord(value) || !stableId(value.id) || !shortText(value.name, 1, 120) || !["fixed", "coincident-origin", "aligned-axis"].includes(String(value.kind))
+    || !Array.isArray(value.componentIds) || value.componentIds.some((id) => !stableId(id)) || !["satisfied", "redundant", "conflict"].includes(String(value.status))) return false;
+  const requiredCount = value.kind === "fixed" ? 1 : 2;
+  if (value.componentIds.length !== requiredCount) return false;
+  if (value.kind === "aligned-axis") return keys(value, ["id", "name", "kind", "componentIds", "axis", "status"]) && ["x", "y", "z"].includes(String(value.axis));
+  return keys(value, ["id", "name", "kind", "componentIds", "status"]);
 }
 
 function validMasterCartTrace(value: unknown): boolean {

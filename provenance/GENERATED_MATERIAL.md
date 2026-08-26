@@ -1,6 +1,6 @@
 # Generated and Assisted Material Record
 
-**Record date:** 2026-08-25  
+**Record date:** 2026-08-26  
 **Material:** Phase 0 qualified-slice and Phase 1 broad-workbench application
 source, tests, configuration, Python MCP client, local 3D exchange and PDF
 delivery, standards-aware engineering drawing and tolerance assistance,
@@ -226,8 +226,8 @@ deployment, release, or legal clearance.
   self-referential record.
   Symbolic links are rejected.
 - Canonical source-set hash:
-  `7d53301ddb99da25e80c175ea8fb9890c1469aaa05da5804c9226c51f73ebfab`
-- Canonical source-set file count: 330
+  `d58e9512736ac07f392b1d50b726a9e71a5de4b84b726e5629b2da4cf0e22173`
+- Canonical source-set file count: 347
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
   `provenance/BUILD_IDENTITY.json`, SHA-256
@@ -317,3 +317,16 @@ browser bundle and real MCP stdio exchange completed before the current
   Assembly trace card, reviewed the 330-command catalog, and reconfirmed the
   official PS3D Master brand surface. Fifteen screenshots and the Master Cart
   product note are packaged in the local verification ZIP.
+  For the command/MCP verification delta, the catalog now contains 331 unique
+  IDs: 2 qualified, 140 preview, and 189 truthfully unavailable contracts. A
+  canonical 55-operation registry removes core/MCP namespace drift, exhaustive
+  UI dispatch rejects unknown action kinds, and the eleven-tool MCP surface now
+  includes an experience-adapted stateless coordination handshake. The local
+  suite passed 103/103 cases and the direct Node stdio exchange exercised modern
+  discovery, retained legacy initialization, every tool schema, correction
+  feedback, receipt rejection, exact retry, and confirmed apply. Live browser
+  verification exercised all eleven built-in handlers, direct sketch dimension
+  editing, sketch hide/show, shared ViewCube/WCS orientation, Undo across a
+  Sketch-to-Part switch, and all nine workspace ribbons with zero console or
+  symbol/layout failures. Images 77 and 78 record the command audit and the
+  non-executing PhD-level coordination result.

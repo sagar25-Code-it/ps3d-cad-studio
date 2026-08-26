@@ -38,6 +38,7 @@ The server uses the official MCP v2 serving entry and supports modern
 legacy negotiation. Its machine-readable guide is available through:
 
 - tool `ps3d_guide`;
+- stateless coordinator `ps3d_agent_handshake`;
 - resource `ps3d://ai/collaboration-guide`;
 - prompt `ps3d-guided-change`.
 
@@ -45,19 +46,25 @@ legacy negotiation. Its machine-readable guide is available through:
 
 1. Connect by launching the prebuilt local stdio server, or authorize the
    deployed `/api/mcp` endpoint with OAuth or one expiring personal token.
-2. Discover with `ps3d_guide`, `tools/list`, and `ps3d_find_commands`.
-3. Understand by supplying a complete caller-owned project to
+2. Discover with `ps3d_guide` and `tools/list`. Retain the guide digest for the
+   preview/apply acknowledgement.
+3. Coordinate by calling `ps3d_agent_handshake` with the exact user request,
+   experience level, optional workspace, and any proposed tool/recipe stable
+   IDs. Resolve every correction or clarification it returns.
+4. Understand by supplying a complete caller-owned project to
    `ps3d_inspect_project`.
-4. Review cross-workspace readiness with `ps3d_design_health`. Its dependency
+5. Review cross-workspace readiness with `ps3d_design_health`. Its dependency
    table distinguishes associative, trace-linked, snapshot, and detached links.
-5. Preview write intent with `ps3d_preview_operation`, or use
+6. Use `ps3d_find_commands` to select a bounded recipe; do not execute fuzzy
+   text or invent operation fields.
+7. Preview write intent with `ps3d_preview_operation`, or use
    `ps3d_preview_electromechanical` for circuit-to-mounted-3D realization.
-6. Show the exact candidate project, changed IDs, engineering disclosures,
+8. Show the exact candidate project, changed IDs, engineering disclosures,
    base/candidate content references, receipt details, and revision.
-7. Obtain user confirmation tied to that exact preview.
-8. Call `ps3d_apply_preview` with the same project, canonical operation,
+9. Obtain user confirmation tied to that exact preview.
+10. Call `ps3d_apply_preview` with the same project, canonical operation,
    receipt, and `confirmed: true`.
-9. Review and open/import the returned project copy.
+11. Review and open/import the returned project copy.
 
 The server is stateless and never writes a file or changes the live browser
 project. A receipt is an unkeyed deterministic SHA-256 integrity checksum. It
@@ -87,6 +94,34 @@ Three namespaces remain deliberately separate:
 
 This separation prevents a fuzzy phrase from becoming an unreviewed mutation.
 
+## PS3D collaboration agent
+
+`ps3d_agent_handshake` is the in-tool agent boundary. It is a deterministic
+contract validator, not a bundled language model, background process, or
+persistent MCP session. The connected host AI and PS3D divide work explicitly:
+
+- the host AI converses with the user, reasons about intent, asks for missing
+  decisions, and explains the result;
+- PS3D matches only registered tools, recipes, operations, and stable IDs,
+  validates supplied data, and returns typed diagnostics and recovery; and
+- both must inspect feedback and revalidate before retrying. Neither may invent
+  a command, selection ID, sketch relation, mate, geometry result, live-browser
+  mutation, or approval.
+
+The caller chooses `child`, `beginner`, `engineer`, `advanced`, or `phd`.
+The returned audience profile changes explanation depth—from small plain steps
+to assumptions, derivations, dimensional consistency, uncertainty, and
+validation evidence—but never changes the safety or geometry capability
+boundary. The handshake also checks optional proposed MCP tool and
+`ai-command:*` recipe IDs. Unknown or mismatched names produce machine-readable
+feedback and an exact next action; no CAD command is executed.
+
+Typical recovery is deterministic: refresh discovery for an unknown command,
+inspect the current project for a missing selection, repair the named sketch or
+mate precondition, discard stale receipts after a revision change, and report
+unsupported exact-kernel behavior as unavailable rather than approximating it
+as completed.
+
 ## Design health boundary
 
 `ps3d_design_health` is a read-only deterministic review of the exact supplied
@@ -113,6 +148,9 @@ with Ps3dClient(
 ) as client:
     print(client.protocol_info())
     print(client.guide()["workflow"])
+    print(client.agent_handshake(
+        "set motorcycle wheelbase", "engineer", workspace="vehicle"
+    ))
     print(client.find_commands("set motorcycle wheelbase", workspace="vehicle"))
 ```
 

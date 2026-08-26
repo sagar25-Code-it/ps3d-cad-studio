@@ -24,6 +24,7 @@ export function inferCommandIcon(text: string, workspace = ""): string {
   const source = `${text} ${workspace}`.toLowerCase();
   const rules: readonly (readonly [string, string])[] = [
     ["finish sketch", "save"], ["sketch options", "display"],
+    ["collaboration agent", "mcp"], ["agent handshake", "mcp"],
     ["immediate hide", "eye-off"], ["show and hide", "eye"], ["clip section", "section"],
     ["global finish", "appearance"], ["object display", "appearance"], ["appearance management", "appearance"],
     ["preferences", "display"], ["theme", "display"], ["background", "display"],

@@ -174,10 +174,10 @@ drawing/GD&T, cargo/BESS, and electrical template states remains under
   prior/candidate MCP disclosure, generated mate change disclosure,
   layout/interference bounds, all-workspace health/dependency analysis, and all
   ten pure MCP handlers.
-- The repository contains **86 authored typed-suite cases**, including six
-  vehicle-domain groups and three public-release security/manual cases.
-  Seventy-six browser-compatible cases were freshly executed; the ten Node-only
-  cases still require the approved GitHub Actions clean environment.
+- The repository contains **100 authored typed-suite cases**, including four
+  new unified-interaction cases covering camera/WCS agreement, connected and
+  tangent sketch selection, truthful context commands, and revision-checked
+  assembly mate records. All 100 passed in the current local run.
 - An earlier, pre-electromechanical revision passed strict TypeScript, production
   build, dependency reconciliation, peer checks, registry audits, SBOM creation,
   and a real MCP initialize/list/preview/receipt/apply stdio exchange. These are
@@ -189,6 +189,33 @@ drawing/GD&T, cargo/BESS, and electrical template states remains under
   `set vehicle parameter` revision and updated the displayed turning radius
   from 3.20 m to 3.36 m.
 
+## Unified CAD interaction evidence
+
+The following images were captured from the independent local PS3D build. They
+are reviewed product evidence, not copied Autodesk or Siemens assets.
+
+| Evidence | Coverage |
+| --- | --- |
+| [`67-unified-part-workspace.jpg`](screenshots/67-unified-part-workspace.jpg) | Shared Z-up WCS, camera-driven ViewCube, top navigation/selection controller, and professional document tree |
+| [`68-part-context-menu.jpg`](screenshots/68-part-context-menu.jpg) | Body-specific right-click commands with topology-dependent actions truthfully unavailable |
+| [`69-unified-sketch-workspace.jpg`](screenshots/69-unified-sketch-workspace.jpg) | Sketch plane inside the common 3D orbit environment with Profile, Curve, Connected, and Tangent intent |
+| [`70-profile-extrude-handoff.jpg`](screenshots/70-profile-extrude-handoff.jpg) | Closed profile selection and associative handoff to Extrude |
+| [`71-profile-extrude-controls.jpg`](screenshots/71-profile-extrude-controls.jpg) | New Body/New Component operation controls and explained Boolean boundary |
+| [`72-assembly-component-mates.jpg`](screenshots/72-assembly-component-mates.jpg) | New component in the shared tree and assembly relationship workspace |
+| [`73-direct-mate-controls.jpg`](screenshots/73-direct-mate-controls.jpg) | Direct mate authoring controls |
+| [`74-mate-relationship-panel.jpg`](screenshots/74-mate-relationship-panel.jpg) | Parent/child and mate relationship inspection |
+| [`75-assembly-context-menu.jpg`](screenshots/75-assembly-context-menu.jpg) | Component-specific Assembly right-click menu |
+| [`76-sketch-direct-dimension-viewcube.jpg`](screenshots/76-sketch-direct-dimension-viewcube.jpg) | Direct driving-dimension editor, visible definition points, and bounded ViewCube/WCS controls |
+| [`77-command-mcp-audit.jpg`](screenshots/77-command-mcp-audit.jpg) | 331-command contract audit with executable/unavailable evidence and zero registry issues |
+| [`78-ai-collaboration-agent.jpg`](screenshots/78-ai-collaboration-agent.jpg) | PhD-level stateless coordination handshake resolving a sketch-dimension goal without CAD execution |
+
+The current local functional suite passed **103/103** cases and the direct MCP
+stdio exchange across all eleven tools plus evaluator identity. The current
+`pnpm build` run produced 59 assets, enforced the strict CSP, and verified that
+Node-only MCP SDK, WASM/Manifold, and dynamic-evaluation paths are absent from
+the browser production boundary. The source-set gate is resealed only after
+the current documentation and reviewed browser evidence are final.
+
 ## Repository and PDF evidence boundary
 
 The repository-boundary verifier rejects symbolic links, credential-like files,
@@ -196,8 +223,8 @@ non-example environment files, high-risk token patterns, private profile paths,
 and unreviewed binary files. Its exact binary manifest now includes the reviewed
 historical interface evidence, current vehicle/release screenshots, the exchange
 sample, and the generated learning manual; it validates file signatures instead
-of trusting extensions. The current in-process verifier passed **229 UTF-8 text
-files and 55 explicitly reviewed binary evidence files**. The standalone verifier
+of trusting extensions. The current in-process verifier passed **254 UTF-8 text
+files and 94 explicitly reviewed binary evidence files**. The standalone verifier
 runs again in clean CI.
 
 The PDF runtime requests a fresh viewport JPEG and embeds a GLB attachment. The
@@ -205,24 +232,22 @@ committed PDF sample passes structural PDF/attachment checks, but its recorded
 page image is blank. It is therefore structural evidence only; a fresh non-blank
 runtime export and independent render comparison remain release gates.
 
-## Enterprise-system safety stop
+## Enterprise-system safety boundary
 
-The final nested-process verification was not rerun because the enterprise
-endpoint product previously flagged Codex while a local MCP child process was
-being launched. No security control was disabled, inspected, modified, or
-bypassed. This delta used the existing browser session, browser-safe modules,
-bounded workspace-only checks, and the bundled approved PDF renderer/Python
-runtime solely to render and inspect the generated manual. It did not start a
-package manager, VS Code process, MCP child process, or security-bypass workflow,
-and it did not inspect private system files or browser credential stores.
+No security control was disabled, inspected, modified, or bypassed. The current
+verification used only the project workspace and the bundled development
+runtime. It did not inspect browser credential stores, private enterprise files,
+or unrelated system locations. The direct MCP test launched only the repository's
+reviewed local server entry point and completed normally.
 
 ## Remaining release gates
 
 - Human provenance, technical, electrical-safety, accessibility, and security
   review.
-- Fresh frozen install, strict typecheck, all 86 authored tests, production
+- Fresh frozen install, strict typecheck, all 103 authored tests, production
   build, real stdio exchange, repository/secret scan, SBOM check, and two-build
-  comparison in the approved GitHub Actions clean environment.
+  comparison in the approved GitHub Actions clean environment. The equivalent
+  local gates pass; clean CI remains the independent release proof.
 - Chromium, Firefox, and WebKit matrix; responsive/zoom keyboard review; and a
   broader rendering/interaction performance budget beyond the bounded router.
 - Fresh non-blank PDF model-package capture and independent PDF render check.

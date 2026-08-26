@@ -49,14 +49,16 @@ async function handler(request: Request): Promise<Response> {
     if (parsed instanceof Response) return parsed;
     const response = await dispatchMcp(parsed, principal, request);
     await recordTokenUse(principal, env);
+    const protocolVersion = negotiatedProtocol(request, parsed);
+    const wireResponse = response === undefined ? undefined : stampModernServerIdentity(response, protocolVersion);
     const headers: Readonly<Record<string, string>> = {
       "X-RateLimit-Limit": "60",
       "X-RateLimit-Remaining": Math.max(0, quota.remaining).toString(),
       "X-RateLimit-Reset": quota.resetAt,
-      "MCP-Protocol-Version": negotiatedProtocol(request, parsed)
+      "MCP-Protocol-Version": protocolVersion
     };
-    if (response === undefined) return new Response(null, { status: 202, headers: { "Cache-Control": "no-store", ...headers } });
-    return new Response(JSON.stringify(response), {
+    if (wireResponse === undefined) return new Response(null, { status: 202, headers: { "Cache-Control": "no-store", ...headers } });
+    return new Response(JSON.stringify(wireResponse), {
       status: 200,
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...headers }
     });
@@ -101,24 +103,26 @@ async function dispatchMcp(message: JsonRpcRequest, principal: McpPrincipal, req
   if (message.method === "ping") return jsonRpcResult(id, {});
   if (message.method === "server/discover") {
     return jsonRpcResult(id, {
-      name: "ps3d-cad-studio",
-      title: "PS3D CAD Studio",
-      version: "0.2.0-preview.1",
-      transport: "stateless-streamable-http",
-      protocolVersions: PS3D_SUPPORTED_PROTOCOL_REVISIONS,
-      authentication: principal.kind,
-      scopes: principal.scopes,
-      tools: accessibleTools(principal).map((tool) => tool.name)
+      supportedVersions: ["2026-07-28"],
+      capabilities: {
+        tools: { listChanged: false },
+        resources: { subscribe: false, listChanged: false },
+        prompts: { listChanged: false }
+      },
+      instructions: PS3D_MCP_INSTRUCTIONS,
+      ttlMs: 300_000,
+      cacheScope: "private",
+      _meta: { "io.modelcontextprotocol/serverInfo": { name: "ps3d-cad-studio", title: "PS3D CAD Studio", version: "0.2.0-preview.1" } }
     });
   }
-  if (message.method === "tools/list") return jsonRpcResult(id, { tools: accessibleTools(principal) });
+  if (message.method === "tools/list") return jsonRpcResult(id, cacheableResult(request, message, { tools: accessibleTools(principal) }));
   if (message.method === "tools/call") return callTool(id, message.params, principal);
   if (message.method === "resources/list") {
-    return jsonRpcResult(id, { resources: [{ uri: GUIDE_URI, name: "ps3d-ai-collaboration-guide", title: "PS3D AI collaboration guide", description: "Machine-readable PS3D connection, safety, and workflow contract.", mimeType: "application/json" }] });
+    return jsonRpcResult(id, cacheableResult(request, message, { resources: [{ uri: GUIDE_URI, name: "ps3d-ai-collaboration-guide", title: "PS3D AI collaboration guide", description: "Machine-readable PS3D connection, safety, and workflow contract.", mimeType: "application/json" }] }));
   }
-  if (message.method === "resources/read") return readResource(id, message.params);
+  if (message.method === "resources/read") return readResource(id, message.params, isModernRequest(request, message));
   if (message.method === "prompts/list") {
-    return jsonRpcResult(id, { prompts: [{ name: "ps3d-guided-change", title: "Plan a safe PS3D change", description: "Guide an AI host through discovery, preview, review, confirmation, and returned-project handling.", arguments: [{ name: "request", description: "The engineering goal", required: true }, { name: "workspace", description: "Optional PS3D workspace", required: false }] }] });
+    return jsonRpcResult(id, cacheableResult(request, message, { prompts: [{ name: "ps3d-guided-change", title: "Plan a safe PS3D change", description: "Guide an AI host through discovery, collaboration-agent correction, preview, review, confirmation, and returned-project handling.", arguments: [{ name: "request", description: "The engineering goal", required: true }, { name: "workspace", description: "Optional PS3D workspace", required: false }] }] }));
   }
   if (message.method === "prompts/get") return getPrompt(id, message.params);
   return jsonRpcErrorObject(id, -32601, "Method not found", `Unsupported MCP method: ${message.method}`);
@@ -140,9 +144,10 @@ async function callTool(id: string | number | null, params: Readonly<Record<stri
   });
 }
 
-async function readResource(id: string | number | null, params: Readonly<Record<string, unknown>> | undefined): Promise<Readonly<Record<string, unknown>>> {
+async function readResource(id: string | number | null, params: Readonly<Record<string, unknown>> | undefined, modern: boolean): Promise<Readonly<Record<string, unknown>>> {
   if (params?.uri !== GUIDE_URI) return jsonRpcErrorObject(id, -32602, "Unknown resource", "The requested PS3D resource is not registered.");
-  return jsonRpcResult(id, { contents: [{ uri: GUIDE_URI, mimeType: "application/json", text: JSON.stringify(await createPs3dCollaborationGuide(), null, 2) }] });
+  const result = { contents: [{ uri: GUIDE_URI, mimeType: "application/json", text: JSON.stringify(await createPs3dCollaborationGuide(), null, 2) }] };
+  return jsonRpcResult(id, modern ? { ...result, ttlMs: 300_000, cacheScope: "private" } : result);
 }
 
 function getPrompt(id: string | number | null, params: Readonly<Record<string, unknown>> | undefined): Readonly<Record<string, unknown>> {
@@ -152,7 +157,7 @@ function getPrompt(id: string | number | null, params: Readonly<Record<string, u
   const workspace = typeof params.arguments.workspace === "string" ? params.arguments.workspace : "not specified";
   return jsonRpcResult(id, {
     description: "PS3D receipt-gated collaboration workflow",
-    messages: [{ role: "user", content: { type: "text", text: `${PS3D_MCP_INSTRUCTIONS}\n\nUser goal: ${params.arguments.request}\nWorkspace: ${workspace}\nFirst call ps3d_find_commands. Do not invent fields or claim a live-browser mutation.` } }]
+    messages: [{ role: "user", content: { type: "text", text: `${PS3D_MCP_INSTRUCTIONS}\n\nUser goal: ${params.arguments.request}\nWorkspace: ${workspace}\nAfter reading ps3d_guide, call ps3d_agent_handshake and then ps3d_find_commands. Do not invent fields or claim a live-browser mutation.` } }]
   });
 }
 
@@ -167,10 +172,32 @@ function scopeForTool(tool: McpToolDefinition): McpScope {
 }
 
 function negotiatedProtocol(request: Request, message: Pick<JsonRpcRequest, "params">): string {
-  const requested = typeof message.params?.protocolVersion === "string" ? message.params.protocolVersion : request.headers.get("mcp-protocol-version");
+  const meta = isRecord(message.params?._meta) ? message.params?._meta : undefined;
+  const metaVersion = typeof meta?.["io.modelcontextprotocol/protocolVersion"] === "string" ? meta["io.modelcontextprotocol/protocolVersion"] : undefined;
+  const requested = typeof message.params?.protocolVersion === "string" ? message.params.protocolVersion : metaVersion ?? request.headers.get("mcp-protocol-version");
   return requested !== null && requested !== undefined && (PS3D_SUPPORTED_PROTOCOL_REVISIONS as readonly string[]).includes(requested)
     ? requested
     : PS3D_SUPPORTED_PROTOCOL_REVISIONS[0];
+}
+
+function isModernRequest(request: Request, message: Pick<JsonRpcRequest, "params">): boolean {
+  return negotiatedProtocol(request, message) === "2026-07-28" && (request.headers.get("mcp-protocol-version") === "2026-07-28" || isRecord(message.params?._meta));
+}
+
+function cacheableResult(request: Request, message: Pick<JsonRpcRequest, "params">, value: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return isModernRequest(request, message) ? { ...value, ttlMs: 300_000, cacheScope: "private" } : value;
+}
+
+function stampModernServerIdentity(response: Readonly<Record<string, unknown>>, protocolVersion: string): Readonly<Record<string, unknown>> {
+  if (protocolVersion !== "2026-07-28" || !isRecord(response.result)) return response;
+  const existingMeta = isRecord(response.result._meta) ? response.result._meta : {};
+  return {
+    ...response,
+    result: {
+      ...response.result,
+      _meta: { ...existingMeta, "io.modelcontextprotocol/serverInfo": { name: "ps3d-cad-studio", title: "PS3D CAD Studio", version: "0.2.0-preview.1" } }
+    }
+  };
 }
 
 function jsonRpcResult(id: string | number | null, result: unknown): Readonly<Record<string, unknown>> {

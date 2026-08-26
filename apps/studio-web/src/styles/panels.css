@@ -178,6 +178,15 @@
 .mate-status { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px #5ed5aa77; }
 .mate-status.redundant { background: var(--amber); }
 .mate-status.conflict { background: var(--red); }
+.mate-builder { display: grid; gap: 0.38rem; }
+.mate-builder > label { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: center; gap: 0.38rem; color: #71899a; font-size: 0.5rem; }
+.mate-builder select,
+.mate-builder output { width: 100%; min-width: 0; height: 28px; padding: 0 0.38rem; border: 1px solid #2d485b; border-radius: 4px; color: #d5e4eb; background: #071520; font: 0.47rem var(--mono); }
+.mate-builder output { display: flex; align-items: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mate-builder > small { color: #6e8595; font-size: 0.45rem; line-height: 1.4; }
+.mate-record { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 0.22rem; }
+.mate-record > button:first-child { width: 100%; }
+.mate-record .mate-delete { min-width: 0; display: grid; place-items: center; padding: 0; border-color: #63353b; color: #d9878e; background: #32171b; font-size: 0.72rem; }
 .selection-card button { width: 100%; margin-top: 0.55rem; font-size: 0.57rem; }
 .component-position-editor { display: grid; gap: 0.48rem; margin-top: 0.65rem; padding-top: 0.65rem; border-top: 1px solid #20374a; }
 .component-position-editor > strong { color: #8298aa; font: 0.51rem var(--mono); text-transform: uppercase; letter-spacing: 0.07em; }

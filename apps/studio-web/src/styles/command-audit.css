@@ -17,7 +17,7 @@
 .audit-summary > div:last-child { border-right: 0; }
 .audit-summary small { color: #6c747b; font: 700 0.62rem var(--mono); text-transform: uppercase; }
 .audit-summary strong { color: #262c31; font-size: 1.4rem; }
-.audit-method { max-width: 1180px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.7rem; margin: 0 auto 1rem; }
+.audit-method { max-width: 1180px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.7rem; margin: 0 auto 1rem; }
 .audit-method > div { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 0.65rem; padding: 0.75rem; border: 1px solid #cbd0d4; border-radius: 7px; background: #f9fafb; }
 .audit-method .command-icon { width: 26px; color: #a01925; }
 .audit-method span { display: grid; gap: 0.15rem; }

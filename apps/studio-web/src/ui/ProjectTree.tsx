@@ -12,11 +12,12 @@ interface ProjectTreeProps {
   readonly revealSelectionRequest: number;
   readonly designHealth: DesignHealthReport;
   readonly onSelect: (id: string | null) => void;
+  readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null) => void;
 }
 
 type TreeKind = "project" | "health" | "datum" | "sketch" | "feature" | "body" | "component" | "mate" | "surface" | "drawing" | "electrical" | "vehicle" | "route" | "tool" | "history";
 
-export function ProjectTree({ project, selectedId, revealSelectionRequest, designHealth, onSelect }: ProjectTreeProps): React.JSX.Element {
+export function ProjectTree({ project, selectedId, revealSelectionRequest, designHealth, onSelect, onContextMenu }: ProjectTreeProps): React.JSX.Element {
   const treeRef = useRef<HTMLElement>(null);
   const handledRevealRequest = useRef(0);
   useEffect(() => {
@@ -29,10 +30,10 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
       selectedItem.focus({ preventScroll: true });
     }
   }, [project.activeWorkspace, revealSelectionRequest, selectedId]);
-  const showOrigin = ["sketch", "part", "assembly", "surface", "vehicle"].includes(project.activeWorkspace);
-  const showSketch = ["sketch", "part", "drawing"].includes(project.activeWorkspace);
-  const showPartHistory = ["part", "drawing"].includes(project.activeWorkspace);
-  const showBodies = ["part", "surface", "drawing"].includes(project.activeWorkspace);
+  const showOrigin = true;
+  const showSketch = true;
+  const showPartHistory = true;
+  const showBodies = true;
   const drawingPreset = project.drawing.viewPreset ?? "automatic-4-view";
   const drawingViews = drawingPreset === "front-only"
     ? ["front"] as const
@@ -47,7 +48,13 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
   const sketchProfiles = detectSketchProfiles(project.sketch);
   const linkedOutline = project.sketch.entities.find((entity) => entity.kind === "rectangle" && !entity.construction && Math.abs(entity.widthMm - project.part.widthMm) < 1e-6 && Math.abs(entity.heightMm - project.part.heightMm) < 1e-6);
   const linkedBore = project.sketch.entities.find((entity) => entity.kind === "circle" && !entity.construction && Math.hypot(entity.center[0] - (linkedOutline?.kind === "rectangle" ? linkedOutline.center[0] : 0), entity.center[1] - (linkedOutline?.kind === "rectangle" ? linkedOutline.center[1] : 0)) < 0.01 && Math.abs(entity.radiusMm * 2 - project.part.holeDiameterMm) < 1e-6);
-  return <aside ref={treeRef} className="project-tree" aria-label="Model browser and feature history">
+  const relationships = selectionRelationships(project, selectedId);
+  return <aside ref={treeRef} className="project-tree" aria-label="Model browser and feature history" onContextMenu={(event) => {
+    event.preventDefault();
+    const id = (event.target as Element).closest<HTMLElement>("[data-tree-id]")?.dataset["treeId"] ?? null;
+    if (id !== null) onSelect(id);
+    onContextMenu(event.clientX, event.clientY, id);
+  }}>
     <div className="panel-title model-browser-title"><p>Model browser</p><h2>{project.name}</h2><div><span>Revision {project.revision}</span><strong>{project.activeWorkspace}</strong></div></div>
     <TreeSection title="Document" badge="preview" initiallyOpen={false}>
       <TreeItem kind="project" id={project.id} label={project.name} meta="workbench / 1" selectedId={selectedId} onSelect={onSelect} />
@@ -55,6 +62,9 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
     <TreeSection title={`Design health · ${designHealth.score}`} badge="preview" initiallyOpen={false}>
       {designHealth.workspaces.map((workspace) => <TreeItem key={workspace.workspace} kind="health" id={`design-health:${workspace.workspace}`} label={workspace.label} meta={`${workspace.status} · ${workspace.score}/100 · ${workspace.findingIds.length} finding${workspace.findingIds.length === 1 ? "" : "s"}`} selectedId={selectedId} onSelect={onSelect} />)}
     </TreeSection>
+    {relationships.length > 0 && <TreeSection title="Selection relationships" badge="preview">
+      {relationships.map((relationship) => <TreeItem key={`${relationship.role}:${relationship.id}`} kind={relationship.kind} id={relationship.id} label={`${relationship.role} · ${relationship.label}`} meta={relationship.meta} selectedId={selectedId} onSelect={onSelect} />)}
+    </TreeSection>}
     {showOrigin && <TreeSection title="Origin" badge="preview" initiallyOpen={false}>
       <TreeItem kind="datum" id="datum:origin" label="Origin" meta="0, 0, 0" selectedId={selectedId} onSelect={onSelect} />
       <TreeItem kind="datum" id="datum:xy" label="XY plane" meta="primary sketch plane" selectedId={selectedId} onSelect={onSelect} indent />
@@ -63,8 +73,8 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
     </TreeSection>}
     {showSketch && <TreeSection title={`Sketches · ${project.sketch.entities.length} entities · ${sketchProfiles.length} profiles`} badge="preview">
       <TreeItem kind="sketch" id={project.sketch.id} label={project.sketch.name} meta={`${project.sketch.constraints.length} constraints`} selectedId={selectedId} onSelect={onSelect} />
-      {project.activeWorkspace === "sketch" && project.sketch.entities.map((entity) => <TreeItem key={entity.id} kind="sketch" id={entity.id} label={entityLabel(entity.kind)} meta={shortId(entity.id)} selectedId={selectedId} onSelect={onSelect} indent />)}
-      {project.activeWorkspace === "sketch" && sketchProfiles.map((profile, index) => <TreeItem key={profile.id} kind="sketch" id={profile.id} label={`Profile P${index + 1}`} meta={`${profile.boundary.kind.replaceAll("-", " ")} · ${formatArea(profile.areaMm2)} mm²`} selectedId={selectedId} onSelect={onSelect} indent />)}
+      {project.sketch.entities.map((entity) => <TreeItem key={entity.id} kind="sketch" id={entity.id} label={entityLabel(entity.kind)} meta={`${shortId(entity.id)} · ${entity.visible === false ? "hidden" : "shown"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
+      {sketchProfiles.map((profile, index) => <TreeItem key={profile.id} kind="sketch" id={profile.id} label={`Profile P${index + 1}`} meta={`${profile.boundary.kind.replaceAll("-", " ")} · ${formatArea(profile.areaMm2)} mm²`} selectedId={selectedId} onSelect={onSelect} indent />)}
     </TreeSection>}
     {showPartHistory && <TreeSection title="Feature history" badge="preview">
       <TreeItem kind="feature" id="feature:plate-extrusion" label="Base extrusion" meta={`${project.part.widthMm} × ${project.part.heightMm} × ${project.part.thicknessMm} mm · ${linkedOutline === undefined ? "parameter driven" : "sketch linked"}`} selectedId={selectedId} onSelect={onSelect} />
@@ -75,8 +85,8 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
     </TreeSection>}
     {showBodies && <TreeSection title="Bodies" badge={project.activeWorkspace === "part" ? "qualified" : "preview"}>
       <TreeItem kind="body" id="body:bracket" label="Mounting plate" meta="closed manifold mesh" selectedId={selectedId} onSelect={onSelect} />
-      {project.activeWorkspace === "part" && (project.part.previewBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.shape} · ${body.visible ? "shown" : "hidden"} · preview`} selectedId={selectedId} onSelect={onSelect} indent />)}
-      {project.activeWorkspace === "surface" && <TreeItem kind="surface" id={project.surface.id} label={project.surface.name} meta={`${project.surface.mode} · open preview`} selectedId={selectedId} onSelect={onSelect} />}
+      {(project.part.previewBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.shape} · ${body.visible ? "shown" : "hidden"} · preview`} selectedId={selectedId} onSelect={onSelect} indent />)}
+      <TreeItem kind="surface" id={project.surface.id} label={project.surface.name} meta={`${project.surface.mode} · open surface preview`} selectedId={selectedId} onSelect={onSelect} />
     </TreeSection>}
     {project.activeWorkspace === "assembly" && <>
       <TreeSection title="Assembly template" badge="preview">
@@ -95,6 +105,14 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
       </TreeSection>
       <TreeSection title={`Mates · ${project.assembly.mates.length}`} badge="preview">
         {project.assembly.mates.map((mate) => <TreeItem key={mate.id} kind="mate" id={mate.id} label={mate.name} meta={mate.status} selectedId={selectedId} onSelect={onSelect} />)}
+      </TreeSection>
+    </>}
+    {project.activeWorkspace !== "assembly" && <>
+      <TreeSection title={`Components · ${project.assembly.components.length}`} badge="preview" initiallyOpen={false}>
+        {project.assembly.components.map((component) => <TreeItem key={component.id} kind="component" id={component.id} label={component.name} meta={`${component.grounded ? "grounded" : component.shape} · ${component.visible ? "shown" : "hidden"}`} selectedId={selectedId} onSelect={onSelect} />)}
+      </TreeSection>
+      <TreeSection title={`Mates · ${project.assembly.mates.length}`} badge="preview" initiallyOpen={false}>
+        {project.assembly.mates.map((mate) => <TreeItem key={mate.id} kind="mate" id={mate.id} label={mate.name} meta={`${mate.kind} · ${mate.status}`} selectedId={selectedId} onSelect={onSelect} />)}
       </TreeSection>
     </>}
     {project.activeWorkspace === "drawing" && <TreeSection title="Drawing views" badge="preview">
@@ -162,7 +180,7 @@ function TreeSection({ title, badge, children, initiallyOpen = true }: { readonl
 
 function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean }): React.JSX.Element {
   const selected = props.selectedId === props.id;
-  return <button className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => props.onSelect(selected ? null : props.id)}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span></button>;
+  return <button data-tree-id={props.id} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => props.onSelect(selected ? null : props.id)}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span></button>;
 }
 
 function treeIcon(kind: TreeKind, label: string, id: string): string {
@@ -204,4 +222,27 @@ function capitalizeWords(value: string): string {
 
 function formatArea(value: number): string {
   return String(Number(value.toFixed(2)));
+}
+
+function selectionRelationships(project: WorkbenchProject, selectedId: string | null): readonly { readonly role: string; readonly id: string; readonly label: string; readonly meta: string; readonly kind: TreeKind }[] {
+  if (selectedId === null) return [];
+  if (selectedId.startsWith("entity:") || selectedId.startsWith("profile:")) return [
+    { role: "Parent", id: project.sketch.id, label: project.sketch.name, meta: "XY sketch · associative input", kind: "sketch" },
+    { role: "Child", id: "feature:plate-extrusion", label: "Base extrusion", meta: "qualified profile consumer", kind: "feature" }
+  ];
+  if (selectedId.startsWith("feature:")) return [
+    { role: "Input", id: project.sketch.id, label: project.sketch.name, meta: "source sketch", kind: "sketch" },
+    { role: "Output", id: "body:bracket", label: "Mounting plate", meta: "closed manifold mesh", kind: "body" }
+  ];
+  if (selectedId === "body:bracket") return [
+    { role: "Parent", id: "feature:plate-extrusion", label: "Base extrusion", meta: "history feature", kind: "feature" }
+  ];
+  const component = project.assembly.components.find((candidate) => candidate.id === selectedId);
+  if (component !== undefined) return project.assembly.mates.filter((mate) => mate.componentIds.includes(component.id)).map((mate) => ({ role: "Mate", id: mate.id, label: mate.name, meta: mate.kind, kind: "mate" as const }));
+  const mate = project.assembly.mates.find((candidate) => candidate.id === selectedId);
+  if (mate !== undefined) return mate.componentIds.flatMap((componentId) => {
+    const related = project.assembly.components.find((candidate) => candidate.id === componentId);
+    return related === undefined ? [] : [{ role: "Component", id: related.id, label: related.name, meta: related.grounded ? "grounded" : related.shape, kind: "component" as const }];
+  });
+  return [];
 }

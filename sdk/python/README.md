@@ -22,7 +22,12 @@ with Ps3dClient(
     protocol="auto",
 ) as client:
     print(client.protocol_info())
-    print(client.guide()["workflow"])
+    guide = client.guide()
+    print(guide["workflow"])
+    guide_acknowledgement = {
+        "manifestSha256": guide["manifestSha256"],
+        "understood": True,
+    }
     print(client.find_commands("change motorcycle wheelbase", workspace="vehicle"))
     # health = client.design_health(project_mapping)
 ```
@@ -52,10 +57,15 @@ Run the example with `sdk/python` on `PYTHONPATH`, or vendor the small
 `ps3d_client` package into an approved Python project. No package installation
 is required.
 
-For a write-intent workflow, first call `preview(project, operation)`, present
+For a write-intent workflow, first read `guide()` and retain its current
+`manifestSha256` with `understood=True` (or call `guide_acknowledgement()`).
+Pass that acknowledgement to `preview(project, operation,
+guide_acknowledgement)`, present
 the returned candidate project, project references, engineering disclosures,
 receipt information, and diff for approval, and only then call
-`apply(project, operation, receipt, confirmed=True)`. The MCP server returns a
+`apply(project, operation, receipt, confirmed=True,
+guide_acknowledgement=guide_acknowledgement)`. Missing or stale guide digests
+fail closed, forcing the client to read the current contract. The MCP server returns a
 new project object; neither the server nor the client writes the project to a
 file.
 

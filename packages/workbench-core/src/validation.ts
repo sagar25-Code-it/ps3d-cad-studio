@@ -211,22 +211,24 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
 }
 
 function validateEntity(value: unknown): value is SketchEntity {
-  if (!isRecord(value) || !stableId(value.id) || typeof value.construction !== "boolean") return false;
+  if (!isRecord(value) || !stableId(value.id) || typeof value.construction !== "boolean"
+    || (Object.hasOwn(value, "visible") && typeof value.visible !== "boolean")) return false;
+  const optionalVisibility = Object.hasOwn(value, "visible") ? ["visible"] : [];
   if (value.kind === "line") {
-    return exactKeys(value, ["id", "kind", "start", "end", "construction"])
+    return exactKeys(value, ["id", "kind", "start", "end", "construction", ...optionalVisibility])
       && vec2(value.start) && vec2(value.end) && distance(value.start, value.end) >= WORKBENCH_LIMITS.minGeometryMm;
   }
   if (value.kind === "rectangle") {
-    return exactKeys(value, ["id", "kind", "center", "widthMm", "heightMm", "rotationDeg", "construction"])
+    return exactKeys(value, ["id", "kind", "center", "widthMm", "heightMm", "rotationDeg", "construction", ...optionalVisibility])
       && vec2(value.center) && finiteRange(value.widthMm, WORKBENCH_LIMITS.minGeometryMm, 20_000)
       && finiteRange(value.heightMm, WORKBENCH_LIMITS.minGeometryMm, 20_000) && finiteRange(value.rotationDeg, -360, 360);
   }
   if (value.kind === "circle") {
-    return exactKeys(value, ["id", "kind", "center", "radiusMm", "construction"])
+    return exactKeys(value, ["id", "kind", "center", "radiusMm", "construction", ...optionalVisibility])
       && vec2(value.center) && finiteRange(value.radiusMm, WORKBENCH_LIMITS.minGeometryMm, 10_000);
   }
   if (value.kind === "arc") {
-    return exactKeys(value, ["id", "kind", "start", "mid", "end", "construction"])
+    return exactKeys(value, ["id", "kind", "start", "mid", "end", "construction", ...optionalVisibility])
       && vec2(value.start) && vec2(value.mid) && vec2(value.end)
       && Math.abs(cross2(value.start, value.mid, value.end)) >= 1e-4;
   }

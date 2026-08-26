@@ -166,7 +166,7 @@ qualification gates mature.
 - Remote Streamable HTTP and OAuth are deferred to the deployment phase.
 - Provide a Python 3.11+ standard-library client that implements modern MCP
   discovery with 2025-era initialize fallback, tools/list, tools/call, and typed
-  helpers for all ten PS3D tools. It must use
+  helpers for all eleven PS3D tools. It must use
   explicit argv, `shell=False`, a finite timeout, and no network or automatic
   project/secret discovery.
 

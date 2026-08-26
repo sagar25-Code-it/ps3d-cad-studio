@@ -67,16 +67,19 @@ client needs. A maximum of five active tokens per account is enforced with
 
 ## Safe command sequence
 
-1. Call `initialize`.
+1. For MCP `2026-07-28`, call `server/discover`; for a supported 2025-era host,
+   use its `initialize` lifecycle.
 2. Call `tools/list` rather than inventing a tool or input field.
-3. Call `ps3d_guide` and `ps3d_find_commands`.
-4. Inspect the complete bounded project supplied by the user.
+3. Call `ps3d_guide`, then `ps3d_agent_handshake` with the user's request and
+   experience level. Resolve every correction or clarification it returns.
+4. Inspect the complete bounded project supplied by the user, run design
+   health, and call `ps3d_find_commands`.
 5. Create a preview and show its diagnostics and exact operation.
 6. Apply only after review, `confirmed: true`, and a matching SHA-256 receipt.
 7. Treat the returned project as a new copy. Remote MCP does not click the live
    CAD browser, open private files, or write an external project automatically.
 
-The ten tools are `ps3d_guide`, `ps3d_find_commands`, `ps3d_capabilities`,
+The eleven tools are `ps3d_guide`, `ps3d_agent_handshake`, `ps3d_find_commands`, `ps3d_capabilities`,
 `ps3d_inspect_project`, `ps3d_design_health`, `ps3d_analyze_vehicle`,
 `ps3d_electromechanical_catalog`, `ps3d_preview_electromechanical`,
 `ps3d_preview_operation`, and `ps3d_apply_preview`.
@@ -98,4 +101,3 @@ no browser-profile, filesystem-secret, credential, or network discovery. See
   minute per identity.
 - JSON-RPC `-32003`: the token lacks the tool's required scope.
 - Receipt mismatch: regenerate the preview against the current project revision.
-
