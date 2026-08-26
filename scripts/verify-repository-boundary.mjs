@@ -168,6 +168,7 @@ async function listFiles(directory, prefix) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
+    if (entry.name === ".git") continue;
     if (entry.isDirectory() && excludedDirectories.has(entry.name)) continue;
     const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
     if (entry.isSymbolicLink()) throw new Error(`Repository boundary rejects symbolic links: ${relative}`);

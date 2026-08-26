@@ -235,7 +235,8 @@ function safeReturnTarget(value: string | null): string | undefined {
 }
 
 function messageFrom(cause: unknown, fallback: string): string {
-  return cause instanceof CloudApiError || cause instanceof Error ? cause.message : fallback;
+  if (cause instanceof CloudApiError) return `${cause.message} Reference: ${cause.code}.`;
+  return cause instanceof Error ? cause.message : fallback;
 }
 
 function scopeLabel(scope: string): string {

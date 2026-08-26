@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
 import {
   PERSONAL_TOKEN_PATTERN,
   generatePersonalAccessToken,
   hashPersonalAccessToken,
   normalizeScopes
 } from "../api/_lib/cloud.js";
+import { classifyTokenStoreFailure } from "../api/_lib/token-store-error.js";
 import { PS3D_LEARNING_MANUAL } from "../apps/studio-web/src/learning/learning-content.js";
 import { buildLearningManualPdf } from "../apps/studio-web/src/learning/learning-pdf.js";
 import { PS3D_BRAND, PS3D_PUBLIC_TOOLS } from "../apps/studio-web/src/brand.js";
@@ -24,6 +26,21 @@ export const publicReleaseTests: readonly TestCase[] = [
       equal(PS3D_BRAND.logoPath, "/ps3d-master-logo.png", "every public surface should use the reviewed official logo asset");
       equal(PS3D_PUBLIC_TOOLS.length, 5, "the portfolio profile should retain all five listed public-tool entries");
       assert(PS3D_PUBLIC_TOOLS.every((tool) => tool.name.length > 0 && tool.description.length > 0), "every marketing tool card should be complete");
+    }
+  },
+  {
+    name: "responsive policy loads last and preserves bounded CAD and public layouts",
+    run: () => {
+      const styleImports = readFileSync("apps/studio-web/src/styles.css", "utf8").trim();
+      const responsive = readFileSync("apps/studio-web/src/styles/responsive.css", "utf8");
+      assert(styleImports.endsWith('@import "./styles/responsive.css";'), "responsive policy must load after every workspace and brand stylesheet");
+      assert(responsive.includes("@media (max-width: 1220px)"), "small-laptop layout should have an explicit breakpoint");
+      assert(responsive.includes("@media (max-width: 700px)"), "single-column CAD layout should have an explicit breakpoint");
+      assert(responsive.includes("@media (max-width: 480px)"), "phone layout should have an explicit breakpoint");
+      assert(responsive.includes("@media (max-height: 700px)"), "high-zoom and short-window layout should have an explicit height breakpoint");
+      assert(/\.studio-app\s*\{[\s\S]*?overflow-x:\s*hidden;/u.test(responsive), "the CAD shell should never widen the document viewport");
+      assert(/\.master-cart-workspace\s*\{[\s\S]*?min-width:\s*0;/u.test(responsive), "the catalog must remove its desktop-only minimum width responsively");
+      assert(/\.public-page-header nav\s*\{[\s\S]*?overflow-x:\s*auto;/u.test(responsive), "public navigation should remain reachable without overflowing the page");
     }
   },
   {
@@ -48,6 +65,37 @@ export const publicReleaseTests: readonly TestCase[] = [
       const normalized = normalizeScopes(["mcp:apply", "mcp:read", "mcp:apply"]);
       assert(normalized !== undefined, "valid scope selection should normalize");
       equal(normalized.join(","), "mcp:read,mcp:apply", "scope order should be canonical and duplicates removed");
+    }
+  },
+  {
+    name: "token-store failures expose safe and actionable deployment reasons",
+    run: () => {
+      const permission = classifyTokenStoreFailure("create", { status: 403, code: "42501", message: "permission denied for table mcp_tokens" });
+      equal(permission.status, 503, "database permission failures should be reported as deployment availability errors");
+      equal(permission.code, "TOKEN_STORE_PERMISSION", "permission failures should have a stable support reference");
+      assert(permission.message.includes("latest Supabase migration"), "permission guidance should identify the administrator action");
+      assert(!permission.message.includes("mcp_tokens"), "the public error must not expose the internal table name");
+
+      const migration = classifyTokenStoreFailure("list", { status: 404, code: "PGRST205", message: "table was not found" });
+      equal(migration.code, "TOKEN_STORE_MIGRATION", "missing schema objects should identify the migration boundary");
+
+      const limit = classifyTokenStoreFailure("create", { status: 500, code: "P0001", message: "active MCP token limit reached" });
+      equal(limit.status, 409, "the active-token cap should remain a user-correctable conflict");
+      equal(limit.code, "TOKEN_LIMIT", "the active-token cap should preserve its public error contract");
+
+      const unknown = classifyTokenStoreFailure("revoke", { status: 500, code: "XX000", message: "sensitive internal detail" });
+      equal(unknown.code, "TOKEN_REVOKE_FAILED", "unknown failures should retain an operation-specific safe fallback");
+      assert(!unknown.message.includes("sensitive internal detail"), "raw database details must never reach the browser");
+    }
+  },
+  {
+    name: "the forward MCP migration grants only the required service-role table access",
+    run: () => {
+      const migration = readFileSync("supabase/migrations/202608260001_grant_mcp_service_role.sql", "utf8");
+      assert(/grant usage on schema public to service_role;/u.test(migration), "the server role needs schema usage");
+      assert(/grant select, insert, update on table public\.mcp_tokens to service_role;/u.test(migration), "the server role needs only token list, create, and update privileges");
+      assert(!/\bto\s+(?:anon|authenticated|public)\b/iu.test(migration), "the forward repair must not grant token-table access to browser roles");
+      assert(!/\b(?:delete|truncate|references|trigger)\b/iu.test(migration.replace(/^--.*$/gmu, "")), "the server role must not receive unnecessary destructive or ownership-adjacent privileges");
     }
   },
   {

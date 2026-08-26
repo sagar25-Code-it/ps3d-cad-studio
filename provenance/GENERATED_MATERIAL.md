@@ -221,13 +221,13 @@ deployment, release, or legal clearance.
 - Canonical source-set hash algorithm: SHA-256 over a sorted sequence of UTF-8
   repository-relative paths normalized to `/` separators, a NUL byte, file
   bytes, and a trailing NUL byte.
-- Exclusions: any `.git`, `.vercel`, `node_modules`, `.pnpm-store`, `dist`,
-  `.test-dist`, or `.mcp-dist` directory at any depth, plus this
+- Exclusions: any `.git` path, any `.vercel`, `node_modules`, `.pnpm-store`,
+  `dist`, `.test-dist`, or `.mcp-dist` directory at any depth, plus this
   self-referential record.
   Symbolic links are rejected.
 - Canonical source-set hash:
-  `d58e9512736ac07f392b1d50b726a9e71a5de4b84b726e5629b2da4cf0e22173`
-- Canonical source-set file count: 347
+  `8e594d0e505b4cf86d33b94d1eff3fd6518043988b33ee046b8abf284dd41db1`
+- Canonical source-set file count: 349
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
   `provenance/BUILD_IDENTITY.json`, SHA-256

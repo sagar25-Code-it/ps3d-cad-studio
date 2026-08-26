@@ -8,6 +8,7 @@ import {
   supabaseAdminFetch
 } from "./_lib/cloud.js";
 import { apiError, assertExactKeys, isRecord, jsonResponse, methodNotAllowed, readJsonObject, requestBodyErrorResponse, requireSameOrigin } from "./_lib/http.js";
+import { tokenStoreErrorResponse } from "./_lib/token-store-error.js";
 
 const ALLOWED_EXPIRY_DAYS = [7, 30, 90] as const;
 
@@ -36,7 +37,7 @@ export default { fetch: handler };
 async function listTokens(userId: string, env: ReturnType<typeof loadCloudEnvironment>): Promise<Response> {
   const query = `/mcp_tokens?user_id=eq.${encodeURIComponent(userId)}&select=id,name,token_prefix,scopes,created_at,expires_at,last_used_at,revoked_at&order=created_at.desc&limit=20`;
   const response = await supabaseAdminFetch(env, query, { method: "GET" });
-  if (!response.ok) return apiError(502, "TOKEN_LIST_FAILED", "Active tokens could not be listed.");
+  if (!response.ok) return tokenStoreErrorResponse(response, "list");
   const value: unknown = await response.json().catch(() => undefined);
   if (!Array.isArray(value)) return apiError(502, "TOKEN_LIST_RESPONSE", "The token store returned an invalid response.");
   return jsonResponse({ schema: "ps3d-mcp-token-list/1", tokens: value });
@@ -60,11 +61,7 @@ async function createToken(userId: string, body: Readonly<Record<string, unknown
     headers: { Prefer: "return=representation" },
     body: JSON.stringify({ user_id: userId, name, token_hash: tokenHash, token_prefix: tokenPrefix, scopes, expires_at: expiresAt })
   });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    if (text.includes("active MCP token limit")) return apiError(409, "TOKEN_LIMIT", "Revoke an existing token before creating another. The maximum is five active tokens.");
-    return apiError(502, "TOKEN_CREATE_FAILED", "The token could not be created.");
-  }
+  if (!response.ok) return tokenStoreErrorResponse(response, "create");
   const value: unknown = await response.json().catch(() => undefined);
   const created = Array.isArray(value) ? value[0] : undefined;
   if (!isRecord(created) || typeof created.id !== "string") return apiError(502, "TOKEN_CREATE_RESPONSE", "The token store returned an invalid creation response.");
@@ -92,7 +89,7 @@ async function revokeToken(userId: string, body: Readonly<Record<string, unknown
     headers: { Prefer: "return=representation" },
     body: JSON.stringify({ revoked_at: new Date().toISOString() })
   });
-  if (!response.ok) return apiError(502, "TOKEN_REVOKE_FAILED", "The token could not be revoked.");
+  if (!response.ok) return tokenStoreErrorResponse(response, "revoke");
   const value: unknown = await response.json().catch(() => undefined);
   if (!Array.isArray(value) || value.length !== 1) return apiError(404, "TOKEN_NOT_FOUND", "The active token was not found.");
   return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
