@@ -109,6 +109,29 @@ export const workbenchEngineeringIntentTests: readonly TestCase[] = [
       assert(plan.questions.some((question) => question.code === "DIMENSION_OWNERSHIP_REQUIRED"), "unscoped dimensions must be assigned to explicit child definitions before geometry planning");
       equal(plan.execution.canCreateCandidateNow, false, "ambiguous cross-part dimensions must block candidate creation");
     }
+  },
+  {
+    name: "engineering intent compiler bounds whitespace parsing and distinguishes hole size from hole count",
+    run: () => {
+      const longWhitespace = " ".repeat(11_000);
+      const startedAt = Date.now();
+      const adversarial = planEngineeringIntent({
+        request: `Create a mounting plate with length${longWhitespace}not-a-number and a diameter 4 mm hole.`,
+        unit: "mm",
+        workspace: "part"
+      });
+      assert(Date.now() - startedAt < 1_000, "uncontrolled whitespace must not cause polynomial regular-expression work");
+      assert(adversarial.dimensionFacts.some((fact) => fact.label === "diameter" && fact.valueMm === 4), "a bounded diameter expression should still capture valid dimensions");
+      const plate = adversarial.partDefinitions.find((part) => part.id === "definition:plate");
+      assert(plate !== undefined, "the adversarial request should still resolve its intended part definition");
+      assert(!plate.features.some((feature) => feature.kind === "linear-pattern"), "a 4 mm hole diameter must not be misread as a four-hole count");
+
+      const oversized = planEngineeringIntent({
+        request: `Create a plate ${" ".repeat(12_100)} with two mounting holes.`,
+        unit: "mm",
+        workspace: "part"
+      });
+      assert(oversized.warnings.some((warning) => warning.includes("12,000 characters") && warning.includes("truncated")), "direct callers should receive an explicit warning when an oversized request is safely truncated");
+    }
   }
 ];
-
