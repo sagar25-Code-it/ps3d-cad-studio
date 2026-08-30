@@ -39,6 +39,7 @@ legacy negotiation. Its machine-readable guide is available through:
 
 - tool `ps3d_guide`;
 - stateless coordinator `ps3d_agent_handshake`;
+- engineering compiler `ps3d_plan_engineering_intent`;
 - resource `ps3d://ai/collaboration-guide`;
 - prompt `ps3d-guided-change`.
 
@@ -51,20 +52,25 @@ legacy negotiation. Its machine-readable guide is available through:
 3. Coordinate by calling `ps3d_agent_handshake` with the exact user request,
    experience level, optional workspace, and any proposed tool/recipe stable
    IDs. Resolve every correction or clarification it returns.
-4. Understand by supplying a complete caller-owned project to
+4. For a new part, assembly, product, or drawing, call
+   `ps3d_plan_engineering_intent` with the complete request. Resolve its
+   dimensions, standards, evidence, quantities, interfaces, and truthful
+   feature-capability gates; the user does not paste a master prompt.
+5. Understand existing state by supplying a complete caller-owned project to
    `ps3d_inspect_project`.
-5. Review cross-workspace readiness with `ps3d_design_health`. Its dependency
+6. Review cross-workspace readiness with `ps3d_design_health`. Its dependency
    table distinguishes associative, trace-linked, snapshot, and detached links.
-6. Use `ps3d_find_commands` to select a bounded recipe; do not execute fuzzy
+7. Use `ps3d_find_commands` to select a bounded recipe for one approved
+   dependency package; do not execute fuzzy
    text or invent operation fields.
-7. Preview write intent with `ps3d_preview_operation`, or use
+8. Preview write intent with `ps3d_preview_operation`, or use
    `ps3d_preview_electromechanical` for circuit-to-mounted-3D realization.
-8. Show the exact candidate project, changed IDs, engineering disclosures,
+9. Show the exact candidate project, changed IDs, engineering disclosures,
    base/candidate content references, receipt details, and revision.
-9. Obtain user confirmation tied to that exact preview.
-10. Call `ps3d_apply_preview` with the same project, canonical operation,
+10. Obtain user confirmation tied to that exact preview.
+11. Call `ps3d_apply_preview` with the same project, canonical operation,
    receipt, and `confirmed: true`.
-11. Review and open/import the returned project copy.
+12. Review and open/import the returned project copy.
 
 The server is stateless and never writes a file or changes the live browser
 project. A receipt is an unkeyed deterministic SHA-256 integrity checksum. It
@@ -93,6 +99,25 @@ Three namespaces remain deliberately separate:
   search.
 
 This separation prevents a fuzzy phrase from becoming an unreviewed mutation.
+
+## Engineering intent compiler
+
+`ps3d_plan_engineering_intent` accepts a complete 2–12,000 character request
+plus optional unit, workspace, experience level, revision, target CAD list,
+and evidence references. It deterministically returns:
+
+- reusable manufactured and standard-part definitions;
+- datum → sketch → base → detail → finish → verification feature order;
+- normalized dimension facts and controlled fit-up questions;
+- standard/supplier evidence gates instead of guessed catalog geometry;
+- semantic interfaces and mate-reference strategy;
+- dependency-ordered subassembly packages with one-package approval gates; and
+- qualified, preview, or unavailable PS3D routes plus honest portability
+  levels for external CAD targets.
+
+This is a planning compiler, not an exact geometry kernel or hidden language
+model. An unrecognized or incomplete request remains useful as a blocked plan
+with specific questions; it never becomes invented geometry.
 
 ## PS3D collaboration agent
 

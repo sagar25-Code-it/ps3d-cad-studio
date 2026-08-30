@@ -206,11 +206,11 @@ are reviewed product evidence, not copied Autodesk or Siemens assets.
 | [`74-mate-relationship-panel.jpg`](screenshots/74-mate-relationship-panel.jpg) | Parent/child and mate relationship inspection |
 | [`75-assembly-context-menu.jpg`](screenshots/75-assembly-context-menu.jpg) | Component-specific Assembly right-click menu |
 | [`76-sketch-direct-dimension-viewcube.jpg`](screenshots/76-sketch-direct-dimension-viewcube.jpg) | Direct driving-dimension editor, visible definition points, and bounded ViewCube/WCS controls |
-| [`77-command-mcp-audit.jpg`](screenshots/77-command-mcp-audit.jpg) | 331-command contract audit with executable/unavailable evidence and zero registry issues |
+| [`77-command-mcp-audit.jpg`](screenshots/77-command-mcp-audit.jpg) | Historical 331-command contract audit with executable/unavailable evidence and zero registry issues; the current catalog adds the engineering-intent command for 332 total |
 | [`78-ai-collaboration-agent.jpg`](screenshots/78-ai-collaboration-agent.jpg) | PhD-level stateless coordination handshake resolving a sketch-dimension goal without CAD execution |
 
-The current local functional suite passed **103/103** cases and the direct MCP
-stdio exchange across all eleven tools plus evaluator identity. The current
+The current local functional suite passed **111/111** cases and the direct MCP
+stdio exchange across all twelve tools plus evaluator identity. The current
 `pnpm build` run produced 59 assets, enforced the strict CSP, and verified that
 Node-only MCP SDK, WASM/Manifold, and dynamic-evaluation paths are absent from
 the browser production boundary. The source-set gate is resealed only after
