@@ -246,6 +246,31 @@ class Ps3dClient:
             arguments["workspace"] = workspace
         return _structured(self.call_tool("ps3d_find_commands", arguments))
 
+    def plan_engineering_intent(
+        self,
+        request: str,
+        *,
+        unit: str = "mm",
+        workspace: str | None = None,
+        experience_level: str | None = None,
+        project_revision: int | None = None,
+        target_cad: Sequence[str] | None = None,
+        evidence: Sequence[str] | None = None,
+    ) -> JsonObject:
+        """Compile ordinary part/assembly intent into a read-only engineering plan."""
+        arguments: JsonObject = {"request": request, "unit": unit}
+        optional = {
+            "workspace": workspace,
+            "experienceLevel": experience_level,
+            "projectRevision": project_revision,
+        }
+        arguments.update({key: value for key, value in optional.items() if value is not None})
+        if target_cad is not None:
+            arguments["targetCad"] = list(target_cad)
+        if evidence is not None:
+            arguments["evidence"] = list(evidence)
+        return _structured(self.call_tool("ps3d_plan_engineering_intent", arguments))
+
     def inspect(self, project: Mapping[str, Any]) -> JsonObject:
         return _structured(self.call_tool("ps3d_inspect_project", {"project": dict(project)}))
 
