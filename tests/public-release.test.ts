@@ -9,6 +9,9 @@ import { classifyTokenStoreFailure } from "../api/_lib/token-store-error.js";
 import { PS3D_LEARNING_MANUAL } from "../apps/studio-web/src/learning/learning-content.js";
 import { buildLearningManualPdf } from "../apps/studio-web/src/learning/learning-pdf.js";
 import { PS3D_BRAND, PS3D_PUBLIC_TOOLS } from "../apps/studio-web/src/brand.js";
+import { deriveFaultBrainNotices, mergeFaultBrainNotices, runtimeFaultNotice } from "../apps/studio-web/src/ui/fault-brain.js";
+import { createWorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { buildDesignHealthReport } from "../packages/workbench-health/src/index.js";
 import { assert, equal, type TestCase } from "./test-kit.js";
 
 const TEST_PEPPER = "ps3d-public-release-test-pepper-32-bytes-minimum";
@@ -41,6 +44,20 @@ export const publicReleaseTests: readonly TestCase[] = [
       assert(/\.studio-app\s*\{[\s\S]*?overflow-x:\s*hidden;/u.test(responsive), "the CAD shell should never widen the document viewport");
       assert(/\.master-cart-workspace\s*\{[\s\S]*?min-width:\s*0;/u.test(responsive), "the catalog must remove its desktop-only minimum width responsively");
       assert(/\.public-page-header nav\s*\{[\s\S]*?overflow-x:\s*auto;/u.test(responsive), "public navigation should remain reachable without overflowing the page");
+    }
+  },
+  {
+    name: "Smart Brain deduplicates engineering faults and redacts runtime secrets",
+    run: () => {
+      const report = buildDesignHealthReport(createWorkbenchProject("project:fault-brain-test"));
+      const engineeringNotices = deriveFaultBrainNotices(report);
+      assert(engineeringNotices.length > 0, "the default broad project should expose its truthful review findings");
+      assert(engineeringNotices.every((notice) => notice.severity === "warning" || notice.severity === "error"), "informational health records should not become fault notifications");
+      const runtime = runtimeFaultNotice("unhandled-rejection", "Bearer secret-token ps3d_privatecredential123 at C:\\private\\system\\key.txt");
+      assert(!runtime.message.includes("secret-token"), "bearer credentials must be redacted from runtime notifications");
+      assert(!runtime.message.includes("privatecredential"), "PS3D credential-like values must be redacted");
+      assert(!runtime.message.includes("C:\\private"), "local system paths must be redacted");
+      equal(mergeFaultBrainNotices([runtime, runtime]).length, 1, "repeated runtime failures should produce one stable notification");
     }
   },
   {

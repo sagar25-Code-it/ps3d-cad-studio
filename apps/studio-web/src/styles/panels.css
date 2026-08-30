@@ -148,7 +148,12 @@
 .selection-card > header,
 .interference-card > header,
 .continuity-card { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
-.explode-card input { width: 100%; margin: 0.55rem 0; }
+.explode-card > header > div { display: grid; gap: 0.12rem; }
+.explode-card > header > div small { color: #668092; font: 0.45rem var(--mono); }
+.explode-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.42rem; margin-top: 0.62rem; }
+.explode-controls input { width: 100%; min-width: 0; margin: 0; accent-color: #43bfd0; }
+.explode-controls button { min-height: 28px; padding: 0.32rem 0.45rem; font-size: 0.48rem; }
+.explode-card meter { width: 100%; height: 7px; margin-top: 0.45rem; accent-color: #43bfd0; }
 
 .component-list,
 .mate-list { display: grid; gap: 0.3rem; }

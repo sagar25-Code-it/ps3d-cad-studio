@@ -34,6 +34,7 @@ import {
 } from "./electromechanical.js";
 import { createVehicleTemplate, solveVehicleGeometry, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
+import { validatePartFeatureStack } from "./part-features.js";
 
 export const WORKBENCH_LIMITS = {
   maxJsonBytes: 1_000_000,
@@ -250,13 +251,15 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
 
 function validatePart(value: unknown): WorkbenchResult<PartIntent> {
   const required = ["id", "name", "widthMm", "heightMm", "thicknessMm", "holeDiameterMm", "edgeTreatmentMm", "patternCount", "revolveAngleDeg"];
+  const optional = ["previewBodies", "modelUpdateSerial"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key))
-    || Object.keys(value).some((key) => !required.includes(key) && key !== "previewBodies")
+    || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || value.id !== "part:mounting-plate" || !shortText(value.name, 1, 120)
     || !finiteRange(value.widthMm, 5, 500) || !finiteRange(value.heightMm, 5, 500)
     || !finiteRange(value.thicknessMm, 1, 100) || !finiteRange(value.holeDiameterMm, 1, 250)
     || !finiteRange(value.edgeTreatmentMm, 0, 25) || !integerRange(value.patternCount, 1, 24)
-    || !finiteRange(value.revolveAngleDeg, 1, 360)) return invalid("The part intent is outside its supported envelope.");
+    || !finiteRange(value.revolveAngleDeg, 1, 360)
+    || (Object.hasOwn(value, "modelUpdateSerial") && !integerRange(value.modelUpdateSerial, 0, 1_000_000))) return invalid("The part intent is outside its supported envelope.");
   if (Object.hasOwn(value, "previewBodies") && (!Array.isArray(value.previewBodies) || value.previewBodies.length > 64)) return invalid("The part preview-body collection is invalid.");
   if (Array.isArray(value.previewBodies)) {
     const ids = new Set<string>();
@@ -272,9 +275,11 @@ function validatePart(value: unknown): WorkbenchResult<PartIntent> {
 }
 
 function validatePartPreviewBody(value: unknown): value is PartPreviewBody {
-  if (!isRecord(value) || !exactKeys(value, ["id", "name", "shape", "visible", "color", "translationMm", "rotationDeg", "sizeMm"])
+  const required = ["id", "name", "shape", "visible", "color", "translationMm", "rotationDeg", "sizeMm"];
+  const optional = ["boreDiameterMm", "edgeTreatment", "shellThicknessMm", "draftAngleDeg", "revolveAngleDeg", "featureTrace"];
+  if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || !stableId(value.id) || !shortText(value.name, 1, 120)
-    || !["block", "cylinder", "cone", "sphere"].includes(String(value.shape))
+    || !["block", "cylinder", "cone", "sphere", "revolved"].includes(String(value.shape))
     || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)
     || !vec3(value.translationMm) || !vec3(value.rotationDeg, 360)
     || !Array.isArray(value.sizeMm) || value.sizeMm.length !== 3
@@ -284,7 +289,18 @@ function validatePartPreviewBody(value: unknown): value is PartPreviewBody {
   const [x, y, z] = value.sizeMm;
   if ((value.shape === "cylinder" || value.shape === "sphere") && Math.abs(x - y) > 1e-9) return false;
   if (value.shape === "sphere" && Math.abs(x - z) > 1e-9) return false;
-  return true;
+  if (value.shape === "revolved" && (!finiteRange(value.revolveAngleDeg, 0.001, 360) || y <= 0 || y >= x)) return false;
+  if (value.shape !== "revolved" && Object.hasOwn(value, "revolveAngleDeg")) return false;
+  if (Object.hasOwn(value, "boreDiameterMm") && !finiteRange(value.boreDiameterMm, WORKBENCH_LIMITS.minGeometryMm, 9_999)) return false;
+  if (Object.hasOwn(value, "shellThicknessMm") && !finiteRange(value.shellThicknessMm, WORKBENCH_LIMITS.minGeometryMm, 5_000)) return false;
+  if (Object.hasOwn(value, "draftAngleDeg") && !finiteRange(value.draftAngleDeg, 0.001, 20)) return false;
+  if (Object.hasOwn(value, "edgeTreatment") && (!isRecord(value.edgeTreatment) || !exactKeys(value.edgeTreatment, ["kind", "sizeMm"])
+    || !["blend", "chamfer"].includes(String(value.edgeTreatment.kind)) || !finiteRange(value.edgeTreatment.sizeMm, WORKBENCH_LIMITS.minGeometryMm, 5_000))) return false;
+  if (Object.hasOwn(value, "featureTrace") && (!isRecord(value.featureTrace) || !exactKeys(value.featureTrace, ["kind", "operationId", "parentIds"])
+    || !["primitive", "revolve", "pattern", "mirror", "unite", "subtract", "trim", "face-edit", "edge-treatment", "draft", "shell", "heal"].includes(String(value.featureTrace.kind))
+    || !stableId(value.featureTrace.operationId) || !Array.isArray(value.featureTrace.parentIds) || value.featureTrace.parentIds.length < 1 || value.featureTrace.parentIds.length > 8
+    || value.featureTrace.parentIds.some((id) => !stableId(id)))) return false;
+  return validatePartFeatureStack(value as unknown as PartPreviewBody).ok;
 }
 
 function validateAssembly(value: unknown): WorkbenchResult<WorkbenchProject["assembly"]> {

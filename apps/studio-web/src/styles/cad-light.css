@@ -563,6 +563,10 @@
 .studio-app .preview-body-editor-title > div { min-width: 0; display: grid; gap: 1px; }
 .studio-app .preview-body-editor-title small { color: #a41c28; font: 700 9px var(--mono); letter-spacing: 0.06em; }
 .studio-app .preview-body-editor-title strong { overflow: hidden; color: #2d3338; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.studio-app .preview-body-feature-summary { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; padding: 7px 8px; border-left: 3px solid #1b6ca8; border-radius: 3px; background: #eaf4fa; }
+.studio-app .preview-body-feature-summary strong { color: #23475e; font-size: 10px; }
+.studio-app .preview-body-feature-summary span { overflow: hidden; color: #314957; font: 600 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.studio-app .preview-body-feature-summary small { grid-column: 1 / -1; overflow: hidden; color: #5b6d78; font: 500 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .studio-app .preview-body-editor fieldset { display: grid; gap: 0.45rem; margin: 0; padding: 0.55rem; border: 1px solid #d2d6da; border-radius: 5px; }
 .studio-app .preview-body-editor legend { padding: 0 0.28rem; color: #555d64; font-size: 10px; }
 .studio-app .preview-body-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }

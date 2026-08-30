@@ -11,8 +11,10 @@ import {
   canonicalizeJson,
   defaultElectromechanicalMappings,
   preferredElectromechanicalLayout,
+  planEngineeringIntent,
   validateWorkbenchOperation,
   validateWorkbenchProject,
+  type EngineeringTargetCad,
   type WorkbenchOperation,
   type WorkbenchProject,
   type WorkspaceId
@@ -109,6 +111,21 @@ const AGENT_HANDSHAKE_SCHEMA = {
     proposedRecipeId: { type: "string", minLength: 1, maxLength: 100 }
   }
 } as const;
+const ENGINEERING_INTENT_PLAN_SCHEMA = {
+  type: "object",
+  description: "Read-only engineering decomposition request. It may plan any described part or assembly, but unresolved inputs and unavailable geometry routes remain explicitly blocked.",
+  additionalProperties: false,
+  required: ["request"],
+  properties: {
+    request: { type: "string", minLength: 2, maxLength: 12_000 },
+    unit: { enum: ["mm", "in"] },
+    workspace: { enum: ["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"] },
+    experienceLevel: { enum: EXPERIENCE_LEVELS },
+    projectRevision: { type: "integer", minimum: 0 },
+    targetCad: { type: "array", maxItems: 6, uniqueItems: true, items: { enum: ["ps3d", "fusion-360", "solidworks", "nx", "creo", "catia-v5"] } },
+    evidence: { type: "array", maxItems: 40, items: { type: "string", minLength: 1, maxLength: 240 } }
+  }
+} as const;
 const STRUCTURED_OUTPUT_SCHEMA = { type: "object", additionalProperties: true } as const;
 
 const operationEnvelope = (kind: string, values: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => ({
@@ -120,12 +137,19 @@ const operationEnvelope = (kind: string, values: Readonly<Record<string, unknown
 export const PS3D_AI_COMMAND_RECIPES: readonly Ps3dAiCommandRecipe[] = [
   recipe("guide", "any", "Learn the safe AI workflow", "Discover tools, protocol support, state ownership, and confirmation rules.", ["help", "start", "connect ai", "what can you do"], "read-only", "ps3d_guide", {}, "Call this first from a new host."),
   recipe("coordinate", "any", "Activate the PS3D collaboration agent", "Configure a stateless two-agent working contract, adapt explanations to the user, match bounded commands, and correct an AI host's proposed tool or recipe before execution.", ["activate agent", "collaborate", "coordinate ai", "check command", "validate plan", "beginner help", "phd mode"], "read-only", "ps3d_agent_handshake", { request: "<user engineering goal>", experienceLevel: "engineer", workspace: "<optional workspace>" }, "Call after ps3d_guide and again whenever the goal or proposed tool is unclear."),
+  recipe("engineering-intent", "any", "Plan a part or assembly from engineering intent", "Decompose an ordinary-language request into reusable part definitions, ordered feature histories, standards questions, interfaces, subassembly dependency packages, approval gates, and truth-labeled execution routes.", ["create part", "make part", "build assembly", "complex part", "product structure", "engineering approach", "standard part", "decompose assembly", "plan cad model"], "read-only", "ps3d_plan_engineering_intent", { request: "<complete user engineering request>", unit: "mm", workspace: "<optional workspace>", experienceLevel: "engineer", projectRevision: "<optional current revision>", targetCad: ["ps3d"], evidence: ["<optional drawing, standard, BOM, or supplier reference>"] }, "Use this built-in planner before command search for creation requests; do not ask the user to paste a master prompt."),
   recipe("inspect", "any", "Understand the current project", "Validate and summarize a caller-supplied project without changing it.", ["inspect project", "understand model", "summarize cad", "read project"], "read-only", "ps3d_inspect_project", { project: "<complete ps3d-workbench-project/1>" }, "The open browser project is not exposed automatically."),
   recipe("design-health", "any", "Review design health and dependencies", "Analyze every workspace, actual associativity, rebuild order, evidence gaps, and release boundaries without changing the project.", ["design health", "rebuild all", "dependency", "associativity", "quality check", "model readiness", "professional review"], "read-only", "ps3d_design_health", { project: "<complete ps3d-workbench-project/1>" }, "Findings are deterministic assistance, not a manufacturing or regulatory release."),
   recipe("sketch-geometry", "sketch", "Create bounded sketch geometry", "Prepare a revision-checked line, rectangle, circle, or three-point arc entity on the supported datum plane.", ["draw line", "create rectangle", "make circle", "three point arc", "sketch geometry", "add sketch entity"], "generic-preview", "ps3d_preview_operation", operationEnvelope("add-sketch-entity", { entity: { id: "sketch-entity:<caller-unique-id>", kind: "line", start: [0, 0], end: [40, 0], construction: false, visible: true } }), "Use a unique stable entity ID, millimetres, and only the supported entity fields; preview before apply."),
   recipe("sketch-dimension", "sketch", "Set a selected sketch dimension", "Prepare a direct length, width, height, or radius edit for one existing sketch entity ID.", ["sketch dimension", "dimension line", "dimension circle", "set radius", "edit sketch size", "direct dimension"], "generic-preview", "ps3d_preview_operation", operationEnvelope("set-sketch-dimension", { entityId: "<existing sketch entity ID from ps3d_inspect_project>", dimension: "length", valueMm: 40 }), "The entity and dimension type must be compatible; use the exact inspected ID and retry only after resolving diagnostics."),
   recipe("sketch-constraint", "sketch", "Constrain selected sketch entities", "Prepare a supported horizontal, vertical, parallel, perpendicular, tangent, collinear, midpoint, symmetry, coincident, concentric, equal, radius, distance, or fixed constraint.", ["sketch constraint", "make horizontal", "make tangent", "make concentric", "coincident points", "fix sketch"], "generic-preview", "ps3d_preview_operation", operationEnvelope("add-sketch-constraint", { constraint: { id: "sketch-constraint:<caller-unique-id>", kind: "horizontal", entityIds: ["<existing sketch entity ID>"] } }), "Inspect first, supply exactly the required compatible entity IDs, and treat constraint-conflict diagnostics as a correction request."),
   recipe("part-parameter", "part", "Change a part parameter", "Prepare a revision-checked width, height, thickness, bore, edge, pattern, or revolve change.", ["resize part", "change thickness", "change hole", "make bore", "part dimension"], "generic-preview", "ps3d_preview_operation", operationEnvelope("set-part-parameter", { parameter: "thicknessMm", value: 12 }), "Preview first, show the candidate project, then request confirmation."),
+  recipe("part-revolve", "part", "Create a bounded revolved body", "Revolve an annular rectangular profile into a closed analytic body with an optional partial sweep.", ["revolve", "lathe", "solid of revolution", "turn profile"], "generic-preview", "ps3d_preview_operation", operationEnvelope("create-part-revolve", { bodyId: "part-body:<caller-unique-id>", name: "Revolved ring", outerDiameterMm: 30, innerDiameterMm: 16, heightMm: 12, angleDeg: 360, translationMm: [60, 0, 6] }), "The supported profile is an annular rectangle; preview and inspect the closed candidate before approval."),
+  recipe("part-pattern", "part", "Pattern or mirror an analytic feature", "Create independently selectable, traceable instances from an existing analytic body.", ["pattern feature", "linear pattern", "mirror feature", "repeat body"], "generic-preview", "ps3d_preview_operation", operationEnvelope("pattern-part-feature", { bodyId: "<existing part-body ID>", instanceIds: ["part-body:<new-id-2>", "part-body:<new-id-3>"], direction: "x", spacingMm: 35 }), "Inspect first and provide unique IDs; use mirror-part-feature for a datum-plane reflection."),
+  recipe("part-boolean", "part", "Unite or subtract bounded analytic bodies", "Unite exact rectangular/coaxial analytic operands or subtract a coaxial through-cylinder from a block/cylinder.", ["unite", "subtract", "boolean", "combine bodies", "cut hole"], "generic-preview", "ps3d_preview_operation", operationEnvelope("boolean-part-bodies", { targetBodyId: "<existing target part-body ID>", toolBodyId: "<existing tool part-body ID>", operation: "subtract" }), "The tool is consumed only in the returned candidate; unsupported rotations or topology fail with corrective diagnostics."),
+  recipe("part-detail", "part", "Apply a bounded detail feature", "Apply blend, chamfer, draft, shell, or trim to a supported analytic body.", ["edge blend", "fillet", "chamfer", "draft body", "shell", "trim body", "resize blend"], "generic-preview", "ps3d_preview_operation", operationEnvelope("set-part-body-edge-treatment", { bodyId: "<existing plain block ID>", treatment: "blend", sizeMm: 2 }), "Only the explicit analytic preconditions are supported; incompatible modifier stacks fail closed."),
+  recipe("part-face-edit", "part", "Move, offset, replace, or heal an analytic face", "Direct-edit supported planar faces or delete and heal a recognized analytic feature face set.", ["move face", "offset face", "replace face", "delete face", "heal face", "synchronous modeling"], "generic-preview", "ps3d_preview_operation", operationEnvelope("move-part-body-face", { bodyId: "<existing part-body ID>", face: "z-positive", offsetMm: 2, mode: "move" }), "Non-block bodies expose local ±Z planar faces only; every edit is revision checked and previewed."),
+  recipe("part-update-model", "part", "Update and revalidate the analytic model", "Rebuild every supported analytic body record and reject invalid feature stacks in one auditable revision.", ["update model", "regenerate", "rebuild part", "validate features"], "generic-preview", "ps3d_preview_operation", operationEnvelope("update-part-model", {}), "This rebuild covers the bounded analytic layer and does not claim a general commercial B-rep kernel."),
   recipe("assembly-template", "assembly", "Create an assembly planning template", "Prepare a cargo-container or BESS planning-frame template operation.", ["cargo container", "bess container", "assembly template", "equipment layout"], "generic-preview", "ps3d_preview_operation", operationEnvelope("apply-assembly-template", { template: "cargo-20ft" }), "Templates are planning geometry, not certified construction models."),
   recipe("assembly-insert", "assembly", "Insert one assembly component", "Prepare one bounded component instance with explicit shape, transform, size, visibility, grounding, color, and explosion direction.", ["insert component", "add component", "place part", "assembly component", "add to assembly"], "generic-preview", "ps3d_preview_operation", operationEnvelope("add-assembly-component", { component: { id: "component:<caller-unique-id>", name: "New component", shape: "box", grounded: false, visible: true, color: "#b8bdc5", translationMm: [0, 0, 0], rotationDeg: [0, 0, 0], sizeMm: [40, 30, 20], explosionDirection: [1, 0, 0] } }), "Use a unique component ID and confirm units and placement before apply."),
   recipe("assembly-insert-group", "assembly", "Insert a grouped Master Cart item", "Prepare a bounded array of independently generated component instances for a multi-body catalog item.", ["master cart", "insert fastener", "add bearing", "add sprocket", "grouped component", "add components"], "generic-preview", "ps3d_preview_operation", operationEnvelope("add-assembly-components", { components: "<non-empty bounded array of validated ComponentInstance values generated from the selected local template>" }), "Every component requires a unique stable ID; PS3D validates the complete group atomically and never fetches supplier geometry through MCP."),
@@ -143,7 +167,7 @@ export const PS3D_AI_COMMAND_RECIPES: readonly Ps3dAiCommandRecipe[] = [
   recipe("apply", "any", "Apply an approved preview", "Return a new project only for the same project, operation, receipt, and explicit confirmation.", ["apply change", "confirm preview", "approve operation", "return new project"], "confirmed-apply", "ps3d_apply_preview", { project: "<same project used for preview>", operation: "<same canonical operation>", receipt: "<64-character preview receipt>", confirmed: true, guideAcknowledgement: { manifestSha256: "<current ps3d_guide manifestSha256>", understood: true } }, "confirmed:true is a host assertion, not cryptographic proof of human approval.")
 ] as const;
 
-export const PS3D_MCP_INSTRUCTIONS = "Start with ps3d_guide and read its complete machine-readable contract. Then call ps3d_agent_handshake with the user's request and experience level; this stateless coordinator assigns the host-AI/PS3D roles, identifies ambiguity, and returns corrections before execution. Copy the guide manifestSha256 into guideAcknowledgement with understood:true for every preview and apply call; stale or missing acknowledgements are rejected. The caller supplies the complete project; PS3D never discovers browser state or files. Use ps3d_find_commands for deterministic intent recipes, ps3d_design_health for cross-workspace dependencies and readiness, inspect before proposing a change, preview every write intent, show the exact candidate and receipt, obtain user confirmation for that revision, and only then call ps3d_apply_preview. Electromechanical realization must use its dedicated preview tool. Treat every structured diagnostic as feedback: correct the named command, ID, selection, field, unit, or revision and revalidate instead of guessing. The server returns data only and never writes external state.";
+export const PS3D_MCP_INSTRUCTIONS = "Start with ps3d_guide and read its complete machine-readable contract. Then call ps3d_agent_handshake with the user's request and experience level; this stateless coordinator assigns the host-AI/PS3D roles, identifies ambiguity, and returns corrections before execution. For any requested part, assembly, product structure, or drawing creation, call ps3d_plan_engineering_intent: it converts ordinary language into reusable definitions, ordered features, standards/evidence questions, assembly dependency packages, approval gates, and truth-labeled execution routes without asking the user to paste a master prompt. Resolve its blocking questions before preparing geometry. Copy the guide manifestSha256 into guideAcknowledgement with understood:true for every preview and apply call; stale or missing acknowledgements are rejected. The caller supplies the complete project; PS3D never discovers browser state or files. Use ps3d_find_commands for exact bounded recipes, ps3d_design_health for cross-workspace dependencies and readiness, inspect before proposing a change, preview every write intent, show the exact candidate and receipt, obtain user confirmation for that revision, and only then call ps3d_apply_preview. Complete and approve one dependency package before its parent assembly. Electromechanical realization must use its dedicated preview tool. Treat every structured diagnostic as feedback: correct the named command, ID, selection, field, unit, standard, interface, or revision and revalidate instead of guessing. The server returns data only and never writes external state.";
 
 export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
   {
@@ -161,6 +185,14 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
     inputSchema: AGENT_HANDSHAKE_SCHEMA,
     outputSchema: STRUCTURED_OUTPUT_SCHEMA,
     annotations: { title: "PS3D collaboration agent handshake", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: "ps3d_plan_engineering_intent",
+    title: "PS3D engineering intent planner",
+    description: "Turn an ordinary part or assembly request into a deterministic engineering build plan with reusable definitions, ordered features, standards questions, interfaces, assembly packages, approval gates, and truthful execution boundaries. It executes no CAD change.",
+    inputSchema: ENGINEERING_INTENT_PLAN_SCHEMA,
+    outputSchema: STRUCTURED_OUTPUT_SCHEMA,
+    annotations: { title: "PS3D engineering intent planner", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   },
   {
     name: "ps3d_find_commands",
@@ -326,10 +358,37 @@ export async function handleWorkbenchMcpTool(name: string, args: unknown): Promi
         { failure: "stale revision or receipt mismatch", action: "Discard the old preview, inspect the latest project, create a new operation for that revision, and preview again." },
         { failure: "unsupported exact-kernel result", action: "Do not approximate it as completed; report the unavailable boundary and propose only a truth-labeled preview or supported alternative." }
       ],
-      requiredSequence: ["ps3d_guide", "ps3d_agent_handshake", "ps3d_inspect_project", "ps3d_design_health", "ps3d_find_commands", "required preview tool", "human confirmation", "ps3d_apply_preview or explicit import"],
+      requiredSequence: ["ps3d_guide", "ps3d_agent_handshake", "ps3d_plan_engineering_intent for creation requests", "ps3d_inspect_project", "ps3d_design_health", "ps3d_find_commands", "required preview tool", "human confirmation", "ps3d_apply_preview or explicit import"],
       guide: { schema: guide["schema"], manifestSha256: guide["manifestSha256"] },
       nextAction: status === "ready-to-inspect" ? "Supply the complete caller-owned project to ps3d_inspect_project, then validate the chosen bounded recipe." : "Resolve every feedback item, then call ps3d_agent_handshake again with the corrected goal or proposed stable IDs."
     });
+  }
+  if (name === "ps3d_plan_engineering_intent") {
+    if (!isRecord(args) || !exactOptionalKeys(args, ["request"], ["unit", "workspace", "experienceLevel", "projectRevision", "targetCad", "evidence"])) {
+      return error("INVALID_PARAMS", "Expected request plus optional unit, workspace, experienceLevel, projectRevision, targetCad, and evidence arguments.");
+    }
+    if (typeof args.request !== "string" || args.request.trim().length < 2 || args.request.length > 12_000) return error("INVALID_PARAMS", "request must contain 2 to 12,000 characters.");
+    if (args.unit !== undefined && args.unit !== "mm" && args.unit !== "in") return error("INVALID_PARAMS", "unit must be mm or in.");
+    if (args.workspace !== undefined && !isWorkspace(args.workspace)) return error("INVALID_PARAMS", "workspace is not a supported PS3D workspace.");
+    if (args.experienceLevel !== undefined && !isExperienceLevel(args.experienceLevel)) return error("INVALID_PARAMS", "experienceLevel must be child, beginner, engineer, advanced, or phd.");
+    if (args.projectRevision !== undefined && (typeof args.projectRevision !== "number" || !Number.isInteger(args.projectRevision) || args.projectRevision < 0)) return error("INVALID_PARAMS", "projectRevision must be a non-negative integer.");
+    if (args.targetCad !== undefined && (!Array.isArray(args.targetCad) || args.targetCad.length > 6 || !args.targetCad.every(isEngineeringTargetCad) || new Set(args.targetCad).size !== args.targetCad.length)) return error("INVALID_PARAMS", "targetCad must contain unique supported target IDs.");
+    if (args.evidence !== undefined && (!Array.isArray(args.evidence) || args.evidence.length > 40 || !args.evidence.every((item) => typeof item === "string" && item.trim().length >= 1 && item.length <= 240))) return error("INVALID_PARAMS", "evidence must contain at most 40 non-empty references of at most 240 characters each.");
+    const plan = planEngineeringIntent({
+      request: args.request,
+      ...(args.unit === undefined ? {} : { unit: args.unit }),
+      ...(args.workspace === undefined ? {} : { workspace: args.workspace }),
+      ...(args.experienceLevel === undefined ? {} : { experienceLevel: args.experienceLevel }),
+      ...(args.projectRevision === undefined ? {} : { projectRevision: args.projectRevision }),
+      ...(args.targetCad === undefined ? {} : { targetCad: args.targetCad }),
+      ...(args.evidence === undefined ? {} : { evidence: args.evidence })
+    });
+    return success(
+      plan.status === "ready-for-review"
+        ? `Engineering intent plan ready for review; ${plan.partDefinitions.length} definition(s) and ${plan.assemblyPackages.length} assembly package(s) were planned without executing CAD.`
+        : `Engineering intent plan ${plan.status}; resolve ${plan.execution.blockedByQuestionIds.length} blocking question(s) and review ${plan.execution.unavailableFeatureIds.length} unavailable feature route(s) before CAD execution.`,
+      { ...plan }
+    );
   }
   if (name === "ps3d_find_commands") {
     if (!isRecord(args) || !exactOptionalKeys(args, ["query"], ["workspace", "limit"])) return error("INVALID_PARAMS", "Expected query plus optional workspace and limit arguments.");
@@ -630,6 +689,7 @@ export async function createPs3dCollaborationGuide(): Promise<Readonly<Record<st
     discovery: {
       guideTool: "ps3d_guide",
       agentHandshakeTool: "ps3d_agent_handshake",
+      engineeringIntentPlannerTool: "ps3d_plan_engineering_intent",
       commandFinderTool: "ps3d_find_commands",
       resource: "ps3d://ai/collaboration-guide",
       prompt: "ps3d-guided-change"
@@ -646,8 +706,8 @@ export async function createPs3dCollaborationGuide(): Promise<Readonly<Record<st
       activation: "Call ps3d_agent_handshake after reading this guide and again whenever the goal, proposed tool, recipe ID, selection, or recovery path is unclear.",
       experienceLevels: EXPERIENCE_LEVELS,
       roleSplit: {
-        hostAi: "Converses, reasons about user intent, requests missing human decisions, and explains the result.",
-        ps3dAgent: "Matches registered capabilities, validates exact data contracts, returns diagnostics, and gates mutation through preview receipts.",
+        hostAi: "Converses, supplies the user's complete request and approved evidence, requests missing human decisions, and explains the result.",
+        ps3dAgent: "Compiles engineering intent into definitions/features/packages, matches registered capabilities, validates exact data contracts, returns diagnostics, and gates mutation through preview receipts.",
         jointRule: "Every mismatch is feedback to correct and revalidate; it is never permission to invent a command, identity, mate, sketch relation, geometry result, or approval."
       }
     },
@@ -672,7 +732,7 @@ export async function createPs3dCollaborationGuide(): Promise<Readonly<Record<st
       { step: 1, name: "Connect", action: "Launch the prebuilt local stdio server with an explicit working directory." },
       { step: 2, name: "Discover and acknowledge", action: "Read this complete guide, list tools, and retain its manifestSha256 as guideAcknowledgement with understood:true." },
       { step: 3, name: "Activate collaboration", action: "Call ps3d_agent_handshake with the user request and experience level; resolve every correction or clarification before continuing." },
-      { step: 4, name: "Understand", action: "Supply the complete caller-owned project to ps3d_inspect_project, run ps3d_design_health, and use ps3d_find_commands for a bounded recipe." },
+      { step: 4, name: "Plan and understand", action: "For creation work, call ps3d_plan_engineering_intent and resolve its standard, dimension, interface, and capability gates. Supply the complete caller-owned project to ps3d_inspect_project, run ps3d_design_health, and use ps3d_find_commands for exact bounded recipes." },
       { step: 5, name: "Preview", action: "Call the required preview tool with the current guideAcknowledgement and show candidateProject, changedIds, warnings, base/candidate references, and receiptInfo." },
       { step: 6, name: "Confirm", action: "Obtain explicit user approval tied to the exact base revision and candidate." },
       { step: 7, name: "Apply or import", action: "Call ps3d_apply_preview with the same guideAcknowledgement, project, operation, receipt, and confirmed:true; review and open/import the returned copy." }
@@ -684,12 +744,12 @@ export async function createPs3dCollaborationGuide(): Promise<Readonly<Record<st
       previewReceipt: "Unkeyed deterministic SHA-256 integrity checksum; not authentication, a digital signature, or proof of approval.",
       instructionAcknowledgement: "Every preview/apply requires the current guide manifestSha256 plus understood:true. A stale digest fails closed and forces the client to read the guide again.",
       electromechanicalPolicy: "generate-electromechanical-realization must use ps3d_preview_electromechanical and its full disclosure response.",
-      diagnosticFeedback: "Unknown names, missing stable IDs, invalid selections, contradictory sketch constraints, invalid mates, stale revisions, and unsupported geometry return typed diagnostics with recovery. The host must correct and revalidate instead of guessing."
+      diagnosticFeedback: "Unknown names, missing dimensions or standards, missing stable IDs, invalid selections, contradictory sketch constraints, invalid mates, stale revisions, and unsupported geometry return typed diagnostics with recovery. The host must correct and revalidate instead of guessing."
     },
     tools: WORKBENCH_MCP_TOOLS.map((tool) => ({ name: tool.name, title: tool.title, readOnly: tool.annotations.readOnlyHint, approvalRequired: !tool.annotations.readOnlyHint })),
     operationKinds: PS3D_OPERATION_KINDS,
     commonRecipes: PS3D_AI_COMMAND_RECIPES,
-    starterPrompt: "Use the connected PS3D MCP server. First call ps3d_guide and read the complete result. Then call ps3d_agent_handshake with my exact request and experience level; resolve all feedback before execution. Retain the guide manifestSha256 and pass {manifestSha256, understood:true} as guideAcknowledgement to every preview/apply. Inspect the complete project I provide and run design health. Use ps3d_find_commands to choose only a bounded recipe. Preview every proposed change, show me the exact candidate project, changed IDs, warnings, revision references, and receipt, and wait for my approval before apply. Treat every error as correction feedback and never invent missing command IDs, selections, mates, sketch relations, geometry results, approvals, live-browser mutations, or file writes."
+    starterPrompt: "Use the connected PS3D MCP server. First call ps3d_guide and read the complete result. Then call ps3d_agent_handshake with my exact request and experience level; resolve all feedback before execution. For part, assembly, product, or drawing creation call ps3d_plan_engineering_intent and resolve every blocking dimension, standard, evidence, quantity, or interface question; do not ask me to paste a master prompt. Retain the guide manifestSha256 and pass {manifestSha256, understood:true} as guideAcknowledgement to every preview/apply. Inspect the complete project I provide and run design health. Use ps3d_find_commands to choose exact bounded recipes, complete one dependency package at a time, and preview every proposed change. Show the exact candidate project, changed IDs, warnings, revision references, and receipt, and wait for my approval before apply. Treat every error as correction feedback and never invent missing command IDs, selections, mates, sketch relations, geometry results, standards, approvals, live-browser mutations, or file writes."
   } as const;
   return { ...manifest, manifestSha256: await sha256Hex(canonicalizeJson(manifest)) };
 }
@@ -829,4 +889,8 @@ function isWorkspace(value: unknown): value is WorkspaceId {
 
 function isExperienceLevel(value: unknown): value is Ps3dExperienceLevel {
   return typeof value === "string" && (EXPERIENCE_LEVELS as readonly string[]).includes(value);
+}
+
+function isEngineeringTargetCad(value: unknown): value is EngineeringTargetCad {
+  return typeof value === "string" && ["ps3d", "fusion-360", "solidworks", "nx", "creo", "catia-v5"].includes(value);
 }

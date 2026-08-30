@@ -1,4 +1,5 @@
 import { validateWorkbenchProject, type WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
+import { cacheWorkbenchProject, loadCachedWorkbenchProject } from "./file-workspace.js";
 
 const DATABASE = "ps3d-workbench-preview";
 const STORE = "projects";
@@ -13,19 +14,26 @@ export async function saveWorkbenchProject(project: WorkbenchProject): Promise<v
   } finally {
     database.close();
   }
+  await cacheWorkbenchProject(valid.value).catch(() => undefined);
 }
 
 export async function loadWorkbenchProject(): Promise<WorkbenchProject | undefined> {
-  const database = await openDatabase();
   try {
-    const value = await transactionPromise(database, "readonly", (store) => store.get(KEY));
-    if (value === undefined) return undefined;
-    const valid = validateWorkbenchProject(value);
-    if (!valid.ok) throw new Error(valid.diagnostics[0]?.message ?? "The stored workbench project is invalid.");
-    return valid.value;
-  } finally {
-    database.close();
+    const database = await openDatabase();
+    try {
+      const value = await transactionPromise(database, "readonly", (store) => store.get(KEY));
+      if (value !== undefined) {
+        const valid = validateWorkbenchProject(value);
+        if (!valid.ok) throw new Error(valid.diagnostics[0]?.message ?? "The stored workbench project is invalid.");
+        return valid.value;
+      }
+    } finally {
+      database.close();
+    }
+  } catch {
+    // A separately validated OPFS recovery snapshot remains available if IndexedDB is blocked or damaged.
   }
+  return loadCachedWorkbenchProject();
 }
 
 function openDatabase(): Promise<IDBDatabase> {

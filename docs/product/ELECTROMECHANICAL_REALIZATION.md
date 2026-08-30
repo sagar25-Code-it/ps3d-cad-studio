@@ -110,10 +110,11 @@ procurement, energization, regulatory approval, or safety approval.
 
 ## MCP and Python contract
 
-The project-wide stateless local MCP server exposes eleven tools:
+The project-wide stateless local MCP server exposes twelve tools:
 
 - `ps3d_guide`;
 - `ps3d_agent_handshake`;
+- `ps3d_plan_engineering_intent`;
 - `ps3d_find_commands`;
 - `ps3d_capabilities`;
 - `ps3d_inspect_project`;
@@ -136,7 +137,7 @@ browser. The confirmation flag is a host assertion, not proof that a person
 reviewed the candidate.
 
 The standard-library Python client provides typed convenience methods for all
-eleven tools, negotiates modern discovery with legacy fallback, and launches only
+twelve tools, negotiates modern discovery with legacy fallback, and launches only
 an explicitly supplied local stdio argv with
 `shell=False`. Caller-supplied environment variables are filtered through an
 explicit allowlist before launch. A real stdio rerun remains restricted to a personal or

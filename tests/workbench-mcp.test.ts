@@ -6,7 +6,7 @@ export const workbenchMcpTests: readonly TestCase[] = [
   {
     name: "MCP capability surface has truthful safety annotations",
     run: async () => {
-      equal(WORKBENCH_MCP_TOOLS.length, 11, "the bounded server should expose eleven truth-labeled tools");
+      equal(WORKBENCH_MCP_TOOLS.length, 12, "the bounded server should expose twelve truth-labeled tools");
       assert(WORKBENCH_MCP_TOOLS.every((tool) => tool.annotations.openWorldHint === false), "local tools must not imply open-world access");
       assert(WORKBENCH_MCP_TOOLS.every((tool) => tool.annotations.destructiveHint === false), "tools return data and never destroy external state");
       assert(WORKBENCH_MCP_TOOLS.every((tool) => tool.inputSchema["type"] === "object" && tool.outputSchema["type"] === "object"), "every tool should publish object input and output schemas");
@@ -18,7 +18,7 @@ export const workbenchMcpTests: readonly TestCase[] = [
       assert(result.isError !== true, "capability query should succeed");
       equal(result.structuredContent["schema"], "ps3d-capabilities/1", "capability schema should be versioned");
       equal((result.structuredContent["operationKinds"] as readonly string[]).length, PS3D_OPERATION_KINDS.length, "capability response should enumerate canonical operation kinds");
-      equal(PS3D_OPERATION_KINDS.length, 55, "all validated workbench operation kinds should be AI-visible");
+      equal(PS3D_OPERATION_KINDS.length, 67, "all validated workbench operation kinds should be AI-visible");
       equal(JSON.stringify(PS3D_OPERATION_KINDS), JSON.stringify(WORKBENCH_OPERATION_KINDS), "MCP operation discovery must use the core canonical registry without drift");
       assert(PS3D_OPERATION_KINDS.includes("add-assembly-components"), "grouped Master Cart insertion must remain AI-visible");
     }

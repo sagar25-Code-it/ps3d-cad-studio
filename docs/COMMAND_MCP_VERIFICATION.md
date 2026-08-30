@@ -1,6 +1,6 @@
 # Command and MCP Verification
 
-**Verification date:** 2026-08-26  
+**Verification date:** 2026-08-28
 **Target:** local PS3D CAD Studio public-preview source  
 **Method:** deterministic contract audit, automated package tests, direct MCP
 process exchange, production build gates, and live in-app-browser interaction
@@ -15,11 +15,11 @@ commercial CAD system.
 
 | Surface | Verified result |
 | --- | --- |
-| CAD command catalog | 331 unique command IDs audited |
-| Executable contracts | 142 total: 2 `qualified`, 140 `preview` |
+| CAD command catalog | 332 unique command IDs audited |
+| Executable contracts | 143 total: 2 `qualified`, 141 `preview` |
 | Truthfully unavailable commands | 189; each retains an explicit boundary and implementation requirement |
 | Workbench operation namespace | 55 canonical operation kinds; compile-time completeness check |
-| MCP tools | 11 registered tools; all 11 built-in handlers executed in the live Automate workspace |
+| MCP tools | 12 registered tools; all 12 exercised through the real local Node stdio lifecycle |
 | MCP protocol | Modern `2026-07-28` discovery plus the retained 2025-era compatibility path |
 | Browser console | 0 errors on the main workbench and command-audit route after the interaction pass |
 | Responsive command symbols | Every inspected ribbon control had a non-empty label, an inline SVG symbol, a positive hit box, and no material internal overflow |
@@ -63,7 +63,7 @@ The ribbon audit observed:
 | Drawing | 18 | 0 | 0 |
 | Electrical | 15 | 0 | 0 |
 | Vehicle | 15 | 0 | 0 |
-| Automate | 13 | 1 | 0 |
+| Automate | 14 | 1 | 0 |
 | Master Cart | 8 | 0 | 0 |
 
 Disabled controls are not counted as failures when the UI states the missing
@@ -72,13 +72,14 @@ spline solving, and topology-dependent edge operations.
 
 ## MCP tool execution
 
-All eleven built-in Automate handlers were invoked against the local fixture
-project. The observed schemas and safety behavior were:
+All twelve tools were invoked against the local fixture project through the
+real Node stdio lifecycle. The observed schemas and safety behavior were:
 
 | Tool | Observed result |
 | --- | --- |
 | `ps3d_guide` | `ps3d-ai-collaboration/3` |
 | `ps3d_agent_handshake` | `ps3d-agent-handshake/1`, bounded recipe plus correction contract |
+| `ps3d_plan_engineering_intent` | `ps3d-engineering-intent-plan/1`, reusable definitions, ordered features, evidence questions, assembly packages, and no CAD execution |
 | `ps3d_find_commands` | `ps3d-command-search/1` |
 | `ps3d_capabilities` | `ps3d-capabilities/1` |
 | `ps3d_inspect_project` | `ps3d-project-summary/1` |
@@ -92,6 +93,13 @@ project. The observed schemas and safety behavior were:
 The apply test returned a new project revision; browser Undo then restored the
 fixture. No MCP handler wrote a file, mutated the open browser implicitly, or
 accessed an operating-system secret.
+
+The engineering-intent delta also passed TypeScript validation, the complete
+111-case local suite, the MCP schema audit, and the production Vite bundle.
+Its responsive Automate layout is source-verified at the narrow breakpoints;
+a new live screenshot was not recorded because the Codex in-app browser runtime
+was unavailable in this verification session. The earlier live interaction
+results below remain evidence for the previously recorded interface revision.
 
 ## External-AI coordination contract
 
@@ -137,4 +145,3 @@ The external AI remains responsible for conversation, judgment, and obtaining
 human approval. PS3D supplies a bounded command vocabulary, project inspection,
 design-health feedback, deterministic validation, preview receipts, and exact
 recovery instructions.
-

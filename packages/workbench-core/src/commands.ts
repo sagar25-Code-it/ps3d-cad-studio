@@ -5,12 +5,23 @@ export type CadSketchTool = "select" | "line" | "rectangle" | "rectangle-center"
 
 export type CadCommandAction =
   | { readonly kind: "open-workspace" }
+  | { readonly kind: "file-new" }
+  | { readonly kind: "file-open" }
+  | { readonly kind: "file-save" }
+  | { readonly kind: "file-save-as" }
+  | { readonly kind: "file-save-copy" }
+  | { readonly kind: "file-workspace" }
+  | { readonly kind: "open-render-studio" }
   | { readonly kind: "finish-sketch" }
   | { readonly kind: "activate-sketch-tool"; readonly tool: CadSketchTool }
   | { readonly kind: "select-record"; readonly selectionId: string }
   | { readonly kind: "insert-current-part-into-assembly" }
   | { readonly kind: "create-part-preview-body"; readonly shape: PartPreviewBodyShape }
   | { readonly kind: "selected-part-preview-body-action"; readonly operation: "edit-transform" | "edit-size" | "edit-appearance" | "duplicate" | "mirror-x" | "pattern-x" | "bounding-block" | "isolate" | "toggle-visible" | "delete" }
+  | {
+      readonly kind: "part-feature-action";
+      readonly operation: "revolve" | "pattern-feature" | "mirror-feature" | "unite" | "subtract" | "trim-body" | "edge-blend" | "chamfer" | "draft" | "shell" | "move-face" | "offset-face" | "replace-face" | "delete-face" | "resize-blend" | "update-model";
+    }
   | { readonly kind: "set-part-preview-bodies-visibility"; readonly visible: boolean }
   | { readonly kind: "insert-component"; readonly shape: Extract<ComponentShape, "box" | "cylinder"> }
   | { readonly kind: "apply-assembly-template"; readonly template: Exclude<AssemblyTemplateId, "custom" | "electrical-panel"> }
@@ -73,8 +84,9 @@ export interface CadCommandAuditReport {
 }
 
 export const CAD_EXECUTABLE_ACTION_KINDS = [
-  "open-workspace", "finish-sketch", "activate-sketch-tool", "select-record", "insert-current-part-into-assembly",
-  "create-part-preview-body", "selected-part-preview-body-action", "set-part-preview-bodies-visibility", "insert-component",
+  "open-workspace", "file-new", "file-open", "file-save", "file-save-as", "file-save-copy", "file-workspace",
+  "open-render-studio", "finish-sketch", "activate-sketch-tool", "select-record", "insert-current-part-into-assembly",
+  "create-part-preview-body", "selected-part-preview-body-action", "part-feature-action", "set-part-preview-bodies-visibility", "insert-component",
   "apply-assembly-template", "selected-component-action", "set-surface-mode", "fit-view", "set-view-orientation",
   "set-view-projection", "set-shading-mode", "set-background-tone", "set-navigation-mode", "set-selection-filter",
   "open-exchange-center", "open-design-health", "apply-electrical-template", "insert-electrical-component",
@@ -116,21 +128,31 @@ export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   unavailable("command:sketch-relax-relations", "sketch", "construct", "Relax Relations", "Requires constraint suppression, solve diagnostics, and a reversible relation state model.", ["constraint", "suppress", "solve"]),
   unavailable("command:sketch-check", "sketch", "inspect", "Sketch Checking", "Requires open-loop, overlap, duplicate, self-intersection, small-entity, and solver-status diagnostics.", ["validate", "profile", "diagnostic"]),
   unavailable("command:sketch-reattach", "sketch", "construct", "Reattach Sketch", "Requires persistent plane or face references, orientation mapping, origin control, and broken-reference repair.", ["plane", "face", "support"]),
-  unavailable("command:sketch-update-model", "sketch", "inspect", "Update Model", "Requires a dependency graph that rebuilds every downstream feature from the edited sketch.", ["regenerate", "rebuild", "history"]),
+  command("command:part-update-model", "part", "inspect", "Update Model", "Revalidate and regenerate every supported analytic Part body in one auditable revision.", "preview", { kind: "part-feature-action", operation: "update-model" }, ["regenerate", "rebuild", "history"]),
   command("command:sketch-finish", "sketch", "construct", "Finish Sketch", "Close the active sketch session and return to the Part workspace while preserving the revisioned sketch geometry.", "preview", { kind: "finish-sketch" }, ["finish", "exit sketch", "update model"], "Esc"),
   command("command:sketch-options", "sketch", "inspect", "Sketch Options", "Open the existing sketch palette for grid, snap, profile shading, dimensions, constraints, and construction visibility.", "preview", { kind: "open-workspace" }, ["options", "palette", "show movable", "sketch checking"]),
+
+  command("command:file-new", "part", "document", "New design", "Create a clean PS3D project, independent engineering history, recovery identity, and default validated part.", "preview", { kind: "file-new" }, ["file", "new", "document", "session", "project"], "Ctrl+N"),
+  command("command:file-open", "part", "document", "Open project", "Open and validate a local PS3D workbench project before replacing the current in-memory session.", "preview", { kind: "file-open" }, ["file", "open", "recent", "project", "json"], "Ctrl+O"),
+  command("command:file-save", "part", "document", "Save project", "Persist the project to browser recovery storage and update the currently approved visible project file.", "preview", { kind: "file-save" }, ["file", "save", "persistence", "recovery", "project"], "Ctrl+S"),
+  command("command:file-save-as", "part", "document", "Save project as", "Validate and write the project with a new name, then bind subsequent saves to that approved file.", "preview", { kind: "file-save-as" }, ["file", "save as", "rename", "copy", "project"], "Ctrl+Shift+S"),
+  command("command:file-save-copy", "part", "document", "Save a project copy", "Write an independent validated copy without changing the active project file binding.", "preview", { kind: "file-save-copy" }, ["file", "save copy", "backup", "archive", "project"]),
+  command("command:file-workspace", "part", "document", "Connect PS CAD Studio folder", "With explicit browser permission, create Projects, Exports, Renders, Recovery, and Cache folders under a user-selected Downloads location.", "preview", { kind: "file-workspace" }, ["downloads", "folder", "cache", "recovery", "workspace", "file system access"]),
+  command("command:render-studio", "part", "document", "Render Studio", "Open a linked, non-destructive scene for materials, lighting, camera presets, raster preview, and PNG or JPEG output.", "preview", { kind: "open-render-studio" }, ["render", "material", "lighting", "camera", "image", "png", "jpeg"]),
 
   command("command:part-extrude", "part", "create", "Extrude", "Edit the qualified centered-bore plate extrusion.", "qualified", { kind: "select-record", selectionId: "feature:plate-extrusion" }, ["solid", "push", "pull"], "E"),
   command("command:part-bore", "part", "create", "Bore", "Edit the qualified centered through-bore.", "qualified", { kind: "select-record", selectionId: "feature:centered-through-hole" }, ["hole", "cut", "drill"]),
   command("command:part-edge", "part", "modify", "Edge treatment", "Semantic chamfer/fillet intent; display remains the qualified base mesh.", "preview", { kind: "select-record", selectionId: "feature:edge-treatment" }, ["fillet", "chamfer", "round"]),
-  command("command:part-pattern", "part", "create", "Linear pattern", "Semantic instance-count preview for the bounded study.", "preview", { kind: "select-record", selectionId: "feature:linear-pattern" }, ["array", "repeat"]),
-  command("command:part-pattern-feature", "part", "create", "Pattern Feature", "Select the bounded linear-pattern feature intent for quantity and spacing review.", "preview", { kind: "select-record", selectionId: "feature:linear-pattern" }, ["pattern geometry", "feature pattern", "array", "repeat"]),
-  command("command:part-revolve", "part", "create", "Revolve study", "Angle-parametric feature intent without exact solid output.", "preview", { kind: "select-record", selectionId: "feature:revolve-study" }, ["lathe", "axis"]),
+  command("command:part-pattern", "part", "create", "Linear pattern", "Create revisioned analytic instances from the selected body using the current count and bounded X spacing.", "preview", { kind: "part-feature-action", operation: "pattern-feature" }, ["array", "repeat"]),
+  command("command:part-pattern-feature", "part", "create", "Pattern Feature", "Create actual independently selectable analytic feature instances from the selected seed body.", "preview", { kind: "part-feature-action", operation: "pattern-feature" }, ["pattern geometry", "feature pattern", "array", "repeat"]),
+  command("command:part-revolve", "part", "create", "Revolve", "Create a closed annular rectangular-profile body using the current revolve angle.", "preview", { kind: "part-feature-action", operation: "revolve" }, ["lathe", "axis", "solid of revolution"]),
   command("command:part-block", "part", "create", "Block", "Create a separately selectable, dimensioned rectangular preview body.", "preview", { kind: "create-part-preview-body", shape: "block" }, ["box", "primitive", "new body"]),
   command("command:part-cylinder", "part", "create", "Cylinder", "Create a separately selectable diameter-and-height cylindrical preview body.", "preview", { kind: "create-part-preview-body", shape: "cylinder" }, ["round", "primitive", "new body"]),
   command("command:part-cone", "part", "create", "Cone", "Create a separately selectable base-diameter, top-diameter, and height preview body.", "preview", { kind: "create-part-preview-body", shape: "cone" }, ["frustum", "taper", "primitive", "new body"]),
   command("command:part-sphere", "part", "create", "Sphere", "Create a separately selectable diameter-controlled spherical preview body.", "preview", { kind: "create-part-preview-body", shape: "sphere" }, ["ball", "primitive", "new body"]),
   command("command:part-move-body", "part", "modify", "Move Body", "Open XYZ translation and rotation controls for the selected independent preview body.", "preview", { kind: "selected-part-preview-body-action", operation: "edit-transform" }, ["synchronous", "translate", "rotate", "direct edit"]),
+  command("command:part-move-face", "part", "modify", "Move Face", "Move the selected body's supported local +Z planar face and regenerate adjacent faces.", "preview", { kind: "part-feature-action", operation: "move-face" }, ["synchronous", "press pull", "direct edit", "face"]),
+  command("command:part-delete-face", "part", "modify", "Delete Face", "Delete and heal the selected body's first recognized bore, blend/chamfer, shell, or draft face set.", "preview", { kind: "part-feature-action", operation: "delete-face" }, ["synchronous", "heal", "remove feature", "face"]),
   command("command:part-scale-body", "part", "modify", "Scale Body", "Open exact size controls for the selected independent preview body.", "preview", { kind: "selected-part-preview-body-action", operation: "edit-size" }, ["resize", "uniform", "nonuniform", "dimension"]),
   command("command:part-copy-body", "part", "modify", "Copy Body", "Create an independent translated copy of the selected preview body.", "preview", { kind: "selected-part-preview-body-action", operation: "duplicate" }, ["duplicate", "reuse", "copy geometry"]),
   command("command:part-pattern-body", "part", "modify", "Pattern Body", "Create three independent preview-body instances along the global X direction.", "preview", { kind: "selected-part-preview-body-action", operation: "pattern-x" }, ["pattern geometry", "linear", "array", "instances"]),
@@ -143,15 +165,15 @@ export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   command("command:part-insert-assembly", "part", "assemble", "Insert current part into assembly", "Create a revisioned editable assembly snapshot from the current qualified part envelope.", "preview", { kind: "insert-current-part-into-assembly" }, ["component", "assembly", "place", "downstream"]),
   unavailable("command:part-sweep", "part", "create", "Sweep", "Requires exact profiles, guide paths, and self-intersection checks.", ["path", "profile"]),
   unavailable("command:part-loft", "part", "create", "Solid loft", "Requires exact section matching and closed-body validation.", ["blend", "profiles"]),
-  unavailable("command:part-shell", "part", "modify", "Shell", "Requires robust face offsetting from an exact topology kernel.", ["hollow", "wall"]),
-  unavailable("command:part-draft", "part", "modify", "Draft Body", "Requires persistent faces, a neutral plane or parting line, pull direction, and exact intersection repair.", ["draft", "taper", "mold", "body"]),
-  unavailable("command:part-mirror-feature", "part", "modify", "Mirror Feature", "Requires persistent feature references, a mirror plane, and exact Boolean composition.", ["mirror", "symmetry", "copy"]),
+  command("command:part-shell", "part", "modify", "Shell", "Hollow a supported plain block or cylinder with a uniform wall and removed local +Z face.", "preview", { kind: "part-feature-action", operation: "shell" }, ["hollow", "wall", "open face"]),
+  command("command:part-draft", "part", "modify", "Draft", "Taper a supported plain block or cylinder along local Z with an explicit bounded angle.", "preview", { kind: "part-feature-action", operation: "draft" }, ["draft body", "taper", "mold", "body"]),
+  command("command:part-mirror-feature", "part", "modify", "Mirror Feature", "Create a revisioned analytic feature copy across the global YZ datum plane.", "preview", { kind: "part-feature-action", operation: "mirror-feature" }, ["mirror", "symmetry", "copy"]),
   unavailable("command:part-boolean", "part", "modify", "Boolean combine", "Requires a separately qualified exact Boolean kernel.", ["union", "cut", "intersect"]),
-  unavailable("command:part-unite", "part", "modify", "Unite", "Requires two overlapping exact solid bodies and a validated union operation with persistent result topology.", ["boolean", "join", "combine"]),
-  unavailable("command:part-subtract", "part", "modify", "Subtract", "Requires an exact target body, one or more tool bodies, and a validated cut result.", ["boolean", "cut", "difference"]),
+  command("command:part-unite", "part", "modify", "Unite", "Unite aligned compatible analytic blocks or coaxial equal-diameter cylinders; the tool body is consumed.", "preview", { kind: "part-feature-action", operation: "unite" }, ["boolean", "join", "combine"]),
+  command("command:part-subtract", "part", "modify", "Subtract", "Subtract a coaxial through-cylinder from a supported block or cylinder target and consume the tool.", "preview", { kind: "part-feature-action", operation: "subtract" }, ["boolean", "cut", "difference"]),
   unavailable("command:part-intersect", "part", "modify", "Intersect", "Requires exact overlapping bodies and validated intersection topology.", ["boolean", "common", "combine"]),
-  unavailable("command:part-edge-blend", "part", "modify", "Edge Blend", "The current edge-treatment value records blend intent, but exact rounded faces require persistent edge references and a topology kernel.", ["fillet", "round", "blend"]),
-  unavailable("command:part-chamfer", "part", "modify", "Chamfer", "The current edge-treatment value records chamfer intent, but exact beveled faces require persistent edge references and a topology kernel.", ["bevel", "edge"]),
+  command("command:part-edge-blend", "part", "modify", "Edge Blend", "Round the four supported vertical edges of a plain analytic block and regenerate a closed mesh.", "preview", { kind: "part-feature-action", operation: "edge-blend" }, ["fillet", "round", "blend"]),
+  command("command:part-chamfer", "part", "modify", "Chamfer", "Bevel the four supported vertical edges of a plain analytic block and regenerate a closed mesh.", "preview", { kind: "part-feature-action", operation: "chamfer" }, ["bevel", "edge"]),
   unavailable("command:part-rib", "part", "create", "Rib", "Requires an open sketch chain, thickness direction, extent rules, and an exact join to a target body.", ["detail feature", "web", "stiffener"]),
   unavailable("command:part-contour-rib", "part", "create", "Contour Rib", "Requires curve-chain continuity, section control, target intersections, and exact joined topology.", ["detail feature", "stiffener", "web"]),
   unavailable("command:part-thread", "part", "create", "Thread", "Requires a cylindrical face, thread standard and size tables, handedness, pitch, extent, and cosmetic or modeled output.", ["detail feature", "screw", "helix"]),
@@ -161,12 +183,12 @@ export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   unavailable("command:part-implicit", "part", "create", "Implicit Modeling", "Requires a signed-distance or volumetric field engine, field Boolean operations, meshing controls, and validation.", ["design feature", "voxel", "field", "lattice"]),
   unavailable("command:part-equation-body", "part", "create", "Body by Equation", "Requires bounded analytic or implicit equations, domain controls, singularity checks, and closed-body tessellation.", ["design feature", "formula", "parametric"]),
   unavailable("command:part-algorithmic-feature", "part", "create", "Algorithmic Feature", "Requires a sandboxed deterministic feature API, bounded execution, provenance, and geometry validation.", ["design feature", "script", "procedural"]),
-  unavailable("command:part-trim-body", "part", "modify", "Trim Body", "Requires an exact target body, trimming tool, kept-region selection, and persistent output topology.", ["trim", "cut", "body"]),
+  command("command:part-trim-body", "part", "modify", "Trim Body", "Trim a supported analytic body normal to local Z and keep the selected bounded side.", "preview", { kind: "part-feature-action", operation: "trim-body" }, ["trim", "cut", "body"]),
   unavailable("command:part-split-body", "part", "modify", "Split Body", "Requires an exact body plus plane, face, surface, or profile splitting tool and two validated output bodies.", ["trim", "divide", "separate"]),
   unavailable("command:part-divide-face", "part", "modify", "Divide Face", "Requires persistent face selection and an intersecting curve, plane, or surface without changing body volume.", ["split face", "partition", "trim"]),
-  unavailable("command:part-offset-face", "part", "modify", "Offset Face", "Requires persistent face selection, normal direction, neighbor extension, and self-intersection repair.", ["synchronous", "press pull", "direct edit"]),
-  unavailable("command:part-replace-face", "part", "modify", "Replace Face", "Requires target and replacement faces or surfaces plus exact trim/extend and healing.", ["synchronous", "direct edit"]),
-  unavailable("command:part-resize-blend", "part", "modify", "Resize Blend", "Requires automatic recognition of a fillet face chain and exact radius regeneration.", ["synchronous", "fillet", "direct edit"]),
+  command("command:part-offset-face", "part", "modify", "Offset Face", "Offset a supported analytic face along its outward normal and regenerate neighboring faces.", "preview", { kind: "part-feature-action", operation: "offset-face" }, ["synchronous", "press pull", "direct edit"]),
+  command("command:part-replace-face", "part", "modify", "Replace Face", "Replace a supported local planar face with a parallel analytic datum position.", "preview", { kind: "part-feature-action", operation: "replace-face" }, ["synchronous", "direct edit", "datum"]),
+  command("command:part-resize-blend", "part", "modify", "Resize Blend", "Recognize the selected body's bounded vertical blend chain and regenerate it at a new radius.", "preview", { kind: "part-feature-action", operation: "resize-blend" }, ["synchronous", "fillet", "direct edit"]),
   unavailable("command:part-copy-face", "part", "modify", "Copy Face", "Requires persistent face selection and independent or associative sheet-body creation.", ["reuse", "extract", "face"]),
   unavailable("command:part-cut-face", "part", "modify", "Cut Face", "Requires persistent selected faces, clipboard-safe topology references, and source-body healing.", ["reuse", "clipboard", "face"]),
   unavailable("command:part-paste-face", "part", "modify", "Paste Face", "Requires a validated copied-face payload, placement transform, and target-body stitching or replacement.", ["reuse", "clipboard", "face"]),
@@ -413,6 +435,7 @@ command("command:electrical-to-3d", "electrical", "automate", "Circuit to wired 
   command("command:automate-guide", "automate", "automate", "AI collaboration guide", "Open the model-neutral connection, discovery, preview, confirmation, and returned-project contract.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_guide" }, ["ai", "mcp", "connect", "help", "workflow"]),
   command("command:automate-agent", "automate", "automate", "Collaboration agent handshake", "Configure a stateless host-AI and PS3D coordination pass with experience-level guidance, bounded recipe matching, stable-ID checks, and correction feedback before execution.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_agent_handshake" }, ["ai", "agent", "collaborate", "coordinate", "beginner", "phd", "feedback", "validate"]),
   command("command:automate-design-health", "automate", "inspect", "Design Health Center", "Analyze all workspaces, actual associativity, deterministic rebuild order, and release boundaries.", "preview", { kind: "open-design-health" }, ["health", "rebuild", "dependency", "associativity", "quality", "readiness"], "Ctrl+Shift+H"),
+  command("command:automate-engineering-intent", "automate", "automate", "Plan any part or assembly", "Turn an ordinary engineering request into reusable parts, ordered feature histories, standard-part evidence questions, interfaces, mates, dependency packages, and approval gates without executing CAD.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_plan_engineering_intent" }, ["ai", "engineering intent", "create part", "assembly", "feature history", "standard part", "mate", "product structure", "planning"]),
   command("command:automate-find", "automate", "automate", "Smart command finder", "Match a plain-language engineering goal to bounded command recipes without executing it.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_find_commands" }, ["ai", "intent", "natural language", "recipe", "command"]),
   command("command:automate-capabilities", "automate", "automate", "MCP capability matrix", "List qualified, preview, and unavailable capabilities.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_capabilities" }, ["ai", "tools", "schema"]),
   command("command:automate-inspect", "automate", "automate", "MCP inspect project", "Validate and summarize a supplied in-memory project.", "preview", { kind: "select-record", selectionId: "mcp-tool:ps3d_inspect_project" }, ["read", "validate"]),

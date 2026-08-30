@@ -26,7 +26,7 @@ export function inferCommandIcon(text: string, workspace = ""): string {
     ["finish sketch", "save"], ["sketch options", "display"],
     ["collaboration agent", "mcp"], ["agent handshake", "mcp"],
     ["immediate hide", "eye-off"], ["show and hide", "eye"], ["clip section", "section"],
-    ["global finish", "appearance"], ["object display", "appearance"], ["appearance management", "appearance"],
+    ["global finish", "appearance"], ["object display", "appearance"], ["appearance management", "appearance"], ["render studio", "appearance"],
     ["preferences", "display"], ["theme", "display"], ["background", "display"],
     ["studio", "shaded-edges"], ["immersive", "view"], ["omniverse", "view"],
     ["rectangle", "rectangle"], ["circle", "circle"], ["arc", "arc"],
@@ -36,8 +36,11 @@ export function inferCommandIcon(text: string, workspace = ""): string {
     ["tangent", "tangent"], ["equal", "equal"], ["fixed", "fixed"],
     ["automatic view", "auto-view"], ["general tolerance", "tolerance"], ["gd&t", "gdt-position"],
     ["datum", "datum"], ["flatness", "flatness"], ["construction", "construction"], ["dimension", "dimension"], ["constraint", "constraint"], ["trim", "trim"],
+    ["move face", "move-face"], ["offset face", "offset-face"], ["replace face", "replace-face"], ["delete face", "delete-face"],
+    ["resize blend", "resize-blend"], ["edge blend", "edge-blend"], ["chamfer", "chamfer"],
+    ["update model", "update-model"], ["unite", "unite"], ["subtract", "subtract"], ["draft", "draft"],
     ["offset", "offset"], ["extrude", "extrude"], ["bore", "bore"],
-    ["hole", "bore"], ["fillet", "edge"], ["chamfer", "edge"],
+    ["hole", "bore"], ["fillet", "edge-blend"],
     ["edge", "edge"], ["pattern", "pattern"], ["revolve", "revolve"],
     ["sweep", "sweep"], ["loft", "loft"], ["shell", "shell"],
     ["boolean", "boolean"], ["combine", "boolean"], ["measure", "measure"],
@@ -79,7 +82,7 @@ export function inferCommandIcon(text: string, workspace = ""): string {
 
 export function iconTone(name: string): "create" | "modify" | "inspect" | "data" | "danger" | "neutral" {
   if (["line", "rectangle", "circle", "arc", "extrude", "bore", "box", "cylinder", "cone", "sphere", "insert", "bezier", "loft", "battery", "fuse", "breaker", "disconnect", "contactor", "inverter", "transformer", "motor", "sensor", "wire", "container", "vehicle", "scooter", "three-wheel", "wheel", "chassis", "master-cart", "fastener", "bearing", "bushing", "gear", "chain", "sprocket", "belt", "o-ring", "linear-motion", "hose-fitting", "tube-fitting", "hand-tool"].includes(name)) return "create";
-  if (["trim", "offset", "spline", "edge", "pattern", "revolve", "sweep", "shell", "boolean", "move", "ground", "explode", "flatten", "canopy", "stitch", "thicken"].includes(name)) return "modify";
+  if (["trim", "offset", "spline", "edge", "edge-blend", "chamfer", "resize-blend", "pattern", "revolve", "sweep", "shell", "draft", "boolean", "unite", "subtract", "move", "move-face", "offset-face", "replace-face", "delete-face", "update-model", "ground", "explode", "flatten", "canopy", "stitch", "thicken"].includes(name)) return "modify";
   if (["measure", "fit", "home", "orbit", "pan", "projection", "grid", "axes", "display", "shaded", "shaded-edges", "wireframe", "appearance", "interference", "section", "detail", "dimension", "constraint", "horizontal", "vertical", "parallel", "perpendicular", "collinear", "concentric", "equal", "tangent", "fixed", "auto-view", "tolerance", "datum", "gdt-position", "flatness", "hardpoint", "suspension", "steering", "brake", "cg"].includes(name)) return "inspect";
   if (["json", "open", "save", "import", "export", "download", "exchange", "cube-file", "scene-file", "mesh-file", "triangle-file", "points-file", "package-file", "pdf-package", "pdf-3d", "matrix", "link-file", "mcp", "python", "bom", "circuit-3d"].includes(name)) return "data";
   if (["trash", "cancel", "eye-off"].includes(name)) return "danger";
@@ -118,6 +121,17 @@ function geometry(name: string): React.ReactNode {
     case "extrude": return <><path d="M5 10 12 6l7 4-7 4z" /><path d="M5 10v7l7 4 7-4v-7M12 14v7" /></>;
     case "bore": return <><ellipse cx="12" cy="8" rx="7" ry="3.5" /><path d="M5 8v8c0 2 3.1 3.5 7 3.5s7-1.5 7-3.5V8" /><ellipse cx="12" cy="8" rx="2.5" ry="1.3" /></>;
     case "edge": return <><path d="m5 16 7 4 7-4V8l-7-4-7 4z" /><path d="m5 8 7 4 7-4M12 12v8" /><path d="M5 16c2-1 3-2.2 3-4.2" /></>;
+    case "edge-blend": return <><path d="M5 7h10a4 4 0 0 1 4 4v8H9a4 4 0 0 1-4-4z" /><path d="M9 16h6a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H8" /></>;
+    case "chamfer": return <><path d="M5 5h10l4 4v10H9l-4-4z" /><path d="m5 15 4 4m6-14 4 4" /><path d="M9 9h6v6H9z" /></>;
+    case "resize-blend": return <><path d="M5 7h9a5 5 0 0 1 5 5v7H9a4 4 0 0 1-4-4z" /><path d="m12 4 3 3-3 3M15 7H8" /></>;
+    case "move-face": return <><path d="m5 8 7-4 7 4-7 4zM5 8v8l7 4 7-4V8" /><path d="M12 12v8M9 16l3 4 3-4" /></>;
+    case "offset-face": return <><path d="m4 8 7-4 7 4-7 4zM4 8v7l7 4 7-4V8" /><path d="m14 12 6-3m-2-1 2 1-1 2" /></>;
+    case "replace-face": return <><path d="M4 6h12v12H4zM8 10h12v10H8" /><path d="m14 4 3 3-3 3M17 7H9" /></>;
+    case "delete-face": return <><path d="m4 8 8-4 8 4-8 4zM4 8v8l8 4 8-4V8" /><path d="M7 7l10 3M16 4l4 4" /><path d="m8 14 8 4" strokeDasharray="2 2" /></>;
+    case "unite": return <><rect x="4" y="6" width="10" height="11" rx="1" /><rect x="10" y="9" width="10" height="11" rx="1" /><path d="M10 9h4v8h-4z" fill="currentColor" opacity=".35" /></>;
+    case "subtract": return <><rect x="4" y="5" width="15" height="14" rx="1" /><circle cx="16" cy="8" r="5" fill="white" /><path d="M13 5a5 5 0 0 0 6 7" /></>;
+    case "draft": return <><path d="m7 19 3-14h4l3 14z" /><path d="M5 19h14M10 5h4" /><path d="m18 6 3 3-3 3M21 9h-5" /></>;
+    case "update-model": return <><path d="M5 7a8 8 0 0 1 13-1l2 2M19 17a8 8 0 0 1-13 1l-2-2" /><path d="M20 3v5h-5M4 21v-5h5" /><path d="m9 10 3-2 3 2-3 2zM9 10v4l3 2 3-2v-4" /></>;
     case "pattern": return <><rect x="4" y="4" width="5" height="5" rx="1" /><rect x="15" y="4" width="5" height="5" rx="1" /><rect x="4" y="15" width="5" height="5" rx="1" /><rect x="15" y="15" width="5" height="5" rx="1" /></>;
     case "revolve": return <><path d="M8 6c-5 2-5 10 0 12M16 6c5 2 5 10 0 12" /><path d="m6 4 2 2-3 1m13-3-2 2 3 1" /><path d="M12 4v16" /></>;
     case "sweep": return <><path d="M5 17c1-9 7-12 14-10" /><path d="m16 4 3 3-4 2" /><rect x="3.5" y="15.5" width="4" height="4" rx="1" /></>;

@@ -72,14 +72,19 @@ client needs. A maximum of five active tokens per account is enforced with
 2. Call `tools/list` rather than inventing a tool or input field.
 3. Call `ps3d_guide`, then `ps3d_agent_handshake` with the user's request and
    experience level. Resolve every correction or clarification it returns.
-4. Inspect the complete bounded project supplied by the user, run design
-   health, and call `ps3d_find_commands`.
-5. Create a preview and show its diagnostics and exact operation.
-6. Apply only after review, `confirmed: true`, and a matching SHA-256 receipt.
-7. Treat the returned project as a new copy. Remote MCP does not click the live
+4. For new part, assembly, product, or drawing work, call
+   `ps3d_plan_engineering_intent` with the complete ordinary-language request.
+   Resolve every blocking dimension, standard, evidence, quantity, interface,
+   and unavailable-feature result. The user does not paste a master prompt.
+5. Inspect the complete bounded project supplied by the user, run design
+   health, and call `ps3d_find_commands` for one approved dependency package.
+6. Create a preview and show its diagnostics and exact operation.
+7. Apply only after review, `confirmed: true`, and a matching SHA-256 receipt.
+8. Treat the returned project as a new copy. Remote MCP does not click the live
    CAD browser, open private files, or write an external project automatically.
 
-The eleven tools are `ps3d_guide`, `ps3d_agent_handshake`, `ps3d_find_commands`, `ps3d_capabilities`,
+The twelve tools are `ps3d_guide`, `ps3d_agent_handshake`,
+`ps3d_plan_engineering_intent`, `ps3d_find_commands`, `ps3d_capabilities`,
 `ps3d_inspect_project`, `ps3d_design_health`, `ps3d_analyze_vehicle`,
 `ps3d_electromechanical_catalog`, `ps3d_preview_electromechanical`,
 `ps3d_preview_operation`, and `ps3d_apply_preview`.

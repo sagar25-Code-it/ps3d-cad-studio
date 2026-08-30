@@ -13,10 +13,26 @@ export async function calculateEvaluatorSourceHash() {
   for (const relativePath of manifest.sourceSet.paths) {
     hash.update(relativePath, "utf8");
     hash.update(Uint8Array.of(0));
-    hash.update(await readFile(resolve(root, ...relativePath.split("/"))));
+    hash.update(canonicalSourceBytes(await readFile(resolve(root, ...relativePath.split("/")))));
     hash.update(Uint8Array.of(0));
   }
   return { actual: hash.digest("hex"), manifest };
+}
+
+function canonicalSourceBytes(bytes) {
+  let crlfCount = 0;
+  for (let index = 0; index < bytes.length - 1; index += 1) {
+    if (bytes[index] === 13 && bytes[index + 1] === 10) crlfCount += 1;
+  }
+  if (crlfCount === 0) return bytes;
+  const canonical = new Uint8Array(bytes.length - crlfCount);
+  let target = 0;
+  for (let source = 0; source < bytes.length; source += 1) {
+    if (bytes[source] === 13 && bytes[source + 1] === 10) continue;
+    canonical[target] = bytes[source];
+    target += 1;
+  }
+  return canonical;
 }
 
 export async function verifyEvaluatorSourceIdentity() {

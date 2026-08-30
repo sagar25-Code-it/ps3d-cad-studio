@@ -307,6 +307,8 @@ export const workbenchCoreTests: readonly TestCase[] = [
       assert(commandsForWorkspace("automate").some((command) => command.name === "Python SDK" && command.level === "preview"), "Python linking should be explicit and preview labeled");
       assert(CAD_COMMANDS.some((command) => command.level === "qualified"), "qualified commands should remain distinguishable");
       assert(CAD_COMMANDS.some((command) => command.level === "unavailable"), "planned exact-kernel commands should remain visibly unavailable");
+      const analyticFeatureNames = ["Revolve", "Pattern Feature", "Mirror Feature", "Unite", "Subtract", "Trim Body", "Edge Blend", "Chamfer", "Draft", "Shell", "Move Face", "Offset Face", "Replace Face", "Delete Face", "Resize Blend", "Update Model"];
+      analyticFeatureNames.forEach((name) => assert(CAD_COMMANDS.some((command) => command.name === name && command.action.kind === "part-feature-action" && command.level === "preview"), `${name} should be executable through the bounded analytic feature contract`));
       assert(CAD_COMMANDS.every((command) => command.guide.selection.length > 0 && command.guide.steps.length >= 3 && command.guide.boundary.length > 0), "every command should explain selection, workflow, and its verification boundary");
       const audit = auditCadCommandSurface();
       assert(audit.passed, `machine command audit should pass: ${audit.issues.map((issue) => `${issue.commandId}:${issue.code}`).join(", ")}`);
@@ -328,7 +330,7 @@ export const workbenchCoreTests: readonly TestCase[] = [
       });
       equal(REFERENCE_IMAGE_COMMAND_TERMS.length, 230, "the screenshot transcription should retain all 230 unique reference terms");
       equal(missing.join(", "), "", "every supplied reference-image command term should remain discoverable without implying execution");
-      equal(CAD_COMMANDS.length, 331, "the audited catalog count should remain synchronized with release copy and evidence");
+      equal(CAD_COMMANDS.length, 341, "the audited catalog count should remain synchronized with release copy and evidence");
     }
   }
 ];

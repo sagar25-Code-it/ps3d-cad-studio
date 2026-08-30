@@ -74,13 +74,32 @@ import {
 import type { ModelSuccessResponse, WorkerResponse } from "../../../packages/worker-protocol/src/index.js";
 import { GeometryWorkerClient } from "./worker-client.js";
 import { loadWorkbenchProject, saveWorkbenchProject } from "./workbench-store.js";
+import {
+  clearCurrentProjectFile,
+  clearPsCadCaches,
+  getPsCadWorkspaceStatus,
+  initializePsCadWorkspace,
+  listRecentProjects,
+  loadCachedWorkbenchProject,
+  openProjectWithPicker,
+  openRecentProject,
+  preparePsCadLocalStorage,
+  rememberOpenedProject,
+  saveProjectText,
+  writeWorkspaceArtifact,
+  type ProjectFilePayload,
+  type PsCadWorkspaceStatus,
+  type RecentProjectEntry
+} from "./file-workspace.js";
 import { WorkbenchHeader } from "./ui/WorkbenchHeader.js";
 import { WorkbenchRibbon } from "./ui/WorkbenchRibbon.js";
+import { SaveProjectDialog } from "./ui/SaveProjectDialog.js";
 import { ProjectTree } from "./ui/ProjectTree.js";
 import { CommandPalette } from "./ui/CommandPalette.js";
 import { ExchangeCenter } from "./ui/ExchangeCenter.js";
 import { ViewportChrome } from "./ui/ViewportChrome.js";
 import { DesignHealthCenter } from "./ui/DesignHealthCenter.js";
+import { SmartFaultBrain } from "./ui/SmartFaultBrain.js";
 import { WorkbenchContextMenu } from "./ui/WorkbenchContextMenu.js";
 import { selectWorkbenchHistoryLane } from "./ui/history-lane.js";
 import { SketchWorkspace, type SketchExtrudeOperation } from "./workspaces/SketchWorkspace.js";
@@ -88,6 +107,13 @@ import { PartInspector } from "./workspaces/PartInspector.js";
 import { ImportedModelInspector } from "./workspaces/ImportedModelInspector.js";
 import { AssemblyInspector } from "./workspaces/AssemblyInspector.js";
 import { MasterCartWorkspace } from "./workspaces/MasterCartWorkspace.js";
+import {
+  DEFAULT_RENDER_SETTINGS,
+  RenderStudioWorkspace,
+  renderResolutionSize,
+  type RenderGalleryEntry,
+  type RenderStudioSettings
+} from "./workspaces/RenderStudioWorkspace.js";
 import { SurfaceInspector } from "./workspaces/SurfaceInspector.js";
 import { DrawingWorkspace } from "./workspaces/DrawingWorkspace.js";
 import { AutomateWorkspace } from "./workspaces/AutomateWorkspace.js";
@@ -123,6 +149,18 @@ const DEFAULT_VIEWPORT_STATE: ViewportViewState = {
   elevationDeg: 35.3
 };
 
+const DEFAULT_FILE_WORKSPACE_STATUS: PsCadWorkspaceStatus = {
+  apiSupported: false,
+  bound: false,
+  permission: "unsupported",
+  folderName: "PS CAD Studio",
+  persistentStorage: false,
+  cacheReady: false,
+  usageBytes: 0,
+  quotaBytes: 0,
+  currentFileName: null
+};
+
 export function App(): React.JSX.Element {
   const initialDocument = useMemo(() => createBracketDocument(`document:${crypto.randomUUID()}`), []);
   const initialProject = useMemo(() => createWorkbenchProject(`project:${crypto.randomUUID()}`), []);
@@ -147,6 +185,13 @@ export function App(): React.JSX.Element {
   const [exchangeOpen, setExchangeOpen] = useState(false);
   const [designHealthOpen, setDesignHealthOpen] = useState(false);
   const [masterCartOpen, setMasterCartOpen] = useState(false);
+  const [renderStudioOpen, setRenderStudioOpen] = useState(false);
+  const [renderSettings, setRenderSettings] = useState<RenderStudioSettings>(DEFAULT_RENDER_SETTINGS);
+  const [renderGallery, setRenderGallery] = useState<readonly RenderGalleryEntry[]>([]);
+  const [renderBusy, setRenderBusy] = useState(false);
+  const [saveDialogMode, setSaveDialogMode] = useState<"save-as" | "copy">();
+  const [fileWorkspaceStatus, setFileWorkspaceStatus] = useState<PsCadWorkspaceStatus>(DEFAULT_FILE_WORKSPACE_STATUS);
+  const [recentProjects, setRecentProjects] = useState<readonly RecentProjectEntry[]>([]);
   const [electromechanicalReviewOpen, setElectromechanicalReviewOpen] = useState(false);
   const [electromechanicalAcknowledged, setElectromechanicalAcknowledged] = useState(false);
   const [pendingAssemblyTemplate, setPendingAssemblyTemplate] = useState<ReplaceableAssemblyTemplate>();
@@ -161,17 +206,24 @@ export function App(): React.JSX.Element {
   const [sketchDimensionMode, setSketchDimensionMode] = useState(false);
   const [viewportState, setViewportState] = useState<ViewportViewState>(DEFAULT_VIEWPORT_STATE);
   const [measurePoints, setMeasurePoints] = useState<readonly ViewportMeasurePoint[]>([]);
+  const [assemblyExplodePreviewMm, setAssemblyExplodePreviewMm] = useState<number | null>(null);
+  const assemblyExplodeRef = useRef(initialProject.assembly.explodeMm);
   const [contextMenu, setContextMenu] = useState<OpenContextMenu>();
   const clientRef = useRef<GeometryWorkerClient | undefined>(undefined);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
+  const renderCanvasRef = useRef<HTMLCanvasElement>(null);
+  const renderViewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const nativeInputRef = useRef<HTMLInputElement>(null);
   const engineeringDialogRef = useRef<HTMLElement>(null);
 
-  const assemblyScene = useMemo(() => buildAssemblyPreview(project.assembly), [project.assembly]);
+  const displayedAssembly = useMemo(() => assemblyExplodePreviewMm === null
+    ? project.assembly
+    : { ...project.assembly, explodeMm: assemblyExplodePreviewMm }, [assemblyExplodePreviewMm, project.assembly]);
+  const assemblyScene = useMemo(() => buildAssemblyPreview(displayedAssembly), [displayedAssembly]);
   const partScene = useMemo(() => buildPartPreview(project.part), [project.part]);
-  const interferences = useMemo(() => findAssemblyInterference(project.assembly), [project.assembly]);
+  const interferences = useMemo(() => findAssemblyInterference(displayedAssembly), [displayedAssembly]);
   const surfacePreview = useMemo(() => buildSurfacePreview(project.surface), [project.surface]);
   const drawing = useMemo(() => createDrawingSvg(project.part, project.drawing), [project.part, project.drawing]);
   const electrical = useMemo(() => createElectricalSchematic(project.electrical), [project.electrical]);
@@ -211,6 +263,12 @@ export function App(): React.JSX.Element {
     setProject(next);
   }, []);
 
+  const refreshFileWorkspace = useCallback(async (): Promise<void> => {
+    const [workspace, recent] = await Promise.all([getPsCadWorkspaceStatus(), listRecentProjects()]);
+    setFileWorkspaceStatus(workspace);
+    setRecentProjects(recent);
+  }, []);
+
   const applyProjectOperation = useCallback((intent: OperationIntent, announce = true): boolean => {
     const current = projectRef.current;
     const operation = { ...intent, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: current.revision } as WorkbenchOperation;
@@ -230,6 +288,25 @@ export function App(): React.JSX.Element {
     }
     return true;
   }, [pushProject]);
+
+  const previewAssemblyExplode = useCallback((valueMm: number): void => {
+    const bounded = Math.round(Math.min(120, Math.max(0, Number.isFinite(valueMm) ? valueMm : 0)) * 10) / 10;
+    assemblyExplodeRef.current = bounded;
+    setAssemblyExplodePreviewMm(bounded);
+  }, []);
+
+  const commitAssemblyExplode = useCallback((valueMm = assemblyExplodeRef.current): void => {
+    const bounded = Math.round(Math.min(120, Math.max(0, Number.isFinite(valueMm) ? valueMm : 0)) * 10) / 10;
+    assemblyExplodeRef.current = bounded;
+    setAssemblyExplodePreviewMm(null);
+    if (Math.abs(projectRef.current.assembly.explodeMm - bounded) <= 0.05) return;
+    applyProjectOperation({ kind: "set-assembly-explode", valueMm: bounded });
+  }, [applyProjectOperation]);
+
+  useEffect(() => {
+    assemblyExplodeRef.current = project.assembly.explodeMm;
+    setAssemblyExplodePreviewMm(null);
+  }, [project.id, project.assembly.explodeMm]);
 
   const acceptModel = useCallback((response: ModelSuccessResponse): void => {
     setModel(response);
@@ -301,6 +378,12 @@ export function App(): React.JSX.Element {
   }, [initialProject, resetProject]);
 
   useEffect(() => {
+    void preparePsCadLocalStorage()
+      .then(refreshFileWorkspace)
+      .catch(() => setStatusText("Browser-private recovery storage is unavailable; standard file downloads remain available."));
+  }, [refreshFileWorkspace]);
+
+  useEffect(() => {
     const listener = (event: KeyboardEvent): void => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -353,7 +436,7 @@ export function App(): React.JSX.Element {
     };
   }, [electromechanicalReviewOpen, pendingAssemblyTemplate, pendingElectricalTemplate, pendingVehicleTemplate]);
 
-  const isThreeDimensional = project.activeWorkspace === "part" || project.activeWorkspace === "assembly" || project.activeWorkspace === "surface" || project.activeWorkspace === "vehicle";
+  const isThreeDimensional = !renderStudioOpen && (project.activeWorkspace === "part" || project.activeWorkspace === "assembly" || project.activeWorkspace === "surface" || project.activeWorkspace === "vehicle");
   const acceptMeasurePoint = useCallback((point: ViewportMeasurePoint): void => {
     setMeasurePoints((current) => current.length >= 2 ? [point] : [...current, point]);
   }, []);
@@ -367,12 +450,18 @@ export function App(): React.JSX.Element {
       onSelectBody: setSelectedId,
       onViewChange: setViewportState,
       onMeasurePoint: acceptMeasurePoint,
-      onContextMenu: (request) => openContextMenu(request.clientX, request.clientY, request.semanticId, request.selectionKind === "body" || request.selectionKind === "component" ? request.selectionKind : undefined)
+      onContextMenu: (request) => openContextMenu(request.clientX, request.clientY, request.semanticId, request.selectionKind === "body" || request.selectionKind === "component" ? request.selectionKind : undefined),
+      ...(project.activeWorkspace === "assembly" ? { assemblyTouchGestures: {
+        getExplodeMm: () => assemblyExplodeRef.current,
+        onExplodePreview: previewAssemblyExplode,
+        onExplodeCommit: commitAssemblyExplode,
+        maxExplodeMm: 120
+      } } : {})
     });
     viewport.restoreViewState(viewportState);
     viewportRef.current = viewport;
     return () => { viewport.dispose(); viewportRef.current = undefined; };
-  }, [acceptMeasurePoint, isThreeDimensional, masterCartOpen, openContextMenu, project.activeWorkspace]);
+  }, [acceptMeasurePoint, commitAssemblyExplode, isThreeDimensional, masterCartOpen, openContextMenu, previewAssemblyExplode, project.activeWorkspace]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -386,8 +475,58 @@ export function App(): React.JSX.Element {
   useEffect(() => viewportRef.current?.setSelectedId(selectedId), [selectedId]);
   useEffect(() => viewportRef.current?.setMeasurePoints(measurePoints.map((point) => point.pointMm)), [measurePoints]);
 
+  useEffect(() => {
+    if (!renderStudioOpen || renderCanvasRef.current === null) return;
+    const viewport = new ThreeViewportAdapter(renderCanvasRef.current, { onSelectBody: () => undefined });
+    viewport.restoreViewState({
+      ...DEFAULT_VIEWPORT_STATE,
+      navigationMode: "orbit",
+      gridVisible: false,
+      axesVisible: false,
+      projection: renderSettings.projection,
+      orientation: renderSettings.orientation,
+      azimuthDeg: viewAnglesForOrientation(renderSettings.orientation)[0],
+      elevationDeg: viewAnglesForOrientation(renderSettings.orientation)[1]
+    });
+    renderViewportRef.current = viewport;
+    return () => { viewport.dispose(); renderViewportRef.current = undefined; };
+  }, [renderStudioOpen]);
+
+  useEffect(() => {
+    const viewport = renderViewportRef.current;
+    if (viewport === undefined) return;
+    if (renderSettings.source === "part" && activeImport !== undefined) viewport.setExternalObject(activeImport.object);
+    else if (renderSettings.source === "part" && model !== undefined) { viewport.setArtifactWithScene(model.render, partScene); viewport.fitPreview(partScene.boundsMm); }
+    else if (renderSettings.source === "part") viewport.setScene(partScene);
+    if (renderSettings.source === "assembly") viewport.setScene(assemblyScene);
+    if (renderSettings.source === "surface") viewport.setScene(surfacePreview.scene);
+    if (renderSettings.source === "vehicle") viewport.setScene(vehiclePreview.scene);
+  }, [activeImport, assemblyScene, model, partScene, renderSettings.source, renderStudioOpen, surfacePreview.scene, vehiclePreview.scene]);
+
+  useEffect(() => {
+    const viewport = renderViewportRef.current;
+    if (viewport === undefined) return;
+    viewport.setStudioEnvironment(renderSettings.environment);
+    viewport.setStudioMaterial({
+      color: renderSettings.bodyColor,
+      roughness: renderSettings.roughness,
+      metalness: renderSettings.metalness,
+      useSourceColors: renderSettings.materialPreset === "original"
+    });
+    viewport.setStudioLighting({
+      exposure: renderSettings.exposure,
+      keyIntensity: renderSettings.keyIntensity,
+      fillIntensity: renderSettings.fillIntensity,
+      rimIntensity: renderSettings.rimIntensity
+    });
+    viewport.setStudioGroundVisible(renderSettings.groundVisible);
+    viewport.setProjection(renderSettings.projection);
+    viewport.setOrientation(renderSettings.orientation);
+  }, [renderSettings]);
+
   const switchWorkspace = (workspace: WorkspaceId): void => {
     setMasterCartOpen(false);
+    setRenderStudioOpen(false);
     setContextMenu(undefined);
     setSelectedId(null);
     setMeasurePoints([]);
@@ -405,11 +544,22 @@ export function App(): React.JSX.Element {
 
   const openMasterCart = (): void => {
     if (projectRef.current.activeWorkspace !== "assembly") switchWorkspace("assembly");
+    setRenderStudioOpen(false);
     setMasterCartOpen(true);
     setSelectedId(null);
     setMeasurePoints([]);
     setStatus("ready");
     setStatusText("Opened PS3D Master Cart with original parametric component templates and supplier category references.");
+  };
+
+  const openRenderStudio = (): void => {
+    setMasterCartOpen(false);
+    setRenderStudioOpen(true);
+    setContextMenu(undefined);
+    setSelectedId(null);
+    setMeasurePoints([]);
+    setStatus("ready");
+    setStatusText("Opened Render Studio with a linked, non-destructive scene for materials, lighting, cameras, and raster output.");
   };
 
   const createPartPreviewBody = (shape: PartPreviewBodyShape): void => {
@@ -473,6 +623,105 @@ export function App(): React.JSX.Element {
       sizeMm: orientedPreviewEnvelope(body)
     });
     if (copies.length > 0 && applyProjectOperation({ kind: "add-part-preview-bodies", bodies: copies })) setSelectedId(copies.at(-1)!.id);
+  };
+
+  const runPartFeatureAction = (operation: Extract<CadCommandRecord["action"], { kind: "part-feature-action" }>["operation"], commandName: string, bodyIdOverride: string | null = selectedId): void => {
+    const current = projectRef.current;
+    const bodies = current.part.previewBodies ?? [];
+    if (operation === "update-model") {
+      applyProjectOperation({ kind: "update-part-model" });
+      return;
+    }
+    if (operation === "revolve") {
+      const bodyId = `part-body:revolve-${crypto.randomUUID()}`;
+      const outerDiameterMm = 30;
+      if (applyProjectOperation({
+        kind: "create-part-revolve",
+        bodyId,
+        name: `Revolved ring ${bodies.length + 1}`,
+        outerDiameterMm,
+        innerDiameterMm: 16,
+        heightMm: 12,
+        angleDeg: current.part.revolveAngleDeg,
+        translationMm: [current.part.widthMm / 2 + 34 + outerDiameterMm / 2, 0, 6]
+      })) setSelectedId(bodyId);
+      return;
+    }
+    const body = bodies.find((candidate) => candidate.id === bodyIdOverride);
+    if (body === undefined) {
+      setStatus("ready");
+      setStatusText(`Select an analytic body in the viewport or Bodies tree before running ${commandName}.`);
+      return;
+    }
+    if (operation === "pattern-feature") {
+      const count = Math.max(2, current.part.patternCount);
+      const instanceIds = Array.from({ length: count - 1 }, () => `part-body:pattern-${crypto.randomUUID()}`);
+      const spacingMm = Math.max(body.sizeMm[0], 10) * 1.25;
+      if (applyProjectOperation({ kind: "pattern-part-feature", bodyId: body.id, instanceIds, direction: "x", spacingMm })) setSelectedId(instanceIds.at(-1) ?? body.id);
+      return;
+    }
+    if (operation === "mirror-feature") {
+      const newBodyId = `part-body:mirror-${crypto.randomUUID()}`;
+      if (applyProjectOperation({ kind: "mirror-part-feature", bodyId: body.id, newBodyId, plane: "yz" })) setSelectedId(newBodyId);
+      return;
+    }
+    if (operation === "unite" || operation === "subtract") {
+      const tool = bodies.find((candidate) => candidate.id !== body.id && candidate.visible);
+      if (tool === undefined) {
+        setStatus("ready");
+        setStatusText(`${commandName} needs a second visible analytic body. Select the target, then create or show a compatible tool body.`);
+        return;
+      }
+      if (applyProjectOperation({ kind: "boolean-part-bodies", targetBodyId: body.id, toolBodyId: tool.id, operation })) setSelectedId(body.id);
+      return;
+    }
+    if (operation === "trim-body") {
+      applyProjectOperation({ kind: "trim-part-body", bodyId: body.id, keptLengthMm: Math.max(0.5, body.sizeMm[2] * 0.7), side: "negative" });
+      return;
+    }
+    if (operation === "edge-blend" || operation === "chamfer") {
+      const maximum = Math.max(0.25, Math.min(body.sizeMm[0], body.sizeMm[1]) / 2 - 0.5);
+      const sizeMm = Math.min(Math.max(0.5, current.part.edgeTreatmentMm), maximum);
+      applyProjectOperation({ kind: "set-part-body-edge-treatment", bodyId: body.id, treatment: operation === "edge-blend" ? "blend" : "chamfer", sizeMm });
+      return;
+    }
+    if (operation === "draft") {
+      applyProjectOperation({ kind: "set-part-body-draft", bodyId: body.id, angleDeg: 5 });
+      return;
+    }
+    if (operation === "shell") {
+      const thicknessMm = Math.min(2, Math.max(0.5, Math.min(body.sizeMm[0] / 4, body.sizeMm[1] / 4, body.sizeMm[2] / 3)));
+      applyProjectOperation({ kind: "set-part-body-shell", bodyId: body.id, thicknessMm });
+      return;
+    }
+    if (operation === "move-face" || operation === "offset-face") {
+      applyProjectOperation({ kind: "move-part-body-face", bodyId: body.id, face: "z-positive", offsetMm: 2, mode: operation === "move-face" ? "move" : "offset" });
+      return;
+    }
+    if (operation === "replace-face") {
+      applyProjectOperation({ kind: "replace-part-body-face", bodyId: body.id, face: "z-positive", localPositionMm: body.sizeMm[2] / 2 + 2 });
+      return;
+    }
+    if (operation === "resize-blend") {
+      if (body.edgeTreatment?.kind !== "blend") {
+        setStatus("ready");
+        setStatusText("Resize Blend needs a recognized analytic blend. Run Edge Blend on a plain block first.");
+        return;
+      }
+      const maximum = Math.min(body.sizeMm[0], body.sizeMm[1]) / 2 - 0.5;
+      applyProjectOperation({ kind: "set-part-body-edge-treatment", bodyId: body.id, treatment: "blend", sizeMm: Math.min(maximum, body.edgeTreatment.sizeMm + 0.5) });
+      return;
+    }
+    const feature = body.boreDiameterMm !== undefined ? "bore"
+      : body.edgeTreatment !== undefined ? "edge-treatment"
+        : body.shellThicknessMm !== undefined ? "shell"
+          : body.draftAngleDeg !== undefined ? "draft" : undefined;
+    if (feature === undefined) {
+      setStatus("ready");
+      setStatusText("Delete Face needs a recognized bore, blend/chamfer, shell, or draft face set; the plain body was not changed.");
+      return;
+    }
+    applyProjectOperation({ kind: "delete-part-body-face", bodyId: body.id, feature });
   };
 
   const insertAssemblyComponent = (shape: "box" | "cylinder"): void => {
@@ -632,6 +881,13 @@ export function App(): React.JSX.Element {
       openDesignHealth();
       return;
     }
+    if (action.kind === "file-new") { void createNewProject(); return; }
+    if (action.kind === "file-open") { void openProjectFromSystem(); return; }
+    if (action.kind === "file-save") { void saveAll(); return; }
+    if (action.kind === "file-save-as") { setSaveDialogMode("save-as"); return; }
+    if (action.kind === "file-save-copy") { setSaveDialogMode("copy"); return; }
+    if (action.kind === "file-workspace") { void connectFileWorkspace(); return; }
+    if (action.kind === "open-render-studio") { openRenderStudio(); return; }
     switchWorkspace(command.workspace);
     if (action.kind === "unavailable") {
       setSelectedId(command.id);
@@ -682,6 +938,9 @@ export function App(): React.JSX.Element {
         break;
       case "selected-part-preview-body-action":
         runSelectedPartPreviewAction(action.operation, command.name);
+        break;
+      case "part-feature-action":
+        runPartFeatureAction(action.operation, command.name);
         break;
       case "set-part-preview-bodies-visibility":
         applyProjectOperation({ kind: "set-part-preview-bodies-visibility", visible: action.visible });
@@ -847,26 +1106,71 @@ export function App(): React.JSX.Element {
     setStatusText(`${direction === "undo" ? "Restored prior" : "Restored next"} broad project revision ${next.revision}.`);
   };
 
+  const serializeProjectText = (): string => `${JSON.stringify(projectRef.current, null, 2)}\n`;
+
+  const saveVisibleProject = async (mode: "save" | "save-as" | "copy", suggestedName: string): Promise<void> => {
+    const current = projectRef.current;
+    const outcome = await saveProjectText(serializeProjectText(), {
+      mode,
+      suggestedName,
+      projectName: current.name,
+      revision: current.revision
+    });
+    await refreshFileWorkspace();
+    setStatus("ready");
+    setStatusText(`${outcome.fileName} saved to ${outcome.destination === "workspace" ? `${outcome.workspaceName ?? "PS CAD Studio"} / Projects` : outcome.destination === "file-picker" ? "the approved file location" : "Downloads"}.`);
+  };
+
   const saveAll = async (): Promise<void> => {
     setStatus("working");
     try {
       await saveWorkbenchProject(projectRef.current);
       const response = await clientRef.current?.persist(documentRef.current.revision);
       if (response !== undefined && !acceptResponse(response)) return;
-      setStatus("ready");
-      setStatusText(`Broad project revision ${projectRef.current.revision} and qualified solid revision ${documentRef.current.revision} are durable in browser IndexedDB.`);
+      await saveVisibleProject("save", fileWorkspaceStatus.currentFileName ?? projectRef.current.name);
     } catch (error) {
+      if (isAbortError(error)) { setStatus("ready"); setStatusText("Save cancelled; the browser recovery copy is still current."); return; }
       setStatus("error"); setStatusText(error instanceof Error ? error.message : "Local save failed.");
+    }
+  };
+
+  const openProjectPayload = async (payload: ProjectFilePayload): Promise<void> => {
+    const parsed = parseWorkbenchProjectText(payload.text);
+    if (!parsed.ok) {
+      await clearCurrentProjectFile().catch(() => undefined);
+      const first = parsed.diagnostics[0];
+      setStatus("error");
+      setStatusText(first?.message ?? "Project rejected.");
+      return;
+    }
+    resetProject(parsed.value);
+    await saveWorkbenchProject(parsed.value);
+    await rememberOpenedProject(payload.fileName, parsed.value);
+    await refreshFileWorkspace();
+    setRenderStudioOpen(false);
+    setMasterCartOpen(false);
+    setStatus("ready");
+    setStatusText(`Opened ${payload.fileName}, project revision ${parsed.value.revision}.`);
+    void synchronizeWorkerPart(parsed.value);
+  };
+
+  const openProjectFromSystem = async (): Promise<void> => {
+    try {
+      const payload = await openProjectWithPicker();
+      if (payload === undefined) { projectInputRef.current?.click(); return; }
+      await openProjectPayload(payload);
+    } catch (error) {
+      if (isAbortError(error)) { setStatusText("Open project cancelled."); return; }
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "The project could not be opened.");
     }
   };
 
   const openProject = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = event.target.files?.[0]; event.target.value = "";
     if (file === undefined) return;
-    const parsed = parseWorkbenchProjectText(await file.text());
-    if (!parsed.ok) { const first = parsed.diagnostics[0]; setStatus("error"); setStatusText(first?.message ?? "Project rejected."); return; }
-    resetProject(parsed.value); await saveWorkbenchProject(parsed.value); setStatus("ready"); setStatusText(`Opened broad project revision ${parsed.value.revision}.`);
-    void synchronizeWorkerPart(parsed.value);
+    await clearCurrentProjectFile().catch(() => undefined);
+    await openProjectPayload({ text: await file.text(), fileName: file.name });
   };
 
   const synchronizeWorkerPart = async (next: WorkbenchProject): Promise<void> => {
@@ -877,6 +1181,152 @@ export function App(): React.JSX.Element {
       const response = await clientRef.current.commit(documentRef.current.revision, { protocolVersion: 1, kind: "set-parameter", commandId: `command:project-open-${key}-${crypto.randomUUID()}`, expectedRevision: documentRef.current.revision, parameterKey: key, expression: { decimal: String(target), unit: "mm" } });
       if (!acceptResponse(response)) break;
     }
+  };
+
+  const createNewProject = async (): Promise<void> => {
+    setStatus("working");
+    try {
+      const nextProject = createWorkbenchProject(`project:${crypto.randomUUID()}`);
+      const nextDocument = createBracketDocument(`document:${crypto.randomUUID()}`);
+      const imported = activeImportRef.current;
+      imported?.releaseResources();
+      if (imported !== undefined) disposeExchangeObject(imported.object);
+      activeImportRef.current = undefined;
+      setActiveImport(undefined);
+      setSelectedId(null);
+      setMeasurePoints([]);
+      setMasterCartOpen(false);
+      setRenderStudioOpen(false);
+      await clearCurrentProjectFile();
+      resetProject(nextProject);
+      setDocument(nextDocument);
+      documentRef.current = nextDocument;
+      setModel(undefined);
+      modelRef.current = undefined;
+      await saveWorkbenchProject(nextProject);
+      const client = clientRef.current;
+      if (client !== undefined) {
+        client.restart();
+        const response = await client.bootstrap(nextDocument, false, null);
+        if (!acceptResponse(response)) return;
+      }
+      await refreshFileWorkspace();
+      setStatus("ready");
+      setStatusText("Created a new unsaved PS3D design with a clean history and independent recovery identity.");
+    } catch (error) {
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "A new design could not be created.");
+    }
+  };
+
+  const reopenRecentProject = async (id: string): Promise<void> => {
+    setStatus("working");
+    try { await openProjectPayload(await openRecentProject(id)); }
+    catch (error) {
+      if (isAbortError(error)) { setStatus("ready"); setStatusText("Recent project opening cancelled."); return; }
+      setStatus("error"); setStatusText(error instanceof Error ? error.message : "The recent project could not be reopened.");
+    }
+  };
+
+  const connectFileWorkspace = async (): Promise<void> => {
+    try {
+      setStatus("working");
+      const connected = await initializePsCadWorkspace();
+      setFileWorkspaceStatus(connected);
+      setRecentProjects(await listRecentProjects());
+      setStatus("ready");
+      setStatusText(`Connected ${connected.folderName} with Projects, Exports, Renders, Recovery, and Cache folders.`);
+    } catch (error) {
+      if (isAbortError(error)) { setStatus("ready"); setStatusText("Folder connection cancelled; browser-private recovery remains available."); return; }
+      setStatus("error"); setStatusText(error instanceof Error ? error.message : "The PS CAD Studio folder could not be connected.");
+    }
+  };
+
+  const recoverAutosave = async (): Promise<void> => {
+    setStatus("working");
+    try {
+      const recovered = await loadCachedWorkbenchProject();
+      if (recovered === undefined) { setStatus("ready"); setStatusText("No validated browser-private autosave is available."); return; }
+      await clearCurrentProjectFile();
+      resetProject(recovered);
+      await saveWorkbenchProject(recovered);
+      await refreshFileWorkspace();
+      setMasterCartOpen(false);
+      setRenderStudioOpen(false);
+      setStatus("ready");
+      setStatusText(`Recovered project revision ${recovered.revision} as an unsaved session. Use Save As to create a visible file.`);
+      void synchronizeWorkerPart(recovered);
+    } catch (error) {
+      setStatus("error"); setStatusText(error instanceof Error ? error.message : "Autosave recovery failed.");
+    }
+  };
+
+  const clearFileCaches = async (): Promise<void> => {
+    try {
+      await clearPsCadCaches();
+      await refreshFileWorkspace();
+      setStatus("ready");
+      setStatusText("Browser-private PS3D render thumbnails and recovery caches were cleared; visible project files were not removed.");
+    } catch (error) {
+      setStatus("error"); setStatusText(error instanceof Error ? error.message : "The browser-private caches could not be cleared.");
+    }
+  };
+
+  const confirmSaveDialog = async (fileName: string): Promise<void> => {
+    const mode = saveDialogMode;
+    setSaveDialogMode(undefined);
+    if (mode === undefined) return;
+    setStatus("working");
+    try {
+      await saveWorkbenchProject(projectRef.current);
+      await saveVisibleProject(mode, fileName);
+    } catch (error) {
+      if (isAbortError(error)) { setStatus("ready"); setStatusText("Save cancelled; the active project was not rebound."); return; }
+      setStatus("error"); setStatusText(error instanceof Error ? error.message : "The project file could not be written.");
+    }
+  };
+
+  const fitRenderViewport = (): void => {
+    const viewport = renderViewportRef.current;
+    if (viewport === undefined) return;
+    if (renderSettings.source === "part" && activeImportRef.current !== undefined) viewport.fitCurrent();
+    else if (renderSettings.source === "part") viewport.fitPreview(partScene.boundsMm);
+    if (renderSettings.source === "assembly") viewport.fitPreview(assemblyScene.boundsMm);
+    if (renderSettings.source === "surface") viewport.fitPreview(surfacePreview.scene.boundsMm);
+    if (renderSettings.source === "vehicle") viewport.fitPreview(vehiclePreview.scene.boundsMm);
+  };
+
+  const renderStudioImage = async (): Promise<void> => {
+    const viewport = renderViewportRef.current;
+    if (viewport === undefined || renderBusy) return;
+    setRenderBusy(true);
+    setStatus("working");
+    try {
+      const [width, height] = renderResolutionSize(renderSettings.resolution);
+      const image = await viewport.captureRenderImage(width, height, renderSettings.format, renderSettings.quality);
+      const extension = renderSettings.format === "png" ? "png" : "jpg";
+      const timestamp = new Date().toISOString().replace(/[:.]/gu, "-");
+      const fileName = `${safeFileStem(projectRef.current.name)}-${renderSettings.source}-r${projectRef.current.revision}-${timestamp}.${extension}`;
+      const renderBuffer = new ArrayBuffer(image.bytes.byteLength);
+      new Uint8Array(renderBuffer).set(image.bytes);
+      const blob = new Blob([renderBuffer], { type: image.mimeType });
+      const written = await writeWorkspaceArtifact("Renders", fileName, blob);
+      if (!written) downloadBlob(blob, fileName);
+      const entry: RenderGalleryEntry = {
+        id: `render:${crypto.randomUUID()}`,
+        fileName,
+        width: image.width,
+        height: image.height,
+        format: renderSettings.format,
+        createdAt: new Date().toISOString(),
+        destination: written ? "workspace" : "download"
+      };
+      setRenderGallery((current) => [entry, ...current].slice(0, 24));
+      setStatus("ready");
+      setStatusText(`Rendered ${image.width} × ${image.height} ${renderSettings.format.toUpperCase()} to ${written ? "PS CAD Studio / Renders" : "Downloads"}.`);
+    } catch (error) {
+      setStatus("error"); setStatusText(error instanceof Error ? error.message : "Render output failed.");
+    } finally { setRenderBusy(false); }
   };
 
   const openNative = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
@@ -1082,6 +1532,13 @@ export function App(): React.JSX.Element {
     if (commandId === "history.redo") { void moveHistory("redo"); return; }
     if (commandId === "view.fit") { fitViewport(); return; }
     if (commandId === "view.home") { homeViewport(); return; }
+    if (commandId.startsWith("view.orientation.")) {
+      const orientation = commandId.slice("view.orientation.".length);
+      if (orientation === "front" || orientation === "top" || orientation === "right" || orientation === "isometric") setViewportOrientation(orientation);
+      return;
+    }
+    if (commandId === "view.projection.perspective") { setViewportProjection("perspective"); return; }
+    if (commandId === "view.projection.orthographic") { setViewportProjection("orthographic"); return; }
     if (commandId === "view.look-at" || commandId === "sketch.look-at") { setViewportOrientation(selectionId === "datum:yz" ? "right" : selectionId === "datum:xz" ? "front" : "top"); return; }
     if (commandId === "inspect.measure") { setViewportNavigation("measure"); return; }
     if (commandId === "sketch.create" || commandId === "sketch.edit") { switchWorkspace("sketch"); if (selectionId !== null) setSelectedId(selectionId); return; }
@@ -1100,6 +1557,21 @@ export function App(): React.JSX.Element {
       return;
     }
     if (commandId === "feature.extrude") { switchWorkspace("sketch"); if (selectionId !== null) setSelectedId(selectionId); setStatusText("Extrude ready: review the selected closed profile and operation in the right inspector."); return; }
+    if (commandId === "body.boolean-join") { runPartFeatureAction("unite", "Unite", selectionId); return; }
+    if (commandId === "body.boolean-cut") { runPartFeatureAction("subtract", "Subtract", selectionId); return; }
+    if (commandId === "body.move-face") { runPartFeatureAction("move-face", "Move Face", selectionId); return; }
+    if (commandId === "body.offset-face") { runPartFeatureAction("offset-face", "Offset Face", selectionId); return; }
+    if (commandId === "body.replace-face") { runPartFeatureAction("replace-face", "Replace Face", selectionId); return; }
+    if (commandId === "body.delete-face") { runPartFeatureAction("delete-face", "Delete Face", selectionId); return; }
+    if (commandId === "body.edge-blend") { runPartFeatureAction("edge-blend", "Edge Blend", selectionId); return; }
+    if (commandId === "body.chamfer") { runPartFeatureAction("chamfer", "Chamfer", selectionId); return; }
+    if (commandId === "body.resize-blend") { runPartFeatureAction("resize-blend", "Resize Blend", selectionId); return; }
+    if (commandId === "body.shell") { runPartFeatureAction("shell", "Shell", selectionId); return; }
+    if (commandId === "body.draft") { runPartFeatureAction("draft", "Draft", selectionId); return; }
+    if (commandId === "body.trim") { runPartFeatureAction("trim-body", "Trim Body", selectionId); return; }
+    if (commandId === "body.pattern-feature") { runPartFeatureAction("pattern-feature", "Pattern Feature", selectionId); return; }
+    if (commandId === "body.mirror-feature") { runPartFeatureAction("mirror-feature", "Mirror Feature", selectionId); return; }
+    if (commandId === "body.update-model") { runPartFeatureAction("update-model", "Update Model"); return; }
     if (commandId === "feature.edit" || commandId === "body.appearance" || commandId === "body.move") { switchWorkspace("part"); if (selectionId !== null) setSelectedId(selectionId); return; }
     if (commandId === "feature.reveal-inputs") { switchWorkspace("sketch"); setSelectedId(projectRef.current.sketch.id); setTreeRevealRequest((request) => request + 1); return; }
     if (commandId === "body.create-component") { insertCurrentPartIntoAssembly(); return; }
@@ -1160,24 +1632,70 @@ export function App(): React.JSX.Element {
   const downloadDrawing = (): void => downloadBlob(new Blob([drawing.svg], { type: "image/svg+xml" }), "ps3d-centered-bore-plate.svg");
   useEffect(() => {
     const listener = (event: KeyboardEvent): void => {
+      if (event.key === "Escape" && renderStudioOpen && globalThis.document.querySelector('[role="dialog"]') === null) {
+        setRenderStudioOpen(false);
+        setStatusText("Returned to the Design workspace; Render Studio settings remain available in this session.");
+        return;
+      }
       if (!(event.ctrlKey || event.metaKey) || isEditableTarget(event.target) || globalThis.document.querySelector('[role="dialog"]') !== null) return;
       const key = event.key.toLowerCase();
-      if (key === "s") { event.preventDefault(); void saveAll(); }
-      if (key === "o") { event.preventDefault(); projectInputRef.current?.click(); }
+      if (key === "s" && event.shiftKey) { event.preventDefault(); setSaveDialogMode("save-as"); }
+      else if (key === "s") { event.preventDefault(); void saveAll(); }
+      if (key === "o") { event.preventDefault(); void openProjectFromSystem(); }
+      if (key === "n") { event.preventDefault(); void createNewProject(); }
+      if (key === "p") { event.preventDefault(); window.print(); }
       if (key === "h" && event.shiftKey) { event.preventDefault(); openDesignHealth(); }
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
-  }, [openDesignHealth]);
+  }, [openDesignHealth, renderStudioOpen]);
   const undoLane = selectWorkbenchHistoryLane(project.activeWorkspace, undoDepth, projectUndoDepth);
   const redoLane = selectWorkbenchHistoryLane(project.activeWorkspace, redoDepth, projectRedoDepth);
   const canUndo = undoLane !== null;
   const canRedo = redoLane !== null;
   const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo });
 
-  return <main className="studio-app" data-workspace={masterCartOpen ? "master-cart" : project.activeWorkspace} aria-busy={status === "working"}>
-    <WorkbenchHeader project={project} masterCartOpen={masterCartOpen} status={status} onWorkspace={switchWorkspace} onMasterCart={openMasterCart} onCommandPalette={() => setPaletteOpen(true)} onDesignHealth={openDesignHealth} onExchange={() => setExchangeOpen(true)} onLearning={() => window.location.assign("/learn")} onAccess={() => window.location.assign("/access")} onSave={() => void saveAll()} onDownload={downloadProject} onOpen={() => projectInputRef.current?.click()} onUndo={() => undoLane === "qualified-part" ? void moveHistory("undo") : moveProjectHistory("undo")} onRedo={() => redoLane === "qualified-part" ? void moveHistory("redo") : moveProjectHistory("redo")} onFit={fitViewport} onHome={homeViewport} onToggleGrid={() => setViewportGrid(!viewportState.gridVisible)} onMeasure={() => setViewportNavigation("measure")} gridVisible={viewportState.gridVisible} canUndo={canUndo} canRedo={canRedo} designHealthStatus={designHealth.overallStatus} designHealthScore={designHealth.score} />
-    <WorkbenchRibbon
+  return <main className="studio-app" data-workspace={renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace} aria-busy={status === "working"}>
+    <WorkbenchHeader
+      project={project}
+      masterCartOpen={masterCartOpen}
+      renderStudioOpen={renderStudioOpen}
+      status={status}
+      fileWorkspaceStatus={fileWorkspaceStatus}
+      recentProjects={recentProjects}
+      onWorkspace={switchWorkspace}
+      onMasterCart={openMasterCart}
+      onRenderStudio={openRenderStudio}
+      onCommandPalette={() => setPaletteOpen(true)}
+      onDesignHealth={openDesignHealth}
+      onExchange={() => setExchangeOpen(true)}
+      onLearning={() => window.location.assign("/learn")}
+      onAccess={() => window.location.assign("/access")}
+      onNew={() => void createNewProject()}
+      onSave={() => void saveAll()}
+      onSaveAs={() => setSaveDialogMode("save-as")}
+      onSaveCopy={() => setSaveDialogMode("copy")}
+      onDownload={downloadProject}
+      onOpen={() => void openProjectFromSystem()}
+      onOpenRecent={(id) => void reopenRecentProject(id)}
+      onOpenNative={() => nativeInputRef.current?.click()}
+      onInitializeFileWorkspace={() => void connectFileWorkspace()}
+      onRecoverProject={() => void recoverAutosave()}
+      onClearFileCache={() => void clearFileCaches()}
+      onPrint={() => window.print()}
+      onUndo={() => undoLane === "qualified-part" ? void moveHistory("undo") : moveProjectHistory("undo")}
+      onRedo={() => redoLane === "qualified-part" ? void moveHistory("redo") : moveProjectHistory("redo")}
+      onFit={fitViewport}
+      onHome={homeViewport}
+      onToggleGrid={() => setViewportGrid(!viewportState.gridVisible)}
+      onMeasure={() => setViewportNavigation("measure")}
+      gridVisible={viewportState.gridVisible}
+      canUndo={canUndo}
+      canRedo={canRedo}
+      designHealthStatus={designHealth.overallStatus}
+      designHealthScore={designHealth.score}
+    />
+    {!renderStudioOpen && <WorkbenchRibbon
       project={project}
       masterCartOpen={masterCartOpen}
       displayUnit={document.displayUnit}
@@ -1192,6 +1710,7 @@ export function App(): React.JSX.Element {
       onSelect={setSelectedId}
       onCreatePartPreviewBody={createPartPreviewBody}
       onPartPreviewAction={(operation, commandName) => runSelectedPartPreviewAction(operation, commandName)}
+      onPartFeatureAction={(operation, commandName) => runPartFeatureAction(operation, commandName)}
       onFit={fitViewport}
       onMeasure={() => setViewportNavigation("measure")}
       onNativeDownload={() => void downloadNative()}
@@ -1199,7 +1718,7 @@ export function App(): React.JSX.Element {
       onExportStl={() => void exportStl()}
       onExchange={() => setExchangeOpen(true)}
       onDisplayUnit={(unit) => void changeUnit(unit)}
-      onAssemblyExplode={(valueMm) => applyProjectOperation({ kind: "set-assembly-explode", valueMm })}
+      onAssemblyExplode={(valueMm) => { previewAssemblyExplode(valueMm); commitAssemblyExplode(valueMm); }}
       onAssemblyTemplate={requestAssemblyTemplate}
       onInsertPartIntoAssembly={insertCurrentPartIntoAssembly}
       onInsertComponent={insertAssemblyComponent}
@@ -1228,15 +1747,31 @@ export function App(): React.JSX.Element {
       onVehicleState={(state) => applyProjectOperation({ kind: "set-vehicle-simulation-state", state })}
       onVehicleLayer={(layer) => applyProjectOperation({ kind: "toggle-vehicle-layer", layer })}
       onCloseMasterCart={() => { setMasterCartOpen(false); setStatusText("Returned to the Assembly workspace; no uninserted catalog preview was committed."); }}
-    />
+    />}
     <input ref={projectInputRef} type="file" accept="application/json,.json" className="visually-hidden" aria-label="Open PS3D workbench project" tabIndex={-1} onChange={(event) => void openProject(event)} />
     <input ref={nativeInputRef} type="file" accept="application/json,.json" className="visually-hidden" aria-label="Open qualified PS3D native part revision" tabIndex={-1} onChange={(event) => void openNative(event)} />
-    <section className="workbench-grid">
+    {renderStudioOpen && <RenderStudioWorkspace
+      project={project}
+      canvasRef={renderCanvasRef}
+      settings={renderSettings}
+      gallery={renderGallery}
+      busy={renderBusy}
+      onSettings={setRenderSettings}
+      onFit={fitRenderViewport}
+      onRender={() => void renderStudioImage()}
+      onClose={() => { setRenderStudioOpen(false); setStatusText("Returned to the Design workspace; Render Studio settings remain available in this session."); }}
+    />}
+    {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={setSelectedId} onContextMenu={openContextMenu} />}
       {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} onExtrudeProfiles={extrudeSketchProfiles} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} onFit={() => setStatusText("Sketch fit is already bounded to all visible entities.")} onHome={homeViewport} onContextMenu={openContextMenu} working={status === "working"} onMessage={setStatusText} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
+        {project.activeWorkspace === "assembly" && <div className="assembly-gesture-hud" aria-live="polite">
+          <span><i />1 finger · orbit 360°</span>
+          <span><i />2 fingers · slide vertical</span>
+          <strong>{displayedAssembly.explodeMm.toFixed(1)} mm <small>{Math.round(displayedAssembly.explodeMm / 1.2)}% exploded</small></strong>
+        </div>}
         <ViewportChrome
           workspace={project.activeWorkspace as "part" | "assembly" | "surface" | "vehicle"}
           state={viewportState}
@@ -1260,16 +1795,17 @@ export function App(): React.JSX.Element {
       {!masterCartOpen && <>
       {project.activeWorkspace === "part" && activeImport === undefined && <PartInspector part={project.part} model={model} working={status === "working"} bodyColor={viewportState.bodyColor} shadingMode={viewportState.shadingMode} selectedId={selectedId} onSelect={setSelectedId} onBodyColor={(color) => viewportRef.current?.setBodyColor(color)} onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)} onCommit={(parameter, value) => void commitPartParameter(parameter, value)} onInsertIntoAssembly={insertCurrentPartIntoAssembly} onCreatePreviewBody={createPartPreviewBody} onPreviewBodyTransform={(bodyId, translationMm, rotationDeg) => applyProjectOperation({ kind: "set-part-preview-body-transform", bodyId, translationMm, rotationDeg })} onPreviewBodySize={(bodyId, sizeMm) => applyProjectOperation({ kind: "set-part-preview-body-size", bodyId, sizeMm })} onPreviewBodyColor={(bodyId, color) => applyProjectOperation({ kind: "set-part-preview-body-color", bodyId, color })} onPreviewBodyVisibility={(bodyId) => applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId })} onPreviewBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId })) setSelectedId(null); }} />}
       {project.activeWorkspace === "part" && activeImport !== undefined && <ImportedModelInspector result={activeImport} onExchange={() => setExchangeOpen(true)} onClear={clearActiveImport} />}
-      {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={project.assembly} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplode={(valueMm) => applyProjectOperation({ kind: "set-assembly-explode", valueMm })} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onAddMate={(mate) => applyProjectOperation({ kind: "add-assembly-mate", mate })} onDeleteMate={(mateId) => { if (applyProjectOperation({ kind: "delete-assembly-mate", mateId })) setSelectedId(null); }} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
+      {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={displayedAssembly} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplodePreview={previewAssemblyExplode} onExplodeCommit={commitAssemblyExplode} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onAddMate={(mate) => applyProjectOperation({ kind: "add-assembly-mate", mate })} onDeleteMate={(mateId) => { if (applyProjectOperation({ kind: "delete-assembly-mate", mateId })) setSelectedId(null); }} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
       {project.activeWorkspace === "surface" && <SurfaceInspector surface={project.surface} metrics={surfacePreview.metrics} onParameter={(parameter, value) => applyProjectOperation({ kind: "set-surface-parameter", parameter, value })} />}
       {project.activeWorkspace === "drawing" && <DrawingWorkspace settings={project.drawing} artifact={drawing} onSheet={(sheet) => applyProjectOperation({ kind: "set-drawing-sheet", sheet })} onProjection={(projection) => applyProjectOperation({ kind: "set-drawing-projection", projection })} onScale={(scale) => applyProjectOperation({ kind: "set-drawing-scale", scale })} onDimensions={(show) => applyProjectOperation({ kind: "set-drawing-dimensions", show })} onViewPreset={(preset) => applyProjectOperation({ kind: "set-drawing-view-preset", preset })} onDisplayStyle={(style) => applyProjectOperation({ kind: "set-drawing-display-style", style })} onSectionView={(show) => applyProjectOperation({ kind: "set-drawing-section-view", show })} onDraftingStandard={(standard) => applyProjectOperation({ kind: "set-drawing-drafting-standard", standard })} onGdt={(show) => applyProjectOperation({ kind: "set-drawing-gdt", show })} onDatumScheme={(scheme) => applyProjectOperation({ kind: "set-drawing-datum-scheme", scheme })} onGdtSpecification={(positionMm, flatnessMm, perpendicularityMm) => applyProjectOperation({ kind: "set-drawing-gdt-specification", positionMm, flatnessMm, perpendicularityMm })} onGeneralTolerance={(linearMm, angularDeg) => applyProjectOperation({ kind: "set-drawing-general-tolerance", linearMm, angularDeg })} onNotes={(notes) => applyProjectOperation({ kind: "set-drawing-notes", notes })} />}
       {project.activeWorkspace === "electrical" && <ElectricalWorkspace intent={project.electrical} artifact={electrical} selectedId={selectedId} onSelect={setSelectedId} onTemplate={requestElectricalTemplate} onStandard={(standard) => applyProjectOperation({ kind: "set-electrical-standard", standard })} onInsertComponent={insertElectricalComponent} onMoveComponent={(componentId, position) => applyProjectOperation({ kind: "set-electrical-component-position", componentId, position })} onDeleteComponent={(componentId) => { if (applyProjectOperation({ kind: "delete-electrical-component", componentId })) setSelectedId(null); }} onAddNet={addElectricalNet} onDeleteNet={(netId) => { if (applyProjectOperation({ kind: "delete-electrical-net", netId })) setSelectedId(null); }} onNotes={(notes) => applyProjectOperation({ kind: "set-electrical-notes", notes })} onPhysicalize={requestElectromechanicalAssembly} onDownload={() => downloadBlob(new Blob([electrical.svg], { type: "image/svg+xml" }), "ps3d-electrical-concept.svg")} />}
       {project.activeWorkspace === "vehicle" && <VehicleWorkspace intent={project.vehicle} analysis={vehiclePreview.analysis} geometry={vehiclePreview.geometry} primitiveCountByLayer={vehiclePreview.primitiveCountByLayer} selectedId={selectedId} onSelect={setSelectedId} onTemplate={requestVehicleTemplate} onParameter={(parameter, value) => applyProjectOperation({ kind: "set-vehicle-parameter", parameter, value })} onState={(state) => applyProjectOperation({ kind: "set-vehicle-simulation-state", state })} onLayer={(layer) => applyProjectOperation({ kind: "toggle-vehicle-layer", layer })} onFit={fitViewport} />}
       {project.activeWorkspace === "automate" && <AutomateWorkspace project={project} selectedId={selectedId} onSelect={setSelectedId} onApplyProject={(next, message) => { const valid = validateWorkbenchProject(next); if (valid.ok) { pushProject(valid.value); setStatusText(message); } }} onReviewElectromechanical={requestElectromechanicalAssembly} onMessage={setStatusText} />}
       </>}
-    </section>
+    </section>}
     {contextMenu !== undefined && <WorkbenchContextMenu x={contextMenu.x} y={contextMenu.y} selectionLabel={contextMenu.selectionId ?? `${project.activeWorkspace} canvas`} commands={contextCommands} onRun={runContextCommand} onClose={() => setContextMenu(undefined)} />}
-    <footer className="app-status"><div className={`status-copy ${status}`} role="status" aria-live="polite"><span />{statusText}</div><div className="status-facts"><a className="app-brand-credit" href="/about" title={`${PS3D_BRAND.name} - ${PS3D_BRAND.serviceLine}`}>{PS3D_BRAND.name}</a><button className={`status-health ${designHealth.overallStatus}`} onClick={openDesignHealth}>health {designHealth.score}</button><span>{document.displayUnit}</span><span>{selectedId === null ? "0 selected" : "1 selected"}</span><span>{masterCartOpen ? "parametric preview" : isThreeDimensional ? viewportState.selectionFilter : project.activeWorkspace === "electrical" ? `ERC ${electrical.erc.status}` : "local"}</span><span>{masterCartOpen ? "master-cart" : project.activeWorkspace}</span></div>{diagnostic !== undefined && <div className="diagnostic-toast" role="alert"><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span><small>{diagnostic.recovery}</small><button onClick={() => setDiagnostic(undefined)} aria-label="Dismiss diagnostic">×</button></div>}</footer>
+    <footer className="app-status"><div className={`status-copy ${status}`} role="status" aria-live="polite"><span />{statusText}</div><div className="status-facts"><a className="app-brand-credit" href="/about" title={`${PS3D_BRAND.name} - ${PS3D_BRAND.serviceLine}`}>{PS3D_BRAND.name}</a><button className={`status-health ${designHealth.overallStatus}`} onClick={openDesignHealth}>health {designHealth.score}</button><span>{document.displayUnit}</span><span>{selectedId === null ? "0 selected" : "1 selected"}</span><span>{renderStudioOpen ? `${renderSettings.resolution} ${renderSettings.format}` : masterCartOpen ? "parametric preview" : isThreeDimensional ? viewportState.selectionFilter : project.activeWorkspace === "electrical" ? `ERC ${electrical.erc.status}` : "local"}</span><span>{renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace}</span></div>{diagnostic !== undefined && <div className="diagnostic-toast" role="alert"><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span><small>{diagnostic.recovery}</small><button onClick={() => setDiagnostic(undefined)} aria-label="Dismiss diagnostic">×</button></div>}</footer>
+    <SmartFaultBrain report={designHealth} {...(diagnostic === undefined ? {} : { diagnostic })} onDesignHealth={openDesignHealth} onWorkspace={switchWorkspace} />
     {electromechanicalReviewOpen && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog exact-candidate" role="dialog" aria-modal="true" aria-labelledby="electromechanical-review-title" aria-describedby="electromechanical-review-description">
         <header><div><span>EXACT CANDIDATE REPLACEMENT REVIEW</span><h2 id="electromechanical-review-title">Circuit → wired mounting plate</h2></div><button data-dialog-initial-focus onClick={() => { setElectromechanicalReviewOpen(false); setElectromechanicalAcknowledged(false); }} aria-label="Close circuit to mounting plate review">×</button></header>
         <div className="engineering-review-metrics"><span><small>Remove</small><strong>{project.assembly.components.length} bodies · {project.assembly.mates.length} mates · {project.assembly.electricalRoutes?.length ?? 0} conductors · {project.assembly.electricalLinks?.length ?? 0} links</strong></span><span><small>Generate</small><strong>{electromechanicalCandidate.ok ? electromechanicalCandidate.value.components.length : 0} bodies · {electromechanicalCandidate.ok ? electromechanicalCandidate.value.mates.length : 0} fixed mates</strong></span><span><small>Trace</small><strong>{electromechanicalCandidate.ok ? electromechanicalCandidate.value.electricalRoutes?.length ?? 0 : 0} unsized conductors</strong></span><span><small>ERC</small><strong>{electrical.erc.errors} error · {electrical.erc.warnings} warning</strong></span></div>
@@ -1290,6 +1826,7 @@ export function App(): React.JSX.Element {
     <CommandPalette open={paletteOpen} workspace={project.activeWorkspace} onClose={() => setPaletteOpen(false)} onCommand={executeCadCommand} />
     <ExchangeCenter open={exchangeOpen} busy={exchangeBusy} hasScene={!masterCartOpen && isThreeDimensional} activeImport={activeImport} feedback={exchangeFeedback} onClose={() => setExchangeOpen(false)} onImport={(files, unit) => void importExchangeFiles(files, unit)} onExport={(format, unit) => void exportExchangeFormat(format, unit)} onPdfPackage={() => void exportPdfPackage()} onInteractivePdf={(file) => void exportInteractivePdf(file)} onClearImport={clearActiveImport} />
     {designHealthOpen && <DesignHealthCenter report={designHealth} onClose={() => setDesignHealthOpen(false)} onWorkspace={switchWorkspace} />}
+    <SaveProjectDialog open={saveDialogMode !== undefined} mode={saveDialogMode ?? "save-as"} projectName={project.name} workspaceStatus={fileWorkspaceStatus} onConfirm={(fileName) => void confirmSaveDialog(fileName)} onClose={() => setSaveDialogMode(undefined)} />
   </main>;
 }
 
@@ -1365,6 +1902,10 @@ function downloadBlob(blob: Blob, filename: string): void {
 
 function isEditableTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function safeFileStem(value: string): string {

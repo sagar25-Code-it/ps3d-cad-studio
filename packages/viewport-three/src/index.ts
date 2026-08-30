@@ -9,6 +9,20 @@ export interface ViewportOptions {
   readonly onViewChange?: (state: ViewportViewState) => void;
   readonly onMeasurePoint?: (point: ViewportMeasurePoint) => void;
   readonly onContextMenu?: (request: ViewportContextMenuRequest) => void;
+  readonly assemblyTouchGestures?: ViewportAssemblyTouchGestures;
+}
+
+export interface ViewportAssemblyTouchGestures {
+  readonly getExplodeMm: () => number;
+  readonly onExplodePreview: (valueMm: number) => void;
+  readonly onExplodeCommit: (valueMm: number) => void;
+  readonly maxExplodeMm?: number;
+}
+
+export interface ViewportTouchPoint {
+  readonly pointerId: number;
+  readonly x: number;
+  readonly y: number;
 }
 
 export type ViewOrientation = "custom" | "front" | "back" | "left" | "right" | "top" | "bottom" | "isometric";
@@ -17,6 +31,28 @@ export type NavigationMode = "select" | "orbit" | "pan" | "measure";
 export type SelectionFilter = "auto" | "body" | "component" | "sketch-curve" | "profile" | "connected" | "tangent";
 export type ViewportShadingMode = "shaded" | "shaded-edges" | "wireframe";
 export type ViewportBackgroundTone = "charcoal" | "dark-gray" | "light-gray" | "white";
+export type ViewportStudioEnvironment = "softbox" | "daylight" | "graphite" | "white-cyclorama" | "warm-studio";
+
+export interface ViewportStudioMaterial {
+  readonly color: string;
+  readonly roughness: number;
+  readonly metalness: number;
+  readonly useSourceColors: boolean;
+}
+
+export interface ViewportStudioLighting {
+  readonly exposure: number;
+  readonly keyIntensity: number;
+  readonly fillIntensity: number;
+  readonly rimIntensity: number;
+}
+
+export interface ViewportRenderImage {
+  readonly bytes: Uint8Array;
+  readonly width: number;
+  readonly height: number;
+  readonly mimeType: "image/jpeg" | "image/png";
+}
 
 export interface ViewportViewState {
   readonly orientation: ViewOrientation;
@@ -80,6 +116,24 @@ export function orbitViewAngles(azimuthDeg: number, elevationDeg: number, deltaX
   return [azimuth, elevation];
 }
 
+export function touchCentroidY(points: readonly ViewportTouchPoint[]): number {
+  if (points.length === 0) return 0;
+  return points.reduce((total, point) => total + point.y, 0) / points.length;
+}
+
+export function assemblyExplodeFromVerticalGesture(
+  startExplodeMm: number,
+  startCentroidY: number,
+  currentCentroidY: number,
+  viewportHeightPx: number,
+  maxExplodeMm = 120
+): number {
+  const boundedMaximum = Number.isFinite(maxExplodeMm) ? THREE.MathUtils.clamp(maxExplodeMm, 1, 200) : 120;
+  const travelPx = Math.max(Number.isFinite(viewportHeightPx) ? viewportHeightPx * 0.62 : 0, 160);
+  const deltaMm = (startCentroidY - currentCentroidY) * boundedMaximum / travelPx;
+  return Math.round(THREE.MathUtils.clamp(startExplodeMm + deltaMm, 0, boundedMaximum) * 10) / 10;
+}
+
 /**
  * Projects the document WCS into screen space using the exact camera convention
  * used by ThreeViewportAdapter. ViewCube faces and the WCS triad both consume
@@ -109,6 +163,14 @@ export class ThreeViewportAdapter {
   readonly #measurementGroup = new THREE.Group();
   readonly #grid = new THREE.GridHelper(0.24, 24, "#9aa3aa", "#545d64");
   readonly #axes = new THREE.AxesHelper(0.035);
+  readonly #hemisphereLight = new THREE.HemisphereLight("#f5f7f8", "#1f2428", 1.35);
+  readonly #keyLight = new THREE.DirectionalLight("#ffffff", 2.35);
+  readonly #fillLight = new THREE.DirectionalLight("#bfd9ef", 0.55);
+  readonly #rimLight = new THREE.DirectionalLight("#c7d1d8", 0.85);
+  readonly #studioGround = new THREE.Mesh(
+    new THREE.PlaneGeometry(20, 20),
+    new THREE.MeshStandardMaterial({ color: "#6d747a", roughness: 0.88, metalness: 0, transparent: true, opacity: 0.4 })
+  );
   readonly #raycaster = new THREE.Raycaster();
   readonly #pointer = new THREE.Vector2();
   readonly #target = new THREE.Vector3();
@@ -130,7 +192,9 @@ export class ThreeViewportAdapter {
   #backgroundTone: ViewportBackgroundTone = "dark-gray";
   #qualifiedBody: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
   #qualifiedEdges: THREE.LineSegments<THREE.EdgesGeometry, THREE.LineBasicMaterial> | undefined;
-  #drag: { x: number; y: number; startX: number; startY: number; moved: boolean; mode: NavigationMode } | undefined;
+  #drag: { pointerId: number; x: number; y: number; startX: number; startY: number; moved: boolean; mode: NavigationMode } | undefined;
+  readonly #touchPointers = new Map<number, ViewportTouchPoint>();
+  #assemblyTouchGesture: { startCentroidY: number; startExplodeMm: number; latestExplodeMm: number } | undefined;
   #frame = 0;
 
   constructor(canvas: HTMLCanvasElement, options: ViewportOptions) {
@@ -141,6 +205,8 @@ export class ThreeViewportAdapter {
     this.#renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.#renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.#renderer.toneMappingExposure = 1;
+    this.#renderer.shadowMap.enabled = true;
+    this.#renderer.shadowMap.type = THREE.PCFShadowMap;
     this.#scene.background = new THREE.Color("#30363b");
     this.#scene.fog = new THREE.Fog("#30363b", 0.28, 0.75);
 
@@ -150,13 +216,21 @@ export class ThreeViewportAdapter {
     this.#scene.add(this.#axes);
     this.#scene.add(this.#bodyGroup);
     this.#scene.add(this.#measurementGroup);
-    this.#scene.add(new THREE.HemisphereLight("#f5f7f8", "#1f2428", 1.35));
-    const key = new THREE.DirectionalLight("#ffffff", 2.35);
-    key.position.set(0.12, -0.08, 0.2);
-    this.#scene.add(key);
-    const rim = new THREE.DirectionalLight("#c7d1d8", 0.85);
-    rim.position.set(-0.1, 0.12, 0.08);
-    this.#scene.add(rim);
+    this.#scene.add(this.#hemisphereLight);
+    this.#keyLight.position.set(0.12, -0.08, 0.2);
+    this.#keyLight.castShadow = true;
+    this.#keyLight.shadow.mapSize.set(2048, 2048);
+    this.#keyLight.shadow.camera.near = 0.001;
+    this.#keyLight.shadow.camera.far = 20;
+    this.#scene.add(this.#keyLight);
+    this.#fillLight.position.set(-0.16, -0.04, 0.09);
+    this.#scene.add(this.#fillLight);
+    this.#rimLight.position.set(-0.1, 0.12, 0.08);
+    this.#scene.add(this.#rimLight);
+    this.#studioGround.position.z = -0.006;
+    this.#studioGround.receiveShadow = true;
+    this.#studioGround.visible = false;
+    this.#scene.add(this.#studioGround);
 
     this.#resizeObserver = new ResizeObserver(() => this.#resize());
     this.#resizeObserver.observe(canvas);
@@ -277,6 +351,62 @@ export class ThreeViewportAdapter {
     this.#emitViewState();
   }
 
+  setStudioEnvironment(environment: ViewportStudioEnvironment): void {
+    const presets: Readonly<Record<ViewportStudioEnvironment, {
+      readonly background: string;
+      readonly fog: string;
+      readonly sky: string;
+      readonly ground: string;
+      readonly key: string;
+      readonly fill: string;
+      readonly rim: string;
+    }>> = {
+      softbox: { background: "#68747d", fog: "#68747d", sky: "#f7fafc", ground: "#2d3439", key: "#ffffff", fill: "#c7e6ff", rim: "#edf7ff" },
+      daylight: { background: "#8eafc4", fog: "#8eafc4", sky: "#e7f6ff", ground: "#45584a", key: "#fff6dc", fill: "#b9dcff", rim: "#ffffff" },
+      graphite: { background: "#151a1f", fog: "#151a1f", sky: "#c8d0d6", ground: "#080a0c", key: "#f4f7fa", fill: "#6685a0", rim: "#d8efff" },
+      "white-cyclorama": { background: "#e9edef", fog: "#e9edef", sky: "#ffffff", ground: "#a8afb4", key: "#ffffff", fill: "#e8f4ff", rim: "#ffffff" },
+      "warm-studio": { background: "#5d4b40", fog: "#5d4b40", sky: "#ffe5c5", ground: "#2c211c", key: "#ffd6a6", fill: "#8ea9c3", rim: "#fff1d7" }
+    };
+    const preset = presets[environment];
+    this.#scene.background = new THREE.Color(preset.background);
+    if (this.#scene.fog instanceof THREE.Fog) this.#scene.fog.color.set(preset.fog);
+    this.#hemisphereLight.color.set(preset.sky);
+    this.#hemisphereLight.groundColor.set(preset.ground);
+    this.#keyLight.color.set(preset.key);
+    this.#fillLight.color.set(preset.fill);
+    this.#rimLight.color.set(preset.rim);
+    const groundMaterial = this.#studioGround.material;
+    if (groundMaterial instanceof THREE.MeshStandardMaterial) groundMaterial.color.set(preset.ground);
+  }
+
+  setStudioMaterial(material: ViewportStudioMaterial): void {
+    if (!/^#[0-9a-f]{6}$/iu.test(material.color) || !Number.isFinite(material.roughness) || !Number.isFinite(material.metalness)) return;
+    this.#bodyGroup.traverse((entry) => {
+      if (!(entry instanceof THREE.Mesh)) return;
+      const materials = Array.isArray(entry.material) ? entry.material : [entry.material];
+      for (const candidate of materials) {
+        if (!(candidate instanceof THREE.MeshStandardMaterial)) continue;
+        const sourceColor = typeof entry.userData["baseColor"] === "string" ? entry.userData["baseColor"] as string : this.#bodyColor;
+        candidate.color.set(material.useSourceColors ? sourceColor : material.color);
+        candidate.roughness = THREE.MathUtils.clamp(material.roughness, 0.04, 1);
+        candidate.metalness = THREE.MathUtils.clamp(material.metalness, 0, 1);
+        candidate.needsUpdate = true;
+      }
+    });
+  }
+
+  setStudioLighting(lighting: ViewportStudioLighting): void {
+    if (![lighting.exposure, lighting.keyIntensity, lighting.fillIntensity, lighting.rimIntensity].every(Number.isFinite)) return;
+    this.#renderer.toneMappingExposure = THREE.MathUtils.clamp(lighting.exposure, 0.25, 3);
+    this.#keyLight.intensity = THREE.MathUtils.clamp(lighting.keyIntensity, 0, 8);
+    this.#fillLight.intensity = THREE.MathUtils.clamp(lighting.fillIntensity, 0, 5);
+    this.#rimLight.intensity = THREE.MathUtils.clamp(lighting.rimIntensity, 0, 5);
+  }
+
+  setStudioGroundVisible(visible: boolean): void {
+    this.#studioGround.visible = visible;
+  }
+
   setGridVisible(visible: boolean): void {
     this.#grid.visible = visible;
     this.#emitViewState();
@@ -389,6 +519,29 @@ export class ThreeViewportAdapter {
     return { bytes, width: this.#canvas.width, height: this.#canvas.height };
   }
 
+  async captureRenderImage(width: number, height: number, format: "jpeg" | "png", quality = 0.94): Promise<ViewportRenderImage> {
+    const boundedWidth = THREE.MathUtils.clamp(Math.round(width), 256, 4096);
+    const boundedHeight = THREE.MathUtils.clamp(Math.round(height), 256, 4096);
+    const priorPixelRatio = this.#renderer.getPixelRatio();
+    try {
+      this.#renderer.setPixelRatio(1);
+      this.#renderer.setSize(boundedWidth, boundedHeight, false);
+      this.#setProjectionAspect(boundedWidth / boundedHeight);
+      this.#renderer.render(this.#scene, this.#activeCamera());
+      const mimeType = format === "png" ? "image/png" : "image/jpeg";
+      const dataUrl = this.#canvas.toDataURL(mimeType, THREE.MathUtils.clamp(quality, 0.5, 1));
+      const encoded = dataUrl.split(",", 2)[1];
+      if (encoded === undefined) throw new Error("The Render Studio image could not be encoded.");
+      const binary = atob(encoded);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+      return { bytes, width: boundedWidth, height: boundedHeight, mimeType };
+    } finally {
+      this.#renderer.setPixelRatio(priorPixelRatio);
+      this.#resize();
+    }
+  }
+
   fit(bounds?: ModelSuccessResponse["render"]["measurements"]["boundsMeters"]): void {
     if (bounds !== undefined) {
       this.#target.set(
@@ -442,6 +595,9 @@ export class ThreeViewportAdapter {
 
   dispose(): void {
     cancelAnimationFrame(this.#frame);
+    this.#touchPointers.clear();
+    this.#assemblyTouchGesture = undefined;
+    this.#drag = undefined;
     this.#resizeObserver.disconnect();
     this.#canvas.removeEventListener("pointerdown", this.#onPointerDown);
     this.#canvas.removeEventListener("pointermove", this.#onPointerMove);
@@ -457,20 +613,56 @@ export class ThreeViewportAdapter {
     this.#axes.geometry.dispose();
     if (Array.isArray(this.#axes.material)) this.#axes.material.forEach((material) => material.dispose());
     else this.#axes.material.dispose();
+    this.#studioGround.geometry.dispose();
+    if (Array.isArray(this.#studioGround.material)) this.#studioGround.material.forEach((material) => material.dispose());
+    else this.#studioGround.material.dispose();
     this.#renderer.dispose();
   }
 
   readonly #onPointerDown = (event: PointerEvent): void => {
     if (event.button === 2) return;
     this.#canvas.setPointerCapture(event.pointerId);
+    if (event.pointerType === "touch") {
+      event.preventDefault();
+      this.#touchPointers.set(event.pointerId, { pointerId: event.pointerId, x: event.clientX, y: event.clientY });
+      const assemblyGestures = this.#options.assemblyTouchGestures;
+      if (assemblyGestures !== undefined && this.#touchPointers.size >= 2) {
+        const points = Array.from(this.#touchPointers.values()).slice(0, 2);
+        const startExplodeMm = THREE.MathUtils.clamp(assemblyGestures.getExplodeMm(), 0, assemblyGestures.maxExplodeMm ?? 120);
+        this.#assemblyTouchGesture = {
+          startCentroidY: touchCentroidY(points),
+          startExplodeMm,
+          latestExplodeMm: startExplodeMm
+        };
+        this.#drag = undefined;
+        return;
+      }
+    }
     const mode: NavigationMode = event.button === 1
       ? event.shiftKey ? "orbit" : "pan"
-      : this.#navigationMode;
-    this.#drag = { x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, moved: false, mode };
+      : event.pointerType === "touch" && this.#options.assemblyTouchGestures !== undefined ? "orbit" : this.#navigationMode;
+    this.#drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, moved: false, mode };
   };
 
   readonly #onPointerMove = (event: PointerEvent): void => {
-    if (this.#drag === undefined) return;
+    if (event.pointerType === "touch" && this.#touchPointers.has(event.pointerId)) {
+      event.preventDefault();
+      this.#touchPointers.set(event.pointerId, { pointerId: event.pointerId, x: event.clientX, y: event.clientY });
+      const assemblyGestures = this.#options.assemblyTouchGestures;
+      if (assemblyGestures !== undefined && this.#assemblyTouchGesture !== undefined && this.#touchPointers.size >= 2) {
+        const valueMm = assemblyExplodeFromVerticalGesture(
+          this.#assemblyTouchGesture.startExplodeMm,
+          this.#assemblyTouchGesture.startCentroidY,
+          touchCentroidY(Array.from(this.#touchPointers.values()).slice(0, 2)),
+          this.#canvas.clientHeight,
+          assemblyGestures.maxExplodeMm ?? 120
+        );
+        this.#assemblyTouchGesture.latestExplodeMm = valueMm;
+        assemblyGestures.onExplodePreview(valueMm);
+        return;
+      }
+    }
+    if (this.#drag === undefined || this.#drag.pointerId !== event.pointerId) return;
     const dx = event.clientX - this.#drag.x;
     const dy = event.clientY - this.#drag.y;
     if (Math.hypot(event.clientX - this.#drag.startX, event.clientY - this.#drag.startY) > 3) this.#drag.moved = true;
@@ -497,11 +689,31 @@ export class ThreeViewportAdapter {
   };
 
   readonly #onPointerUp = (event: PointerEvent): void => {
-    if (this.#drag !== undefined && !this.#drag.moved) {
+    if (event.pointerType === "touch") {
+      this.#touchPointers.delete(event.pointerId);
+      if (this.#assemblyTouchGesture !== undefined && this.#touchPointers.size < 2) {
+        const committedValueMm = this.#assemblyTouchGesture.latestExplodeMm;
+        this.#assemblyTouchGesture = undefined;
+        this.#options.assemblyTouchGestures?.onExplodeCommit(committedValueMm);
+        const remaining = this.#touchPointers.values().next().value as ViewportTouchPoint | undefined;
+        this.#drag = remaining === undefined ? undefined : {
+          pointerId: remaining.pointerId,
+          x: remaining.x,
+          y: remaining.y,
+          startX: remaining.x,
+          startY: remaining.y,
+          moved: true,
+          mode: "orbit"
+        };
+        if (this.#canvas.hasPointerCapture(event.pointerId)) this.#canvas.releasePointerCapture(event.pointerId);
+        return;
+      }
+    }
+    if (this.#drag !== undefined && this.#drag.pointerId === event.pointerId && !this.#drag.moved) {
       if (this.#drag.mode === "select") this.#pick(event);
       if (this.#drag.mode === "measure") this.#measurePick(event);
     }
-    this.#drag = undefined;
+    if (this.#drag?.pointerId === event.pointerId) this.#drag = undefined;
     if (this.#canvas.hasPointerCapture(event.pointerId)) this.#canvas.releasePointerCapture(event.pointerId);
   };
 
@@ -621,6 +833,10 @@ export class ThreeViewportAdapter {
 
   #updateProjection(): void {
     const aspect = Math.max(this.#canvas.clientWidth, 1) / Math.max(this.#canvas.clientHeight, 1);
+    this.#setProjectionAspect(aspect);
+  }
+
+  #setProjectionAspect(aspect: number): void {
     const halfHeight = Math.max(this.#radius * Math.tan(THREE.MathUtils.degToRad(this.#camera.fov / 2)), 0.004);
     this.#orthographicCamera.left = -halfHeight * aspect;
     this.#orthographicCamera.right = halfHeight * aspect;
@@ -641,6 +857,9 @@ export class ThreeViewportAdapter {
   }
 
   #addObject(object: THREE.Object3D, pickable: boolean): void {
+    object.traverse((entry) => {
+      if (entry instanceof THREE.Mesh) { entry.castShadow = true; entry.receiveShadow = true; }
+    });
     this.#bodyGroup.add(object);
     this.#objects.push(object);
     if (pickable) this.#pickable.push(object);

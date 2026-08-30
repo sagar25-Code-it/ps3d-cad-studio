@@ -1,6 +1,6 @@
 # Generated and Assisted Material Record
 
-**Record date:** 2026-08-26  
+**Record date:** 2026-08-27
 **Material:** Phase 0 qualified-slice and Phase 1 broad-workbench application
 source, tests, configuration, Python MCP client, local 3D exchange and PDF
 delivery, standards-aware engineering drawing and tolerance assistance,
@@ -16,7 +16,9 @@ sketch-driven qualified extrusion, professional circle/rectangle variants,
 an original light-neutral CAD shell, gray part material, display-style controls,
 body color presets and a custom color input, screenshots, SBOM, and supporting
 documentation, plus the original PS3D Master Cart parametric component studio
-with 25 ready families, grouped Assembly insertion, and local browser evidence  
+with 25 ready families, grouped Assembly insertion, a permission-gated local
+File and session center, OPFS recovery/cache support, nested context commands,
+and a linked non-destructive Render Studio with local raster output
 **Review state:** Public-preview release candidate pending clean CI, live cloud
 integration, and human provenance/technical review; not a production release
 
@@ -62,6 +64,18 @@ previews, and a read-only vehicle MCP analysis. The implementation used only:
   pages to understand base/projected/section view relationships, view display,
   selective annotations, and rules-based drawing automation, all without
   copying vendor source, assets, templates, examples, or wording;
+- official Autodesk Fusion File/export and Render documentation, official
+  SOLIDWORKS save, shortcut-bar, context-toolbar, and shortcut-menu help,
+  official Onshape document-tab and Render Studio help, official PTC Creo Save
+  a Copy help, and MDN File System API/OPFS documentation to establish generic
+  desktop-CAD workflow expectations and the browser permission/storage
+  boundary. The resulting File center, shortcuts, scene controls, symbols,
+  layout, wording, and implementation are original PS3D material;
+- the user-supplied NX File-menu photograph was reviewed only to identify the
+  user's requested generic command families such as New, Open, Save, Import,
+  Export, Preferences, Properties, and Help. The photograph is not included in
+  the repository, and no vendor asset, icon, visual layout, text, or executable
+  behavior was copied;
 - official ISO freight-container catalog/sector pages and an official carrier
   container specification to establish nominal external planning envelopes;
 - official NFPA and UL pages to establish that BESS installation, product
@@ -205,7 +219,15 @@ the authorized deep-indigo, engineering-blue, signal-cyan, and steel palette;
 semantic command colors; functional CAD application menus; a dependency-free
 inline SVG command-symbol set; a keyboard-navigable workspace-filtered command
 launcher; and qualified-part shaded, shaded-with-edges, feature-wireframe, and
-display-only color overrides. No third-party or competing-product icon asset
+display-only color overrides. The current original File center exposes New,
+Open, Save, Save As, Save a Copy, recovery, import/export, properties, print,
+and Help workflows. After an explicit directory-picker gesture it may create
+`PS CAD Studio/{Projects,Exports,Renders,Recovery,Cache}` under a user-selected
+directory; without that permission it uses browser-private OPFS recovery/cache
+and ordinary downloads. Render Studio links to the in-memory engineering model
+and provides bounded material, environment, camera, lighting, ground, format,
+resolution, and raster capture controls without claiming path-traced or
+manufacturing-qualified output. No third-party or competing-product icon asset
 was used.
 
 Keep canonical intent separate from disposable render geometry. Preserve
@@ -226,8 +248,8 @@ deployment, release, or legal clearance.
   self-referential record.
   Symbolic links are rejected.
 - Canonical source-set hash:
-  `8e594d0e505b4cf86d33b94d1eff3fd6518043988b33ee046b8abf284dd41db1`
-- Canonical source-set file count: 349
+  `cfd83cb963113e489e652b9320c378189e435ba0a5f5d0e35e2b192e8f7aa887`
+- Canonical source-set file count: 363
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
   `provenance/BUILD_IDENTITY.json`, SHA-256
@@ -330,3 +352,25 @@ browser bundle and real MCP stdio exchange completed before the current
   Sketch-to-Part switch, and all nine workspace ribbons with zero console or
   symbol/layout failures. Images 77 and 78 record the command audit and the
   non-executing PhD-level coordination result.
+  For the File/session and Render Studio delta, the catalog contains 338 unique
+  IDs: 2 qualified, 147 preview, and 189 truthfully unavailable contracts.
+  Direct typecheck and all 109/109 authored typed-suite cases passed in the
+  approved bundled runtime, and the production Vite build completed with 148
+  transformed modules. Live local browser verification at the normal viewport
+  and at a 760-pixel responsive viewport exercised the File center, verified
+  zero document-level horizontal overflow, opened the linked Render Studio,
+  checked its stacked narrow-window layout, and opened the Part right-click
+  menu plus its nested named-view/projection submenu. Browser screenshots were
+  saved outside the canonical repository source set. The final fresh-page
+  browser check produced no application error or warning log entries.
+  For the reconciled engineering-intent, touch-assembly, and Smart Fault Brain
+  delta, the typed behavioral suite passes 124/124 cases and the real MCP stdio
+  verifier discovers all 12 tool schemas. The production browser bundle
+  compiles successfully. Live in-app browser verification at the minimum
+  available 758 × 900 viewport confirms zero document-level horizontal
+  overflow, reachable inspector content, a labeled continuous exploded-view
+  controller, one-finger orbit/two-finger vertical-slide guidance, and a fault
+  drawer that fits inside the viewport. The deterministic multi-pointer tests
+  cover continuous preview plus one revisioned commit. A physical capacitive
+  touch-device smoke test remains required before release; desktop automation
+  does not constitute evidence for device palm rejection or OS touch drivers.

@@ -13,6 +13,7 @@ import {
 
 const workspaceSchema = z.enum(["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"]);
 const experienceLevelSchema = z.enum(["child", "beginner", "engineer", "advanced", "phd"]);
+const engineeringTargetCadSchema = z.enum(["ps3d", "fusion-360", "solidworks", "nx", "creo", "catia-v5"]);
 const projectSchema = z.object({
   format: z.string(), schemaVersion: z.literal(1), applicationVersion: z.string(), id: z.string(), name: z.string(),
   revision: z.number().int().nonnegative(), unit: z.literal("mm"), activeWorkspace: workspaceSchema,
@@ -72,6 +73,22 @@ export function createPs3dMcpServer(): McpServer {
     outputSchema: structuredOutputSchema,
     annotations: { title: "PS3D collaboration agent handshake", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async (args) => toSdkResult(await handleWorkbenchMcpTool("ps3d_agent_handshake", args)));
+
+  server.registerTool("ps3d_plan_engineering_intent", {
+    title: "PS3D engineering intent planner",
+    description: "Decompose an ordinary part or assembly request into reusable definitions, ordered features, standards questions, interfaces, dependency packages, approval gates, and truthful execution routes without running CAD.",
+    inputSchema: z.object({
+      request: z.string().min(2).max(12_000),
+      unit: z.enum(["mm", "in"]).optional(),
+      workspace: workspaceSchema.optional(),
+      experienceLevel: experienceLevelSchema.optional(),
+      projectRevision: z.number().int().nonnegative().optional(),
+      targetCad: z.array(engineeringTargetCadSchema).max(6).optional(),
+      evidence: z.array(z.string().min(1).max(240)).max(40).optional()
+    }).strict(),
+    outputSchema: structuredOutputSchema,
+    annotations: { title: "PS3D engineering intent planner", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  }, async (args) => toSdkResult(await handleWorkbenchMcpTool("ps3d_plan_engineering_intent", args)));
 
   server.registerTool("ps3d_find_commands", {
     title: "Find PS3D command recipes",
@@ -170,7 +187,7 @@ export function createPs3dMcpServer(): McpServer {
       role: "user" as const,
       content: {
         type: "text" as const,
-        text: `${PS3D_MCP_INSTRUCTIONS}\n\nUser goal: ${request}\nWorkspace: ${workspace ?? "not specified"}\nProject revision: ${projectRevision ?? "not supplied"}\nAfter reading ps3d_guide, call ps3d_agent_handshake and then ps3d_find_commands. Do not invent fields or claim a live-browser mutation.`
+        text: `${PS3D_MCP_INSTRUCTIONS}\n\nUser goal: ${request}\nWorkspace: ${workspace ?? "not specified"}\nProject revision: ${projectRevision ?? "not supplied"}\nAfter reading ps3d_guide, call ps3d_agent_handshake. For creation requests call ps3d_plan_engineering_intent, resolve its blockers, and then use ps3d_find_commands for exact bounded operations. Do not invent fields or claim a live-browser mutation.`
       }
     }]
   }));
