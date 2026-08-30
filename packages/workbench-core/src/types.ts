@@ -171,6 +171,12 @@ export interface PartIntent {
   readonly patternCount: number;
   readonly revolveAngleDeg: number;
   /**
+   * Monotonic user-requested rebuild counter for the bounded analytic feature
+   * layer. Geometry is generated deterministically from the records below;
+   * incrementing this value provides an explicit, auditable Update Model step.
+   */
+  readonly modelUpdateSerial?: number;
+  /**
    * Independent editable preview bodies. These deliberately remain separate
    * from the qualified centered-bore body until an exact persistent-topology
    * kernel can evaluate their Boolean and face-level relationships.
@@ -181,10 +187,33 @@ export interface PartIntent {
 
 export type PartPreviewBodyShape = "block" | "cylinder" | "cone" | "sphere";
 
+export type PartAnalyticBodyShape = PartPreviewBodyShape | "revolved";
+export type PartBodyFaceId = "x-negative" | "x-positive" | "y-negative" | "y-positive" | "z-negative" | "z-positive";
+export type PartBodyEdgeTreatment = "blend" | "chamfer";
+export type PartBodyFeatureKind =
+  | "primitive"
+  | "revolve"
+  | "pattern"
+  | "mirror"
+  | "unite"
+  | "subtract"
+  | "trim"
+  | "face-edit"
+  | "edge-treatment"
+  | "draft"
+  | "shell"
+  | "heal";
+
+export interface PartBodyFeatureTrace {
+  readonly kind: PartBodyFeatureKind;
+  readonly operationId: string;
+  readonly parentIds: readonly string[];
+}
+
 export interface PartPreviewBody {
   readonly id: string;
   readonly name: string;
-  readonly shape: PartPreviewBodyShape;
+  readonly shape: PartAnalyticBodyShape;
   readonly visible: boolean;
   readonly color: string;
   readonly translationMm: Vec3;
@@ -195,6 +224,18 @@ export interface PartPreviewBody {
    * cone = base diameter/top diameter/height; sphere = diameter/diameter/diameter.
    */
   readonly sizeMm: Vec3;
+  /** Optional closed analytic through-bore for supported block/cylinder bodies. */
+  readonly boreDiameterMm?: number;
+  /** Optional supported vertical-edge treatment for analytic blocks. */
+  readonly edgeTreatment?: { readonly kind: PartBodyEdgeTreatment; readonly sizeMm: number };
+  /** Optional open-top wall thickness for supported block/cylinder bodies. */
+  readonly shellThicknessMm?: number;
+  /** Supported positive taper from the smaller lower face to the nominal upper face. */
+  readonly draftAngleDeg?: number;
+  /** Sweep angle for a revolved annular rectangular profile. */
+  readonly revolveAngleDeg?: number;
+  /** Stable trace used by feature history, Update Model, and MCP inspection. */
+  readonly featureTrace?: PartBodyFeatureTrace;
 }
 
 export type MasterCartTemplateId =
@@ -771,6 +812,27 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "toggle-part-preview-body-visibility"; readonly bodyId: string }
   | { readonly kind: "isolate-part-preview-body"; readonly bodyId: string }
   | { readonly kind: "set-part-preview-bodies-visibility"; readonly visible: boolean }
+  | {
+      readonly kind: "create-part-revolve";
+      readonly bodyId: string;
+      readonly name: string;
+      readonly outerDiameterMm: number;
+      readonly innerDiameterMm: number;
+      readonly heightMm: number;
+      readonly angleDeg: number;
+      readonly translationMm: Vec3;
+    }
+  | { readonly kind: "pattern-part-feature"; readonly bodyId: string; readonly instanceIds: readonly string[]; readonly direction: "x" | "y" | "z"; readonly spacingMm: number }
+  | { readonly kind: "mirror-part-feature"; readonly bodyId: string; readonly newBodyId: string; readonly plane: "xy" | "xz" | "yz" }
+  | { readonly kind: "boolean-part-bodies"; readonly targetBodyId: string; readonly toolBodyId: string; readonly operation: "unite" | "subtract" }
+  | { readonly kind: "trim-part-body"; readonly bodyId: string; readonly keptLengthMm: number; readonly side: "negative" | "positive" }
+  | { readonly kind: "set-part-body-edge-treatment"; readonly bodyId: string; readonly treatment: PartBodyEdgeTreatment; readonly sizeMm: number }
+  | { readonly kind: "set-part-body-draft"; readonly bodyId: string; readonly angleDeg: number }
+  | { readonly kind: "set-part-body-shell"; readonly bodyId: string; readonly thicknessMm: number }
+  | { readonly kind: "move-part-body-face"; readonly bodyId: string; readonly face: PartBodyFaceId; readonly offsetMm: number; readonly mode: "move" | "offset" }
+  | { readonly kind: "replace-part-body-face"; readonly bodyId: string; readonly face: PartBodyFaceId; readonly localPositionMm: number }
+  | { readonly kind: "delete-part-body-face"; readonly bodyId: string; readonly feature: "bore" | "edge-treatment" | "shell" | "draft" }
+  | { readonly kind: "update-part-model" }
   | { readonly kind: "set-assembly-explode"; readonly valueMm: number }
   | { readonly kind: "apply-assembly-template"; readonly template: Exclude<AssemblyTemplateId, "custom" | "electrical-panel"> }
   | { readonly kind: "add-assembly-component"; readonly component: ComponentInstance }
@@ -831,7 +893,9 @@ export const WORKBENCH_OPERATION_KINDS = [
   "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
   "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
   "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
-  "isolate-part-preview-body", "set-part-preview-bodies-visibility", "set-assembly-explode", "apply-assembly-template",
+  "isolate-part-preview-body", "set-part-preview-bodies-visibility", "create-part-revolve", "pattern-part-feature", "mirror-part-feature",
+  "boolean-part-bodies", "trim-part-body", "set-part-body-edge-treatment", "set-part-body-draft", "set-part-body-shell",
+  "move-part-body-face", "replace-part-body-face", "delete-part-body-face", "update-part-model", "set-assembly-explode", "apply-assembly-template",
   "add-assembly-component", "add-assembly-components", "delete-assembly-component", "set-component-translation", "toggle-component-grounded",
   "toggle-component-visibility", "add-assembly-mate", "delete-assembly-mate", "set-surface-mode", "set-surface-parameter", "set-drawing-sheet", "set-drawing-projection",
   "set-drawing-scale", "set-drawing-dimensions", "set-drawing-view-preset", "set-drawing-display-style", "set-drawing-section-view",

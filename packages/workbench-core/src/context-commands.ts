@@ -10,6 +10,8 @@ export interface WorkbenchContextCommand {
   readonly enabled: boolean;
   readonly disabledReason?: string;
   readonly danger?: boolean;
+  readonly shortcut?: string;
+  readonly children?: readonly WorkbenchContextCommand[];
 }
 
 export interface WorkbenchContextRequest {
@@ -20,7 +22,8 @@ export interface WorkbenchContextRequest {
   readonly canRedo?: boolean;
 }
 
-const TOPOLOGY_REASON = "Requires persistent B-rep face/body topology and an overlap preview; the bounded mesh kernel cannot execute this safely.";
+const TOPOLOGY_REASON = "Requires persistent general B-rep face/body topology and an overlap preview; the bounded analytic kernel cannot execute this safely.";
+const ANALYTIC_BODY_REASON = "Select an independent analytic body. Qualified worker bodies remain immutable from this direct-modeling menu.";
 
 export function classifyWorkbenchSelection(selectionId: string | null): WorkbenchSelectionKind {
   if (selectionId === null) return "empty";
@@ -43,8 +46,8 @@ export function classifyWorkbenchSelection(selectionId: string | null): Workbenc
 export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest): readonly WorkbenchContextCommand[] {
   const kind = request.selectionKind ?? classifyWorkbenchSelection(request.selectionId);
   const commands: WorkbenchContextCommand[] = [
-    command("history.undo", "Undo", "undo", "history", request.canUndo ?? false, "No earlier revision is available."),
-    command("history.redo", "Redo", "redo", "history", request.canRedo ?? false, "No later revision is available.")
+    command("history.undo", "Undo", "undo", "history", request.canUndo ?? false, "No earlier revision is available.", false, "Ctrl+Z"),
+    command("history.redo", "Redo", "redo", "history", request.canRedo ?? false, "No later revision is available.", false, "Ctrl+Shift+Z")
   ];
 
   if (kind === "empty") {
@@ -87,18 +90,38 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
     command("inspect.properties", "Properties", "inspect", "inspect")
   );
 
-  if (kind === "body") commands.push(
-    command("selection.toggle-visibility", "Show / Hide Body", "show", "visibility"),
-    command("selection.isolate", "Isolate Body", "isolate", "visibility"),
-    command("body.appearance", "Appearance", "appearance", "edit"),
-    command("body.move", "Move / Copy", "move", "edit"),
-    command("body.create-component", "Create Component from Body", "assembly", "assembly"),
-    command("body.boolean-join", "Join", "unite", "edit", false, TOPOLOGY_REASON),
-    command("body.boolean-cut", "Cut", "subtract", "edit", false, TOPOLOGY_REASON),
-    command("body.boolean-intersect", "Intersect", "intersect", "edit", false, TOPOLOGY_REASON),
-    command("inspect.properties", "Physical Properties", "inspect", "inspect"),
-    command("selection.delete", "Delete Body", "trash", "edit", request.selectionId?.startsWith("part-body:") === true, request.selectionId?.startsWith("part-body:") === true ? undefined : "The qualified base body is revision-controlled and cannot be deleted here.", true)
-  );
+  if (kind === "body") {
+    const analyticBody = request.selectionId?.startsWith("part-body:") === true;
+    commands.push(
+      command("selection.toggle-visibility", "Show / Hide Body", "show", "visibility"),
+      command("selection.isolate", "Isolate Body", "isolate", "visibility", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+      command("body.appearance", "Appearance", "appearance", "edit"),
+      command("body.move", "Move / Copy", "move", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+      submenu("body.direct-features", "Direct & Detail Features", "edge", "edit", [
+        command("body.move-face", "Move Face", "move-face", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+        command("body.offset-face", "Offset Face", "offset-face", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+        command("body.replace-face", "Replace Face", "replace-face", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+        command("body.delete-face", "Delete Face / Heal", "delete-face", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+        command("body.edge-blend", "Edge Blend", "edge-blend", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+        command("body.chamfer", "Chamfer", "chamfer", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+        command("body.resize-blend", "Resize Blend", "resize-blend", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+        command("body.shell", "Shell", "shell", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+        command("body.draft", "Draft", "draft", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+        command("body.trim", "Trim Body", "trim", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON)
+      ]),
+      submenu("body.copy-features", "Pattern & Mirror", "pattern", "edit", [
+        command("body.pattern-feature", "Pattern Feature", "pattern", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+        command("body.mirror-feature", "Mirror Feature", "mirror", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON)
+      ]),
+      command("body.create-component", "Create Component from Body", "assembly", "assembly"),
+      command("body.boolean-join", "Unite", "unite", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+      command("body.boolean-cut", "Subtract", "subtract", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+      command("body.boolean-intersect", "Intersect", "boolean", "edit", false, TOPOLOGY_REASON),
+      command("body.update-model", "Update Model", "update-model", "history", true),
+      command("inspect.properties", "Physical Properties", "inspect", "inspect"),
+      command("selection.delete", "Delete Body", "trash", "edit", analyticBody, analyticBody ? undefined : "The qualified base body is revision-controlled and cannot be deleted here.", true)
+    );
+  }
 
   if (kind === "component") commands.push(
     command("component.activate", "Activate Component", "assembly", "assembly", false, "Component-local activation needs the versioned document graph."),
@@ -125,12 +148,24 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
   );
 
   commands.push(
-    command("view.fit", "Fit", "fit", "view"),
-    command("view.home", "Home / Isometric", "home", "view")
+    submenu("view.named-views", "Named Views & Projection", "view", "view", [
+      command("view.orientation.front", "Front", "view", "view", true, undefined, false, "1"),
+      command("view.orientation.top", "Top", "view", "view", true, undefined, false, "2"),
+      command("view.orientation.right", "Right", "view", "view", true, undefined, false, "3"),
+      command("view.orientation.isometric", "Isometric", "home", "view", true, undefined, false, "4"),
+      command("view.projection.perspective", "Perspective", "view", "view"),
+      command("view.projection.orthographic", "Orthographic", "view", "view")
+    ]),
+    command("view.fit", "Fit", "fit", "view", true, undefined, false, "F"),
+    command("view.home", "Home / Isometric", "home", "view", true, undefined, false, "Home")
   );
   return commands;
 }
 
-function command(id: string, label: string, icon: string, group: WorkbenchContextCommand["group"], enabled = true, disabledReason?: string, danger = false): WorkbenchContextCommand {
-  return { id, label, icon, group, enabled, ...(disabledReason === undefined ? {} : { disabledReason }), ...(danger ? { danger: true } : {}) };
+function command(id: string, label: string, icon: string, group: WorkbenchContextCommand["group"], enabled = true, disabledReason?: string, danger = false, shortcut?: string): WorkbenchContextCommand {
+  return { id, label, icon, group, enabled, ...(disabledReason === undefined ? {} : { disabledReason }), ...(danger ? { danger: true } : {}), ...(shortcut === undefined ? {} : { shortcut }) };
+}
+
+function submenu(id: string, label: string, icon: string, group: WorkbenchContextCommand["group"], children: readonly WorkbenchContextCommand[]): WorkbenchContextCommand {
+  return { id, label, icon, group, enabled: children.some((child) => child.enabled), children };
 }

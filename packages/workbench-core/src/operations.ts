@@ -21,6 +21,21 @@ import { createBessContainerAssembly, createCargoContainerAssembly, createElectr
 import { createElectromechanicalAssembly, electricalSignature } from "./electromechanical.js";
 import { createVehicleTemplate, vehicleHardPoints, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
+import {
+  booleanPartBodies,
+  createRevolvedPartBody,
+  deletePartBodyFaceFeature,
+  mirrorPartBody,
+  movePartBodyFace,
+  patternPartBody,
+  replacePartBodyFace,
+  setPartBodyDraft,
+  setPartBodyEdgeTreatment,
+  setPartBodyShell,
+  trimPartBody,
+  validatePartFeatureStack,
+  type PartFeatureResult
+} from "./part-features.js";
 import { failure, validateWorkbenchProject, WORKBENCH_LIMITS } from "./validation.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
@@ -135,6 +150,59 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "set-part-preview-bodies-visibility":
       if (!keys(input, [...common, "visible"]) || typeof input.visible !== "boolean") return invalidOperation("The preview-body visibility value is invalid.");
+      break;
+    case "create-part-revolve":
+      if (!keys(input, [...common, "bodyId", "name", "outerDiameterMm", "innerDiameterMm", "heightMm", "angleDeg", "translationMm"])
+        || !stableId(input.bodyId) || !shortText(input.name, 1, 120)
+        || !finiteRange(input.outerDiameterMm, WORKBENCH_LIMITS.minGeometryMm, 10_000)
+        || !finiteRange(input.innerDiameterMm, WORKBENCH_LIMITS.minGeometryMm, 9_999)
+        || !finiteRange(input.heightMm, WORKBENCH_LIMITS.minGeometryMm, 10_000)
+        || !finiteRange(input.angleDeg, 0.001, 360)
+        || !vec3(input.translationMm, WORKBENCH_LIMITS.maxCoordinateMm)) return invalidOperation("The revolve feature payload is invalid.");
+      break;
+    case "pattern-part-feature":
+      if (!keys(input, [...common, "bodyId", "instanceIds", "direction", "spacingMm"]) || !stableId(input.bodyId)
+        || !Array.isArray(input.instanceIds) || input.instanceIds.length < 1 || input.instanceIds.length > 23
+        || input.instanceIds.some((id) => !stableId(id)) || new Set(input.instanceIds).size !== input.instanceIds.length
+        || !["x", "y", "z"].includes(String(input.direction)) || !finiteRange(input.spacingMm, WORKBENCH_LIMITS.minGeometryMm, 10_000)) return invalidOperation("The feature-pattern payload is invalid.");
+      break;
+    case "mirror-part-feature":
+      if (!keys(input, [...common, "bodyId", "newBodyId", "plane"]) || !stableId(input.bodyId) || !stableId(input.newBodyId)
+        || !["xy", "xz", "yz"].includes(String(input.plane))) return invalidOperation("The mirror-feature payload is invalid.");
+      break;
+    case "boolean-part-bodies":
+      if (!keys(input, [...common, "targetBodyId", "toolBodyId", "operation"]) || !stableId(input.targetBodyId) || !stableId(input.toolBodyId)
+        || input.targetBodyId === input.toolBodyId || !["unite", "subtract"].includes(String(input.operation))) return invalidOperation("The Boolean body payload is invalid.");
+      break;
+    case "trim-part-body":
+      if (!keys(input, [...common, "bodyId", "keptLengthMm", "side"]) || !stableId(input.bodyId)
+        || !finiteRange(input.keptLengthMm, WORKBENCH_LIMITS.minGeometryMm, 10_000) || !["negative", "positive"].includes(String(input.side))) return invalidOperation("The trim-body payload is invalid.");
+      break;
+    case "set-part-body-edge-treatment":
+      if (!keys(input, [...common, "bodyId", "treatment", "sizeMm"]) || !stableId(input.bodyId)
+        || !["blend", "chamfer"].includes(String(input.treatment)) || !finiteRange(input.sizeMm, WORKBENCH_LIMITS.minGeometryMm, 5_000)) return invalidOperation("The edge-treatment payload is invalid.");
+      break;
+    case "set-part-body-draft":
+      if (!keys(input, [...common, "bodyId", "angleDeg"]) || !stableId(input.bodyId) || !finiteRange(input.angleDeg, 0.001, 20)) return invalidOperation("The draft payload is invalid.");
+      break;
+    case "set-part-body-shell":
+      if (!keys(input, [...common, "bodyId", "thicknessMm"]) || !stableId(input.bodyId) || !finiteRange(input.thicknessMm, WORKBENCH_LIMITS.minGeometryMm, 5_000)) return invalidOperation("The shell payload is invalid.");
+      break;
+    case "move-part-body-face":
+      if (!keys(input, [...common, "bodyId", "face", "offsetMm", "mode"]) || !stableId(input.bodyId)
+        || !partFace(input.face) || !finiteRange(input.offsetMm, -5_000, 5_000) || Math.abs(input.offsetMm as number) < 1e-12
+        || !["move", "offset"].includes(String(input.mode))) return invalidOperation("The face move/offset payload is invalid.");
+      break;
+    case "replace-part-body-face":
+      if (!keys(input, [...common, "bodyId", "face", "localPositionMm"]) || !stableId(input.bodyId)
+        || !partFace(input.face) || !finiteRange(input.localPositionMm, -5_000, 5_000)) return invalidOperation("The replace-face payload is invalid.");
+      break;
+    case "delete-part-body-face":
+      if (!keys(input, [...common, "bodyId", "feature"]) || !stableId(input.bodyId)
+        || !["bore", "edge-treatment", "shell", "draft"].includes(String(input.feature))) return invalidOperation("The delete-face/heal payload is invalid.");
+      break;
+    case "update-part-model":
+      if (!keys(input, common)) return invalidOperation("Update Model accepts no additional fields.");
       break;
     case "set-part-preview-body-transform":
       if (!keys(input, [...common, "bodyId", "translationMm", "rotationDeg"]) || !stableId(input.bodyId)
@@ -442,6 +510,104 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
         part: { ...project.part, previewBodies: currentBodies.map((body) => ({ ...body, visible: operation.visible })) }
       }, currentBodies.map((body) => body.id), `${operation.visible ? "Showed" : "Hid"} all independent preview bodies.`);
     }
+    case "create-part-revolve": {
+      const currentBodies = project.part.previewBodies ?? [];
+      if (currentBodies.length >= 64) return failure("RESOURCE_LIMIT", "The part reached its 64-body preview limit.", [project.part.id], "Delete an unused body before creating the revolve.");
+      if (currentBodies.some((body) => body.id === operation.bodyId)) return invalidOperation("The revolved body ID already exists.");
+      const result = createRevolvedPartBody({ ...operation });
+      if (!result.ok) return partFeatureFailure(result);
+      return changed({ ...project, part: { ...project.part, previewBodies: [...currentBodies, result.value] } }, [result.value.id], `Revolved ${result.value.name} through ${formatNumber(operation.angleDeg)}° as a closed analytic body.`);
+    }
+    case "pattern-part-feature": {
+      const currentBodies = project.part.previewBodies ?? [];
+      const target = currentBodies.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The pattern seed body does not exist.");
+      if (currentBodies.length + operation.instanceIds.length > 64) return failure("RESOURCE_LIMIT", "The feature pattern exceeds the 64-body preview limit.", [target.id], "Reduce the instance count or delete unused bodies.");
+      if (operation.instanceIds.some((id) => currentBodies.some((body) => body.id === id))) return invalidOperation("A feature-pattern instance ID already exists.");
+      const result = patternPartBody({ operationId: operation.operationId, body: target, instanceIds: operation.instanceIds, direction: operation.direction, spacingMm: operation.spacingMm });
+      if (!result.ok) return partFeatureFailure(result);
+      return changed({ ...project, part: { ...project.part, previewBodies: [...currentBodies, ...result.value] } }, [target.id, ...result.value.map((body) => body.id)], `Patterned ${target.name} into ${result.value.length + 1} analytic instances along ${operation.direction.toUpperCase()}.`);
+    }
+    case "mirror-part-feature": {
+      const currentBodies = project.part.previewBodies ?? [];
+      const target = currentBodies.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The mirror seed body does not exist.");
+      if (currentBodies.some((body) => body.id === operation.newBodyId)) return invalidOperation("The mirrored body ID already exists.");
+      if (currentBodies.length >= 64) return failure("RESOURCE_LIMIT", "The part reached its 64-body preview limit.", [target.id], "Delete an unused body before mirroring.");
+      const result = mirrorPartBody({ operationId: operation.operationId, body: target, newBodyId: operation.newBodyId, plane: operation.plane });
+      if (!result.ok) return partFeatureFailure(result);
+      return changed({ ...project, part: { ...project.part, previewBodies: [...currentBodies, result.value] } }, [target.id, result.value.id], `Mirrored ${target.name} across the global ${operation.plane.toUpperCase()} plane.`);
+    }
+    case "boolean-part-bodies": {
+      const currentBodies = project.part.previewBodies ?? [];
+      const target = currentBodies.find((body) => body.id === operation.targetBodyId);
+      const tool = currentBodies.find((body) => body.id === operation.toolBodyId);
+      if (target === undefined) return broken(operation.targetBodyId, "The Boolean target body does not exist.");
+      if (tool === undefined) return broken(operation.toolBodyId, "The Boolean tool body does not exist.");
+      const result = booleanPartBodies({ operationId: operation.operationId, target, tool, operation: operation.operation });
+      if (!result.ok) return partFeatureFailure(result);
+      const nextBodies = currentBodies.filter((body) => body.id !== tool.id).map((body) => body.id === target.id ? result.value : body);
+      return changed({ ...project, part: { ...project.part, previewBodies: nextBodies } }, [target.id, tool.id], `${operation.operation === "unite" ? "United" : "Subtracted"} ${tool.name} ${operation.operation === "unite" ? "with" : "from"} ${target.name}; the consumed tool body was removed.`);
+    }
+    case "trim-part-body": {
+      const currentBodies = project.part.previewBodies ?? [];
+      const target = currentBodies.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The trim target body does not exist.");
+      const result = trimPartBody({ operationId: operation.operationId, body: target, keptLengthMm: operation.keptLengthMm, side: operation.side });
+      if (!result.ok) return partFeatureFailure(result);
+      return changed(replacePartBody(project, result.value), [target.id], `Trimmed ${target.name}; kept the local ${operation.side} ${formatNumber(operation.keptLengthMm)} mm region.`);
+    }
+    case "set-part-body-edge-treatment": {
+      const target = findPartBody(project, operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The edge-treatment target body does not exist.");
+      const result = setPartBodyEdgeTreatment({ operationId: operation.operationId, body: target, treatment: operation.treatment, sizeMm: operation.sizeMm });
+      if (!result.ok) return partFeatureFailure(result);
+      return changed(replacePartBody(project, result.value), [target.id], `Applied ${formatNumber(operation.sizeMm)} mm ${operation.treatment} to the four supported vertical edges of ${target.name}.`);
+    }
+    case "set-part-body-draft": {
+      const target = findPartBody(project, operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The draft target body does not exist.");
+      const result = setPartBodyDraft({ operationId: operation.operationId, body: target, angleDeg: operation.angleDeg });
+      if (!result.ok) return partFeatureFailure(result);
+      return changed(replacePartBody(project, result.value), [target.id], `Drafted ${target.name} by ${formatNumber(operation.angleDeg)}° along local Z.`);
+    }
+    case "set-part-body-shell": {
+      const target = findPartBody(project, operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The shell target body does not exist.");
+      const result = setPartBodyShell({ operationId: operation.operationId, body: target, thicknessMm: operation.thicknessMm });
+      if (!result.ok) return partFeatureFailure(result);
+      return changed(replacePartBody(project, result.value), [target.id], `Shelled ${target.name} to ${formatNumber(operation.thicknessMm)} mm and removed its local +Z face.`);
+    }
+    case "move-part-body-face": {
+      const target = findPartBody(project, operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The face-edit target body does not exist.");
+      const result = movePartBodyFace({ operationId: operation.operationId, body: target, face: operation.face, offsetMm: operation.offsetMm });
+      if (!result.ok) return partFeatureFailure(result);
+      return changed(replacePartBody(project, result.value), [target.id], `${operation.mode === "move" ? "Moved" : "Offset"} ${operation.face} of ${target.name} outward by ${formatNumber(operation.offsetMm)} mm.`);
+    }
+    case "replace-part-body-face": {
+      const target = findPartBody(project, operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The replace-face target body does not exist.");
+      const result = replacePartBodyFace({ operationId: operation.operationId, body: target, face: operation.face, localPositionMm: operation.localPositionMm });
+      if (!result.ok) return partFeatureFailure(result);
+      return changed(replacePartBody(project, result.value), [target.id], `Replaced ${operation.face} of ${target.name} at local coordinate ${formatNumber(operation.localPositionMm)} mm.`);
+    }
+    case "delete-part-body-face": {
+      const target = findPartBody(project, operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The delete-face target body does not exist.");
+      const result = deletePartBodyFaceFeature({ operationId: operation.operationId, body: target, feature: operation.feature });
+      if (!result.ok) return partFeatureFailure(result);
+      return changed(replacePartBody(project, result.value), [target.id], `Deleted and healed the recognized ${operation.feature} face set on ${target.name}.`);
+    }
+    case "update-part-model": {
+      const currentBodies = project.part.previewBodies ?? [];
+      for (const body of currentBodies) {
+        const result = validatePartFeatureStack(body);
+        if (!result.ok) return partFeatureFailure(result);
+      }
+      const serial = (project.part.modelUpdateSerial ?? 0) + 1;
+      return changed({ ...project, part: { ...project.part, modelUpdateSerial: serial } }, [project.part.id, ...currentBodies.map((body) => body.id)], `Updated and revalidated ${currentBodies.length} analytic preview ${currentBodies.length === 1 ? "body" : "bodies"} (model update ${serial}).`);
+    }
     case "set-assembly-explode":
       return changed({ ...project, assembly: { ...project.assembly, explodeMm: operation.valueMm } }, [project.assembly.id], `Set exploded distance to ${formatNumber(operation.valueMm)} mm.`);
     case "apply-assembly-template": { 
@@ -662,6 +828,24 @@ function broken(id: string, message: string): WorkbenchResult<never> {
   return failure("BROKEN_REFERENCE", message, [id], "Refresh the project and select an existing stable ID.");
 }
 
+function partFeatureFailure(result: Extract<PartFeatureResult<unknown>, { readonly ok: false }>): WorkbenchResult<never> {
+  return failure("UNSUPPORTED_CAPABILITY", result.message, result.relatedIds, result.recovery);
+}
+
+function findPartBody(project: WorkbenchProject, bodyId: string): PartPreviewBody | undefined {
+  return (project.part.previewBodies ?? []).find((body) => body.id === bodyId);
+}
+
+function replacePartBody(project: WorkbenchProject, replacement: PartPreviewBody): WorkbenchProject {
+  return {
+    ...project,
+    part: {
+      ...project.part,
+      previewBodies: (project.part.previewBodies ?? []).map((body) => body.id === replacement.id ? replacement : body)
+    }
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -684,6 +868,10 @@ function finiteRange(value: unknown, minimum: number, maximum: number): value is
   return finite(value) && value >= minimum && value <= maximum;
 }
 
+function partFace(value: unknown): boolean {
+  return ["x-negative", "x-positive", "y-negative", "y-positive", "z-negative", "z-positive"].includes(String(value));
+}
+
 function vec3(value: unknown, maximum: number, positive = false): value is readonly [number, number, number] {
   return Array.isArray(value) && value.length === 3
     && value.every((coordinate) => finiteRange(coordinate, positive ? WORKBENCH_LIMITS.minGeometryMm : -maximum, maximum));
@@ -697,17 +885,26 @@ function partPreviewSize(value: unknown): value is readonly [number, number, num
 }
 
 function validPartPreviewBodyPayload(value: unknown): value is PartPreviewBody {
+  const required = ["id", "name", "shape", "visible", "color", "translationMm", "rotationDeg", "sizeMm"];
+  const optional = ["boreDiameterMm", "edgeTreatment", "shellThicknessMm", "draftAngleDeg", "revolveAngleDeg", "featureTrace"];
   if (!isRecord(value)
-    || !keys(value, ["id", "name", "shape", "visible", "color", "translationMm", "rotationDeg", "sizeMm"])
+    || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || !stableId(value.id) || !shortText(value.name, 1, 120)
-    || !["block", "cylinder", "cone", "sphere"].includes(String(value.shape))
+    || !["block", "cylinder", "cone", "sphere", "revolved"].includes(String(value.shape))
     || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)
     || !vec3(value.translationMm, WORKBENCH_LIMITS.maxCoordinateMm) || !vec3(value.rotationDeg, 360)
     || !partPreviewSize(value.sizeMm)) return false;
   const [x, y] = value.sizeMm;
   if ((value.shape === "cylinder" || value.shape === "sphere") && Math.abs(x - y) > 1e-9) return false;
   if (value.shape === "sphere" && Math.abs(x - value.sizeMm[2]) > 1e-9) return false;
-  return true;
+  if (value.shape === "revolved" && (!((value.revolveAngleDeg as number) > 0) || !finiteRange(value.revolveAngleDeg, 0.001, 360) || y <= 0 || y >= x)) return false;
+  if (value.shape !== "revolved" && Object.hasOwn(value, "revolveAngleDeg")) return false;
+  if (Object.hasOwn(value, "boreDiameterMm") && !finiteRange(value.boreDiameterMm, WORKBENCH_LIMITS.minGeometryMm, 9_999)) return false;
+  if (Object.hasOwn(value, "shellThicknessMm") && !finiteRange(value.shellThicknessMm, WORKBENCH_LIMITS.minGeometryMm, 5_000)) return false;
+  if (Object.hasOwn(value, "draftAngleDeg") && !finiteRange(value.draftAngleDeg, 0.001, 20)) return false;
+  if (Object.hasOwn(value, "edgeTreatment") && !validPartEdgeTreatment(value.edgeTreatment)) return false;
+  if (Object.hasOwn(value, "featureTrace") && !validPartFeatureTrace(value.featureTrace)) return false;
+  return validatePartFeatureStack(value as unknown as PartPreviewBody).ok;
 }
 
 function normalizePartPreviewSize(shape: PartPreviewBody["shape"], size: readonly [number, number, number]): readonly [number, number, number] | undefined {
@@ -715,7 +912,20 @@ function normalizePartPreviewSize(shape: PartPreviewBody["shape"], size: readonl
   if (shape === "cylinder") return [size[0], size[0], size[2]];
   if (shape === "sphere") return [size[0], size[0], size[0]];
   if (shape === "cone" && size[0] <= 0 && size[1] <= 0) return undefined;
+  if (shape === "revolved" && (size[1] <= 0 || size[1] >= size[0])) return undefined;
   return [size[0], size[1], size[2]];
+}
+
+function validPartEdgeTreatment(value: unknown): boolean {
+  return isRecord(value) && keys(value, ["kind", "sizeMm"])
+    && ["blend", "chamfer"].includes(String(value.kind)) && finiteRange(value.sizeMm, WORKBENCH_LIMITS.minGeometryMm, 5_000);
+}
+
+function validPartFeatureTrace(value: unknown): boolean {
+  return isRecord(value) && keys(value, ["kind", "operationId", "parentIds"])
+    && ["primitive", "revolve", "pattern", "mirror", "unite", "subtract", "trim", "face-edit", "edge-treatment", "draft", "shell", "heal"].includes(String(value.kind))
+    && stableId(value.operationId) && Array.isArray(value.parentIds) && value.parentIds.length > 0 && value.parentIds.length <= 8
+    && value.parentIds.every((id) => stableId(id));
 }
 
 function validComponentPayload(value: unknown): value is ComponentInstance {

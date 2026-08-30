@@ -9,5 +9,7 @@ export * from "./electromechanical.js";
 export * from "./electrical-routing.js";
 export * from "./vehicle.js";
 export * from "./master-cart.js";
+export * from "./part-features.js";
 export * from "./validation.js";
 export * from "./operations.js";
+export * from "./engineering-intent.js";
