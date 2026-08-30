@@ -32,6 +32,7 @@ interface WorkbenchRibbonProps {
   readonly onInsertPartIntoAssembly: () => void;
   readonly onCreatePartPreviewBody: (shape: PartPreviewBodyShape) => void;
   readonly onPartPreviewAction: (operation: "edit-transform" | "edit-size" | "edit-appearance" | "duplicate" | "mirror-x" | "pattern-x" | "toggle-visible" | "delete", commandName: string) => void;
+  readonly onPartFeatureAction: (operation: "revolve" | "pattern-feature" | "mirror-feature" | "unite" | "subtract" | "trim-body" | "edge-blend" | "chamfer" | "draft" | "shell" | "move-face" | "offset-face" | "replace-face" | "delete-face" | "resize-blend" | "update-model", commandName: string) => void;
   readonly onInsertComponent: (shape: "box" | "cylinder") => void;
   readonly onDeleteComponent: (componentId: string) => void;
   readonly onToggleGrounded: (componentId: string) => void;
@@ -74,16 +75,14 @@ const SKETCH_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; r
 
 const PART_FEATURES = [
   { id: "feature:plate-extrusion", icon: "extrude", label: "Extrude", level: "qualified" },
-  { id: "feature:centered-through-hole", icon: "bore", label: "Bore", level: "qualified" },
-  { id: "feature:edge-treatment", icon: "edge", label: "Edge", level: "preview" },
-  { id: "feature:linear-pattern", icon: "pattern", label: "Pattern", level: "preview" },
-  { id: "feature:revolve-study", icon: "revolve", label: "Revolve", level: "preview" }
+  { id: "feature:centered-through-hole", icon: "bore", label: "Bore", level: "qualified" }
 ] as const;
 
 export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element {
   const level = props.project.activeWorkspace === "part" ? "qualified" : "preview";
   const selectedComponent = props.project.assembly.components.find((component) => component.id === props.selectedId);
   const selectedSketchEntity = props.project.sketch.entities.find((entity) => entity.id === props.selectedId);
+  const analyticBodySelected = props.selectedId?.startsWith("part-body:") === true;
   return <section className="command-ribbon" role="toolbar" aria-label={`${props.project.activeWorkspace} command ribbon`}>
     <div className="ribbon-context">
       <small>Active workspace</small>
@@ -142,6 +141,9 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
     {!props.masterCartOpen && props.project.activeWorkspace === "part" && <>
       <RibbonGroup label="Feature tools">
         {PART_FEATURES.map((feature) => <RibbonButton key={feature.id} icon={feature.icon} label={feature.label} hint={feature.level} active={props.selectedId === feature.id} onClick={() => props.onSelect(feature.id)} />)}
+        <RibbonButton icon="revolve" label="Revolve" hint="closed profile" onClick={() => props.onPartFeatureAction("revolve", "Revolve")} />
+        <RibbonButton icon="pattern" label="Pattern Feature" hint={`${props.project.part.patternCount} × X`} disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("pattern-feature", "Pattern Feature")} />
+        <RibbonButton icon="mirror" label="Mirror Feature" hint="YZ plane" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("mirror-feature", "Mirror Feature")} />
       </RibbonGroup>
       <RibbonGroup label="Primitive bodies">
         <RibbonButton icon="box" label="Block" hint="preview body" onClick={() => props.onCreatePartPreviewBody("block")} />
@@ -158,6 +160,25 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="appearance" label="Appearance" hint="display color" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-appearance", "Edit Object Display")} />
         <RibbonButton icon="eye-off" label="Hide / show" hint="body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("toggle-visible", "Show / Hide Body")} />
         <RibbonButton icon="trash" label="Delete" hint="body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("delete", "Delete Body")} />
+      </RibbonGroup>
+      <RibbonGroup label="Face operations">
+        <RibbonButton icon="move-face" label="Move Face" hint="local +Z · 2 mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("move-face", "Move Face")} />
+        <RibbonButton icon="offset-face" label="Offset Face" hint="normal · 2 mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("offset-face", "Offset Face")} />
+        <RibbonButton icon="replace-face" label="Replace Face" hint="parallel datum" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("replace-face", "Replace Face")} />
+        <RibbonButton icon="delete-face" label="Delete Face" hint="recognize + heal" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("delete-face", "Delete Face")} />
+      </RibbonGroup>
+      <RibbonGroup label="Boolean & trim">
+        <RibbonButton icon="unite" label="Unite" hint="target + tool" disabled={!analyticBodySelected || (props.project.part.previewBodies?.length ?? 0) < 2} onClick={() => props.onPartFeatureAction("unite", "Unite")} />
+        <RibbonButton icon="subtract" label="Subtract" hint="through cylinder" disabled={!analyticBodySelected || (props.project.part.previewBodies?.length ?? 0) < 2} onClick={() => props.onPartFeatureAction("subtract", "Subtract")} />
+        <RibbonButton icon="trim" label="Trim Body" hint="keep 70%" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("trim-body", "Trim Body")} />
+      </RibbonGroup>
+      <RibbonGroup label="Detail features">
+        <RibbonButton icon="edge-blend" label="Edge Blend" hint="vertical chain" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("edge-blend", "Edge Blend")} />
+        <RibbonButton icon="chamfer" label="Chamfer" hint="vertical chain" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("chamfer", "Chamfer")} />
+        <RibbonButton icon="resize-blend" label="Resize Blend" hint="+0.5 mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("resize-blend", "Resize Blend")} />
+        <RibbonButton icon="shell" label="Shell" hint="open +Z" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("shell", "Shell")} />
+        <RibbonButton icon="draft" label="Draft" hint="5° · local Z" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("draft", "Draft")} />
+        <RibbonButton icon="update-model" label="Update Model" hint={`build ${props.project.part.modelUpdateSerial ?? 0}`} onClick={() => props.onPartFeatureAction("update-model", "Update Model")} />
       </RibbonGroup>
       <RibbonGroup label="Inspect & exchange">
         <RibbonButton icon="fit" label="Fit" hint="view" onClick={props.onFit} />

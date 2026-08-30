@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { WorkspaceId, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { DesignHealthStatus } from "../../../../packages/workbench-health/src/index.js";
 import { PS3D_BRAND } from "../brand.js";
+import type { PsCadWorkspaceStatus, RecentProjectEntry } from "../file-workspace.js";
 import { BrandLogo } from "./BrandLogo.js";
 import { CommandIcon } from "./CommandIcon.js";
+import { FileApplicationMenu } from "./FileApplicationMenu.js";
 
 const WORKSPACES: readonly { id: WorkspaceId; label: string; icon: string }[] = [
   { id: "sketch", label: "Sketch", icon: "sketch" },
@@ -19,17 +21,30 @@ const WORKSPACES: readonly { id: WorkspaceId; label: string; icon: string }[] = 
 interface WorkbenchHeaderProps {
   readonly project: WorkbenchProject;
   readonly masterCartOpen: boolean;
+  readonly renderStudioOpen: boolean;
   readonly status: "starting" | "ready" | "working" | "error";
+  readonly fileWorkspaceStatus: PsCadWorkspaceStatus;
+  readonly recentProjects: readonly RecentProjectEntry[];
   readonly onWorkspace: (workspace: WorkspaceId) => void;
   readonly onMasterCart: () => void;
+  readonly onRenderStudio: () => void;
   readonly onCommandPalette: () => void;
   readonly onDesignHealth: () => void;
   readonly onExchange: () => void;
   readonly onLearning: () => void;
   readonly onAccess: () => void;
   readonly onSave: () => void;
+  readonly onSaveAs: () => void;
+  readonly onSaveCopy: () => void;
   readonly onDownload: () => void;
   readonly onOpen: () => void;
+  readonly onOpenRecent: (id: string) => void;
+  readonly onOpenNative: () => void;
+  readonly onNew: () => void;
+  readonly onInitializeFileWorkspace: () => void;
+  readonly onRecoverProject: () => void;
+  readonly onClearFileCache: () => void;
+  readonly onPrint: () => void;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
   readonly onFit: () => void;
@@ -61,10 +76,10 @@ interface MenuDefinition {
 export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLElement>(null);
-  const is3d = !props.masterCartOpen && (props.project.activeWorkspace === "part" || props.project.activeWorkspace === "assembly" || props.project.activeWorkspace === "surface" || props.project.activeWorkspace === "vehicle");
+  const is3d = !props.masterCartOpen && !props.renderStudioOpen && (props.project.activeWorkspace === "part" || props.project.activeWorkspace === "assembly" || props.project.activeWorkspace === "surface" || props.project.activeWorkspace === "vehicle");
 
   useEffect(() => {
-    if (openMenu === null) return;
+    if (openMenu === null || openMenu === "file") return;
     const closeOutside = (event: MouseEvent): void => {
       if (event.target instanceof Node && menuRef.current?.contains(event.target) !== true) setOpenMenu(null);
     };
@@ -73,12 +88,6 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
   }, [openMenu]);
 
   const menus: readonly MenuDefinition[] = [
-    { id: "file", label: "File", icon: "file", items: [
-      { label: "Open project", icon: "open", shortcut: "Ctrl+O", action: props.onOpen },
-      { label: "Save local", icon: "save", shortcut: "Ctrl+S", action: props.onSave },
-      { label: "Download copy", icon: "download", action: props.onDownload },
-      { label: "3D Exchange Center", icon: "exchange", action: props.onExchange }
-    ] },
     { id: "edit", label: "Edit", icon: "command", items: [
       { label: "Undo", icon: "undo", shortcut: "Ctrl+Z", disabled: !props.canUndo || props.status === "working", action: props.onUndo },
       { label: "Redo", icon: "redo", shortcut: "Ctrl+Shift+Z", disabled: !props.canRedo || props.status === "working", action: props.onRedo },
@@ -89,6 +98,7 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
       { label: "Part features", icon: "extrude", action: () => props.onWorkspace("part") },
       { label: "Assembly components", icon: "assembly", action: () => props.onWorkspace("assembly") },
       { label: "Master Cart component library", icon: "master-cart", action: props.onMasterCart },
+      { label: "Render Studio", icon: "appearance", action: props.onRenderStudio },
       { label: "Surface tools", icon: "surface", action: () => props.onWorkspace("surface") },
       { label: "Electrical schematic", icon: "electrical", action: () => props.onWorkspace("electrical") },
       { label: "Vehicle engineering", icon: "vehicle", action: () => props.onWorkspace("vehicle") }
@@ -97,6 +107,7 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
       { label: "Fit canvas", icon: "fit", shortcut: "F", disabled: !is3d, action: props.onFit },
       { label: "Home view", icon: "home", disabled: !is3d, action: props.onHome },
       { label: props.gridVisible ? "Hide grid" : "Show grid", icon: "grid", disabled: !is3d, action: props.onToggleGrid },
+      { label: "Render Studio", icon: "appearance", action: props.onRenderStudio },
       { label: "Drawing workspace", icon: "drawing", action: () => props.onWorkspace("drawing") },
       { label: "Electrical workspace", icon: "electrical", action: () => props.onWorkspace("electrical") },
       { label: "Vehicle workspace", icon: "vehicle", action: () => props.onWorkspace("vehicle") }
@@ -150,6 +161,14 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
     </header>
     <nav className="cad-menu-bar" aria-label="Application menus" ref={menuRef} onKeyDown={(event) => { if (event.key === "Escape") setOpenMenu(null); }}>
       <div className="cad-menu-groups">
+        <div className="cad-menu">
+          <button
+            className={openMenu === "file" ? "active" : ""}
+            aria-haspopup="dialog"
+            aria-expanded={openMenu === "file"}
+            onClick={() => setOpenMenu((current) => current === "file" ? null : "file")}
+          ><CommandIcon name="file" />File<span aria-hidden="true">⌄</span></button>
+        </div>
         {menus.map((menu) => <div className="cad-menu" key={menu.id}>
           <button
             className={openMenu === menu.id ? "active" : ""}
@@ -178,14 +197,39 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
     <nav className="workspace-tabs" aria-label="CAD workspaces" role="tablist">
       {WORKSPACES.map((workspace) => <button
         key={workspace.id}
-        className={!props.masterCartOpen && props.project.activeWorkspace === workspace.id ? "active" : ""}
+        className={!props.masterCartOpen && !props.renderStudioOpen && props.project.activeWorkspace === workspace.id ? "active" : ""}
         data-workspace={workspace.id}
         role="tab"
-        aria-selected={!props.masterCartOpen && props.project.activeWorkspace === workspace.id}
+        aria-selected={!props.masterCartOpen && !props.renderStudioOpen && props.project.activeWorkspace === workspace.id}
         onClick={() => props.onWorkspace(workspace.id)}
       ><span aria-hidden="true"><CommandIcon name={workspace.icon} /></span>{workspace.label}</button>)}
       <button className={props.masterCartOpen ? "active master-cart-tab" : "master-cart-tab"} data-workspace="master-cart" role="tab" aria-selected={props.masterCartOpen} onClick={props.onMasterCart}><span aria-hidden="true"><CommandIcon name="master-cart" /></span>Master Cart</button>
+      <button className={props.renderStudioOpen ? "active render-studio-tab" : "render-studio-tab"} data-workspace="render-studio" role="tab" aria-selected={props.renderStudioOpen} onClick={props.onRenderStudio}><span aria-hidden="true"><CommandIcon name="appearance" /></span>Render Studio</button>
       <div className="workspace-health"><button className={`design-health-status ${props.designHealthStatus}`} onClick={props.onDesignHealth} aria-label={`Design health ${props.designHealthStatus}, score ${props.designHealthScore}`}><span className={`health-dot ${props.designHealthStatus}`} />design {props.designHealthStatus} · {props.designHealthScore}</button></div>
     </nav>
+    <FileApplicationMenu
+      open={openMenu === "file"}
+      project={props.project}
+      status={props.status}
+      workspaceStatus={props.fileWorkspaceStatus}
+      recentProjects={props.recentProjects}
+      onClose={() => setOpenMenu(null)}
+      onNew={props.onNew}
+      onOpen={props.onOpen}
+      onOpenNative={props.onOpenNative}
+      onOpenRecent={props.onOpenRecent}
+      onSave={props.onSave}
+      onSaveAs={props.onSaveAs}
+      onSaveCopy={props.onSaveCopy}
+      onDownload={props.onDownload}
+      onInitializeWorkspace={props.onInitializeFileWorkspace}
+      onRecover={props.onRecoverProject}
+      onClearCache={props.onClearFileCache}
+      onExchange={props.onExchange}
+      onRenderStudio={props.onRenderStudio}
+      onWorkspace={props.onWorkspace}
+      onPrint={props.onPrint}
+      onLearning={props.onLearning}
+    />
   </>;
 }
