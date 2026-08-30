@@ -5,11 +5,11 @@ import { resolve } from "node:path";
 import { createWorkbenchProject } from "../apps/mcp-server/dist/packages/workbench-core/src/index.js";
 
 const serverPath = resolve("apps/mcp-server/dist/apps/mcp-server/src/server.js");
-const expectedTools = "ps3d_guide,ps3d_agent_handshake,ps3d_find_commands,ps3d_capabilities,ps3d_inspect_project,ps3d_design_health,ps3d_analyze_vehicle,ps3d_electromechanical_catalog,ps3d_preview_electromechanical,ps3d_preview_operation,ps3d_apply_preview";
+const expectedTools = "ps3d_guide,ps3d_agent_handshake,ps3d_plan_engineering_intent,ps3d_find_commands,ps3d_capabilities,ps3d_inspect_project,ps3d_design_health,ps3d_analyze_vehicle,ps3d_electromechanical_catalog,ps3d_preview_electromechanical,ps3d_preview_operation,ps3d_apply_preview";
 
 await verifyModernDiscovery();
 await verifyLegacyLifecycle();
-process.stdout.write("Verified direct-Node MCP stdio launch, modern discovery, legacy initialization, eleven schemas, collaboration-agent correction, design health, guide/resource/prompt discovery, command matching, candidate disclosure, receipt rejection, exact retry, and confirmed apply.\n");
+process.stdout.write("Verified direct-Node MCP stdio launch, modern discovery, legacy initialization, twelve schemas, collaboration-agent correction, engineering-intent decomposition, design health, guide/resource/prompt discovery, command matching, candidate disclosure, receipt rejection, exact retry, and confirmed apply.\n");
 
 async function verifyModernDiscovery() {
   const session = createSession();
@@ -64,6 +64,11 @@ async function verifyLegacyLifecycle() {
     const coordinated = await session.callTool("ps3d_agent_handshake", { request: "change motorcycle wheelbase", experienceLevel: "engineer", workspace: "vehicle", clientName: "ps3d-mcp-verifier", proposedTool: "ps3d_preview_operation", proposedRecipeId: "ai-command:vehicle-parameter" });
     assert(coordinated.structuredContent?.schema === "ps3d-agent-handshake/1" && coordinated.structuredContent?.status === "ready-to-inspect", "Collaboration agent did not validate the bounded host proposal.");
     assert(coordinated.structuredContent?.proposal?.executionPerformed === false, "Collaboration handshake must never execute the proposed command.");
+
+    const engineeringPlan = await session.callTool("ps3d_plan_engineering_intent", { request: "Create a 100 x 50 x 3 mm RHS tube 1200 mm long with two diameter 12 mm holes 50 mm from each end.", unit: "mm", workspace: "part", projectRevision: 0, targetCad: ["ps3d"] });
+    assert(engineeringPlan.structuredContent?.schema === "ps3d-engineering-intent-plan/1", "Engineering intent planner returned the wrong schema.");
+    assert(engineeringPlan.structuredContent?.interpretation?.executionPerformed === false, "Engineering intent planning must never execute CAD.");
+    assert(engineeringPlan.structuredContent?.partDefinitions?.some((part) => part.id === "definition:tube"), "Engineering intent planner did not resolve the RHS definition.");
 
     const found = await session.callTool("ps3d_find_commands", { query: "change motorcycle wheelbase", workspace: "vehicle", limit: 4 });
     assert(found.structuredContent?.schema === "ps3d-command-search/1" && found.structuredContent?.executionPerformed === false, "Command finder must be deterministic and read-only.");
@@ -173,7 +178,7 @@ function modernMeta() {
 }
 
 function assertToolCatalog(tools) {
-  assert(Array.isArray(tools) && tools.length === 11, "MCP server must list exactly eleven bounded tools.");
+  assert(Array.isArray(tools) && tools.length === 12, "MCP server must list exactly twelve bounded tools.");
   assert(tools.map((tool) => tool.name).join(",") === expectedTools, "MCP tool ordering or names changed.");
   assert(tools.every((tool) => tool.inputSchema?.type === "object" && tool.outputSchema?.type === "object"), "Every MCP tool must advertise object input and output schemas.");
   const inspect = tools.find((tool) => tool.name === "ps3d_inspect_project");
@@ -182,6 +187,8 @@ function assertToolCatalog(tools) {
   assert(JSON.stringify(electromechanical?.inputSchema?.required) === JSON.stringify(["project", "guideAcknowledgement"]), "Electromechanical preview schema omitted its guide acknowledgement.");
   const agent = tools.find((tool) => tool.name === "ps3d_agent_handshake");
   assert(JSON.stringify(agent?.inputSchema?.required) === JSON.stringify(["request", "experienceLevel"]), "Collaboration-agent schema omitted required inputs.");
+  const planner = tools.find((tool) => tool.name === "ps3d_plan_engineering_intent");
+  assert(JSON.stringify(planner?.inputSchema?.required) === JSON.stringify(["request"]), "Engineering-intent schema omitted its request input.");
 }
 
 function hasJsonTextFallback(result) {
