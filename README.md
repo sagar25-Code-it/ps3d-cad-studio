@@ -27,7 +27,7 @@ Official PS3D Master links: [Engineering calculator](https://stepper-calculator.
 | Workspace | Current level | Implemented subset |
 | --- | --- | --- |
 | Sketch | Preview | Lines, center rectangles, circles, three-point arcs, grid/snap/profile palette, construction geometry, multi-selection, visible constraint glyphs, bounded driving dimensions, stable IDs, DOF and conflict diagnostics |
-| Part | Qualified + preview | Worker-qualified centered-bore manifold mesh-solid; named views, orbit/pan/zoom/fit, perspective/orthographic cameras, view box, WCS axis viewer, selection priority, point measurement, and bounded feature intent |
+| Part | Qualified + preview | Worker-qualified centered-bore manifold mesh-solid plus revisioned analytic bodies; closed annular revolve, linear pattern, datum mirror, bounded block/cylinder Unite and through-cylinder Subtract, local-Z trim, vertical-edge blend/chamfer, shell, draft, supported planar-face move/offset/replace and recognized-face delete/heal; named views, orbit/pan/zoom/fit, perspective/orthographic cameras, view box, WCS axis viewer, selection priority, and point measurement |
 | 3D exchange | Preview | Local reference import for 14 scene/mesh/toolpath/point-cloud families; visible-scene export to GLB, glTF, OBJ, STL, PLY, and USDZ; PDF model package with attached GLB; U3D/PRC interactive-PDF pass-through |
 | Assembly | Preview | Insert/delete box and cylinder components, edit XYZ position, hide/show, ground/release, fixed/origin/axis mate records, exploded state, deterministic transforms, conservative AABB interference candidates, original 20 ft/40 ft high-cube cargo planning frames, and a non-certified 20 ft high-cube BESS equipment arrangement |
 | Master Cart | Preview | 25 original standards-oriented parametric families across fasteners, bearings/bushings, gears, chain/sprockets, timing belts/pulleys, O-rings, linear motion, hydraulic hose fittings, tube fittings, and hand tools; interactive 3D regeneration, metric/inch filters, editable material/finish/envelope fields, dimension tables, and coherent grouped Assembly insertion |
@@ -35,7 +35,7 @@ Official PS3D Master links: [Engineering calculator](https://stepper-calculator.
 | Drawing | Preview | Descriptive front base view with aligned first/third-angle top and right projections; optional full section A-A and reference isometric; hidden-edge and center-line control; selective non-duplicated dimensions; user-defined general tolerances kept independent from explicit datum/position/flatness/perpendicularity inputs; A4/A3 zones, revision table, projection symbol, release-marked original title block, and SVG output |
 | Electrical | Preview | Original vector component library, stable references and terminals, named pin-to-pin AC/DC/control/ground nets, automatic BESS single-line/DC auxiliary/motor-starter concepts, live structural ERC, concept BOM, SVG output, and review-gated conversion into one traceable mounting plate with DIN rails, ducts, panel-scale generic packages, terminal detail, and unsized orthogonal conductor visualization |
 | Vehicle | Preview | Five original topology-specific motorcycle/scooter/EV/three-wheel packages; one authoritative SI hardpoint/member graph for 3D and orthographic projection; fork, swingarm, unit-swing and front-view wishbone state constraints; Ackermann targets; brake/tyre, road-load, operating-point and support-polygon screens; visible invariant gate; full-droop/design/full-bump states; and explicit safety boundaries |
-| Automate | Preview | Eleven model-neutral local and authenticated remote MCP tools, machine-readable collaboration guide, experience-adapted stateless coordination agent, deterministic plain-language command finder, all-workspace Design Health analysis, scoped receipt-gated previews, OAuth/personal-token access, and a dependency-free Python client |
+| Automate | Preview | Twelve model-neutral local and authenticated remote MCP tools, built-in engineering-intent decomposition for parts and multi-level assemblies, machine-readable collaboration guide, experience-adapted stateless coordination agent, deterministic command finder, all-workspace Design Health analysis, scoped receipt-gated previews, OAuth/personal-token access, and a dependency-free Python client |
 
 The public account portal supports verified-email sign-up, sign-in, sign-out,
 password recovery, tab-scoped sessions, and up to five unique expiring MCP
@@ -48,7 +48,7 @@ the same reviewed source content.
 The shell also provides an original color-wheel workspace system, a functional
 File/Edit/Create/View/Inspect/Automate/Help menu bar, a context-sensitive top
 command ribbon with project-owned inline SVG symbols, a keyboard-navigable and
-workspace-filtered 331-command original CAD catalog with explicit capability
+workspace-filtered 341-command original CAD catalog with explicit capability
 levels, a persistent
 model browser with Origin/Sketches/Feature History/Bodies/revision timeline,
 workspace-preserving selection, revision audit,
@@ -83,8 +83,8 @@ review order, repair queue, scoring rules, and release boundary are in
 [`docs/product/DESIGN_HEALTH_AND_REBUILD.md`](docs/product/DESIGN_HEALTH_AND_REBUILD.md).
 
 Only the centered-bore part path is marked `qualified`. All other functional
-workbench capabilities are marked `preview`. Exact B-rep/NURBS, general
-Boolean and constraint solvers, persistent face naming, trimming/sewing,
+workbench capabilities are marked `preview`. Exact general B-rep/NURBS,
+freeform Boolean and constraint solvers, persistent arbitrary-face naming, trimming/sewing,
 STEP/IGES/DWG/DXF exact conversion, native proprietary CAD, production drawing
 PDF certification, shared cloud CAD-document collaboration, automatic electrical sizing,
 protection coordination, arc-flash/compliance analysis,
@@ -164,8 +164,14 @@ The server supports modern MCP `2026-07-28` discovery and 2025-era legacy
 initialization over local stdio. Start with `ps3d_guide`, then call
 `ps3d_agent_handshake` to configure a stateless host-AI/PS3D working contract,
 experience-level explanation depth, and correction feedback. Use
+`ps3d_plan_engineering_intent` for any new part, assembly, product, or drawing:
+it converts the ordinary request into reusable definitions, ordered features,
+standards/evidence questions, semantic interfaces, dependency packages, and
+approval gates without asking the user to paste a master prompt or claiming
+geometry execution. Use
 `ps3d_find_commands` to map a plain-language goal to a bounded recipe without
-executing it. The eleven tools are `ps3d_guide`, `ps3d_agent_handshake`, `ps3d_find_commands`,
+executing it. The twelve tools are `ps3d_guide`, `ps3d_agent_handshake`,
+`ps3d_plan_engineering_intent`, `ps3d_find_commands`,
 `ps3d_capabilities`, `ps3d_inspect_project`, `ps3d_design_health`,
 `ps3d_analyze_vehicle`, `ps3d_electromechanical_catalog`,
 `ps3d_preview_electromechanical`, `ps3d_preview_operation`, and
