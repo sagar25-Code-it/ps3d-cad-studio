@@ -28,6 +28,12 @@ with Ps3dClient(
         "manifestSha256": guide["manifestSha256"],
         "understood": True,
     }
+    plan = client.plan_engineering_intent(
+        "Create a 100 x 50 x 3 mm RHS tube 1200 mm long with two diameter 12 mm holes 50 mm from each end.",
+        workspace="part",
+        target_cad=["ps3d"],
+    )
+    print(plan["partDefinitions"])
     print(client.find_commands("change motorcycle wheelbase", workspace="vehicle"))
     # health = client.design_health(project_mapping)
 ```
@@ -46,6 +52,13 @@ fabrication approval.
 `design_health(project)` is also read-only. It returns the deterministic
 eight-workspace health matrix, truthful associative/detached dependency map,
 rebuild review order, findings, and release boundary for the supplied project.
+
+`plan_engineering_intent(request, ...)` is read-only and accepts a complete
+ordinary-language part or assembly requirement. It returns reusable child
+definitions, ordered feature histories, dimension facts, standards/evidence
+questions, semantic interfaces, dependency-ordered assembly packages,
+approval gates, and truthful execution/portability levels. It does not require
+a pasted master prompt and never claims that planning created CAD geometry.
 
 ```python
 # project_mapping is a complete caller-owned ps3d-workbench-project/1 value.
