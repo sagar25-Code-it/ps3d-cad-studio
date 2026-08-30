@@ -56,12 +56,12 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
       <PartAppearanceControls bodyColor={props.bodyColor} shadingMode={props.shadingMode} onBodyColor={props.onBodyColor} onShadingMode={props.onShadingMode} />
     </section>
     <section className="inspector-section preview-body-card"><header><strong>Independent preview bodies</strong><span>{previewBodies.length} bodies</span></header>
-      <p>Primitives remain separate from the qualified plate. They are selectable, revisioned, editable, exportable, and intentionally do not imply Boolean or face-level topology.</p>
+      <p>Analytic bodies remain separate from the qualified plate. Supported revolve, pattern, mirror, Boolean, trim, detail, shell, draft, and planar-face edits are revisioned and regenerate visible closed meshes.</p>
       <div className="preview-body-create" aria-label="Create preview primitive">
         {(["block", "cylinder", "cone", "sphere"] as const).map((shape) => <button key={shape} onClick={() => props.onCreatePreviewBody(shape)}><CommandIcon name={shape} />{shape}</button>)}
       </div>
       {previewBodies.length === 0 ? <div className="preview-body-empty">Create a primitive here or from All Commands.</div> : <div className="preview-body-list">
-        {previewBodies.map((body) => <button key={body.id} className={body.id === props.selectedId ? "active" : ""} onClick={() => props.onSelect(body.id === props.selectedId ? null : body.id)}><i style={{ background: body.color }} /><span><strong>{body.name}</strong><small>{body.shape} · {body.visible ? "shown" : "hidden"}</small></span></button>)}
+        {previewBodies.map((body) => <button key={body.id} className={body.id === props.selectedId ? "active" : ""} onClick={() => props.onSelect(body.id === props.selectedId ? null : body.id)}><i style={{ background: body.color }} /><span><strong>{body.name}</strong><small>{featureSummary(body)} | {body.visible ? "shown" : "hidden"}</small></span></button>)}
       </div>}
       {selectedPreviewBody !== undefined && <PreviewBodyEditor
         body={selectedPreviewBody}
@@ -105,15 +105,17 @@ function PreviewBodyEditor(props: {
   const normalizedSize: Vec3 = props.body.shape === "cylinder" ? [rawSize[0], rawSize[0], rawSize[2]]
     : props.body.shape === "sphere" ? [rawSize[0], rawSize[0], rawSize[0]] : rawSize;
   const transformValid = [...translation, ...rotation].every(Number.isFinite);
-  const sizeValid = normalizedSize.every(Number.isFinite) && normalizedSize[0] > 0 && normalizedSize[2] > 0 && normalizedSize[1] >= 0;
+  const sizeValid = normalizedSize.every(Number.isFinite) && normalizedSize[0] > 0 && normalizedSize[2] > 0 && normalizedSize[1] >= 0
+    && (props.body.shape !== "revolved" || (normalizedSize[1] > 0 && normalizedSize[1] < normalizedSize[0]));
   return <div className="preview-body-editor">
-    <div className="preview-body-editor-title"><span><CommandIcon name={props.body.shape} /></span><div><small>PREVIEW BODY / DIRECT EDIT</small><strong>{props.body.name}</strong></div></div>
+    <div className="preview-body-editor-title"><span><CommandIcon name={bodyShapeIcon(props.body)} /></span><div><small>ANALYTIC BODY / DIRECT EDIT</small><strong>{props.body.name}</strong></div></div>
+    <div className="preview-body-feature-summary"><strong>Feature stack</strong><span>{featureSummary(props.body)}</span><small>{props.body.featureTrace === undefined ? "Created primitive" : `${props.body.featureTrace.kind} | ${props.body.featureTrace.operationId}`}</small></div>
     <fieldset><legend>Move / rotate</legend><div className="preview-body-fields">
       {(["tx", "ty", "tz", "rx", "ry", "rz"] as const).map((key) => <label key={key}><span>{key.toUpperCase()}</span><input type="number" step={key.startsWith("r") ? 1 : 0.5} value={transform[key]} onChange={(event) => setTransform((current) => ({ ...current, [key]: event.target.value }))} /><small>{key.startsWith("r") ? "°" : "mm"}</small></label>)}
     </div><button disabled={!transformValid} onClick={() => props.onTransform(props.body.id, translation, rotation)}>Apply transform</button></fieldset>
-    <fieldset><legend>Primitive dimensions</legend><div className="preview-body-fields size">
-      <label><span>{props.body.shape === "cone" ? "Base Ø" : props.body.shape === "block" ? "Width" : "Diameter"}</span><input type="number" min="0.01" step="0.5" value={size.x} onChange={(event) => setSize((current) => ({ ...current, x: event.target.value }))} /><small>mm</small></label>
-      {(props.body.shape === "block" || props.body.shape === "cone") && <label><span>{props.body.shape === "cone" ? "Top Ø" : "Depth"}</span><input type="number" min={props.body.shape === "cone" ? 0 : 0.01} step="0.5" value={size.y} onChange={(event) => setSize((current) => ({ ...current, y: event.target.value }))} /><small>mm</small></label>}
+    <fieldset><legend>Analytic dimensions</legend><div className="preview-body-fields size">
+      <label><span>{props.body.shape === "cone" ? "Base diameter" : props.body.shape === "block" ? "Width" : props.body.shape === "revolved" ? "Outer diameter" : "Diameter"}</span><input type="number" min="0.01" step="0.5" value={size.x} onChange={(event) => setSize((current) => ({ ...current, x: event.target.value }))} /><small>mm</small></label>
+      {(props.body.shape === "block" || props.body.shape === "cone" || props.body.shape === "revolved") && <label><span>{props.body.shape === "cone" ? "Top diameter" : props.body.shape === "revolved" ? "Inner diameter" : "Depth"}</span><input type="number" min={props.body.shape === "cone" ? 0 : 0.01} step="0.5" value={size.y} onChange={(event) => setSize((current) => ({ ...current, y: event.target.value }))} /><small>mm</small></label>}
       {props.body.shape !== "sphere" && <label><span>Height</span><input type="number" min="0.01" step="0.5" value={size.z} onChange={(event) => setSize((current) => ({ ...current, z: event.target.value }))} /><small>mm</small></label>}
     </div><button disabled={!sizeValid} onClick={() => props.onSize(props.body.id, normalizedSize)}>Apply dimensions</button></fieldset>
     <div className="preview-body-appearance"><label><span>Body color</span><input type="color" value={props.body.color} onChange={(event) => props.onColor(props.body.id, event.target.value)} /></label><button onClick={() => props.onVisibility(props.body.id)}><CommandIcon name={props.body.visible ? "eye-off" : "eye"} />{props.body.visible ? "Hide" : "Show"}</button><button className="danger" onClick={() => props.onDelete(props.body.id)}><CommandIcon name="trash" />Delete</button></div>
@@ -126,6 +128,20 @@ function transformStrings(body: PartPreviewBody): { tx: string; ty: string; tz: 
 
 function sizeStrings(body: PartPreviewBody): { x: string; y: string; z: string } {
   return { x: String(body.sizeMm[0]), y: String(body.sizeMm[1]), z: String(body.sizeMm[2]) };
+}
+
+function bodyShapeIcon(body: PartPreviewBody): string {
+  return body.shape === "revolved" ? "revolve" : body.shape;
+}
+
+function featureSummary(body: PartPreviewBody): string {
+  const modifiers = [
+    body.boreDiameterMm === undefined ? undefined : `bore ${body.boreDiameterMm} mm`,
+    body.edgeTreatment === undefined ? undefined : `${body.edgeTreatment.kind} ${body.edgeTreatment.sizeMm} mm`,
+    body.shellThicknessMm === undefined ? undefined : `shell ${body.shellThicknessMm} mm`,
+    body.draftAngleDeg === undefined ? undefined : `draft ${body.draftAngleDeg} deg`
+  ].filter((value): value is string => value !== undefined);
+  return modifiers.length === 0 ? body.shape : `${body.shape} | ${modifiers.join(" | ")}`;
 }
 
 function values(part: PartIntent): Record<PartParameter, string> {

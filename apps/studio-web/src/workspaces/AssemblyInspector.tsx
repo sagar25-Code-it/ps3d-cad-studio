@@ -8,7 +8,8 @@ interface AssemblyInspectorProps {
   readonly selectedId: string | null;
   readonly interferences: readonly InterferenceCandidate[];
   readonly onTemplate: (template: Exclude<AssemblyTemplateId, "custom" | "electrical-panel">) => void;
-  readonly onExplode: (value: number) => void;
+  readonly onExplodePreview: (value: number) => void;
+  readonly onExplodeCommit: (value: number) => void;
   readonly onMove: (id: string, translationMm: readonly [number, number, number]) => void;
   readonly onToggleGrounded: (id: string) => void;
   readonly onToggleVisible: (id: string) => void;
@@ -20,8 +21,6 @@ interface AssemblyInspectorProps {
 }
 
 export function AssemblyInspector(props: AssemblyInspectorProps): React.JSX.Element {
-  const [explode, setExplode] = useState(props.assembly.explodeMm);
-  useEffect(() => setExplode(props.assembly.explodeMm), [props.assembly.explodeMm]);
   const selected = props.assembly.components.find((component) => component.id === props.selectedId);
   const [position, setPosition] = useState<[number, number, number]>([0, 0, 0]);
   const [mateKind, setMateKind] = useState<AssemblyMate["kind"]>("aligned-axis");
@@ -45,7 +44,29 @@ export function AssemblyInspector(props: AssemblyInspectorProps): React.JSX.Elem
     {props.assembly.safetyNotes !== undefined && <section className="assembly-safety-notes priority-boundary"><header><strong>{props.assembly.template === "bess-20ft-hc" ? "BESS engineering boundary" : props.assembly.template === "electrical-panel" ? "Wired-panel realization boundary" : "Template boundary"}</strong><span>review first</span></header>{props.assembly.safetyNotes.map((note) => <p key={note}><i />{note}</p>)}</section>}
     {props.assembly.electromechanicalSource !== undefined && <section className={`electromechanical-source-card ${props.assembly.electromechanicalSource.status}`}><header><strong>ECAD ↔ panel trace</strong><span>{props.assembly.electromechanicalSource.status}</span></header><dl className="compact-facts"><div><dt>Catalog</dt><dd>{props.assembly.electromechanicalSource.catalogRevision}</dd></div><div><dt>Layout</dt><dd>{props.assembly.electromechanicalSource.layoutPreset.replaceAll("-", " ")}</dd></div><div><dt>Devices</dt><dd>{linkedDevices} linked</dd></div><div><dt>Hardware</dt><dd>{installationHardware} generated</dd></div><div><dt>Conductors</dt><dd>{props.assembly.electricalRoutes?.length ?? 0} unsized</dd></div></dl>{props.assembly.electromechanicalSource.status === "stale" && <p>The schematic or linked package layout changed after conductor generation. Regenerate before relying on traceability.</p>}<button className="primary full" onClick={() => props.onOpenElectricalSource(selected?.sourceElectricalComponentId)}>Open {selected?.sourceElectricalComponentId === undefined ? "source schematic" : "selected source device"}</button></section>}
     <section className="assembly-template-card"><header><strong>{props.assembly.template === "electrical-panel" ? "Wired mounting-plate realization" : "Editable planning template"}</strong><span>{props.assembly.designStatus ?? "editable-preview"}</span></header><div><button className={props.assembly.template === "cargo-20ft" ? "active" : ""} onClick={() => props.onTemplate("cargo-20ft")}><strong>20 ft cargo</strong><small>6058 × 2438 × 2591 mm nominal</small></button><button className={props.assembly.template === "cargo-40ft-hc" ? "active" : ""} onClick={() => props.onTemplate("cargo-40ft-hc")}><strong>40 ft high cube</strong><small>12192 × 2438 × 2896 mm nominal</small></button><button className={props.assembly.template === "bess-20ft-hc" ? "active warning" : "warning"} onClick={() => props.onTemplate("bess-20ft-hc")}><strong>BESS arrangement</strong><small>20 ft HC · equipment + aisle study</small></button></div>{props.assembly.nominalEnvelopeMm !== undefined && <dl className="compact-facts"><div><dt>Nominal envelope</dt><dd>{props.assembly.nominalEnvelopeMm.join(" × ")} mm</dd></div><div><dt>Template</dt><dd>{(props.assembly.template ?? "custom").replaceAll("-", " ")}</dd></div></dl>}</section>
-    <section className="explode-card"><header><strong>Exploded distance</strong><output>{explode.toFixed(0)} mm</output></header><input type="range" min="0" max="80" step="1" value={explode} onChange={(event) => setExplode(Number(event.target.value))} onPointerUp={() => props.onExplode(explode)} onKeyUp={() => props.onExplode(explode)} /><small className="property-help">Use Assemble, Explode, and Fit all from the top ribbon.</small></section>
+    <section className="explode-card">
+      <header><div><strong>Exploded view</strong><small>Live assembly controller</small></div><output>{props.assembly.explodeMm.toFixed(1)} mm · {Math.round(props.assembly.explodeMm / 1.2)}%</output></header>
+      <div className="explode-controls">
+        <button onClick={() => { props.onExplodePreview(0); props.onExplodeCommit(0); }}>Assemble</button>
+        <input
+          aria-label="Assembly exploded-view distance"
+          aria-valuetext={`${props.assembly.explodeMm.toFixed(1)} millimeters, ${Math.round(props.assembly.explodeMm / 1.2)} percent exploded`}
+          type="range"
+          min="0"
+          max="120"
+          step="0.5"
+          value={props.assembly.explodeMm}
+          onChange={(event) => props.onExplodePreview(Number(event.target.value))}
+          onPointerUp={(event) => props.onExplodeCommit(Number(event.currentTarget.value))}
+          onPointerCancel={(event) => props.onExplodeCommit(Number(event.currentTarget.value))}
+          onKeyUp={(event) => props.onExplodeCommit(Number(event.currentTarget.value))}
+          onBlur={(event) => props.onExplodeCommit(Number(event.currentTarget.value))}
+        />
+        <button onClick={() => { props.onExplodePreview(120); props.onExplodeCommit(120); }}>Full</button>
+      </div>
+      <meter min="0" max="120" value={props.assembly.explodeMm}>{Math.round(props.assembly.explodeMm / 1.2)}%</meter>
+      <small className="property-help">One finger orbits. Slide two fingers up to explode and down to assemble; one project revision is committed when the gesture ends.</small>
+    </section>
     <section className="inspector-section"><header><strong>Components</strong><span>{props.assembly.components.length}</span></header><div className="component-list">{props.assembly.components.map((component) => <button key={component.id} className={`${component.id === props.selectedId ? "selected" : ""} ${component.visible ? "" : "hidden-component"}`} onClick={() => props.onSelect(component.id === props.selectedId ? null : component.id)}><i style={{ background: component.color }} /><span><strong>{component.name}</strong><small>{component.shape} · {component.grounded ? "grounded" : "free"} · {component.visible ? "shown" : "hidden"}</small></span></button>)}</div></section>
     <section className="inspector-section"><header><strong>Create direct mate</strong><span>same canvas</span></header>
       {selected === undefined ? <p className="empty-copy">Select the first component in the canvas or browser.</p> : <div className="mate-builder">
