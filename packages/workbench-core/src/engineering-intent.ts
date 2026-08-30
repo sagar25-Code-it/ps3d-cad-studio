@@ -222,11 +222,14 @@ const NUMBER_WORDS: Readonly<Record<string, number>> = {
   twelve: 12, sixteen: 16, twenty: 20
 };
 
+const MAX_ENGINEERING_INTENT_REQUEST_CHARACTERS = 12_000;
 const MATERIAL_EXPRESSION = /\b(?:steel|stainless|aluminium|aluminum|titanium|brass|bronze|copper|plastic|polymer|composite|rubber|cast\s+iron)\b/u;
 const STANDARD_EXPRESSION = /\b(?:iso|din|jis|asme|astm|iec|en)\s*[- ]?\d+(?:[-:]\d+)*(?::\d{4})?\b/iu;
 
 export function planEngineeringIntent(input: EngineeringIntentRequest): EngineeringIntentPlan {
-  const request = input.request.trim();
+  const completeRequest = input.request.trim();
+  const requestWasTruncated = completeRequest.length > MAX_ENGINEERING_INTENT_REQUEST_CHARACTERS;
+  const request = completeRequest.slice(0, MAX_ENGINEERING_INTENT_REQUEST_CHARACTERS);
   const normalized = normalize(request);
   const unit = input.unit ?? inferUnit(normalized) ?? "mm";
   const scope = inferScope(normalized, input.workspace);
@@ -270,7 +273,12 @@ export function planEngineeringIntent(input: EngineeringIntentRequest): Engineer
     commonDefinitionIds: partDefinitions.filter((part) => (part.quantity ?? 0) > 1).map((part) => part.id),
     assemblyPackages,
     questions,
-    warnings: buildWarnings(normalized, partDefinitions, unavailableFeatureIds),
+    warnings: [
+      ...buildWarnings(normalized, partDefinitions, unavailableFeatureIds),
+      ...(requestWasTruncated
+        ? [`Engineering intent input exceeded ${MAX_ENGINEERING_INTENT_REQUEST_CHARACTERS.toLocaleString("en-US")} characters and was truncated before deterministic parsing.`]
+        : [])
+    ],
     execution: {
       canCreateCandidateNow,
       planningOnly: true,
@@ -444,7 +452,7 @@ function buildFeaturePlan(normalized: string, classification: EngineeringPartCla
     if (!pattern.expression.test(normalized)) continue;
     pushFeature(features, ownerKey, pattern.kind, pattern.order, pattern.purpose, pattern.method, pattern.references, pattern.capability, pattern.route, pattern.portability);
   }
-  if (/\b(?:two|three|four|five|six|\d+)\s+(?:identical\s+)?(?:(?:diameter|dia|ø|⌀)\s*\d+(?:\.\d+)?\s*(?:mm|in)?\s*)?holes?\b/u.test(normalized) && !features.some((feature) => feature.kind === "linear-pattern")) {
+  if (hasPatternableHoleCount(normalized) && !features.some((feature) => feature.kind === "linear-pattern")) {
     pushFeature(features, ownerKey, "linear-pattern", 50, "Reuse one validated hole definition for the stated count.", "Pattern the seed hole from a stable axis or direction and control end conditions or spacing explicitly.", ["seed hole", "pattern direction", "count and spacing"], "preview", "ps3d_preview_operation:set-part-parameter(patternCount)", "editable-approximation");
   }
   pushFeature(features, ownerKey, "verify", 95, "Verify rebuild, body count, dimensions, mass-property inputs, clearances, and feature references.", "Rebuild after each dependency package; compare measured results with stated requirements and evidence.", ["completed definition", "acceptance criteria"], "preview", "ps3d_design_health", "native-editable");
@@ -606,22 +614,55 @@ function extractDimensions(request: string, defaultUnit: "mm" | "in"): readonly 
     if (facts.some((fact) => `${normalize(fact.label)}:${fact.valueMm}` === key)) return;
     facts.push({ id: `dimension:${slug(label)}-${facts.length + 1}`, label, valueMm: rounded, sourceValue, sourceUnit, sourceText, status: "stated-by-user" });
   };
-  const stackExpression = /\b(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)(?:\s*x\s*(\d+(?:\.\d+)?))?\s*(mm|millimet(?:er|re)s?|in|inch(?:es)?|")?/giu;
+  const stackExpression = /\b(\d{1,9}(?:\.\d{1,6})?)[ \t\r\n]{0,12}x[ \t\r\n]{0,12}(\d{1,9}(?:\.\d{1,6})?)(?:[ \t\r\n]{0,12}x[ \t\r\n]{0,12}(\d{1,9}(?:\.\d{1,6})?))?[ \t\r\n]{0,12}(mm|millimet(?:er|re)s?|inch(?:es)?|in|")?/giu;
   for (const match of normalizedSymbols.matchAll(stackExpression)) {
     add("section dimension 1", match[1]!, match[4], match[0]);
     add("section dimension 2", match[2]!, match[4], match[0]);
     if (match[3] !== undefined) add("section dimension 3 / wall or thickness", match[3], match[4], match[0]);
   }
-  const namedExpression = /\b(length|width|height|depth|thickness|wall|diameter|radius|bore|spacing|pitch|wheelbase|offset|distance)\s*(?:=|:|of)?\s*(\d+(?:\.\d+)?)\s*(mm|millimet(?:er|re)s?|in|inch(?:es)?|")?/giu;
+  const namedExpression = /\b(length|width|height|depth|thickness|wall|diameter|radius|bore|spacing|pitch|wheelbase|offset|distance)[ \t\r\n]{0,12}(?:(?:=|:)[ \t\r\n]{0,12}|of[ \t\r\n]{1,12})?(\d{1,9}(?:\.\d{1,6})?)[ \t\r\n]{0,12}(mm|millimet(?:er|re)s?|inch(?:es)?|in|")?/giu;
   for (const match of normalizedSymbols.matchAll(namedExpression)) add(match[1]!.toLowerCase(), match[2]!, match[3], match[0]);
-  const diameterExpression = /(?:ø|⌀|\bdia(?:meter)?\.?\s*)(\d+(?:\.\d+)?)\s*(mm|millimet(?:er|re)s?|in|inch(?:es)?|")?/giu;
+  const diameterExpression = /(?:ø|⌀|\bdia(?:meter)?\.?)[ \t\r\n]{0,12}(\d{1,9}(?:\.\d{1,6})?)[ \t\r\n]{0,12}(mm|millimet(?:er|re)s?|inch(?:es)?|in|")?/giu;
   for (const match of normalizedSymbols.matchAll(diameterExpression)) add("diameter", match[1]!, match[2], match[0]);
-  const endOffsetExpression = /\b(\d+(?:\.\d+)?)\s*(mm|millimet(?:er|re)s?|in|inch(?:es)?|")?\s+from\s+(?:each|the)\s+end\b/giu;
+  const endOffsetExpression = /\b(\d{1,9}(?:\.\d{1,6})?)(?:[ \t\r\n]{0,12}(mm|millimet(?:er|re)s?|inch(?:es)?|in|"))?[ \t\r\n]{1,12}from[ \t\r\n]{1,12}(?:each|the)[ \t\r\n]{1,12}end\b/giu;
   for (const match of normalizedSymbols.matchAll(endOffsetExpression)) add("end offset", match[1]!, match[2], match[0]);
-  const trailingDescriptorExpression = /\b(\d+(?:\.\d+)?)\s*(mm|millimet(?:er|re)s?|in|inch(?:es)?|")?\s*(long|wide|high|tall|thick)\b/giu;
+  const trailingDescriptorExpression = /\b(\d{1,9}(?:\.\d{1,6})?)(?:[ \t\r\n]{0,12}(mm|millimet(?:er|re)s?|inch(?:es)?|in|"))?[ \t\r\n]{1,12}(long|wide|high|tall|thick)\b/giu;
   const trailingLabels: Readonly<Record<string, string>> = { long: "length", wide: "width", high: "height", tall: "height", thick: "thickness" };
   for (const match of normalizedSymbols.matchAll(trailingDescriptorExpression)) add(trailingLabels[match[3]!.toLowerCase()] ?? match[3]!, match[1]!, match[2], match[0]);
   return facts;
+}
+
+function hasPatternableHoleCount(normalized: string): boolean {
+  const permittedNumericFollowers = new Set(["identical", "mounting", "through", "tapped", "blind", "clearance", "counterbored", "countersunk", "diameter", "dia", "ø", "⌀"]);
+  for (const holeMatch of normalized.matchAll(/\bholes?\b/gu)) {
+    if (holeMatch.index === undefined) continue;
+    const prefixTokens = normalized
+      .slice(Math.max(0, holeMatch.index - 96), holeMatch.index)
+      .trim()
+      .split(/\s+/u);
+    const firstCandidate = Math.max(0, prefixTokens.length - 12);
+    for (let index = prefixTokens.length - 1; index >= firstCandidate; index -= 1) {
+      const token = cleanEngineeringToken(prefixTokens[index] ?? "");
+      const wordCount = NUMBER_WORDS[token];
+      if (wordCount !== undefined && wordCount > 1) return true;
+      if (!/^\d{1,4}$/u.test(token)) continue;
+      const numericCount = Number(token);
+      if (!Number.isInteger(numericCount) || numericCount <= 1) continue;
+      const previousToken = cleanEngineeringToken(prefixTokens[index - 1] ?? "");
+      const nextToken = cleanEngineeringToken(prefixTokens[index + 1] ?? "");
+      if (isEngineeringUnitToken(nextToken) || previousToken === "diameter" || previousToken === "dia" || previousToken === "ø" || previousToken === "⌀") continue;
+      if (index === prefixTokens.length - 1 || permittedNumericFollowers.has(nextToken)) return true;
+    }
+  }
+  return false;
+}
+
+function cleanEngineeringToken(token: string): string {
+  return token.toLowerCase().replace(/^[^a-z0-9ø⌀]+|[^a-z0-9ø⌀]+$/gu, "");
+}
+
+function isEngineeringUnitToken(token: string): boolean {
+  return /^(?:mm|millimeter|millimeters|millimetre|millimetres|in|inch|inches)$/u.test(token);
 }
 
 function quantityBefore(normalized: string, matchIndex: number): number | null {
