@@ -280,10 +280,11 @@
   body { overflow: auto; }
 
   .studio-app {
-    height: 100dvh;
-    min-height: 0;
-    grid-template-rows: auto 32px 40px 108px minmax(0, 1fr) 34px;
-    overflow: hidden;
+    height: auto;
+    min-height: 100dvh;
+    grid-template-rows: auto 32px 40px 108px auto 34px;
+    overflow-x: hidden;
+    overflow-y: visible;
   }
 
   .studio-app .app-header {
@@ -325,13 +326,13 @@
 
   .studio-app .workbench-grid,
   .studio-app[data-workspace] .workbench-grid {
-    height: 100%;
+    height: auto;
     min-height: 0;
     display: grid;
     grid-template-columns: clamp(180px, 24vw, 210px) minmax(0, 1fr);
-    grid-template-rows: minmax(480px, 1fr) max-content;
+    grid-template-rows: minmax(480px, 70vh) max-content;
     align-content: start;
-    overflow: auto;
+    overflow: visible;
   }
 
   .studio-app .project-tree {
@@ -395,7 +396,7 @@
 
 @media (max-width: 700px) {
   .studio-app {
-    grid-template-rows: auto 32px 40px 104px minmax(0, 1fr) 34px;
+    grid-template-rows: auto 32px 40px 104px auto 34px;
   }
 
   .studio-app .app-header {
@@ -450,23 +451,24 @@
   .studio-app[data-workspace] .workbench-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 240px minmax(500px, 66vh) max-content;
+    grid-template-rows: minmax(420px, 66vh) 200px max-content;
   }
 
   .studio-app .project-tree {
     grid-column: 1;
-    grid-row: 1;
-    height: 240px;
-    min-height: 240px;
-    max-height: 240px;
+    grid-row: 2;
+    height: 200px;
+    min-height: 200px;
+    max-height: 200px;
     border-right: 0;
+    border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
   }
 
   .studio-app .workspace-canvas {
     grid-column: 1;
-    grid-row: 2;
-    min-height: 500px;
+    grid-row: 1;
+    min-height: 420px;
   }
 
   .studio-app .inspector-panel {
@@ -485,6 +487,31 @@
     justify-content: flex-start;
     overflow-x: auto;
     transform: none;
+  }
+
+  .studio-app .assembly-gesture-hud {
+    top: 4.05rem;
+    right: 0.5rem;
+    left: 0.5rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+    max-width: none;
+    transform: none;
+  }
+
+  .studio-app .assembly-gesture-hud > span:nth-child(2) { display: none; }
+
+  .studio-app .fault-brain-shell { right: 0.45rem; bottom: 0.45rem; }
+  .studio-app .fault-brain-launcher { min-width: 136px; }
+  .studio-app .fault-brain-panel {
+    position: fixed;
+    inset: 0.5rem 0.5rem 3.65rem;
+    width: auto;
+    max-height: none;
+  }
+  .studio-app .fault-brain-announcement {
+    position: fixed;
+    right: 0.5rem;
+    bottom: 3.65rem;
   }
 
   .studio-app .viewbox {
@@ -663,8 +690,14 @@
 
 @media (max-height: 700px) {
   .studio-app {
-    grid-template-rows: auto 30px 38px 92px minmax(0, 1fr) 32px;
+    height: auto;
+    min-height: 100dvh;
+    grid-template-rows: auto 30px 38px 92px auto 32px;
+    overflow-x: hidden;
+    overflow-y: visible;
   }
+
+  .studio-app .workbench-grid { height: auto; min-height: 520px; }
 
   .studio-app .app-header { padding-block: 0.3rem; }
   .studio-app .brand-block small,
@@ -682,4 +715,129 @@
   .public-page :where(button, a, input, select) {
     min-height: 40px;
   }
+}
+
+/* File/session center and Render Studio retain command identity at every zoom level. */
+@media (max-width: 1220px) {
+  .file-menu-body { grid-template-columns: 160px minmax(0, 1fr); }
+  .file-section.home-section,
+  .file-section.two-column-section { grid-template-columns: minmax(0, 1fr) minmax(235px, 0.68fr); }
+  .export-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .render-studio-grid { grid-template-columns: 195px minmax(320px, 1fr) 270px; }
+  .render-ribbon-group button { min-width: 88px; }
+}
+
+@media (max-width: 980px) {
+  .studio-app[data-workspace="render-studio"] {
+    height: 100dvh;
+    min-height: 640px;
+    grid-template-rows: auto 32px 40px minmax(0, 1fr) 34px;
+    overflow: hidden;
+  }
+  .file-menu-scrim { padding: 0.65rem; }
+  .file-application-menu { width: 100%; height: calc(100dvh - 1.3rem); }
+  .file-menu-titlebar { grid-template-columns: minmax(190px, 1fr) minmax(180px, 0.7fr) auto; }
+  .file-menu-body { grid-template-columns: 148px minmax(0, 1fr); }
+  .file-section.home-section,
+  .file-section.two-column-section { grid-template-columns: minmax(0, 1fr); }
+  .recent-project-panel { min-height: 220px; }
+  .render-studio-workspace { position: relative; min-height: 0; }
+  .render-studio-grid { grid-template-columns: 180px minmax(290px, 1fr) 244px; }
+  .render-context { min-width: 132px; }
+  .render-ribbon-group button { min-width: 80px; grid-template-columns: 30px minmax(0, 1fr); }
+  .render-ribbon-group button > span { width: 28px; height: 28px; }
+  .render-viewport-toolbar span { display: none; }
+}
+
+@media (max-width: 760px) {
+  .file-menu-scrim { padding: 0.35rem; }
+  .file-application-menu { height: calc(100dvh - 0.7rem); border-radius: 6px; }
+  .file-menu-titlebar { grid-template-columns: minmax(0, 1fr) auto; min-height: 56px; }
+  .file-menu-current { display: none; }
+  .file-menu-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .file-command-rail {
+    flex-direction: row;
+    min-height: 48px;
+    overflow-x: auto;
+    padding: 0.25rem;
+    border-right: 0;
+    border-bottom: 1px solid #b7c0c6;
+  }
+  .file-command-rail > button { flex: 0 0 auto; grid-template-columns: 20px auto; min-width: max-content; min-height: 38px; }
+  .file-command-rail > button kbd,
+  .file-command-rail-spacer { display: none; }
+  .file-section { padding: 0.85rem; }
+  .file-start-grid,
+  .project-property-grid { grid-template-columns: minmax(0, 1fr); }
+  .file-menu-footer > span:nth-of-type(n + 2) { display: none; }
+  .file-menu-footer > kbd { margin-left: auto; }
+  .save-project-dialog { width: calc(100vw - 0.8rem); }
+
+  .studio-app[data-workspace="render-studio"] {
+    height: auto;
+    min-height: 100dvh;
+    grid-template-rows: auto auto auto auto 34px;
+    overflow: visible;
+  }
+  .render-studio-workspace { min-height: 0; overflow: visible; }
+  .render-studio-ribbon { min-height: 78px; }
+  .render-context { min-width: 120px; }
+  .render-ribbon-group button { min-width: 76px; grid-template-columns: 1fr; text-align: center; }
+  .render-ribbon-group button > span { grid-row: 1; justify-self: center; }
+  .render-ribbon-group button strong { grid-column: 1; }
+  .render-ribbon-group button small { display: none; }
+  .render-studio-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(440px, 62vh) auto auto;
+    overflow: visible;
+  }
+  .render-scene-browser { grid-column: 1; grid-row: 1; max-height: 270px; border-right: 0; border-bottom: 1px solid #53616a; }
+  .render-viewport-shell { grid-column: 1; grid-row: 2; min-height: 440px; }
+  .render-properties { grid-column: 1; grid-row: 3; max-height: none; border-top: 1px solid #53616a; border-left: 0; }
+  .render-gallery { grid-column: 1; grid-row: 4; min-height: 130px; }
+  .render-viewport-toolbar { left: 0.45rem; right: 0.45rem; justify-content: space-between; transform: none; }
+  .render-preview-badge { max-width: calc(100% - 1rem); }
+}
+
+@media (max-width: 520px) {
+  .file-menu-scrim { padding: 0; }
+  .file-application-menu { height: 100dvh; border-width: 0; border-radius: 0; }
+  .file-menu-titlebar { padding-inline: 0.55rem; }
+  .file-menu-titlebar strong { font-size: 0.82rem; }
+  .file-menu-mark { width: 32px; height: 32px; }
+  .file-command-rail > button { padding-inline: 0.45rem; }
+  .file-action-card { min-height: 88px; }
+  .export-grid { grid-template-columns: minmax(0, 1fr); }
+  .storage-row { grid-template-columns: 8px 84px minmax(0, 1fr); }
+  .save-project-dialog > footer { align-items: stretch; flex-direction: column-reverse; }
+  .save-project-dialog > footer button { width: 100%; }
+  .render-view-presets { right: 0.45rem; }
+  .render-preview-badge { left: 0.45rem; bottom: 0.45rem; }
+}
+
+@media (max-height: 720px) and (min-width: 761px) {
+  .file-menu-scrim { padding-block: 0.4rem; }
+  .file-application-menu { height: calc(100dvh - 0.8rem); }
+  .file-menu-titlebar { min-height: 52px; }
+  .file-section { padding-block: 0.8rem; }
+  .render-studio-ribbon { min-height: 72px; }
+  .render-studio-grid { grid-template-rows: minmax(0, 1fr) 92px; }
+  .render-ribbon-group button { padding-block: 0.18rem; }
+}
+
+@media print {
+  .studio-app { display: block !important; height: auto; overflow: visible; background: #fff; }
+  .studio-app > :where(.app-header, .cad-menu-bar, .workspace-tabs, .command-ribbon, .app-status),
+  .project-tree,
+  .inspector-panel,
+  .viewport-chrome,
+  .render-studio-ribbon,
+  .render-scene-browser,
+  .render-properties,
+  .render-gallery { display: none !important; }
+  .workbench-grid,
+  .render-studio-workspace,
+  .render-studio-grid,
+  .workspace-canvas,
+  .render-viewport-shell { display: block !important; width: 100%; min-height: 180mm; overflow: visible; color: #000; background: #fff; }
 }
