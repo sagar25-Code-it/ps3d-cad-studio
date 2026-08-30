@@ -9,8 +9,10 @@ import {
   selectTangentSketchEntities
 } from "../packages/workbench-sketch/src/index.js";
 import {
+  assemblyExplodeFromVerticalGesture,
   orbitViewAngles,
   projectWorldAxes,
+  touchCentroidY,
   viewAnglesForOrientation
 } from "../packages/viewport-three/src/index.js";
 import { selectWorkbenchHistoryLane } from "../apps/studio-web/src/ui/history-lane.js";
@@ -46,6 +48,21 @@ export const workbenchInteractionTests: readonly TestCase[] = [
     }
   },
   {
+    name: "assembly touch gestures map one-finger orbit and two-finger vertical travel deterministically",
+    run: () => {
+      const centroid = touchCentroidY([
+        { pointerId: 1, x: 100, y: 300 },
+        { pointerId: 2, x: 220, y: 340 }
+      ]);
+      equal(centroid, 320, "the explode controller should use the stable two-pointer centroid");
+      const raised = assemblyExplodeFromVerticalGesture(18, centroid, 220, 600, 120);
+      assert(raised > 18, "sliding both fingers upward should increase exploded distance");
+      const lowered = assemblyExplodeFromVerticalGesture(raised, 220, 620, 600, 120);
+      equal(lowered, 0, "sliding downward beyond the assembled stop should clamp exactly to zero");
+      equal(assemblyExplodeFromVerticalGesture(110, 300, -200, 600, 120), 120, "the exploded stop should clamp at the reviewed maximum");
+    }
+  },
+  {
     name: "global Undo and Redo retain broad-project history across workspace switches",
     run: () => {
       equal(selectWorkbenchHistoryLane("sketch", 0, 1), "broad-project", "Sketch edits should use broad-project history");
@@ -77,7 +94,7 @@ export const workbenchInteractionTests: readonly TestCase[] = [
     }
   },
   {
-    name: "workspace context menus are selection-aware and truthfully disable unsupported booleans",
+    name: "workspace context menus expose bounded analytic features and disable general topology",
     run: () => {
       equal(classifyWorkbenchSelection("profile:mounting"), "profile", "profile IDs should classify deterministically");
       equal(classifyWorkbenchSelection("component:base"), "component", "component IDs should classify deterministically");
@@ -87,7 +104,15 @@ export const workbenchInteractionTests: readonly TestCase[] = [
 
       const bodyCommands = resolveWorkbenchContextCommands({ workspace: "part", selectionId: "body:qualified" });
       assert(bodyCommands.some((command) => command.id === "body.create-component" && command.enabled), "a selected body should offer Create Component");
-      assert(bodyCommands.filter((command) => command.id.startsWith("body.boolean-")).every((command) => !command.enabled && command.disabledReason?.includes("B-rep") === true), "unsafe booleans should remain visible with an exact-kernel reason");
+      assert(bodyCommands.filter((command) => command.id.startsWith("body.boolean-")).every((command) => !command.enabled), "qualified worker geometry should remain immutable to direct Boolean edits");
+
+      const analyticCommands = resolveWorkbenchContextCommands({ workspace: "part", selectionId: "part-body:target" });
+      assert(analyticCommands.some((command) => command.id === "body.boolean-join" && command.enabled), "an analytic body should expose bounded Unite");
+      assert(analyticCommands.some((command) => command.id === "body.boolean-cut" && command.enabled), "an analytic body should expose bounded Subtract");
+      assert(analyticCommands.some((command) => command.id === "body.boolean-intersect" && !command.enabled && command.disabledReason?.includes("B-rep") === true), "general Intersect should remain visible with an exact-kernel reason");
+      const directFeatures = analyticCommands.find((command) => command.id === "body.direct-features");
+      assert(directFeatures?.children?.some((command) => command.id === "body.move-face" && command.enabled) === true, "an analytic body should expose direct face editing");
+      assert(directFeatures?.children?.some((command) => command.id === "body.shell" && command.enabled) === true, "an analytic body should expose bounded Shell");
 
       const sketchCanvasCommands = resolveWorkbenchContextCommands({ workspace: "sketch", selectionId: null });
       assert(sketchCanvasCommands.some((command) => command.id === "sketch.select-connected" && command.enabled), "empty sketch canvas should expose connected-curve intent");

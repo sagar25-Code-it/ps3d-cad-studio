@@ -14,7 +14,10 @@ import { workbenchVehicleTests } from "./workbench-vehicle.test.js";
 import { workbenchHealthTests } from "./workbench-health.test.js";
 import { workbenchMasterCartTests } from "./workbench-master-cart.test.js";
 import { workbenchInteractionTests } from "./workbench-interaction.test.js";
+import { workbenchPartFeatureTests } from "./workbench-part-features.test.js";
+import { workbenchEngineeringIntentTests } from "./workbench-engineering-intent.test.js";
 import { publicReleaseTests } from "./public-release.test.js";
+import { fileWorkspaceTests } from "./file-workspace.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -33,7 +36,10 @@ const tests: readonly TestCase[] = [
   ...workbenchHealthTests,
   ...workbenchMasterCartTests,
   ...workbenchInteractionTests,
+  ...workbenchPartFeatureTests,
+  ...workbenchEngineeringIntentTests,
   ...workbenchMcpTests,
+  ...fileWorkspaceTests,
   ...publicReleaseTests
 ];
 let failures = 0;
