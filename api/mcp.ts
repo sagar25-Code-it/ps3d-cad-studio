@@ -157,7 +157,7 @@ function getPrompt(id: string | number | null, params: Readonly<Record<string, u
   const workspace = typeof params.arguments.workspace === "string" ? params.arguments.workspace : "not specified";
   return jsonRpcResult(id, {
     description: "PS3D receipt-gated collaboration workflow",
-    messages: [{ role: "user", content: { type: "text", text: `${PS3D_MCP_INSTRUCTIONS}\n\nUser goal: ${params.arguments.request}\nWorkspace: ${workspace}\nAfter reading ps3d_guide, call ps3d_agent_handshake and then ps3d_find_commands. Do not invent fields or claim a live-browser mutation.` } }]
+    messages: [{ role: "user", content: { type: "text", text: `${PS3D_MCP_INSTRUCTIONS}\n\nUser goal: ${params.arguments.request}\nWorkspace: ${workspace}\nAfter reading ps3d_guide, call ps3d_agent_handshake. For creation requests call ps3d_plan_engineering_intent, resolve its blockers, and then use ps3d_find_commands for exact bounded operations. Do not invent fields or claim a live-browser mutation.` } }]
   });
 }
 
