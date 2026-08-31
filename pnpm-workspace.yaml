@@ -13,4 +13,4 @@ allowBuilds:
   esbuild: true
 
 catalog:
-  esbuild-wasm: 0.27.3
+  esbuild-wasm: 0.28.2

@@ -7,8 +7,8 @@ settings:
 catalogs:
   default:
     esbuild-wasm:
-      specifier: 0.27.3
-      version: 0.27.3
+      specifier: 0.28.2
+      version: 0.28.2
 
 importers:
 
@@ -38,10 +38,10 @@ importers:
         version: 0.185.4
       esbuild-wasm:
         specifier: 'catalog:'
-        version: 0.27.3
+        version: 0.28.2
       manifold-3d:
         specifier: 3.5.1
-        version: 3.5.1(@types/node@24.13.3)(esbuild-wasm@0.27.3)
+        version: 3.5.1(@types/node@24.13.3)(esbuild-wasm@0.28.2)
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -610,8 +610,8 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
-  esbuild-wasm@0.27.3:
-    resolution: {integrity: sha512-AUXuOxZ145/5Az+lIqk6TdJbxKTyDGkXMJpTExmBdbnHR6n6qAFx+F4oG9ORpVYJ9dQYeQAqzv51TO4DFKsbXw==}
+  esbuild-wasm@0.28.2:
+    resolution: {integrity: sha512-GccVwhv3mmOUVQHCQm2Ox/rby8n/EqUwvZxE6Pjfikrq/lWw9g9WX/u9EykWnpot3Ko6j426DgQdea2xWKIAQA==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -1118,7 +1118,7 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  esbuild-wasm@0.27.3: {}
+  esbuild-wasm@0.28.2: {}
 
   esbuild@0.28.2:
     optionalDependencies:
@@ -1184,7 +1184,7 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  manifold-3d@3.5.1(@types/node@24.13.3)(esbuild-wasm@0.27.3):
+  manifold-3d@3.5.1(@types/node@24.13.3)(esbuild-wasm@0.28.2):
     dependencies:
       '@gltf-transform/core': 4.4.2
       '@gltf-transform/extensions': 4.4.2
@@ -1194,7 +1194,7 @@ snapshots:
       '@jscadui/3mf-export': 0.5.0
       commander: 13.1.0
       convert-source-map: 2.0.0
-      esbuild-wasm: 0.27.3
+      esbuild-wasm: 0.28.2
       fast-xml-parser: 5.11.0
       fflate: 0.8.3
       magic-string: 0.30.21
