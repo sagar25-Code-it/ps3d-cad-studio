@@ -10,8 +10,8 @@ catalogs:
       specifier: 1.0.1
       version: 1.0.1
     esbuild-wasm:
-      specifier: 0.27.3
-      version: 0.27.3
+      specifier: 0.28.2
+      version: 0.28.2
 
 importers:
 
@@ -41,10 +41,10 @@ importers:
         version: 0.185.4
       esbuild-wasm:
         specifier: 'catalog:'
-        version: 0.27.3
+        version: 0.28.2
       manifold-3d:
         specifier: 3.5.1
-        version: 3.5.1(@types/node@24.13.3)(esbuild-wasm@0.27.3)
+        version: 3.5.1(@types/node@24.13.3)(esbuild-wasm@0.28.2)
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -58,8 +58,8 @@ importers:
         specifier: 2.0.0
         version: 2.0.0
       zod:
-        specifier: 4.4.3
-        version: 4.4.3
+        specifier: 4.5.2
+        version: 4.5.2
 
   apps/studio-web:
     dependencies:
@@ -457,8 +457,8 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
-  '@types/ndarray@1.0.14':
-    resolution: {integrity: sha512-oANmFZMnFQvb219SSBIhI1Ih/r4CvHDOzkWyJS/XRqkMrGH5/kaPSA1hQhdIBzouaE+5KpE/f5ylI9cujmckQg==}
+  '@types/ndarray@1.1.0':
+    resolution: {integrity: sha512-go+C6vHBUuO9jH6Tj6qEZ63JEGoMSxFdmd+6QAtthGD6xumBfIz3RbNDDs2aoRVLf9naH8lk5jnWy2UHHKgYQQ==}
 
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
@@ -620,8 +620,8 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
-  esbuild-wasm@0.27.3:
-    resolution: {integrity: sha512-AUXuOxZ145/5Az+lIqk6TdJbxKTyDGkXMJpTExmBdbnHR6n6qAFx+F4oG9ORpVYJ9dQYeQAqzv51TO4DFKsbXw==}
+  esbuild-wasm@0.28.2:
+    resolution: {integrity: sha512-GccVwhv3mmOUVQHCQm2Ox/rby8n/EqUwvZxE6Pjfikrq/lWw9g9WX/u9EykWnpot3Ko6j426DgQdea2xWKIAQA==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -692,8 +692,8 @@ packages:
   ndarray-pixels@5.2.0:
     resolution: {integrity: sha512-lTh4tFKziAatVTa9crIsidUyn+lqujVOQpzfdBWvdFu2wo9Uo6z261lVX7SgMyP89xGmj3TMTPbbxl9YDnV4SA==}
 
-  ndarray@1.0.19:
-    resolution: {integrity: sha512-B4JHA4vdyZU30ELBw3g7/p9bZupyew5a7tX1Y/gGeF2hafrPaQZhgrGQfsvgfYbgdFZjYwuEcnaobeM/WMW+HQ==}
+  ndarray@1.1.1:
+    resolution: {integrity: sha512-AsE8w/M2MS+0pD3nP5qbRRtJFeJJJaJ+qXZaZr0XjVGXhy6LIj2TERTlkpdK2AI3WufoOP+pwPk3q2ilAJcZ9g==}
 
   path-expression-matcher@1.6.2:
     resolution: {integrity: sha512-enSlaiat05iasnzmgNxRj8reFdj3puY2QpNgP1aPIaVfT6nn9ICuPoFlKHk8EN22HcwewshO+mN2DGbkCEOtqQ==}
@@ -735,8 +735,8 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  sharp@0.35.3:
-    resolution: {integrity: sha512-ej0zVHuZGHCiABXcNxeYhpRnPNPAcvbG8RMdBAhDAxLKkCRVSpK3Iyu7qbqw3JMzoj0REeM6f3tJLtVwl0023Q==}
+  sharp@0.35.4:
+    resolution: {integrity: sha512-n++8XWcj+jCOr2IOl7h8LbKnGBDY4aPbmprMONBNFdn0ImXqpGVv5zliDs0V9HbmbCQLpbuo2ej9rAoOQTvMDA==}
     engines: {node: '>=20.9.0'}
     peerDependencies:
       '@types/node': '*'
@@ -813,8 +813,8 @@ packages:
     resolution: {integrity: sha512-ghig2TBE/H11aOVgmahA3MhimvkBr6JIYknH/Dhdk10nXwdbIqBJsbfMxpvFPG8bAw77gN29aQWvKpmVoPlvPQ==}
     engines: {node: '>=16.0.0'}
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+  zod@4.5.2:
+    resolution: {integrity: sha512-XkYXCol10+ba/6F/cueWV+TezUeOqXW0hdeJt5CdXjTYeAgAQg5N03RQdJ80mhfFE72+pblvYMW4wy2Qp4Qbrg==}
 
 ignoredOptionalDependencies:
   - '@img/sharp-*'
@@ -915,7 +915,7 @@ snapshots:
       '@gltf-transform/core': 4.4.2
       '@gltf-transform/extensions': 4.4.2
       ktx-parse: 1.1.0
-      ndarray: 1.0.19
+      ndarray: 1.1.1
       ndarray-lanczos: 0.3.0
       ndarray-pixels: 5.2.0(@types/node@24.13.3)
     transitivePeerDependencies:
@@ -938,12 +938,12 @@ snapshots:
 
   '@modelcontextprotocol/core@2.0.0':
     dependencies:
-      zod: 4.4.3
+      zod: 4.5.2
 
   '@modelcontextprotocol/server@2.0.0':
     dependencies:
       '@modelcontextprotocol/core': 2.0.0
-      zod: 4.4.3
+      zod: 4.5.2
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
@@ -1029,7 +1029,7 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
-  '@types/ndarray@1.0.14': {}
+  '@types/ndarray@1.1.0': {}
 
   '@types/node@24.13.3':
     dependencies:
@@ -1130,7 +1130,7 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  esbuild-wasm@0.27.3: {}
+  esbuild-wasm@0.28.2: {}
 
   esbuild@0.28.2:
     optionalDependencies:
@@ -1196,7 +1196,7 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  manifold-3d@3.5.1(@types/node@24.13.3)(esbuild-wasm@0.27.3):
+  manifold-3d@3.5.1(@types/node@24.13.3)(esbuild-wasm@0.28.2):
     dependencies:
       '@gltf-transform/core': 4.4.2
       '@gltf-transform/extensions': 4.4.2
@@ -1206,7 +1206,7 @@ snapshots:
       '@jscadui/3mf-export': 0.5.0
       commander: 13.1.0
       convert-source-map: 2.0.0
-      esbuild-wasm: 0.27.3
+      esbuild-wasm: 0.28.2
       fast-xml-parser: 5.11.0
       fflate: 0.8.3
       magic-string: 0.30.21
@@ -1219,8 +1219,8 @@ snapshots:
 
   ndarray-lanczos@0.3.0:
     dependencies:
-      '@types/ndarray': 1.0.14
-      ndarray: 1.0.19
+      '@types/ndarray': 1.1.0
+      ndarray: 1.1.1
 
   ndarray-ops@1.2.2:
     dependencies:
@@ -1228,14 +1228,14 @@ snapshots:
 
   ndarray-pixels@5.2.0(@types/node@24.13.3):
     dependencies:
-      '@types/ndarray': 1.0.14
-      ndarray: 1.0.19
+      '@types/ndarray': 1.1.0
+      ndarray: 1.1.1
       ndarray-ops: 1.2.2
-      sharp: 0.35.3(@types/node@24.13.3)
+      sharp: 0.35.4(@types/node@24.13.3)
     transitivePeerDependencies:
       - '@types/node'
 
-  ndarray@1.0.19:
+  ndarray@1.1.1:
     dependencies:
       iota-array: 1.0.0
       is-buffer: 1.1.6
@@ -1297,7 +1297,7 @@ snapshots:
 
   semver@7.8.5: {}
 
-  sharp@0.35.3(@types/node@24.13.3):
+  sharp@0.35.4(@types/node@24.13.3):
     dependencies:
       '@img/colour': 1.1.0
       detect-libc: 2.1.2
@@ -1359,4 +1359,4 @@ snapshots:
 
   xml-naming@0.3.0: {}
 
-  zod@4.4.3: {}
+  zod@4.5.2: {}
