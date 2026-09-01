@@ -244,11 +244,78 @@ This local, not-yet-deployed delta now also contains:
 
 - the reconciled engineering-intent planner and 12-tool MCP surface;
 - a compact-layout correction that keeps the inspector and all controls reachable at narrow widths and browser zoom;
-- one-finger 360-degree assembly orbit;
-- two-finger vertical slide control for continuous 0–120 mm assembly explosion and reassembly;
+- an open-right-palm acquisition gate that requires model-label and palm-chirality agreement, an index-fingertip CAD cursor, and mirrored 4x thumb-index pinch-and-hold 360-degree orbit;
+- independent near/far palm-depth control for continuous assembly explosion and reassembly up to 50% of the assembled model's largest dimension;
 - one revisioned exploded-view commit when a gesture completes;
 - an accessible inspector slider with live distance, percentage, Assemble, and Full controls;
 - an on-canvas assembly gesture guide; and
 - a Smart Fault Brain notification center for Design Health findings, detached dependencies, operation diagnostics, runtime failures, and unhandled promise rejections.
 
 The Smart Fault Brain is advisory and fail-safe: it deduplicates and sanitizes messages, points to a recovery workspace, and never silently mutates the project. Physical touch-device validation remains a required pre-release smoke test even though the multi-pointer controller and UI contract have automated coverage.
+
+## 12. On-device camera hand control
+
+The pending local delta now uses the landmark architecture in
+[`ADR 0015`](./adr/0015-landmark-camera-gesture-control.md). Camera access begins
+only after a user click. A dedicated same-origin Worker mirrors each transferred
+`ImageBitmap`, runs a hash-pinned MediaPipe Hand Landmarker, returns only 21
+landmarks plus handedness/confidence/timing, and closes the frame immediately.
+One-frame backpressure prevents an inference queue and keeps synchronous video
+inference off the UI thread.
+
+Project-owned validation and gesture logic require a stable open right palm,
+require the model label to agree with mirrored wrist-index-pinky palm chirality,
+apply scale-aware continuity rejection and One Euro filtering, keep index
+movement cursor-only, and engage orbit only during a hysteretic thumb-index
+pinch hold. The CAD boundary inverts both mirrored screen deltas and applies a
+bounded 4x gain, so the model follows the visible hand direction. Left,
+ambiguous, malformed, low-confidence, missing, and discontinuous frames produce
+no CAD motion. A handedness change immediately suspends pinch and cannot inherit
+the prior lock. Assembly Explode separately maps calibrated palm width to the
+shared 50%-of-model travel limit and commits only through the existing
+preview/commit boundary. Stop, Close, timeout, worker failure, or frame-transfer
+failure releases all media and worker resources.
+
+Preview blur remains optional and visual only. The thirteen owner-supplied
+webcam photos informed the failure analysis and requested gestures; no photo or
+derived frame is copied, uploaded, retained, or used for model training.
+
+Deployment policy changes from `camera=()` to the narrower
+`camera=(self)`. Microphone, geolocation, payment, and USB remain disabled.
+The production build gate rejects a deployment that does not keep that exact
+same-origin camera boundary. It also permits only the reviewed MediaPipe
+loader/WASM/model paths and exact SHA-256 identities, verifies the runtime
+manifest and Apache notice, rejects any additional `.wasm` or `.task` file, and
+continues to reject general `unsafe-eval`, dynamic evaluation, geometry WASM,
+Manifold, and Node-only MCP code.
+
+Deterministic tests cover open-right acquisition, true-left and handedness-
+disagreement rejection, fist rejection, pinch engage/release and identity-loss
+behavior, finite/confidence validation, temporal smoothing, discontinuous-jump
+rejection, mirrored 4x orbit direction, depth stops, and the model-scale 50%
+limit. A physical webcam smoke test remains required
+before this delta can be called hardware-verified.
+
+## 13. MediaPipe development-loader routing hotfix
+
+The local Vite preview originally exposed the prepared hand runtime through
+`publicDir`. That is invalid for the MediaPipe ES-module loader: Vite blocks a
+JavaScript module imported from `publicDir` because public assets bypass module
+transforms. The browser therefore displayed a red development overlay even
+though the same files were valid production assets.
+
+The pending hotfix disables `publicDir` and adds an exact-route development
+middleware for only four reviewed same-origin assets: the runtime manifest,
+hand-landmarker model, ES-module loader, and WASM binary. It accepts only `GET`
+and `HEAD`, rejects writes with `405`, sets explicit content types and security
+headers, and cannot resolve arbitrary filesystem paths. Production bundle
+completion copies the same four-file allowlist to `dist`; the existing build
+verifier continues to enforce the pinned hashes and rejects extra runtime files.
+
+Local regression evidence confirms the loader and model return `200`, a write
+attempt returns `405`, the refreshed application has no Vite overlay or browser
+error log, and the authored suite now contains 136 passing cases. A fresh
+production bundle transforms 156 modules and passes the strict 61-asset
+production-boundary verifier with the one approved, hash-pinned vision
+WASM/model pair. Physical webcam behavior remains a separate hardware
+smoke-test requirement.

@@ -1,5 +1,6 @@
 import {
   ELECTROMECHANICAL_CATALOG,
+  WORKBENCH_LIMITS,
   electromechanicalTerminalWorldPoint,
   type AssemblyIntent,
   type ComponentInstance,
@@ -28,6 +29,19 @@ export function buildAssemblyPreview(assembly: AssemblyIntent): PreviewScene {
   const primitives = [...componentPrimitives, ...detailPrimitives, ...routePrimitives];
   const bounds = primitives.flatMap((primitive) => primitiveBounds(primitive));
   return { id: assembly.id, kind: "assembly", primitives, boundsMm: boundsFromPoints(bounds) };
+}
+
+/**
+ * Returns the shared maximum per-component explosion travel. It is based on
+ * the assembled scene so all direct-manipulation inputs remain proportional
+ * to the current model instead of using a fixed demo distance.
+ */
+export function assemblyExplodeLimitMm(assembly: AssemblyIntent, fraction = 0.5): number {
+  const assembledScene = buildAssemblyPreview({ ...assembly, explodeMm: 0 });
+  const largestDimensionMm = Math.max(0, ...assembledScene.boundsMm.size.filter(Number.isFinite));
+  const boundedFraction = Number.isFinite(fraction) ? Math.min(1, Math.max(0.05, fraction)) : 0.5;
+  const limitMm = largestDimensionMm * boundedFraction;
+  return Math.round(Math.min(WORKBENCH_LIMITS.maxCoordinateMm, Math.max(1, limitMm)) * 10) / 10;
 }
 
 function uniqueRouteSegments(points: readonly Vec3[]): readonly number[] {

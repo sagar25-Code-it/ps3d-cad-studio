@@ -30,7 +30,7 @@
       },
       {
         "name": "ps3d:metadata-accessed-on",
-        "value": "2026-08-19"
+        "value": "2026-08-31"
       }
     ]
   },
@@ -5176,6 +5176,45 @@
         {
           "name": "ps3d:usage",
           "value": "Locked transitive package required by the declared runtime or development dependency graph"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "npm:@mediapipe/tasks-vision@1.0.1",
+      "group": "@mediapipe",
+      "name": "@mediapipe/tasks-vision",
+      "version": "1.0.1",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "aef444d8598067a671292c3bc2af9efa3403a4ddedd41fed0f6989cfd4a60336f59aca0391de1d328138c0087c677d149b43d0c0b887afd42da268665e4dda51"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40mediapipe/tasks-vision@1.0.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-1.0.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "ps3d:kind",
+          "value": "npm"
+        },
+        {
+          "name": "ps3d:scope",
+          "value": "browser-runtime-direct"
+        },
+        {
+          "name": "ps3d:usage",
+          "value": "Browser runtime for same-origin 21-point hand landmark inference in an isolated worker"
         }
       ]
     },

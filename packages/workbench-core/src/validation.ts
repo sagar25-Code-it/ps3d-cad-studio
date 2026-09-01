@@ -308,7 +308,7 @@ function validateAssembly(value: unknown): WorkbenchResult<WorkbenchProject["ass
   const optional = ["template", "nominalEnvelopeMm", "designStatus", "safetyNotes", "electricalLinks", "electricalRoutes", "electromechanicalSource"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key))
     || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
-    || value.id !== "assembly:fixture-demo" || !shortText(value.name, 1, 120) || !finiteRange(value.explodeMm, 0, 200)
+    || value.id !== "assembly:fixture-demo" || !shortText(value.name, 1, 120) || !finiteRange(value.explodeMm, 0, WORKBENCH_LIMITS.maxCoordinateMm)
     || !Array.isArray(value.components) || value.components.length < 1 || value.components.length > WORKBENCH_LIMITS.maxComponents
     || !Array.isArray(value.mates) || value.mates.length > WORKBENCH_LIMITS.maxMates
     || (Object.hasOwn(value, "template") && !["custom", "cargo-20ft", "cargo-40ft-hc", "bess-20ft-hc", "electrical-panel"].includes(String(value.template)))

@@ -128,7 +128,7 @@ export function assemblyExplodeFromVerticalGesture(
   viewportHeightPx: number,
   maxExplodeMm = 120
 ): number {
-  const boundedMaximum = Number.isFinite(maxExplodeMm) ? THREE.MathUtils.clamp(maxExplodeMm, 1, 200) : 120;
+  const boundedMaximum = Number.isFinite(maxExplodeMm) ? THREE.MathUtils.clamp(maxExplodeMm, 1, 10_000) : 120;
   const travelPx = Math.max(Number.isFinite(viewportHeightPx) ? viewportHeightPx * 0.62 : 0, 160);
   const deltaMm = (startCentroidY - currentCentroidY) * boundedMaximum / travelPx;
   return Math.round(THREE.MathUtils.clamp(startExplodeMm + deltaMm, 0, boundedMaximum) * 10) / 10;
@@ -272,6 +272,20 @@ export class ThreeViewportAdapter {
     if (!Number.isFinite(azimuthDeg) || !Number.isFinite(elevationDeg)) return;
     this.#azimuth = THREE.MathUtils.degToRad(normalizeDegrees(azimuthDeg));
     this.#elevation = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(elevationDeg, -87.1, 87.1));
+    this.#orientation = "custom";
+    this.#updateCamera();
+  }
+
+  orbitByPixels(deltaX: number, deltaY: number): void {
+    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
+    const [azimuthDeg, elevationDeg] = orbitViewAngles(
+      THREE.MathUtils.radToDeg(this.#azimuth),
+      THREE.MathUtils.radToDeg(this.#elevation),
+      THREE.MathUtils.clamp(deltaX, -80, 80),
+      THREE.MathUtils.clamp(deltaY, -80, 80)
+    );
+    this.#azimuth = THREE.MathUtils.degToRad(azimuthDeg);
+    this.#elevation = THREE.MathUtils.degToRad(elevationDeg);
     this.#orientation = "custom";
     this.#updateCamera();
   }

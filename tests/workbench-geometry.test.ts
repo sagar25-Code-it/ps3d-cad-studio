@@ -1,5 +1,6 @@
 import { createWorkbenchProject } from "../packages/workbench-core/src/index.js";
 import {
+  assemblyExplodeLimitMm,
   bezierPoint,
   buildAssemblyPreview,
   buildControlNet,
@@ -17,6 +18,16 @@ export const workbenchGeometryTests: readonly TestCase[] = [
       equal(scene.kind, "assembly", "scene kind should remain explicit");
       equal(scene.primitives.length, assembly.components.length, "all visible components should render");
       assert(scene.boundsMm.size.every((value) => Number.isFinite(value) && value > 0), "assembly bounds must be finite and positive");
+    }
+  },
+  {
+    name: "assembly exploded-view travel is exactly fifty percent of the largest assembled dimension",
+    run: () => {
+      const assembly = createWorkbenchProject("project:test-model-scale-explode").assembly;
+      const scene = buildAssemblyPreview({ ...assembly, explodeMm: 0 });
+      const largestDimensionMm = Math.max(...scene.boundsMm.size);
+      near(assemblyExplodeLimitMm(assembly), Math.round(largestDimensionMm * 5) / 10, 1e-9, "the shared explode limit should remain proportional to assembled bounds");
+      equal(assemblyExplodeLimitMm({ ...assembly, explodeMm: 999 }), assemblyExplodeLimitMm(assembly), "the limit must not depend on the current exploded state");
     }
   },
   {

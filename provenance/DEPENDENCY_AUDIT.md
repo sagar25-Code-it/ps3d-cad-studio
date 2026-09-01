@@ -1,6 +1,6 @@
 # Phase 1 Dependency Audit
 
-**Audit date:** 2026-08-19  
+**Audit date:** 2026-08-31
 **Decision:** Approved for the bounded local workbench preview; public-release review remains required  
 **Policy:** [`SOURCE_POLICY.md`](SOURCE_POLICY.md)
 
@@ -15,19 +15,21 @@ lock immediately after the lock update.
 
 `scripts/verify-dependency-inventory.mjs` now enforces a deny-by-default,
 one-to-one match between every `packages` entry in `pnpm-lock.yaml` and the
-inventory. The current lock contains 139 exact package artifacts. pnpm 11.9.0
+inventory. The current lock contains 140 exact package artifacts. pnpm 11.9.0
 is recorded separately as the external package-manager artifact, bringing the
-recorded total to 140.
+recorded total to 141.
 
 | SPDX declaration | Locked artifacts |
 | --- | ---: |
 | MIT | 111 |
-| Apache-2.0 | 25 |
+| Apache-2.0 | 26 |
 | ISC | 2 |
 | BSD-3-Clause | 1 |
 
 pnpm adds one MIT external-tool record. Floating versions, CDN imports,
-vendored third-party source, fonts, icons, and media are absent.
+vendored third-party source, fonts, and icons are absent. The hand-control
+build prepares one reviewed model artifact and its two reviewed MediaPipe
+runtime files into a generated cache; none is checked into repository source.
 
 ## Direct selection
 
@@ -36,6 +38,7 @@ vendored third-party source, fonts, icons, and media are absent.
 | React | 19.2.8 | MIT | browser presentation |
 | React DOM | 19.2.8 | MIT | browser presentation |
 | three | 0.185.1 | MIT | disposable viewport adapter |
+| @mediapipe/tasks-vision | 1.0.1 | Apache-2.0 | isolated browser hand-landmark worker |
 | @modelcontextprotocol/server | 2.0.0 | MIT | local Node stdio MCP server only |
 | zod | 4.4.3 | MIT | local MCP runtime schemas only |
 | TypeScript | 7.0.2 | Apache-2.0 | development |
@@ -66,10 +69,14 @@ binaries. Candidate qualification does not perform image processing.
 and permits no dependency build scripts. Those artifacts are absent from the
 lock graph and installation.
 
-The deployed worker continues to use the project-owned, bracket-specific f64
-kernel for its one qualified solid path. Production build gates reject
-Manifold/WASM artifacts, dynamic code generation, and the Node-only MCP SDK
-from the browser graph.
+The deployed solid evaluator continues to use the project-owned,
+bracket-specific f64 kernel for its one qualified solid path. Production build
+gates reject Manifold and geometry-kernel WASM artifacts, dynamic code
+generation, and the Node-only MCP SDK from the browser graph. Camera control
+is the sole production WASM exception: the build gate allows exactly one
+same-origin MediaPipe loader/WASM pair and one Hand Landmarker model, each at
+an exact reviewed SHA-256. Any additional `.wasm`, `.task`, loader, model, or
+runtime file fails the build.
 
 ## Installation and verification
 
@@ -82,10 +89,12 @@ pnpm verify:deps
 ```
 
 The frozen install must not alter the lockfile. On 2026-08-19,
-`pnpm peers check` reported no peer issues. `pnpm audit --json` checked all 139
-locked packages and `pnpm audit --prod --json` checked the seven production
-dependencies; both reported zero informational, low, moderate, high, or
-critical vulnerabilities. Typecheck also passed against this graph.
+`pnpm peers check` reported no peer issues. On 2026-08-31, a fresh
+`pnpm audit --prod --json` check of the updated production graph, including the
+pinned vision runtime, reported zero informational, low, moderate, high, or
+critical advisories across its eight production dependency entries. Typecheck
+and all 135 deterministic tests also pass against the updated graph. Advisory
+results remain time-dependent and must still be repeated at release time.
 
 Registry advisory results are time-dependent and must be rerun at release
 time. Package metadata review does not replace security, export-control,

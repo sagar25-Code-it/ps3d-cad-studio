@@ -5,7 +5,7 @@
   "defaultDecision": "deny",
   "allowUndeclaredDependencies": false,
   "metadataSource": "Official npm registry package-version metadata",
-  "metadataAccessedOn": "2026-08-19",
+  "metadataAccessedOn": "2026-08-31",
   "lockfile": "../pnpm-lock.yaml",
   "excludedOptionalDependencies": [
     {
@@ -1889,6 +1889,20 @@
       "approvedBy": "Phase 0 implementation task authorization",
       "approvedOn": "2026-08-19",
       "noticeRequirements": "Retain MIT copyright and permission notice"
+    },
+    {
+      "id": "npm:@mediapipe/tasks-vision@1.0.1",
+      "kind": "npm",
+      "name": "@mediapipe/tasks-vision",
+      "version": "1.0.1",
+      "source": "https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-1.0.1.tgz",
+      "integrity": "sha512-rvRE2FmAZ6ZxKSw7wq+e+jQDpN3t1B/tD2mJz9SmAzb1msoDkd4dMoE4wAh8Z30Um0PQwLiHr9QtomhmXk3aUQ==",
+      "license": "Apache-2.0",
+      "usage": "Browser runtime for same-origin 21-point hand landmark inference in an isolated worker",
+      "scope": "browser-runtime-direct",
+      "approvedBy": "User-authorized camera tracking architecture implementation",
+      "approvedOn": "2026-08-31",
+      "noticeRequirements": "Retain Apache-2.0 license, copyright, attribution, modification notices, and NOTICE if supplied"
     },
     {
       "id": "npm:@modelcontextprotocol/core@2.0.0",

@@ -1,6 +1,6 @@
 # Generated and Assisted Material Record
 
-**Record date:** 2026-08-27
+**Record date:** 2026-09-01
 **Material:** Phase 0 qualified-slice and Phase 1 broad-workbench application
 source, tests, configuration, Python MCP client, local 3D exchange and PDF
 delivery, standards-aware engineering drawing and tolerance assistance,
@@ -94,6 +94,10 @@ previews, and a read-only vehicle MCP analysis. The implementation used only:
   suspension manual; and an open peer-reviewed three-wheel dynamics paper to
   establish terminology, equation boundaries, and unavailable qualification
   work without copying proprietary CAD, paid standards text, or OEM data; and
+- official Google AI Edge Hand Landmarker documentation plus the exact
+  inventoried Apache-2.0 MediaPipe Tasks Vision package and hash-pinned official
+  model artifact, used only for on-device anatomical landmark inference; no
+  documentation sample, user image, or external training data was copied; and
 - public McMaster-Carr category and filter pages for high-level component-family
   and selection-field orientation only. No supplier photograph, illustration,
   logo, page design, wording, SKU, price, inventory, downloadable CAD asset, or
@@ -138,7 +142,9 @@ sketch entities and constraint
 diagnostics, sketch palette, pair-selection controls, and bounded driving
 dimensions; the worker-qualified centered-bore mesh-solid plus named camera
 views, orbit/pan/zoom/fit, projection control, an original view box and WCS axis
-viewer, selection priorities, point measurement, and bounded feature
+viewer, selection priorities, point measurement, an explicit user-started
+on-device 21-landmark worker controller for same-direction orbit and
+bounded Assembly explode preview/commit, and bounded feature
 intent; editable component instances, supported mates, exploded state, and conservative
 interference candidates; bicubic Bézier and ruled-loft surface tessellation;
 safe associative SVG drafting with a descriptive front base view, aligned
@@ -248,8 +254,8 @@ deployment, release, or legal clearance.
   self-referential record.
   Symbolic links are rejected.
 - Canonical source-set hash:
-  `7286674fb6a969699a45d767fbd565b056ef33b7c235755877818c910cf7692a`
-- Canonical source-set file count: 363
+`64710c12c753f81d917607b568e24955054d98763cb91904cc44656c4349b4a5`
+- Canonical source-set file count: 371
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
   `provenance/BUILD_IDENTITY.json`, SHA-256
@@ -257,7 +263,7 @@ deployment, release, or legal clearance.
   The identity carrier remains outside that closure; the value was recomputed
   in the existing in-app runtime and matched exactly.
 - CycloneDX artifact: `artifacts/sbom/ps3d.cdx.json`, deterministically derived
-  from all 140 recorded components.
+  from all 141 recorded components.
 - Human-authored changes after generation: the reviewed pnpm dependency-build
   policy explicitly allows only `esbuild`, which is required by Vite's fresh
   production install. Repository verification also excludes the generated
@@ -374,3 +380,27 @@ browser bundle and real MCP stdio exchange completed before the current
   cover continuous preview plus one revisioned commit. A physical capacitive
   touch-device smoke test remains required before release; desktop automation
   does not constitute evidence for device palm rejection or OS touch drivers.
+  The former colour/silhouette camera experiment was then superseded by an
+  anatomical landmark architecture. A hash-pinned MediaPipe Hand Landmarker
+  runs in a dedicated same-origin Worker with one-frame backpressure and returns
+  only 21 points, handedness, confidence, and timing. Project-owned logic adds
+  finite-data validation, scale-aware continuity rejection, One Euro filtering,
+  joint-angle/open-palm interpretation, seven-frame right-hand acquisition,
+  pinch hysteresis, cursor-only index motion, and bounded palm-width explosion.
+  Confidence-gated model identity is independently checked against palm
+  chirality using the worker's mirrored selfie-coordinate convention: a
+  palm-facing right hand produces the negative wrist-index-pinky signed area.
+  Clear opposite-hand evidence fails closed, while edge-on
+  anatomical ambiguity no longer erases a valid high-confidence right-hand
+  identity. The panel exposes model, palm, and resolved identity codes for
+  live diagnosis. Left, model-ambiguous, conflicting, missing, malformed, or
+  discontinuous observations produce no CAD motion; handedness changes suspend
+  pinch immediately and cannot inherit a lock. Runtime failure releases camera
+  and worker resources. The exact package,
+  loader, WASM, and model identities are inventoried and production-gated. The
+  owner-supplied photos were not copied, uploaded, or used to train the model.
+  Deterministic coverage passes 137/137 cases, including cursor and relative
+  orbit emission across the complete authorized landmark-control boundary and
+  the exact read-only development runtime-route regression, before final source-identity and browser
+  verification. A physical webcam smoke test remains required for
+  hardware-specific evidence and cannot be replaced by synthetic landmarks.
