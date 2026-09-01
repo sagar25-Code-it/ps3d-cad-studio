@@ -44,22 +44,26 @@ This note records the confirmed state **before** corrective edits for the fault-
 |---|---|
 | DV-001 | Reconciled the engineering-intent planner, expanded MCP/Python contracts, File/Render work, analytic Part features, and responsive UI into the latest UI worktree without replacing the newer owner changes. |
 | DV-004 | Replaced the compact fixed-height/hidden-overflow policy with a scrollable document flow. At the in-app browser's minimum available width, document width equals viewport width and document height now reaches the complete inspector. |
-| DV-005 | Added an active touch-pointer map, stable centroid tracking, continuous 0–120 mm explosion preview, and a single revisioned commit at gesture completion. |
+| DV-005 | Added an active touch-pointer map, stable centroid tracking, continuous model-scale explosion preview capped at 50% of the assembled scene's largest dimension, and a single revisioned commit at gesture completion. |
 | DV-006 | Assembly touch input now maps one finger directly to 360-degree orbit regardless of the desktop selection tool. Desktop mouse behavior remains unchanged. |
 | DV-007 | Added an accessible exploded-view distance control with live millimetres, percentage, Assemble/Full commands, preview/commit separation, and on-canvas gesture help. |
 | DV-008 | Added a deterministic Smart Fault Brain that deduplicates Design Health, dependency, operation, browser-error, and unhandled-rejection notices; sanitizes credentials and local paths; announces new faults; and routes the user to recovery without silently changing CAD. |
+| DV-011 | Replaced always-on fingertip orbit with a right-hand state machine: open-palm acquisition, cursor-only index tracking, hysteretic thumb-index pinch orbit, palm-continuity hand lock, jump rejection, and independent palm-depth explosion. |
+| DV-012 | Superseded: the temporary colour/silhouette detector was useful only as an experiment and is no longer the production camera-control path. |
+| DV-013 | Replaced production camera perception with a hash-pinned 21-landmark model in an isolated same-origin Worker; added backpressure, One Euro filtering, strict right-hand identity continuity, pinch hysteresis, fail-closed invalid-frame handling, and exact runtime/model build gates. |
+| DV-014 | Hardened right-hand-only control by requiring model-label and mirrored palm-chirality agreement, inverted both mirrored axes for direct model manipulation, increased bounded orbit gain to 4x, and raised the shared assembly explosion limit to 50% of model scale. |
 
 ## Post-fix verification evidence
 
 - TypeScript test compilation passes.
-- The compiled behavioral suite passes **124/124** cases, including touch-explode mapping and Smart Fault Brain redaction/deduplication.
+- The compiled behavioral suite passes **136/136** cases. Landmark-specific coverage includes model-label plus anatomical-chirality agreement, open-right acquisition, left/unknown/fist rejection, pinch engage/release hysteresis, immediate pinch suspension on identity change, finite/confidence validation, temporal smoothing, discontinuous-jump rejection, mirrored 4x orbit mapping, and the shared 50% model-relative explosion limit. Historical silhouette tests remain regression-only and do not describe the production path.
 - The real MCP stdio verifier discovers and validates all **12** tool schemas.
 - The production Vite bundle compiles successfully.
 - `git diff --check` is clean.
 - The targeted source scan reports no accidental shell-output blocks, TODO/FIXME markers, dynamic evaluation, raw console logging, or `dangerouslySetInnerHTML` in the changed gesture/fault-brain surface.
 - At the in-app browser minimum width (758 × 900), there is no document-level horizontal overflow, the complete inspector is reachable by scrolling, and the Smart Fault Brain drawer fits inside the viewport.
-- The rendered Assembly workspace exposes the one-finger orbit and two-finger vertical-explode guidance, a labeled 18.0 mm / 15% live controller, and the deduplicated fault count.
+- Static UI inspection confirms that the Assembly workspace exposes touch plus open-palm/index/pinch/palm-depth camera guidance, a live millimetre/percentage controller against the shared 50%-of-model limit, and the deduplicated fault count.
 
 Automated tests validate the multi-pointer state machine and continuous preview/commit contract. A final physical capacitive-screen smoke test is still required before release because desktop browser automation cannot truthfully reproduce the user's actual fingers, device palm rejection, or OS touch-driver behavior.
 
-After this record was finalized, the exact recorded source passed repository-boundary verification, dependency policy, deterministic SBOM verification, all 124 behavioral tests, the 12-tool MCP stdio lifecycle, evaluator identity, generated source-set identity, strict-CSP production-boundary verification, and the complete production build.
+After the original record was finalized, its exact recorded source passed repository-boundary verification, dependency policy, deterministic SBOM verification, all 124 then-current behavioral tests, the 12-tool MCP stdio lifecycle, evaluator identity, generated source-set identity, strict-CSP production-boundary verification, and the complete production build. The later right-hand camera and photo-informed clutter/pinch deltas separately pass the expanded 131-case suite before refreshed source-set and production-build verification. A fresh interactive webcam smoke test remains required.

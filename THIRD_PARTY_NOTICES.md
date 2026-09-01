@@ -11,10 +11,14 @@ components; the repository MIT License does not relicense third-party work.
 | React | 19.2.8 | MIT | Accessible presentation shell |
 | React DOM | 19.2.8 | MIT | Browser rendering for React |
 | three | 0.185.1 | MIT | Disposable 3D viewport adapter |
+| @mediapipe/tasks-vision | 1.0.1 | Apache-2.0 | Same-origin 21-point hand-landmark inference in an isolated worker |
 
 The project-owned pure MCP handler/simulator code is part of the browser
 source. No external MCP SDK, Node server code, Zod runtime, Manifold package,
-or WASM payload is bundled into the browser artifact.
+or geometry-kernel WASM payload is bundled into the browser artifact. Camera
+control includes one hash-pinned MediaPipe vision WASM runtime and one
+hash-pinned Hand Landmarker model. Both are served from the PS3D origin; no
+camera frame or landmark result is sent to an external service.
 
 ## Local MCP stdio runtime
 
@@ -48,7 +52,8 @@ Apache-2.0 components require preservation of the Apache License 2.0 text,
 copyright and attribution notices, modification notices where applicable, and
 any upstream `NOTICE` supplied with a distribution. Release packaging must
 reproduce applicable upstream license files and notices; this summary is not a
-substitute for those texts.
+substitute for those texts. The browser distribution includes the complete
+standard Apache License 2.0 text at `licenses/APACHE-2.0.txt`.
 
 The production `dist` license payload is generated from modules actually
 bundled into the browser artifact. The build gate fails if Manifold, its WASM,

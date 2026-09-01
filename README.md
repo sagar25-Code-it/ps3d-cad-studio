@@ -37,6 +37,31 @@ Official PS3D Master links: [Engineering calculator](https://stepper-calculator.
 | Vehicle | Preview | Five original topology-specific motorcycle/scooter/EV/three-wheel packages; one authoritative SI hardpoint/member graph for 3D and orthographic projection; fork, swingarm, unit-swing and front-view wishbone state constraints; Ackermann targets; brake/tyre, road-load, operating-point and support-polygon screens; visible invariant gate; full-droop/design/full-bump states; and explicit safety boundaries |
 | Automate | Preview | Twelve model-neutral local and authenticated remote MCP tools, built-in engineering-intent decomposition for parts and multi-level assemblies, machine-readable collaboration guide, experience-adapted stateless coordination agent, deterministic command finder, all-workspace Design Health analysis, scoped receipt-gated previews, OAuth/personal-token access, and a dependency-free Python client |
 
+The 3D workspaces also provide an explicit, on-device camera hand controller.
+After the user starts the camera, a dedicated same-origin Worker runs a
+hash-pinned MediaPipe Hand Landmarker and returns only 21 landmarks,
+handedness, confidence, and timing. Raw mirrored frames are closed immediately
+inside the worker and are never stored or uploaded. Seven stable open-right-
+palm frames acquire control only when the model label and mirrored wrist-index-
+pinky palm chirality agree; left, ambiguous, malformed, low-confidence, and
+discontinuous detections fail closed. The index fingertip moves a visible CAD
+cursor without rotating the model. Touching and holding thumb and index engages
+mirrored direct-manipulation orbit with 4x gain and hysteresis; releasing them
+stops orbit.
+In Assembly, apparent palm depth independently maps far to assembled and near
+to a maximum per-component travel of 50% of the assembled scene's largest
+X/Y/Z extent. Intermediate palm depth produces a smoothed partial explosion,
+and one project revision is committed when motion is paused, stopped, or the
+workspace is left. Camera frames stay in the current browser tab, are not
+stored or uploaded, and media tracks are released on Stop, Close, or component
+unmount. One-frame backpressure prevents inference queues, a One Euro filter
+reduces normal jitter, and scale-aware jump rejection prevents a one-frame
+background steal. Optional preview blur is visual only. The owner-supplied
+photo set was used only to understand failure conditions; it was not copied,
+uploaded, retained as biometric data, or used for training. This remains an
+optional probabilistic input, so a live webcam smoke test and mouse/touch/
+keyboard fallbacks remain required.
+
 The public account portal supports verified-email sign-up, sign-in, sign-out,
 password recovery, tab-scoped sessions, and up to five unique expiring MCP
 personal tokens per user. OAuth 2.1 is the preferred connection path for

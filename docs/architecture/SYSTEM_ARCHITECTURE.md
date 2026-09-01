@@ -30,6 +30,7 @@ This document is read together with:
 - [ADR 0001: Permissive Mesh-Solid Kernel](../adr/0001-permissive-mesh-solid-kernel.md)
 - [ADR 0002: Worker Isolation](../adr/0002-worker-isolation.md)
 - [ADR 0003: Semantic Document and Evidence](../adr/0003-semantic-document-and-evidence.md)
+- [ADR 0015: Landmark Camera Gesture Control](../adr/0015-landmark-camera-gesture-control.md)
 - [Phase 0 and Phase 1 PRD](../product/PRD_PHASE_0_1.md)
 - [Product Roadmap](../product/ROADMAP.md)
 
@@ -42,7 +43,9 @@ kernel. The proposed Manifold adapter remains a development-only qualification
 candidate for Phase 1; it is not reachable from the production browser graph,
 and no WASM artifact or dynamic code generation ships in Phase 0. References
 below to WASM solvers and a general mesh-solid dependency describe gated future
-adapters, not current runtime claims.
+adapters, not current geometry-runtime claims. The sole production WASM
+exception is the isolated, hash-pinned hand-landmark perception adapter in ADR
+0015; it cannot evaluate or mutate CAD geometry.
 
 ## 2. Governing principles
 

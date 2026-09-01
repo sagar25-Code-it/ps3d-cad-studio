@@ -5,6 +5,7 @@ import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 
 interface AssemblyInspectorProps {
   readonly assembly: AssemblyIntent;
+  readonly maxExplodeMm: number;
   readonly selectedId: string | null;
   readonly interferences: readonly InterferenceCandidate[];
   readonly onTemplate: (template: Exclude<AssemblyTemplateId, "custom" | "electrical-panel">) => void;
@@ -32,6 +33,7 @@ export function AssemblyInspector(props: AssemblyInspectorProps): React.JSX.Elem
   const satisfied = props.assembly.mates.filter((mate) => mate.status === "satisfied").length;
   const linkedDevices = props.assembly.electricalLinks?.length ?? 0;
   const installationHardware = Math.max(0, props.assembly.components.length - linkedDevices);
+  const explodePercent = Math.round(Math.min(100, props.assembly.explodeMm / props.maxExplodeMm * 100));
   const mateTargets = selected === undefined ? [] : props.assembly.components.filter((component) => component.id !== selected.id);
   useEffect(() => {
     if (mateTargets.some((component) => component.id === mateTargetId)) return;
@@ -45,15 +47,15 @@ export function AssemblyInspector(props: AssemblyInspectorProps): React.JSX.Elem
     {props.assembly.electromechanicalSource !== undefined && <section className={`electromechanical-source-card ${props.assembly.electromechanicalSource.status}`}><header><strong>ECAD ↔ panel trace</strong><span>{props.assembly.electromechanicalSource.status}</span></header><dl className="compact-facts"><div><dt>Catalog</dt><dd>{props.assembly.electromechanicalSource.catalogRevision}</dd></div><div><dt>Layout</dt><dd>{props.assembly.electromechanicalSource.layoutPreset.replaceAll("-", " ")}</dd></div><div><dt>Devices</dt><dd>{linkedDevices} linked</dd></div><div><dt>Hardware</dt><dd>{installationHardware} generated</dd></div><div><dt>Conductors</dt><dd>{props.assembly.electricalRoutes?.length ?? 0} unsized</dd></div></dl>{props.assembly.electromechanicalSource.status === "stale" && <p>The schematic or linked package layout changed after conductor generation. Regenerate before relying on traceability.</p>}<button className="primary full" onClick={() => props.onOpenElectricalSource(selected?.sourceElectricalComponentId)}>Open {selected?.sourceElectricalComponentId === undefined ? "source schematic" : "selected source device"}</button></section>}
     <section className="assembly-template-card"><header><strong>{props.assembly.template === "electrical-panel" ? "Wired mounting-plate realization" : "Editable planning template"}</strong><span>{props.assembly.designStatus ?? "editable-preview"}</span></header><div><button className={props.assembly.template === "cargo-20ft" ? "active" : ""} onClick={() => props.onTemplate("cargo-20ft")}><strong>20 ft cargo</strong><small>6058 × 2438 × 2591 mm nominal</small></button><button className={props.assembly.template === "cargo-40ft-hc" ? "active" : ""} onClick={() => props.onTemplate("cargo-40ft-hc")}><strong>40 ft high cube</strong><small>12192 × 2438 × 2896 mm nominal</small></button><button className={props.assembly.template === "bess-20ft-hc" ? "active warning" : "warning"} onClick={() => props.onTemplate("bess-20ft-hc")}><strong>BESS arrangement</strong><small>20 ft HC · equipment + aisle study</small></button></div>{props.assembly.nominalEnvelopeMm !== undefined && <dl className="compact-facts"><div><dt>Nominal envelope</dt><dd>{props.assembly.nominalEnvelopeMm.join(" × ")} mm</dd></div><div><dt>Template</dt><dd>{(props.assembly.template ?? "custom").replaceAll("-", " ")}</dd></div></dl>}</section>
     <section className="explode-card">
-      <header><div><strong>Exploded view</strong><small>Live assembly controller</small></div><output>{props.assembly.explodeMm.toFixed(1)} mm · {Math.round(props.assembly.explodeMm / 1.2)}%</output></header>
+      <header><div><strong>Exploded view</strong><small>50% model-scale travel limit</small></div><output>{props.assembly.explodeMm.toFixed(1)} mm · {explodePercent}%</output></header>
       <div className="explode-controls">
         <button onClick={() => { props.onExplodePreview(0); props.onExplodeCommit(0); }}>Assemble</button>
         <input
           aria-label="Assembly exploded-view distance"
-          aria-valuetext={`${props.assembly.explodeMm.toFixed(1)} millimeters, ${Math.round(props.assembly.explodeMm / 1.2)} percent exploded`}
+          aria-valuetext={`${props.assembly.explodeMm.toFixed(1)} millimeters, ${explodePercent} percent exploded`}
           type="range"
           min="0"
-          max="120"
+          max={props.maxExplodeMm}
           step="0.5"
           value={props.assembly.explodeMm}
           onChange={(event) => props.onExplodePreview(Number(event.target.value))}
@@ -62,10 +64,10 @@ export function AssemblyInspector(props: AssemblyInspectorProps): React.JSX.Elem
           onKeyUp={(event) => props.onExplodeCommit(Number(event.currentTarget.value))}
           onBlur={(event) => props.onExplodeCommit(Number(event.currentTarget.value))}
         />
-        <button onClick={() => { props.onExplodePreview(120); props.onExplodeCommit(120); }}>Full</button>
+        <button onClick={() => { props.onExplodePreview(props.maxExplodeMm); props.onExplodeCommit(props.maxExplodeMm); }}>Full</button>
       </div>
-      <meter min="0" max="120" value={props.assembly.explodeMm}>{Math.round(props.assembly.explodeMm / 1.2)}%</meter>
-      <small className="property-help">One finger orbits. Slide two fingers up to explode and down to assemble; one project revision is committed when the gesture ends.</small>
+      <meter min="0" max={props.maxExplodeMm} value={props.assembly.explodeMm}>{explodePercent}%</meter>
+      <small className="property-help">Camera: lock the right palm, pinch thumb to index, then drag with mirrored 4x orbit; in Explode mode keep the palm open and move near/far. Touch: one finger orbits and two fingers slide vertically. A single project revision is committed when the gesture ends.</small>
     </section>
     <section className="inspector-section"><header><strong>Components</strong><span>{props.assembly.components.length}</span></header><div className="component-list">{props.assembly.components.map((component) => <button key={component.id} className={`${component.id === props.selectedId ? "selected" : ""} ${component.visible ? "" : "hidden-component"}`} onClick={() => props.onSelect(component.id === props.selectedId ? null : component.id)}><i style={{ background: component.color }} /><span><strong>{component.name}</strong><small>{component.shape} · {component.grounded ? "grounded" : "free"} · {component.visible ? "shown" : "hidden"}</small></span></button>)}</div></section>
     <section className="inspector-section"><header><strong>Create direct mate</strong><span>same canvas</span></header>

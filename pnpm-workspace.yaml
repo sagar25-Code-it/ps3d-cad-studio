@@ -13,4 +13,5 @@ allowBuilds:
   esbuild: true
 
 catalog:
+  '@mediapipe/tasks-vision': 1.0.1
   esbuild-wasm: 0.27.3

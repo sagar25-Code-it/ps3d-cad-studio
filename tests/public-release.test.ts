@@ -47,6 +47,24 @@ export const publicReleaseTests: readonly TestCase[] = [
     }
   },
   {
+    name: "hand runtime uses exact development routes instead of Vite public-module imports",
+    run: () => {
+      const viteConfig = readFileSync("apps/studio-web/vite.config.mjs", "utf8");
+      assert(viteConfig.includes("publicDir: false"), "Vite publicDir must remain disabled because MediaPipe imports its loader as a module");
+      assert(viteConfig.includes("configureServer(server)"), "development must serve the reviewed hand runtime before Vite transform middleware");
+      for (const runtimePath of [
+        "/mediapipe/runtime-manifest.json",
+        "/mediapipe/models/hand_landmarker-float16-v1.task",
+        "/mediapipe/wasm/vision_wasm_module_internal.js",
+        "/mediapipe/wasm/vision_wasm_module_internal.wasm"
+      ]) {
+        assert(viteConfig.includes(runtimePath), `the exact hand-runtime route ${runtimePath} must remain explicit`);
+      }
+      assert(viteConfig.includes('candidate.url === pathname'), "development routing must reject every non-allowlisted runtime path");
+      assert(viteConfig.includes('request.method !== "GET" && request.method !== "HEAD"'), "runtime middleware must remain read-only");
+    }
+  },
+  {
     name: "Smart Brain deduplicates engineering faults and redacts runtime secrets",
     run: () => {
       const report = buildDesignHealthReport(createWorkbenchProject("project:fault-brain-test"));

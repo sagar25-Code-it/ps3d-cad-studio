@@ -498,7 +498,11 @@
     transform: none;
   }
 
-  .studio-app .assembly-gesture-hud > span:nth-child(2) { display: none; }
+  .studio-app .assembly-gesture-hud > span:nth-child(2),
+  .studio-app .assembly-gesture-hud > span:nth-child(3) { display: none; }
+
+  .studio-app .camera-gesture-launcher { left: 0.5rem; bottom: 7.2rem; }
+  .studio-app .camera-gesture-panel { left: 0.5rem; bottom: 7.2rem; width: min(292px, calc(100% - 1rem)); }
 
   .studio-app .fault-brain-shell { right: 0.45rem; bottom: 0.45rem; }
   .studio-app .fault-brain-launcher { min-width: 136px; }
@@ -627,6 +631,15 @@
 
   .studio-app .controller-group > span { display: none; }
   .studio-app .viewbox { right: 0.2rem; }
+  .studio-app .camera-gesture-launcher { bottom: 10.75rem; }
+  .studio-app .camera-gesture-panel {
+    top: 4rem;
+    right: 0.35rem;
+    bottom: auto;
+    left: 0.35rem;
+    width: auto;
+    max-height: calc(100% - 4.35rem);
+  }
 
   .studio-app :where(.profile-list, .constraint-buttons, .component-position-editor > div, .component-actions, .tolerance-grid, .gdt-list, .electrical-position-editor) {
     grid-template-columns: minmax(0, 1fr);

@@ -42,7 +42,7 @@ import {
   type Vec3,
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
-import { buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference } from "../../../packages/workbench-geometry/src/index.js";
+import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
 import { createDrawingSvg } from "../../../packages/workbench-drawing/src/index.js";
@@ -98,6 +98,7 @@ import { ProjectTree } from "./ui/ProjectTree.js";
 import { CommandPalette } from "./ui/CommandPalette.js";
 import { ExchangeCenter } from "./ui/ExchangeCenter.js";
 import { ViewportChrome } from "./ui/ViewportChrome.js";
+import { CameraGestureControl, type CameraCursorState } from "./ui/CameraGestureControl.js";
 import { DesignHealthCenter } from "./ui/DesignHealthCenter.js";
 import { SmartFaultBrain } from "./ui/SmartFaultBrain.js";
 import { WorkbenchContextMenu } from "./ui/WorkbenchContextMenu.js";
@@ -211,6 +212,7 @@ export function App(): React.JSX.Element {
   const [contextMenu, setContextMenu] = useState<OpenContextMenu>();
   const clientRef = useRef<GeometryWorkerClient | undefined>(undefined);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cameraCursorRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
   const renderCanvasRef = useRef<HTMLCanvasElement>(null);
   const renderViewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
@@ -218,9 +220,11 @@ export function App(): React.JSX.Element {
   const nativeInputRef = useRef<HTMLInputElement>(null);
   const engineeringDialogRef = useRef<HTMLElement>(null);
 
+  const assemblyExplodeMaxMm = useMemo(() => assemblyExplodeLimitMm(project.assembly), [project.assembly]);
   const displayedAssembly = useMemo(() => assemblyExplodePreviewMm === null
     ? project.assembly
     : { ...project.assembly, explodeMm: assemblyExplodePreviewMm }, [assemblyExplodePreviewMm, project.assembly]);
+  const assemblyExplodePercent = Math.round(Math.min(100, displayedAssembly.explodeMm / assemblyExplodeMaxMm * 100));
   const assemblyScene = useMemo(() => buildAssemblyPreview(displayedAssembly), [displayedAssembly]);
   const partScene = useMemo(() => buildPartPreview(project.part), [project.part]);
   const interferences = useMemo(() => findAssemblyInterference(displayedAssembly), [displayedAssembly]);
@@ -290,18 +294,27 @@ export function App(): React.JSX.Element {
   }, [pushProject]);
 
   const previewAssemblyExplode = useCallback((valueMm: number): void => {
-    const bounded = Math.round(Math.min(120, Math.max(0, Number.isFinite(valueMm) ? valueMm : 0)) * 10) / 10;
+    const bounded = Math.round(Math.min(assemblyExplodeMaxMm, Math.max(0, Number.isFinite(valueMm) ? valueMm : 0)) * 10) / 10;
     assemblyExplodeRef.current = bounded;
     setAssemblyExplodePreviewMm(bounded);
-  }, []);
+  }, [assemblyExplodeMaxMm]);
 
   const commitAssemblyExplode = useCallback((valueMm = assemblyExplodeRef.current): void => {
-    const bounded = Math.round(Math.min(120, Math.max(0, Number.isFinite(valueMm) ? valueMm : 0)) * 10) / 10;
+    const bounded = Math.round(Math.min(assemblyExplodeMaxMm, Math.max(0, Number.isFinite(valueMm) ? valueMm : 0)) * 10) / 10;
     assemblyExplodeRef.current = bounded;
     setAssemblyExplodePreviewMm(null);
     if (Math.abs(projectRef.current.assembly.explodeMm - bounded) <= 0.05) return;
     applyProjectOperation({ kind: "set-assembly-explode", valueMm: bounded });
-  }, [applyProjectOperation]);
+  }, [applyProjectOperation, assemblyExplodeMaxMm]);
+
+  const updateCameraCursor = useCallback((cursor: CameraCursorState): void => {
+    const element = cameraCursorRef.current;
+    if (element === null) return;
+    element.hidden = !cursor.visible;
+    element.style.setProperty("--camera-cursor-x", `${Math.min(100, Math.max(0, cursor.x * 100)).toFixed(2)}%`);
+    element.style.setProperty("--camera-cursor-y", `${Math.min(100, Math.max(0, cursor.y * 100)).toFixed(2)}%`);
+    element.classList.toggle("pinching", cursor.pinching);
+  }, []);
 
   useEffect(() => {
     assemblyExplodeRef.current = project.assembly.explodeMm;
@@ -455,13 +468,13 @@ export function App(): React.JSX.Element {
         getExplodeMm: () => assemblyExplodeRef.current,
         onExplodePreview: previewAssemblyExplode,
         onExplodeCommit: commitAssemblyExplode,
-        maxExplodeMm: 120
+        maxExplodeMm: assemblyExplodeMaxMm
       } } : {})
     });
     viewport.restoreViewState(viewportState);
     viewportRef.current = viewport;
     return () => { viewport.dispose(); viewportRef.current = undefined; };
-  }, [acceptMeasurePoint, commitAssemblyExplode, isThreeDimensional, masterCartOpen, openContextMenu, previewAssemblyExplode, project.activeWorkspace]);
+  }, [acceptMeasurePoint, assemblyExplodeMaxMm, commitAssemblyExplode, isThreeDimensional, masterCartOpen, openContextMenu, previewAssemblyExplode, project.activeWorkspace]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -1701,6 +1714,7 @@ export function App(): React.JSX.Element {
       displayUnit={document.displayUnit}
       sketchTool={sketchTool}
       sketchDimensionMode={sketchDimensionMode}
+      assemblyExplodeMaxMm={assemblyExplodeMaxMm}
       selectedId={selectedId}
       onSketchTool={(tool) => { setSketchTool(tool); setSketchDimensionMode(false); setStatusText(`${sketchToolLabel(tool)} tool active in the top ribbon.`); }}
       onSketchDimension={() => { setSketchTool("select"); setSketchDimensionMode(true); setViewportNavigation("select"); setViewportSelectionFilter("sketch-curve"); setStatusText("Sketch Dimension active: select a curve or two displayed definition points."); }}
@@ -1767,10 +1781,22 @@ export function App(): React.JSX.Element {
       {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} onExtrudeProfiles={extrudeSketchProfiles} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} onFit={() => setStatusText("Sketch fit is already bounded to all visible entities.")} onHome={homeViewport} onContextMenu={openContextMenu} working={status === "working"} onMessage={setStatusText} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
+        <CameraGestureControl
+          workspace={project.activeWorkspace as "part" | "assembly" | "surface" | "vehicle"}
+          currentExplodeMm={displayedAssembly.explodeMm}
+          maxExplodeMm={assemblyExplodeMaxMm}
+          onOrbit={(deltaX, deltaY) => viewportRef.current?.orbitByPixels(deltaX, deltaY)}
+          onCursor={updateCameraCursor}
+          onExplodePreview={previewAssemblyExplode}
+          onExplodeCommit={commitAssemblyExplode}
+          onMessage={setStatusText}
+        />
+        <div ref={cameraCursorRef} className="camera-cad-cursor" hidden aria-hidden="true"><i /><span>INDEX</span></div>
         {project.activeWorkspace === "assembly" && <div className="assembly-gesture-hud" aria-live="polite">
-          <span><i />1 finger · orbit 360°</span>
-          <span><i />2 fingers · slide vertical</span>
-          <strong>{displayedAssembly.explodeMm.toFixed(1)} mm <small>{Math.round(displayedAssembly.explodeMm / 1.2)}% exploded</small></strong>
+          <span><i />Open right palm · acquire lock</span>
+          <span><i />Index cursor · pinch and hold to orbit</span>
+          <span><i />Palm near / far · explode / assemble</span>
+          <strong>{displayedAssembly.explodeMm.toFixed(1)} mm <small>{assemblyExplodePercent}% of {assemblyExplodeMaxMm.toFixed(1)} mm max</small></strong>
         </div>}
         <ViewportChrome
           workspace={project.activeWorkspace as "part" | "assembly" | "surface" | "vehicle"}
@@ -1795,7 +1821,7 @@ export function App(): React.JSX.Element {
       {!masterCartOpen && <>
       {project.activeWorkspace === "part" && activeImport === undefined && <PartInspector part={project.part} model={model} working={status === "working"} bodyColor={viewportState.bodyColor} shadingMode={viewportState.shadingMode} selectedId={selectedId} onSelect={setSelectedId} onBodyColor={(color) => viewportRef.current?.setBodyColor(color)} onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)} onCommit={(parameter, value) => void commitPartParameter(parameter, value)} onInsertIntoAssembly={insertCurrentPartIntoAssembly} onCreatePreviewBody={createPartPreviewBody} onPreviewBodyTransform={(bodyId, translationMm, rotationDeg) => applyProjectOperation({ kind: "set-part-preview-body-transform", bodyId, translationMm, rotationDeg })} onPreviewBodySize={(bodyId, sizeMm) => applyProjectOperation({ kind: "set-part-preview-body-size", bodyId, sizeMm })} onPreviewBodyColor={(bodyId, color) => applyProjectOperation({ kind: "set-part-preview-body-color", bodyId, color })} onPreviewBodyVisibility={(bodyId) => applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId })} onPreviewBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId })) setSelectedId(null); }} />}
       {project.activeWorkspace === "part" && activeImport !== undefined && <ImportedModelInspector result={activeImport} onExchange={() => setExchangeOpen(true)} onClear={clearActiveImport} />}
-      {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={displayedAssembly} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplodePreview={previewAssemblyExplode} onExplodeCommit={commitAssemblyExplode} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onAddMate={(mate) => applyProjectOperation({ kind: "add-assembly-mate", mate })} onDeleteMate={(mateId) => { if (applyProjectOperation({ kind: "delete-assembly-mate", mateId })) setSelectedId(null); }} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
+      {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={displayedAssembly} maxExplodeMm={assemblyExplodeMaxMm} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplodePreview={previewAssemblyExplode} onExplodeCommit={commitAssemblyExplode} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onAddMate={(mate) => applyProjectOperation({ kind: "add-assembly-mate", mate })} onDeleteMate={(mateId) => { if (applyProjectOperation({ kind: "delete-assembly-mate", mateId })) setSelectedId(null); }} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
       {project.activeWorkspace === "surface" && <SurfaceInspector surface={project.surface} metrics={surfacePreview.metrics} onParameter={(parameter, value) => applyProjectOperation({ kind: "set-surface-parameter", parameter, value })} />}
       {project.activeWorkspace === "drawing" && <DrawingWorkspace settings={project.drawing} artifact={drawing} onSheet={(sheet) => applyProjectOperation({ kind: "set-drawing-sheet", sheet })} onProjection={(projection) => applyProjectOperation({ kind: "set-drawing-projection", projection })} onScale={(scale) => applyProjectOperation({ kind: "set-drawing-scale", scale })} onDimensions={(show) => applyProjectOperation({ kind: "set-drawing-dimensions", show })} onViewPreset={(preset) => applyProjectOperation({ kind: "set-drawing-view-preset", preset })} onDisplayStyle={(style) => applyProjectOperation({ kind: "set-drawing-display-style", style })} onSectionView={(show) => applyProjectOperation({ kind: "set-drawing-section-view", show })} onDraftingStandard={(standard) => applyProjectOperation({ kind: "set-drawing-drafting-standard", standard })} onGdt={(show) => applyProjectOperation({ kind: "set-drawing-gdt", show })} onDatumScheme={(scheme) => applyProjectOperation({ kind: "set-drawing-datum-scheme", scheme })} onGdtSpecification={(positionMm, flatnessMm, perpendicularityMm) => applyProjectOperation({ kind: "set-drawing-gdt-specification", positionMm, flatnessMm, perpendicularityMm })} onGeneralTolerance={(linearMm, angularDeg) => applyProjectOperation({ kind: "set-drawing-general-tolerance", linearMm, angularDeg })} onNotes={(notes) => applyProjectOperation({ kind: "set-drawing-notes", notes })} />}
       {project.activeWorkspace === "electrical" && <ElectricalWorkspace intent={project.electrical} artifact={electrical} selectedId={selectedId} onSelect={setSelectedId} onTemplate={requestElectricalTemplate} onStandard={(standard) => applyProjectOperation({ kind: "set-electrical-standard", standard })} onInsertComponent={insertElectricalComponent} onMoveComponent={(componentId, position) => applyProjectOperation({ kind: "set-electrical-component-position", componentId, position })} onDeleteComponent={(componentId) => { if (applyProjectOperation({ kind: "delete-electrical-component", componentId })) setSelectedId(null); }} onAddNet={addElectricalNet} onDeleteNet={(netId) => { if (applyProjectOperation({ kind: "delete-electrical-net", netId })) setSelectedId(null); }} onNotes={(notes) => applyProjectOperation({ kind: "set-electrical-notes", notes })} onPhysicalize={requestElectromechanicalAssembly} onDownload={() => downloadBlob(new Blob([electrical.svg], { type: "image/svg+xml" }), "ps3d-electrical-concept.svg")} />}

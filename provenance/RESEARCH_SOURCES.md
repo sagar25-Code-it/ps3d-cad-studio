@@ -309,6 +309,30 @@ artifact change.
   standard text, or documentation wording was copied. PS3D's source, SVG
   geometry, controls, tests, and sheet layout are original.
 
+### RS-025 - Google AI Edge Hand Landmarker for Web
+
+- **Owner/publisher:** Google AI Edge / MediaPipe
+- **URLs:**
+  - <https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker>
+  - <https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/web_js>
+  - <https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker/web_js>
+- **Accessed:** 2026-08-31
+- **Facts used:** Hand Landmarker returns handedness plus 21 normalized and
+  world landmarks; video inference uses separate detection, presence, and
+  tracking-confidence thresholds; and synchronous `detectForVideo` work can
+  block the UI thread, so inference should be moved to a Web Worker.
+- **Informed:** PS3D's isolated worker, one-frame backpressure, landmark-only
+  main-thread protocol, right-hand lock, joint-angle/open-palm interpretation,
+  pinch hysteresis, and confidence-gated fail-closed behavior.
+- **Selected artifact:** `@mediapipe/tasks-vision@1.0.1`, Apache-2.0, exact npm
+  integrity recorded in `dependencies.json`; official full-float16 Hand
+  Landmarker model version 1 at SHA-256
+  `fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1`.
+- **Use limit:** Only the exact inventoried package runtime and exact
+  hash-pinned model are distributed. No documentation sample, wording,
+  screenshot, or user-supplied camera photo is copied into application source
+  or used to train or fine-tune the model.
+
 ## User-supplied supplementary interaction references
 
 These documents were supplied by the project owner for research. They are not
@@ -395,6 +419,7 @@ ship their pages, text, figures, screenshots, tutorial models, or trade dress.
 | three.js | MIT | Viewport adapter |
 | React | MIT | Presentation candidate |
 | Vite | MIT | Build candidate |
+| MediaPipe Tasks Vision 1.0.1 | Apache-2.0 | Selected on-device hand-landmark worker |
 | Zod 4.4.3 | MIT | Local MCP runtime schemas |
 | MCP server/core 2.0.0 | MIT for exact npm artifacts | Local MCP stdio transport |
 | Vitest | MIT | Unit tests |

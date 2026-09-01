@@ -13,6 +13,7 @@ interface WorkbenchRibbonProps {
   readonly displayUnit: DisplayUnit;
   readonly sketchTool: SketchTool;
   readonly sketchDimensionMode: boolean;
+  readonly assemblyExplodeMaxMm: number;
   readonly selectedId: string | null;
   readonly onSketchTool: (tool: SketchTool) => void;
   readonly onSketchDimension: () => void;
@@ -207,7 +208,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
       <RibbonGroup label="Assembly position">
         <RibbonButton icon="assemble" label="Assemble" hint="0 mm" active={props.project.assembly.explodeMm === 0} onClick={() => props.onAssemblyExplode(0)} />
-        <RibbonButton icon="explode" label="Explode" hint="32 mm" active={props.project.assembly.explodeMm > 0} onClick={() => props.onAssemblyExplode(32)} />
+        <RibbonButton icon="explode" label="Explode" hint={`${props.assemblyExplodeMaxMm.toFixed(1)} mm max`} active={props.project.assembly.explodeMm > 0} onClick={() => props.onAssemblyExplode(props.assemblyExplodeMaxMm)} />
         <RibbonButton icon="fit" label="Fit all" hint="view" onClick={props.onFit} />
       </RibbonGroup>
       <RibbonGroup label="Component state">
