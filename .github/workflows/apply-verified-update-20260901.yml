@@ -1,0 +1,42 @@
+name: Apply verified PS3D final update
+
+on:
+  push:
+    branches:
+      - ps3d-final-release-20260901
+    paths:
+      - .github/workflows/apply-verified-update-20260901.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the review branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ps3d-final-release-20260901
+          fetch-depth: 0
+
+      - name: Verify the bounded update archive
+        shell: bash
+        run: |
+          echo "89c8e421b9862c6f35f1e66f7e4c1eb1b1dc4ce3d8e6f3eb0f2d8a122aaca3be  ps3d-final-update-20260901.zip" | sha256sum -c -
+          test "$(unzip -Z1 ps3d-final-update-20260901.zip | sed '/\/$/d' | wc -l)" -eq 88
+
+      - name: Apply, clean, and commit the verified source set
+        shell: bash
+        run: |
+          unzip -o ps3d-final-update-20260901.zip -d .
+          rm -f ps3d-final-update-20260901.zip .github/workflows/apply-verified-update-20260901.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The verified archive produced no repository changes."
+            exit 1
+          fi
+          git commit -m "feat: release final verified PS3D update"
+          git push origin HEAD:ps3d-final-release-20260901
