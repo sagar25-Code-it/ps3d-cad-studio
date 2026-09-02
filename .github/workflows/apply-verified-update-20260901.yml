@@ -1,0 +1,54 @@
+name: Apply verified PS3D audited release
+
+on:
+  push:
+    branches:
+      - ps3d-audit-release-20260902
+    paths:
+      - .github/workflows/apply-verified-update-20260901.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the review branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ps3d-audit-release-20260902
+          fetch-depth: 0
+
+      - name: Verify the bounded update archive
+        shell: bash
+        run: |
+          echo "6db24c829bd2a0734d396766859ec5f061779b12fe0ceb9d85748412d1a2ac46  ps3d-audited-release-20260902-v2.zip" | sha256sum -c -
+          test "$(unzip -Z1 ps3d-audited-release-20260902-v2.zip | sed '/\/$/d' | wc -l)" -eq 532
+          test -z "$(unzip -Z1 ps3d-audited-release-20260902-v2.zip | grep -E '(^/|(^|/)\.\.(/|$)|\\)' || true)"
+
+      - name: Validate the isolated source set
+        shell: bash
+        run: |
+          release_dir="$RUNNER_TEMP/ps3d-audited-release"
+          rm -rf "$release_dir"
+          mkdir -p "$release_dir"
+          unzip -q ps3d-audited-release-20260902-v2.zip -d "$release_dir"
+          cd "$release_dir"
+          node scripts/verify-repository-boundary.mjs
+          node scripts/verify-generated-source-set.mjs
+
+      - name: Apply, clean, and commit the verified source set
+        shell: bash
+        run: |
+          release_dir="$RUNNER_TEMP/ps3d-audited-release"
+          rsync -a --delete --exclude='.git/' "$release_dir/" ./
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The verified archive produced no repository changes."
+            exit 1
+          fi
+          git commit -m "fix: apply double-audited PS3D release"
+          git push origin HEAD:ps3d-audit-release-20260902
