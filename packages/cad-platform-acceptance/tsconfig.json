@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@ps3d/ai-engineering-gateway/src/index.js": ["../ai-engineering-gateway/src/index.ts"],
+      "@ps3d/cad-document-core/src/index.js": ["../cad-document-core/src/index.ts"],
+      "@ps3d/exact-kernel-api/src/index.js": ["../exact-kernel-api/src/index.ts"],
+      "@ps3d/parametric-cad-engine": ["../parametric-cad-engine/src/index.ts"],
+      "@ps3d/parametric-sketch-core/src/index.js": ["../parametric-sketch-core/src/index.ts"]
+    },
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}

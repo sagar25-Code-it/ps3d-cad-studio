@@ -5,7 +5,7 @@ supports remote MCP over HTTPS, or can send MCP JSON-RPC requests with an HTTP
 Authorization header. The model itself does not receive a universal hidden key.
 Every PS3D account owns its own connections.
 
-## Recommended: OAuth 2.1
+## Read-only inspection: OAuth 2.1
 
 Give the AI host one URL:
 
@@ -18,6 +18,11 @@ A compatible host discovers
 opens the PS3D consent screen, and receives a revocable Supabase access token.
 The host never receives the PS3D web password. Register each OAuth client and
 its exact callback URI in the Supabase OAuth Apps settings.
+
+At the current provider boundary, OAuth access is deliberately limited to
+`mcp:read`. The identity provider exposes standard OpenID scopes but does not
+provide a PS3D-specific consent grant for `mcp:preview` or `mcp:apply`. Use a
+separately scoped personal MCP token for either mutation capability.
 
 ## Compatibility path: personal MCP token
 
@@ -61,8 +66,8 @@ token. Revoke it immediately after suspected exposure.
 | `mcp:preview` | Deterministic electromechanical and model-operation previews |
 | `mcp:apply` | Return a confirmed new project copy after a matching preview receipt |
 
-Every token includes `mcp:read`. Select only the additional permissions the
-client needs. A maximum of five active tokens per account is enforced with
+Every personal token includes `mcp:read`. Select only the additional permissions
+the client needs. OAuth credentials are read-only. A maximum of five active personal tokens per account is enforced with
 7-day, 30-day, or 90-day expiry.
 
 ## Safe command sequence

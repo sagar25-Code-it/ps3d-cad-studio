@@ -19,6 +19,13 @@ documentation, plus the original PS3D Master Cart parametric component studio
 with 25 ready families, grouped Assembly insertion, a permission-gated local
 File and session center, OPFS recovery/cache support, nested context commands,
 and a linked non-destructive Render Studio with local raster output
+plus an additive exact-parametric CAD foundation comprising a canonical
+component/occurrence document model, bounded analytic sketch solver,
+exact-kernel and isolated-worker contracts, deterministic feature rebuild,
+persistent topology recovery, externally authorized revision storage, an
+attestation-gated OCCT adapter boundary, assembly/drawing/surface/render and
+exchange contracts, a receipt-gated provider-neutral AI engineering gateway,
+and cross-package acceptance tests
 **Review state:** Public-preview release candidate pending clean CI, live cloud
 integration, and human provenance/technical review; not a production release
 
@@ -254,8 +261,8 @@ deployment, release, or legal clearance.
   self-referential record.
   Symbolic links are rejected.
 - Canonical source-set hash:
-`64710c12c753f81d917607b568e24955054d98763cb91904cc44656c4349b4a5`
-- Canonical source-set file count: 371
+`0c5b8899b27dca5242bf7508dca8215e1938f9eb900f3188ac4115824a198e5f`
+- Canonical source-set file count: 531
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
   `provenance/BUILD_IDENTITY.json`, SHA-256

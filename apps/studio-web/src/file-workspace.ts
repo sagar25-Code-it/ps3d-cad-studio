@@ -8,10 +8,11 @@ const DIRECTORY_KEY = "workspace-directory";
 const CURRENT_FILE_KEY = "current-project-file";
 const RECENT_KEY = "recent-projects";
 const MAX_RECENT_PROJECTS = 12;
-const MAX_PROJECT_BYTES = 50 * 1024 * 1024;
+export const MAX_PROJECT_BYTES = 50 * 1024 * 1024;
 
 type WritablePermission = PermissionState | "unsupported";
 type ProjectLocator = "workspace" | "file-handle" | "metadata";
+type PermissionMode = "read" | "readwrite";
 
 interface PermissionCapableHandle extends FileSystemHandle {
   queryPermission?: (descriptor?: { readonly mode?: "read" | "readwrite" }) => Promise<PermissionState>;
@@ -54,6 +55,8 @@ interface StoredRecentProject extends RecentProjectEntry {
   readonly locator: ProjectLocator;
   readonly handle?: FileSystemFileHandle;
 }
+
+const pendingOpenBindings = new WeakMap<ProjectFilePayload, StoredCurrentFile>();
 
 export interface RecentProjectEntry {
   readonly id: string;
@@ -106,7 +109,7 @@ export async function initializePsCadWorkspace(): Promise<PsCadWorkspaceStatus> 
   const picker = (window as PickerWindow).showDirectoryPicker;
   if (picker === undefined) throw new Error("Folder workspaces are not supported by this browser. PS3D will keep using its private recovery cache and standard downloads.");
   const selected = await picker.call(window, { id: "ps3d-workspace", mode: "readwrite", startIn: "downloads" });
-  const selectedPermission = await ensurePermission(selected, true);
+  const selectedPermission = await ensurePermission(selected, true, "readwrite");
   if (selectedPermission !== "granted") throw new Error("Read/write permission is required to create the PS CAD Studio workspace.");
   const workspace = selected.name.toLocaleLowerCase() === WORKSPACE_NAME.toLocaleLowerCase()
     ? selected
@@ -124,8 +127,8 @@ export async function initializePsCadWorkspace(): Promise<PsCadWorkspaceStatus> 
 export async function getPsCadWorkspaceStatus(): Promise<PsCadWorkspaceStatus> {
   const pickerSupported = (window as PickerWindow).showDirectoryPicker !== undefined;
   const directory = await getSetting<FileSystemDirectoryHandle>(DIRECTORY_KEY).catch(() => undefined);
-  const permission = directory === undefined ? "unsupported" : await ensurePermission(directory, false);
-  const current = await getSetting<StoredCurrentFile>(CURRENT_FILE_KEY).catch(() => undefined);
+  const permission = directory === undefined ? "unsupported" : await ensurePermission(directory, false, "readwrite");
+  const current = await readCurrentProjectFile();
   const estimate = await navigator.storage?.estimate?.().catch(() => undefined);
   const persistentStorage = await navigator.storage?.persisted?.().catch(() => false) ?? false;
   return {
@@ -144,25 +147,31 @@ export async function getPsCadWorkspaceStatus(): Promise<PsCadWorkspaceStatus> {
 export async function saveProjectText(text: string, options: ProjectSaveOptions): Promise<ProjectSaveOutcome> {
   assertProjectText(text);
   const fileName = normalizeProjectFileName(options.suggestedName);
-  const current = options.mode === "save" ? await getSetting<StoredCurrentFile>(CURRENT_FILE_KEY).catch(() => undefined) : undefined;
-  if (current !== undefined) {
+  const current = await readCurrentProjectFile();
+  if (options.mode === "save" && current !== undefined) {
     const saved = await writeCurrentFile(current, text);
-    if (saved) {
-      await recordRecentProject({ fileName: current.fileName, projectName: options.projectName, revision: options.revision, sizeBytes: byteLength(text) }, current.locator, current.handle);
-      await cacheProjectText(text);
-      return { destination: current.locator === "workspace" ? "workspace" : "file-picker", fileName: current.fileName, workspaceName: current.locator === "workspace" ? WORKSPACE_NAME : null };
-    }
+    if (!saved) throw new Error("The current project file is no longer writable. Use Save As to choose an approved destination; the previous file was not replaced.");
+    await recordRecentProject({ fileName: current.fileName, projectName: options.projectName, revision: options.revision, sizeBytes: byteLength(text) }, current.locator, current.handle);
+    await cacheProjectText(text).catch(() => undefined);
+    return { destination: current.locator === "workspace" ? "workspace" : "file-picker", fileName: current.fileName, workspaceName: current.locator === "workspace" ? WORKSPACE_NAME : null };
   }
 
-  const workspace = await writableWorkspaceDirectory(false);
+  const workspace = await writableWorkspaceDirectory(true);
   if (workspace !== undefined) {
+    if (options.mode === "copy" && current?.locator === "workspace" && sameFileName(current.fileName, fileName)) {
+      throw new Error("Save a Copy requires a different file name so the active project file cannot be overwritten.");
+    }
     const projects = await workspace.getDirectoryHandle("Projects", { create: true });
     const handle = await projects.getFileHandle(fileName, { create: true });
     await writeFileHandle(handle, text);
-    if (options.mode !== "copy") await putSetting(CURRENT_FILE_KEY, { locator: "workspace", fileName } satisfies StoredCurrentFile);
-    await recordRecentProject({ fileName, projectName: options.projectName, revision: options.revision, sizeBytes: byteLength(text) }, "workspace");
-    await writeVisibleSessionManifest(workspace, fileName, options.projectName, options.revision);
-    await cacheProjectText(text);
+    await recordRecentProject(
+      { fileName, projectName: options.projectName, revision: options.revision, sizeBytes: byteLength(text) },
+      "workspace",
+      undefined,
+      saveModeRebindsCurrentFile(options.mode) ? { locator: "workspace", fileName } : undefined
+    );
+    if (saveModeRebindsCurrentFile(options.mode)) await writeVisibleSessionManifest(workspace, fileName, options.projectName, options.revision);
+    await cacheProjectText(text).catch(() => undefined);
     return { destination: "workspace", fileName, workspaceName: workspace.name };
   }
 
@@ -174,16 +183,28 @@ export async function saveProjectText(text: string, options: ProjectSaveOptions)
       suggestedName: fileName,
       types: projectPickerTypes()
     });
+    if (options.mode === "copy" && current?.locator === "file-handle" && current.handle !== undefined && await sameFileHandle(current.handle, handle)) {
+      throw new Error("Save a Copy cannot replace the active project file. Choose a different file name or location.");
+    }
     await writeFileHandle(handle, text);
-    if (options.mode !== "copy") await putSetting(CURRENT_FILE_KEY, { locator: "file-handle", fileName: handle.name, handle } satisfies StoredCurrentFile);
-    await recordRecentProject({ fileName: handle.name, projectName: options.projectName, revision: options.revision, sizeBytes: byteLength(text) }, "file-handle", handle);
+    await recordRecentProject(
+      { fileName: handle.name, projectName: options.projectName, revision: options.revision, sizeBytes: byteLength(text) },
+      "file-handle",
+      handle,
+      saveModeRebindsCurrentFile(options.mode) ? { locator: "file-handle", fileName: handle.name, handle } : undefined
+    );
     await cacheProjectText(text);
     return { destination: "file-picker", fileName: handle.name, workspaceName: null };
   }
 
   downloadBlob(new Blob([text], { type: "application/json" }), fileName);
-  await recordRecentProject({ fileName, projectName: options.projectName, revision: options.revision, sizeBytes: byteLength(text) }, "metadata");
-  await cacheProjectText(text);
+  await recordRecentProject(
+    { fileName, projectName: options.projectName, revision: options.revision, sizeBytes: byteLength(text) },
+    "metadata",
+    undefined,
+    saveModeRebindsCurrentFile(options.mode) ? null : undefined
+  );
+  await cacheProjectText(text).catch(() => undefined);
   return { destination: "download", fileName, workspaceName: null };
 }
 
@@ -193,12 +214,11 @@ export async function openProjectWithPicker(): Promise<ProjectFilePayload | unde
   const handles = await picker.call(window, { id: "ps3d-project-open", multiple: false, startIn: "downloads", types: projectPickerTypes() });
   const handle = handles[0];
   if (handle === undefined) return undefined;
-  const permission = await ensurePermission(handle, false);
-  if (permission === "denied") throw new Error("The selected project cannot be read because file permission was denied.");
-  const file = await handle.getFile();
-  if (file.size > MAX_PROJECT_BYTES) throw new Error("The selected PS3D project exceeds the 50 MB browser safety limit.");
-  await putSetting(CURRENT_FILE_KEY, { locator: "file-handle", fileName: file.name, handle } satisfies StoredCurrentFile);
-  return { text: await file.text(), fileName: file.name };
+  const permission = await ensurePermission(handle, true, "read");
+  if (permission !== "granted") throw new Error("The selected project cannot be read because file permission was denied.");
+  const payload = await readProjectFilePayload(await handle.getFile());
+  pendingOpenBindings.set(payload, { locator: "file-handle", fileName: payload.fileName, handle });
+  return payload;
 }
 
 export async function openRecentProject(entryId: string): Promise<ProjectFilePayload> {
@@ -206,30 +226,54 @@ export async function openRecentProject(entryId: string): Promise<ProjectFilePay
   const entry = entries.find((candidate) => candidate.id === entryId);
   if (entry === undefined) throw new Error("The recent project entry no longer exists.");
   if (entry.locator === "workspace") {
-    const workspace = await writableWorkspaceDirectory(false);
+    const workspace = await readableWorkspaceDirectory(true);
     if (workspace === undefined) throw new Error("Reconnect the PS CAD Studio folder before opening this recent project.");
     const projects = await workspace.getDirectoryHandle("Projects");
     const handle = await projects.getFileHandle(entry.fileName);
-    const file = await handle.getFile();
-    await putSetting(CURRENT_FILE_KEY, { locator: "workspace", fileName: entry.fileName } satisfies StoredCurrentFile);
-    return { text: await file.text(), fileName: file.name };
+    const payload = await readProjectFilePayload(await handle.getFile());
+    pendingOpenBindings.set(payload, { locator: "workspace", fileName: entry.fileName });
+    return payload;
   }
   if (entry.locator === "file-handle" && entry.handle !== undefined) {
-    const permission = await ensurePermission(entry.handle, true);
+    const permission = await ensurePermission(entry.handle, true, "read");
     if (permission !== "granted") throw new Error("File permission is required to reopen this recent project.");
-    const file = await entry.handle.getFile();
-    await putSetting(CURRENT_FILE_KEY, { locator: "file-handle", fileName: file.name, handle: entry.handle } satisfies StoredCurrentFile);
-    return { text: await file.text(), fileName: file.name };
+    const payload = await readProjectFilePayload(await entry.handle.getFile());
+    pendingOpenBindings.set(payload, { locator: "file-handle", fileName: payload.fileName, handle: entry.handle });
+    return payload;
   }
   throw new Error("This recent item was downloaded without a reusable file handle. Use Open Project and select it again.");
 }
 
-export async function rememberOpenedProject(fileName: string, project: WorkbenchProject): Promise<void> {
-  const current = await getSetting<StoredCurrentFile>(CURRENT_FILE_KEY).catch(() => undefined);
-  const locator = current?.fileName === fileName ? current.locator : "metadata";
-  const handle = current?.fileName === fileName ? current.handle : undefined;
-  await recordRecentProject({ fileName, projectName: project.name, revision: project.revision, sizeBytes: byteLength(JSON.stringify(project)) }, locator, handle);
+export async function commitOpenedProject(payload: ProjectFilePayload, project: WorkbenchProject): Promise<void> {
+  const valid = validateWorkbenchProject(project);
+  if (!valid.ok) throw new Error(valid.diagnostics[0]?.message ?? "The opened workbench project is invalid.");
+  assertProjectText(payload.text);
+  const binding = pendingOpenBindings.get(payload);
+  pendingOpenBindings.delete(payload);
+  const fileName = binding?.fileName ?? payload.fileName;
+  await recordRecentProject(
+    { fileName, projectName: valid.value.name, revision: valid.value.revision, sizeBytes: byteLength(payload.text) },
+    binding?.locator ?? "metadata",
+    binding?.handle,
+    binding ?? null
+  );
 }
+
+export async function readProjectFilePayload(file: Pick<File, "name" | "size" | "text">): Promise<ProjectFilePayload> {
+  if (typeof file.name !== "string" || file.name.length === 0 || file.name.length > 255) throw new Error("The selected project has an invalid file name.");
+  assertProjectFileSize(file.size);
+  const text = await file.text();
+  assertProjectText(text);
+  return { text, fileName: file.name };
+}
+
+export function assertProjectFileSize(sizeBytes: number): void {
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_PROJECT_BYTES) {
+    throw new Error("The selected PS3D project must be between 1 byte and the 50 MB browser safety limit.");
+  }
+}
+
+export function saveModeRebindsCurrentFile(mode: ProjectSaveOptions["mode"]): boolean { return mode !== "copy"; }
 
 export async function listRecentProjects(): Promise<readonly RecentProjectEntry[]> {
   return (await readStoredRecentProjects()).map(({ locator: _locator, handle: _handle, ...entry }) => entry);
@@ -246,8 +290,12 @@ export async function cacheWorkbenchProject(project: WorkbenchProject): Promise<
 }
 
 export async function loadCachedWorkbenchProject(): Promise<WorkbenchProject | undefined> {
-  const text = await readOpfsText("Recovery", "autosave-latest.workbench.json").catch(() => undefined);
+  const file = await readOpfsFile("Recovery", "autosave-latest.workbench.json").catch(() => undefined);
+  if (file === undefined) return undefined;
+  try { assertProjectFileSize(file.size); } catch { return undefined; }
+  const text = await file.text().catch(() => undefined);
   if (text === undefined) return undefined;
+  try { assertProjectText(text); } catch { return undefined; }
   let value: unknown;
   try { value = JSON.parse(text) as unknown; } catch { return undefined; }
   const valid = validateWorkbenchProject(value);
@@ -267,8 +315,7 @@ export async function writeWorkspaceArtifact(directoryName: "Exports" | "Renders
   if (workspace === undefined) return false;
   const directory = await workspace.getDirectoryHandle(directoryName, { create: true });
   const handle = await directory.getFileHandle(safeFileName(fileName), { create: true });
-  const writable = await handle.createWritable();
-  try { await writable.write(blob); } finally { await writable.close(); }
+  await writeFileHandle(handle, blob);
   return true;
 }
 
@@ -288,34 +335,48 @@ export function formatStorageSize(bytes: number): string {
 
 async function writeCurrentFile(current: StoredCurrentFile, text: string): Promise<boolean> {
   if (current.locator === "workspace") {
-    const workspace = await writableWorkspaceDirectory(false);
+    const workspace = await writableWorkspaceDirectory(true);
     if (workspace === undefined) return false;
     const projects = await workspace.getDirectoryHandle("Projects", { create: true });
     await writeFileHandle(await projects.getFileHandle(current.fileName, { create: true }), text);
     return true;
   }
-  if (current.handle === undefined || await ensurePermission(current.handle, true) !== "granted") return false;
+  if (current.handle === undefined || await ensurePermission(current.handle, true, "readwrite") !== "granted") return false;
   await writeFileHandle(current.handle, text);
   return true;
 }
 
 async function writableWorkspaceDirectory(request: boolean): Promise<FileSystemDirectoryHandle | undefined> {
+  return workspaceDirectory(request, "readwrite");
+}
+
+async function readableWorkspaceDirectory(request: boolean): Promise<FileSystemDirectoryHandle | undefined> {
+  return workspaceDirectory(request, "read");
+}
+
+async function workspaceDirectory(request: boolean, mode: PermissionMode): Promise<FileSystemDirectoryHandle | undefined> {
   const directory = await getSetting<FileSystemDirectoryHandle>(DIRECTORY_KEY).catch(() => undefined);
   if (directory === undefined) return undefined;
-  return await ensurePermission(directory, request) === "granted" ? directory : undefined;
+  return await ensurePermission(directory, request, mode) === "granted" ? directory : undefined;
 }
 
-async function ensurePermission(handle: FileSystemHandle, request: boolean): Promise<WritablePermission> {
+async function ensurePermission(handle: FileSystemHandle, request: boolean, mode: PermissionMode): Promise<WritablePermission> {
   const capable = handle as PermissionCapableHandle;
   if (capable.queryPermission === undefined) return "granted";
-  const current = await capable.queryPermission({ mode: "readwrite" }).catch(() => "denied" as PermissionState);
+  const current = await capable.queryPermission({ mode }).catch(() => "denied" as PermissionState);
   if (current === "granted" || !request || capable.requestPermission === undefined) return current;
-  return capable.requestPermission({ mode: "readwrite" }).catch(() => "denied" as PermissionState);
+  return capable.requestPermission({ mode }).catch(() => "denied" as PermissionState);
 }
 
-async function writeFileHandle(handle: FileSystemFileHandle, content: string): Promise<void> {
+async function writeFileHandle(handle: FileSystemFileHandle, content: string | Blob): Promise<void> {
   const writable = await handle.createWritable();
-  try { await writable.write(content); } finally { await writable.close(); }
+  try {
+    await writable.write(content);
+    await writable.close();
+  } catch (error) {
+    await writable.abort(error).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function writeTextFile(directory: FileSystemDirectoryHandle, fileName: string, content: string): Promise<void> {
@@ -327,8 +388,12 @@ async function writeVisibleSessionManifest(workspace: FileSystemDirectoryHandle,
   await writeTextFile(cache, "session-manifest.json", `${JSON.stringify({ schema: "ps3d-workspace-session/1", projectName, fileName, revision, savedAt: new Date().toISOString() }, null, 2)}\n`);
 }
 
-async function recordRecentProject(input: { readonly fileName: string; readonly projectName: string; readonly revision: number; readonly sizeBytes: number }, locator: ProjectLocator, handle?: FileSystemFileHandle): Promise<void> {
-  const current = await readStoredRecentProjects();
+async function recordRecentProject(
+  input: { readonly fileName: string; readonly projectName: string; readonly revision: number; readonly sizeBytes: number },
+  locator: ProjectLocator,
+  handle?: FileSystemFileHandle,
+  currentFileUpdate?: StoredCurrentFile | null
+): Promise<void> {
   const id = recentId(locator, input.fileName);
   const entry: StoredRecentProject = {
     id,
@@ -341,7 +406,26 @@ async function recordRecentProject(input: { readonly fileName: string; readonly 
     locator,
     ...(handle === undefined ? {} : { handle })
   };
-  await putSetting(RECENT_KEY, [entry, ...current.filter((candidate) => candidate.id !== id)].slice(0, MAX_RECENT_PROJECTS));
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(SETTINGS_STORE, "readwrite", { durability: "strict" });
+      const store = transaction.objectStore(SETTINGS_STORE);
+      const request = store.get(RECENT_KEY);
+      request.onsuccess = () => {
+        const stored = Array.isArray(request.result) ? request.result.filter(isStoredRecentProject) : [];
+        store.put([entry, ...stored.filter((candidate) => candidate.id !== id)].slice(0, MAX_RECENT_PROJECTS), RECENT_KEY);
+        if (currentFileUpdate === null) store.delete(CURRENT_FILE_KEY);
+        else if (currentFileUpdate !== undefined) store.put(currentFileUpdate, CURRENT_FILE_KEY);
+      };
+      request.onerror = () => reject(request.error ?? new Error("The recent-project index could not be read."));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("The recent-project update failed."));
+      transaction.onabort = () => reject(transaction.error ?? new Error("The recent-project update was aborted."));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 async function readStoredRecentProjects(): Promise<readonly StoredRecentProject[]> {
@@ -353,9 +437,23 @@ async function readStoredRecentProjects(): Promise<readonly StoredRecentProject[
 function isStoredRecentProject(value: unknown): value is StoredRecentProject {
   if (typeof value !== "object" || value === null) return false;
   const entry = value as Partial<StoredRecentProject>;
-  return typeof entry.id === "string" && typeof entry.fileName === "string" && typeof entry.projectName === "string"
-    && typeof entry.revision === "number" && typeof entry.updatedAt === "string" && typeof entry.sizeBytes === "number"
-    && typeof entry.canReopen === "boolean" && (entry.locator === "workspace" || entry.locator === "file-handle" || entry.locator === "metadata");
+  if (entry.locator !== "workspace" && entry.locator !== "file-handle" && entry.locator !== "metadata") return false;
+  const handleMatches = entry.locator === "file-handle" ? isFileSystemFileHandle(entry.handle) : entry.handle === undefined;
+  return typeof entry.id === "string" && typeof entry.fileName === "string" && entry.fileName.length > 0 && entry.fileName.length <= 255
+    && entry.id === recentId(entry.locator, entry.fileName) && typeof entry.projectName === "string" && entry.projectName.length > 0 && entry.projectName.length <= 256
+    && Number.isSafeInteger(entry.revision) && (entry.revision as number) >= 0 && typeof entry.updatedAt === "string" && Number.isFinite(Date.parse(entry.updatedAt))
+    && Number.isSafeInteger(entry.sizeBytes) && (entry.sizeBytes as number) > 0 && (entry.sizeBytes as number) <= MAX_PROJECT_BYTES
+    && entry.canReopen === (entry.locator !== "metadata") && handleMatches;
+}
+
+async function readCurrentProjectFile(): Promise<StoredCurrentFile | undefined> {
+  const value = await getSetting<unknown>(CURRENT_FILE_KEY).catch(() => undefined);
+  if (typeof value !== "object" || value === null) return undefined;
+  const current = value as Partial<StoredCurrentFile>;
+  if (typeof current.fileName !== "string" || current.fileName.length === 0 || current.fileName.length > 255) return undefined;
+  if (current.locator === "workspace" && current.handle === undefined) return current as StoredCurrentFile;
+  if (current.locator === "file-handle" && isFileSystemFileHandle(current.handle)) return current as StoredCurrentFile;
+  return undefined;
 }
 
 async function cacheProjectText(text: string): Promise<void> {
@@ -392,12 +490,12 @@ async function writeOpfsText(directoryName: string, fileName: string, text: stri
   await writeTextFile(directory, fileName, text);
 }
 
-async function readOpfsText(directoryName: string, fileName: string): Promise<string | undefined> {
+async function readOpfsFile(directoryName: string, fileName: string): Promise<File | undefined> {
   const root = await navigator.storage?.getDirectory?.();
   if (root === undefined) return undefined;
   const ps3d = await root.getDirectoryHandle(WORKSPACE_NAME);
   const directory = await ps3d.getDirectoryHandle(directoryName);
-  return (await (await directory.getFileHandle(fileName)).getFile()).text();
+  return (await directory.getFileHandle(fileName)).getFile();
 }
 
 function projectPickerTypes(): readonly { readonly description: string; readonly accept: Readonly<Record<string, readonly string[]>> }[] {
@@ -411,6 +509,17 @@ function assertProjectText(text: string): void {
 
 function byteLength(text: string): number { return new TextEncoder().encode(text).byteLength; }
 function recentId(locator: ProjectLocator, fileName: string): string { return `${locator}:${fileName.toLocaleLowerCase()}`; }
+function sameFileName(left: string, right: string): boolean { return left.toLocaleLowerCase() === right.toLocaleLowerCase(); }
+async function sameFileHandle(left: FileSystemFileHandle, right: FileSystemFileHandle): Promise<boolean> {
+  if (left === right) return true;
+  const comparable = left as FileSystemFileHandle & { isSameEntry?: (other: FileSystemHandle) => Promise<boolean> };
+  return comparable.isSameEntry === undefined ? false : comparable.isSameEntry(right).catch(() => false);
+}
+function isFileSystemFileHandle(value: unknown): value is FileSystemFileHandle {
+  if (typeof value !== "object" || value === null) return false;
+  const handle = value as Partial<FileSystemFileHandle>;
+  return handle.kind === "file" && typeof handle.name === "string" && typeof handle.getFile === "function" && typeof handle.createWritable === "function";
+}
 function safeFileName(value: string): string { return value.replace(/[<>:"/\\|?*\u0000-\u001f]+/gu, "-").replace(/[ .]+$/gu, "").slice(0, 128) || "ps3d-artifact"; }
 
 function workspaceReadme(): string {

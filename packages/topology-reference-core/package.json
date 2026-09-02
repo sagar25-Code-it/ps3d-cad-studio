@@ -1,0 +1,14 @@
+{
+  "name": "@ps3d/topology-reference-core",
+  "version": "0.1.0-contract.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test .test-dist/topology-reference-core/tests/index.test.js && node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@ps3d/cad-document-core": "workspace:*",
+    "@ps3d/exact-kernel-api": "workspace:*"
+  }
+}

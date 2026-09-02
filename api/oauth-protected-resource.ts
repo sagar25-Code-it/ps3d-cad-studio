@@ -1,9 +1,9 @@
 import { cloudIsConfigured, loadCloudEnvironment } from "./_lib/cloud.js";
-import { jsonResponse, methodNotAllowed } from "./_lib/http.js";
+import { jsonResponse, methodNotAllowed, publicRequestOrigin } from "./_lib/http.js";
 
 function handler(request: Request): Response {
   if (request.method !== "GET") return methodNotAllowed(["GET"]);
-  const origin = new URL(request.url).origin;
+  const origin = publicRequestOrigin(request);
   const configured = cloudIsConfigured();
   return jsonResponse({
     resource: `${origin}/api/mcp`,

@@ -1,9 +1,9 @@
 import { cloudIsConfigured, loadCloudEnvironment } from "./_lib/cloud.js";
-import { jsonResponse, methodNotAllowed } from "./_lib/http.js";
+import { jsonResponse, methodNotAllowed, publicRequestOrigin } from "./_lib/http.js";
 
 function handler(request: Request): Response {
   if (request.method !== "GET") return methodNotAllowed(["GET"]);
-  const origin = new URL(request.url).origin;
+  const origin = publicRequestOrigin(request);
   const configured = cloudIsConfigured();
   const issuer = configured ? `${loadCloudEnvironment().supabaseUrl}/auth/v1` : null;
   return jsonResponse({
@@ -12,6 +12,7 @@ function handler(request: Request): Response {
     authentication: configured ? "email-password-and-oauth-2.1" : "unavailable",
     mcpEndpoint: `${origin}/api/mcp`,
     oauthIssuer: issuer,
+    oauthMcpAccess: "read-only",
     protectedResourceMetadata: `${origin}/.well-known/oauth-protected-resource`,
     tokenPrefix: "ps3d_mcp_",
     tokenSecretCharacters: 64,

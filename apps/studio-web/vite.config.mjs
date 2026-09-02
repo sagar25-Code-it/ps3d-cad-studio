@@ -6,6 +6,12 @@ import { productionGeometryBoundaryPlugin } from "../../scripts/production-bound
 
 const distDirectory = fileURLToPath(new URL("../../dist", import.meta.url));
 const handRuntimeDirectory = fileURLToPath(new URL("../../node_modules/.cache/ps3d-hand-runtime", import.meta.url));
+const brandLogoAsset = {
+  url: "/ps3d-master-logo.png",
+  sourcePath: fileURLToPath(new URL("./public/ps3d-master-logo.png", import.meta.url)),
+  targetPath: fileURLToPath(new URL("../../dist/ps3d-master-logo.png", import.meta.url)),
+  contentType: "image/png"
+};
 const handRuntimeAssets = [
   { url: "/mediapipe/runtime-manifest.json", relativePath: "mediapipe/runtime-manifest.json", contentType: "application/json; charset=utf-8" },
   { url: "/mediapipe/models/hand_landmarker-float16-v1.task", relativePath: "mediapipe/models/hand_landmarker-float16-v1.task", contentType: "application/octet-stream" },
@@ -32,7 +38,8 @@ function handRuntimePlugin() {
           next();
           return;
         }
-        const asset = handRuntimeAssets.find((candidate) => candidate.url === pathname);
+        const runtimeAsset = handRuntimeAssets.find((candidate) => candidate.url === pathname);
+        const asset = runtimeAsset ?? (brandLogoAsset.url === pathname ? brandLogoAsset : undefined);
         if (asset === undefined) {
           next();
           return;
@@ -43,7 +50,10 @@ function handRuntimePlugin() {
           response.end();
           return;
         }
-        readFile(resolve(handRuntimeDirectory, asset.relativePath)).then((payload) => {
+        const sourcePath = runtimeAsset === undefined
+          ? brandLogoAsset.sourcePath
+          : resolve(handRuntimeDirectory, runtimeAsset.relativePath);
+        readFile(sourcePath).then((payload) => {
           response.statusCode = 200;
           response.setHeader("Content-Type", asset.contentType);
           response.setHeader("Content-Length", String(payload.byteLength));
@@ -61,6 +71,7 @@ function handRuntimePlugin() {
         await mkdir(dirname(target), { recursive: true });
         await copyFile(source, target);
       }
+      await copyFile(brandLogoAsset.sourcePath, brandLogoAsset.targetPath);
     }
   };
 }
@@ -70,7 +81,8 @@ export default defineConfig({
   base: "/",
   // MediaPipe imports its loader as a module. Vite intentionally forbids
   // importing modules from publicDir, so development uses the exact-route
-  // middleware above and production copies the same reviewed four-file set.
+  // middleware above and production copies only the reviewed runtime files and
+  // the owner-approved PS3D brand mark.
   publicDir: false,
   plugins: [productionGeometryBoundaryPlugin(), handRuntimePlugin(), {
     name: "ps3d-project-license",

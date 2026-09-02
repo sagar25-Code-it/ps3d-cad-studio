@@ -8,6 +8,7 @@ import { verifyGeneratedSourceSetHash, verifyVercelPreinstallSourceSet } from ".
 const root = resolve(import.meta.dirname, "..");
 const distDirectory = resolve(root, "dist");
 const assetsDirectory = resolve(distDirectory, "assets");
+const brandLogoHash = "f1a979ccd3cf650a23cf0065bee3f4081f0520a6f7158fd72b559bfae6e4c63a";
 const handRuntimeFiles = new Map([
   ["mediapipe/models/hand_landmarker-float16-v1.task", "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"],
   ["mediapipe/wasm/vision_wasm_module_internal.js", "da8934057f147b622e82cfb4c0dbd85461c598e268588b5a8ba9ca963a8ff82d"],
@@ -95,6 +96,9 @@ if (!sameSet(runtimeBinaryPaths, expectedBinaryPaths)) {
 for (const [relativePath, expectedHash] of handRuntimeFiles) {
   const actualHash = await sha256(resolve(distDirectory, ...relativePath.split("/")));
   if (actualHash !== expectedHash) throw new Error(`Hand runtime hash mismatch: ${relativePath}.`);
+}
+if (await sha256(resolve(distDirectory, "ps3d-master-logo.png")) !== brandLogoHash) {
+  throw new Error("Production artifact must carry the exact owner-approved PS3D brand mark.");
 }
 const manifestAssets = runtimeManifest.package?.assets;
 if (!Array.isArray(manifestAssets) || manifestAssets.length !== 2) {

@@ -74,9 +74,11 @@ import {
 import type { ModelSuccessResponse, WorkerResponse } from "../../../packages/worker-protocol/src/index.js";
 import { GeometryWorkerClient } from "./worker-client.js";
 import { loadWorkbenchProject, saveWorkbenchProject } from "./workbench-store.js";
+import { createQualifiedPartDocument } from "./project-worker-sync.js";
 import {
   clearCurrentProjectFile,
   clearPsCadCaches,
+  commitOpenedProject,
   getPsCadWorkspaceStatus,
   initializePsCadWorkspace,
   listRecentProjects,
@@ -84,7 +86,7 @@ import {
   openProjectWithPicker,
   openRecentProject,
   preparePsCadLocalStorage,
-  rememberOpenedProject,
+  readProjectFilePayload,
   saveProjectText,
   writeWorkspaceArtifact,
   type ProjectFilePayload,
@@ -128,6 +130,11 @@ type PartParameter = Extract<WorkbenchOperation, { kind: "set-part-parameter" }>
 type ReplaceableAssemblyTemplate = Exclude<AssemblyTemplateId, "custom" | "electrical-panel">;
 type UiDiagnostic = Pick<Diagnostic, "code" | "message" | "recovery"> | { readonly code: string; readonly message: string; readonly recovery: string };
 interface OpenContextMenu { readonly x: number; readonly y: number; readonly selectionId: string | null; readonly selectionKind: WorkbenchSelectionKind; }
+interface PreparedQualifiedWorker {
+  readonly client: GeometryWorkerClient;
+  readonly response: ModelSuccessResponse;
+  readonly activate: () => void;
+}
 
 const QUALIFIED_PART_KEYS: Readonly<Partial<Record<PartParameter, ParameterKey>>> = {
   widthMm: "width",
@@ -219,6 +226,8 @@ export function App(): React.JSX.Element {
   const projectInputRef = useRef<HTMLInputElement>(null);
   const nativeInputRef = useRef<HTMLInputElement>(null);
   const engineeringDialogRef = useRef<HTMLElement>(null);
+  const projectTransitionQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const projectPersistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const assemblyExplodeMaxMm = useMemo(() => assemblyExplodeLimitMm(project.assembly), [project.assembly]);
   const displayedAssembly = useMemo(() => assemblyExplodePreviewMm === null
@@ -243,6 +252,12 @@ export function App(): React.JSX.Element {
     )
     : { ok: false as const, diagnostics: [] }, [electrical.routing, electromechanicalReviewOpen, project.electrical, project.revision]);
 
+  const persistBroadProject = useCallback((next: WorkbenchProject): Promise<void> => {
+    const queued = projectPersistenceQueueRef.current.then(() => saveWorkbenchProject(next));
+    projectPersistenceQueueRef.current = queued.catch(() => undefined);
+    return queued;
+  }, []);
+
   const pushProject = useCallback((next: WorkbenchProject, persist = true): void => {
     const history = projectHistoryRef.current.slice(0, projectHistoryIndexRef.current + 1);
     history.push(next);
@@ -252,11 +267,11 @@ export function App(): React.JSX.Element {
     setProjectRedoDepth(0);
     projectRef.current = next;
     setProject(next);
-    if (persist) void saveWorkbenchProject(next).catch((error: unknown) => {
+    if (persist) void persistBroadProject(next).catch((error: unknown) => {
       setStatus("error");
       setStatusText(error instanceof Error ? error.message : "The broad project could not be persisted.");
     });
-  }, []);
+  }, [persistBroadProject]);
 
   const resetProject = useCallback((next: WorkbenchProject): void => {
     projectHistoryRef.current = [next];
@@ -265,6 +280,12 @@ export function App(): React.JSX.Element {
     setProjectRedoDepth(0);
     projectRef.current = next;
     setProject(next);
+  }, []);
+
+  const queueProjectTransition = useCallback((transition: () => Promise<void>): Promise<void> => {
+    const queued = projectTransitionQueueRef.current.then(transition);
+    projectTransitionQueueRef.current = queued.catch(() => undefined);
+    return queued;
   }, []);
 
   const refreshFileWorkspace = useCallback(async (): Promise<void> => {
@@ -369,26 +390,34 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const client = new GeometryWorkerClient(restoreAfterFailure);
     clientRef.current = client;
-    void client.bootstrap(initialDocument, true, null).then(async (response) => {
-      if (response.status === "error" && response.diagnostics[0]?.code === "PERSISTENCE_FAILURE") acceptResponse(await client.bootstrap(initialDocument, false, null));
-      else acceptResponse(response);
-    }).catch(() => undefined);
-    return () => { client.dispose(); clientRef.current = undefined; };
-  }, [acceptResponse, initialDocument, restoreAfterFailure]);
+    void (async () => {
+      const stored = await loadWorkbenchProject().catch(() => undefined);
+      const authoritativeProject = stored ?? initialProject;
+      if (stored === undefined) await persistBroadProject(initialProject).catch(() => undefined);
+      const fallbackDocument = createQualifiedPartDocument(authoritativeProject, initialDocument.id, initialDocument.displayUnit);
+      const response = await client.bootstrap(fallbackDocument, false, null);
+      if (clientRef.current !== client) return;
+      resetProject(authoritativeProject);
+      acceptResponse(response);
+      if (stored !== undefined && response.status !== "error") setStatusText(`Recovered synchronized workbench project revision ${stored.revision}.`);
+    })().catch((error: unknown) => {
+      if (clientRef.current !== client) return;
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "The synchronized project could not be started.");
+    });
+    return () => {
+      const active = clientRef.current;
+      active?.dispose();
+      if (active !== client) client.dispose();
+      clientRef.current = undefined;
+    };
+  }, [acceptResponse, initialDocument, initialProject, persistBroadProject, resetProject, restoreAfterFailure]);
 
   useEffect(() => () => {
     const imported = activeImportRef.current;
     imported?.releaseResources();
     if (imported !== undefined) disposeExchangeObject(imported.object);
   }, []);
-
-  useEffect(() => {
-    void loadWorkbenchProject().then((stored) => {
-      if (stored === undefined) return saveWorkbenchProject(initialProject);
-      resetProject(stored);
-      setStatusText(`Recovered broad workbench project revision ${stored.revision}.`);
-    }).catch(() => setStatusText("No durable broad project was recovered; using the original local study."));
-  }, [initialProject, resetProject]);
 
   useEffect(() => {
     void preparePsCadLocalStorage()
@@ -550,7 +579,7 @@ export function App(): React.JSX.Element {
     projectRef.current = next;
     setProject(next);
     projectHistoryRef.current[projectHistoryIndexRef.current] = next;
-    void saveWorkbenchProject(next).catch(() => undefined);
+    void persistBroadProject(next).catch(() => undefined);
     setStatus("ready");
     setStatusText(`Opened ${workspace === "automate" ? "Automate" : `${workspace[0]!.toUpperCase()}${workspace.slice(1)}`} workspace without changing engineering revision ${current.revision}.`);
   };
@@ -1115,11 +1144,41 @@ export function App(): React.JSX.Element {
     setProject(next);
     setProjectUndoDepth(nextIndex);
     setProjectRedoDepth(projectHistoryRef.current.length - nextIndex - 1);
-    void saveWorkbenchProject(next);
+    void persistBroadProject(next).catch(() => undefined);
     setStatusText(`${direction === "undo" ? "Restored prior" : "Restored next"} broad project revision ${next.revision}.`);
   };
 
   const serializeProjectText = (): string => `${JSON.stringify(projectRef.current, null, 2)}\n`;
+
+  const prepareQualifiedWorker = async (next: WorkbenchProject): Promise<PreparedQualifiedWorker | undefined> => {
+    let active = false;
+    const candidate = new GeometryWorkerClient((message) => { if (active) restoreAfterFailure(message); });
+    try {
+      const candidateDocument = createQualifiedPartDocument(next, `document:${crypto.randomUUID()}`, documentRef.current.displayUnit);
+      const response = await candidate.bootstrap(candidateDocument, false, null);
+      if (response.status === "error") {
+        candidate.dispose();
+        acceptResponse(response);
+        return undefined;
+      }
+      if (response.kind !== "model") {
+        candidate.dispose();
+        throw new Error("The qualified geometry worker did not return a synchronized model snapshot.");
+      }
+      return { client: candidate, response, activate: () => { active = true; } };
+    } catch (error) {
+      candidate.dispose();
+      throw error;
+    }
+  };
+
+  const activateQualifiedWorker = (prepared: PreparedQualifiedWorker): void => {
+    const previous = clientRef.current;
+    clientRef.current = prepared.client;
+    prepared.activate();
+    previous?.dispose();
+    acceptModel(prepared.response);
+  };
 
   const saveVisibleProject = async (mode: "save" | "save-as" | "copy", suggestedName: string): Promise<void> => {
     const current = projectRef.current;
@@ -1137,10 +1196,12 @@ export function App(): React.JSX.Element {
   const saveAll = async (): Promise<void> => {
     setStatus("working");
     try {
-      await saveWorkbenchProject(projectRef.current);
-      const response = await clientRef.current?.persist(documentRef.current.revision);
-      if (response !== undefined && !acceptResponse(response)) return;
-      await saveVisibleProject("save", fileWorkspaceStatus.currentFileName ?? projectRef.current.name);
+      await queueProjectTransition(async () => {
+        await persistBroadProject(projectRef.current);
+        const response = await clientRef.current?.persist(documentRef.current.revision);
+        if (response !== undefined && !acceptResponse(response)) return;
+        await saveVisibleProject("save", fileWorkspaceStatus.currentFileName ?? projectRef.current.name);
+      });
     } catch (error) {
       if (isAbortError(error)) { setStatus("ready"); setStatusText("Save cancelled; the browser recovery copy is still current."); return; }
       setStatus("error"); setStatusText(error instanceof Error ? error.message : "Local save failed.");
@@ -1148,23 +1209,33 @@ export function App(): React.JSX.Element {
   };
 
   const openProjectPayload = async (payload: ProjectFilePayload): Promise<void> => {
-    const parsed = parseWorkbenchProjectText(payload.text);
-    if (!parsed.ok) {
-      await clearCurrentProjectFile().catch(() => undefined);
-      const first = parsed.diagnostics[0];
-      setStatus("error");
-      setStatusText(first?.message ?? "Project rejected.");
-      return;
-    }
-    resetProject(parsed.value);
-    await saveWorkbenchProject(parsed.value);
-    await rememberOpenedProject(payload.fileName, parsed.value);
-    await refreshFileWorkspace();
-    setRenderStudioOpen(false);
-    setMasterCartOpen(false);
-    setStatus("ready");
-    setStatusText(`Opened ${payload.fileName}, project revision ${parsed.value.revision}.`);
-    void synchronizeWorkerPart(parsed.value);
+    await queueProjectTransition(async () => {
+      const parsed = parseWorkbenchProjectText(payload.text);
+      if (!parsed.ok) {
+        const first = parsed.diagnostics[0];
+        setStatus("error");
+        setStatusText(first?.message ?? "Project rejected. The active file remains unchanged.");
+        return;
+      }
+      const previous = projectRef.current;
+      const prepared = await prepareQualifiedWorker(parsed.value);
+      if (prepared === undefined) return;
+      try {
+        await persistBroadProject(parsed.value);
+        await commitOpenedProject(payload, parsed.value);
+      } catch (error) {
+        prepared.client.dispose();
+        await persistBroadProject(previous).catch(() => undefined);
+        throw error;
+      }
+      resetProject(parsed.value);
+      activateQualifiedWorker(prepared);
+      await refreshFileWorkspace();
+      setRenderStudioOpen(false);
+      setMasterCartOpen(false);
+      setStatus("ready");
+      setStatusText(`Opened ${payload.fileName}, project revision ${parsed.value.revision}, with one synchronized qualified-part snapshot.`);
+    });
   };
 
   const openProjectFromSystem = async (): Promise<void> => {
@@ -1182,50 +1253,44 @@ export function App(): React.JSX.Element {
   const openProject = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = event.target.files?.[0]; event.target.value = "";
     if (file === undefined) return;
-    await clearCurrentProjectFile().catch(() => undefined);
-    await openProjectPayload({ text: await file.text(), fileName: file.name });
-  };
-
-  const synchronizeWorkerPart = async (next: WorkbenchProject): Promise<void> => {
-    for (const [parameter, key] of Object.entries(QUALIFIED_PART_KEYS) as [PartParameter, ParameterKey][]) {
-      const current = parameterByKey(documentRef.current, key).valueMeters * 1000;
-      const target = next.part[parameter];
-      if (Math.abs(current - target) < 1e-9 || clientRef.current === undefined) continue;
-      const response = await clientRef.current.commit(documentRef.current.revision, { protocolVersion: 1, kind: "set-parameter", commandId: `command:project-open-${key}-${crypto.randomUUID()}`, expectedRevision: documentRef.current.revision, parameterKey: key, expression: { decimal: String(target), unit: "mm" } });
-      if (!acceptResponse(response)) break;
+    try { await openProjectPayload(await readProjectFilePayload(file)); }
+    catch (error) {
+      setStatus("error");
+      setStatusText(error instanceof Error ? error.message : "The selected project could not be opened.");
     }
   };
 
   const createNewProject = async (): Promise<void> => {
     setStatus("working");
     try {
-      const nextProject = createWorkbenchProject(`project:${crypto.randomUUID()}`);
-      const nextDocument = createBracketDocument(`document:${crypto.randomUUID()}`);
-      const imported = activeImportRef.current;
-      imported?.releaseResources();
-      if (imported !== undefined) disposeExchangeObject(imported.object);
-      activeImportRef.current = undefined;
-      setActiveImport(undefined);
-      setSelectedId(null);
-      setMeasurePoints([]);
-      setMasterCartOpen(false);
-      setRenderStudioOpen(false);
-      await clearCurrentProjectFile();
-      resetProject(nextProject);
-      setDocument(nextDocument);
-      documentRef.current = nextDocument;
-      setModel(undefined);
-      modelRef.current = undefined;
-      await saveWorkbenchProject(nextProject);
-      const client = clientRef.current;
-      if (client !== undefined) {
-        client.restart();
-        const response = await client.bootstrap(nextDocument, false, null);
-        if (!acceptResponse(response)) return;
-      }
-      await refreshFileWorkspace();
-      setStatus("ready");
-      setStatusText("Created a new unsaved PS3D design with a clean history and independent recovery identity.");
+      await queueProjectTransition(async () => {
+        const nextProject = createWorkbenchProject(`project:${crypto.randomUUID()}`);
+        const previous = projectRef.current;
+        const prepared = await prepareQualifiedWorker(nextProject);
+        if (prepared === undefined) return;
+        try {
+          await persistBroadProject(nextProject);
+          await clearCurrentProjectFile();
+        } catch (error) {
+          prepared.client.dispose();
+          await persistBroadProject(previous).catch(() => undefined);
+          throw error;
+        }
+        const imported = activeImportRef.current;
+        imported?.releaseResources();
+        if (imported !== undefined) disposeExchangeObject(imported.object);
+        activeImportRef.current = undefined;
+        setActiveImport(undefined);
+        setSelectedId(null);
+        setMeasurePoints([]);
+        setMasterCartOpen(false);
+        setRenderStudioOpen(false);
+        resetProject(nextProject);
+        activateQualifiedWorker(prepared);
+        await refreshFileWorkspace();
+        setStatus("ready");
+        setStatusText("Created a new unsaved PS3D design with a clean, synchronized history and independent recovery identity.");
+      });
     } catch (error) {
       setStatus("error");
       setStatusText(error instanceof Error ? error.message : "A new design could not be created.");
@@ -1258,17 +1323,28 @@ export function App(): React.JSX.Element {
   const recoverAutosave = async (): Promise<void> => {
     setStatus("working");
     try {
-      const recovered = await loadCachedWorkbenchProject();
-      if (recovered === undefined) { setStatus("ready"); setStatusText("No validated browser-private autosave is available."); return; }
-      await clearCurrentProjectFile();
-      resetProject(recovered);
-      await saveWorkbenchProject(recovered);
-      await refreshFileWorkspace();
-      setMasterCartOpen(false);
-      setRenderStudioOpen(false);
-      setStatus("ready");
-      setStatusText(`Recovered project revision ${recovered.revision} as an unsaved session. Use Save As to create a visible file.`);
-      void synchronizeWorkerPart(recovered);
+      await queueProjectTransition(async () => {
+        const recovered = await loadCachedWorkbenchProject();
+        if (recovered === undefined) { setStatus("ready"); setStatusText("No validated browser-private autosave is available."); return; }
+        const previous = projectRef.current;
+        const prepared = await prepareQualifiedWorker(recovered);
+        if (prepared === undefined) return;
+        try {
+          await persistBroadProject(recovered);
+          await clearCurrentProjectFile();
+        } catch (error) {
+          prepared.client.dispose();
+          await persistBroadProject(previous).catch(() => undefined);
+          throw error;
+        }
+        resetProject(recovered);
+        activateQualifiedWorker(prepared);
+        await refreshFileWorkspace();
+        setMasterCartOpen(false);
+        setRenderStudioOpen(false);
+        setStatus("ready");
+        setStatusText(`Recovered project revision ${recovered.revision} as an unsaved synchronized session. Use Save As to create a visible file.`);
+      });
     } catch (error) {
       setStatus("error"); setStatusText(error instanceof Error ? error.message : "Autosave recovery failed.");
     }
@@ -1291,8 +1367,10 @@ export function App(): React.JSX.Element {
     if (mode === undefined) return;
     setStatus("working");
     try {
-      await saveWorkbenchProject(projectRef.current);
-      await saveVisibleProject(mode, fileName);
+      await queueProjectTransition(async () => {
+        await persistBroadProject(projectRef.current);
+        await saveVisibleProject(mode, fileName);
+      });
     } catch (error) {
       if (isAbortError(error)) { setStatus("ready"); setStatusText("Save cancelled; the active project was not rebound."); return; }
       setStatus("error"); setStatusText(error instanceof Error ? error.message : "The project file could not be written.");

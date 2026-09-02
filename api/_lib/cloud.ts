@@ -1,5 +1,5 @@
 import { createHmac, randomBytes } from "node:crypto";
-import { apiError, bearerToken, isRecord } from "./http.js";
+import { apiError, bearerToken, isRecord, publicRequestOrigin } from "./http.js";
 
 export interface CloudEnvironment {
   readonly supabaseUrl: string;
@@ -25,6 +25,7 @@ export interface McpPrincipal {
 export type McpScope = "mcp:read" | "mcp:preview" | "mcp:apply";
 
 export const MCP_SCOPES: readonly McpScope[] = ["mcp:read", "mcp:preview", "mcp:apply"];
+export const OAUTH_MCP_SCOPES: readonly McpScope[] = ["mcp:read"];
 export const PERSONAL_TOKEN_PATTERN = /^ps3d_mcp_[a-f0-9]{64}$/u;
 
 export class CloudConfigurationError extends Error {
@@ -54,13 +55,15 @@ export function cloudIsConfigured(): boolean {
   }
 }
 
-function normalizeSupabaseUrl(value: string | undefined): string | undefined {
+export function normalizeSupabaseUrl(value: string | undefined): string | undefined {
   if (value === undefined || value.trim().length === 0) return undefined;
   try {
     const parsed = new URL(value.trim());
-    if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1"))) return undefined;
-    parsed.pathname = parsed.pathname.replace(/\/$/u, "");
-    return parsed.toString().replace(/\/$/u, "");
+    if (parsed.username.length > 0 || parsed.password.length > 0 || parsed.search.length > 0 || parsed.hash.length > 0) return undefined;
+    if (!(parsed.pathname === "" || parsed.pathname === "/")) return undefined;
+    const loopback = parsed.hostname === "localhost" || parsed.hostname.endsWith(".localhost") || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]";
+    if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) return undefined;
+    return parsed.origin;
   } catch {
     return undefined;
   }
@@ -150,7 +153,7 @@ export async function authenticateMcpRequest(request: Request, env: CloudEnviron
   return {
     userId: user.id,
     actorHash: hashPersonalAccessToken(`oauth:${user.id}`, env.tokenPepper),
-    scopes: MCP_SCOPES,
+    scopes: OAUTH_MCP_SCOPES,
     kind: "oauth-access-token"
   };
 }
@@ -197,7 +200,7 @@ export function hasMcpScope(principal: McpPrincipal, scope: McpScope): boolean {
 }
 
 export function mcpUnauthorized(request: Request, message: string): Response {
-  const metadataUrl = `${new URL(request.url).origin}/.well-known/oauth-protected-resource`;
+  const metadataUrl = `${publicRequestOrigin(request)}/.well-known/oauth-protected-resource`;
   return apiError(401, "MCP_AUTH_REQUIRED", message, {
     "WWW-Authenticate": `Bearer resource_metadata="${metadataUrl}"`
   });
