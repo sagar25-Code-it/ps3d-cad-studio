@@ -1,0 +1,16 @@
+{
+  "name": "@ps3d/cad-document-store",
+  "version": "0.1.0-preview.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "esbuild tests/store.test.ts --bundle --platform=node --format=esm --target=node24 --outfile=.test-dist/store.test.mjs && node --test .test-dist/store.test.mjs && node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@ps3d/cad-document-core": "workspace:*"
+  }
+}

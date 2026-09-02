@@ -20,7 +20,7 @@ import { MAX_MCP_JSON_BYTES, apiError, isAllowedMcpOrigin, isRecord, methodNotAl
 
 interface JsonRpcRequest {
   readonly jsonrpc: "2.0";
-  readonly id?: string | number | null;
+  readonly id?: string | number;
   readonly method: string;
   readonly params?: Readonly<Record<string, unknown>>;
 }
@@ -69,17 +69,21 @@ async function handler(request: Request): Promise<Response> {
 
 export default { fetch: handler };
 
-function parseJsonRpcRequest(body: Readonly<Record<string, unknown>>): JsonRpcRequest | Response {
+export function parseJsonRpcRequest(body: Readonly<Record<string, unknown>>): JsonRpcRequest | Response {
   if (body.jsonrpc !== "2.0" || typeof body.method !== "string" || body.method.length === 0 || body.method.length > 120) {
     return jsonRpcError(null, -32600, "Invalid Request", "Expected one JSON-RPC 2.0 request object.");
   }
-  if (body.id !== undefined && body.id !== null && typeof body.id !== "string" && typeof body.id !== "number") {
-    return jsonRpcError(null, -32600, "Invalid Request", "The JSON-RPC id must be a string, number, or null.");
+  const notification = body.method.startsWith("notifications/");
+  if ((!notification && body.id === undefined) || (notification && body.id !== undefined)) {
+    return jsonRpcError(null, -32600, "Invalid Request", "MCP requests require a string or number id; notifications must omit it.");
+  }
+  if (body.id !== undefined && typeof body.id !== "string" && typeof body.id !== "number") {
+    return jsonRpcError(null, -32600, "Invalid Request", "The JSON-RPC id must be a string or number.");
   }
   if (body.params !== undefined && !isRecord(body.params)) return jsonRpcError(body.id ?? null, -32602, "Invalid params", "params must be an object.");
   return {
     jsonrpc: "2.0",
-    ...(body.id === undefined ? {} : { id: body.id as string | number | null }),
+    ...(body.id === undefined ? {} : { id: body.id as string | number }),
     method: body.method,
     ...(body.params === undefined ? {} : { params: body.params })
   };
@@ -135,6 +139,7 @@ async function callTool(id: string | number | null, params: Readonly<Record<stri
   const tool = WORKBENCH_MCP_TOOLS.find((candidate) => candidate.name === params.name);
   if (tool === undefined) return jsonRpcErrorObject(id, -32602, "Unknown tool", "The requested PS3D tool is not registered.");
   const requiredScope = scopeForTool(tool);
+  if (requiredScope === undefined) return jsonRpcErrorObject(id, -32602, "Tool policy unavailable", "The requested PS3D tool has no registered authorization policy.");
   if (!hasMcpScope(principal, requiredScope)) return jsonRpcErrorObject(id, -32003, "Insufficient scope", `This token requires ${requiredScope} for ${tool.name}.`);
   const result = await handleWorkbenchMcpTool(tool.name, params.arguments ?? {});
   return jsonRpcResult(id, {
@@ -162,13 +167,32 @@ function getPrompt(id: string | number | null, params: Readonly<Record<string, u
 }
 
 function accessibleTools(principal: McpPrincipal): readonly McpToolDefinition[] {
-  return WORKBENCH_MCP_TOOLS.filter((tool) => hasMcpScope(principal, scopeForTool(tool)));
+  return WORKBENCH_MCP_TOOLS.filter((tool) => {
+    const scope = scopeForTool(tool);
+    return scope !== undefined && hasMcpScope(principal, scope);
+  });
 }
 
-function scopeForTool(tool: McpToolDefinition): McpScope {
-  if (tool.name === "ps3d_apply_preview") return "mcp:apply";
-  if (tool.name.startsWith("ps3d_preview_")) return "mcp:preview";
-  return "mcp:read";
+const READ_ONLY_MCP_TOOL_NAMES = new Set([
+  "ps3d_guide",
+  "ps3d_agent_handshake",
+  "ps3d_plan_engineering_intent",
+  "ps3d_find_commands",
+  "ps3d_capabilities",
+  "ps3d_inspect_project",
+  "ps3d_design_health",
+  "ps3d_analyze_vehicle",
+  "ps3d_electromechanical_catalog"
+]);
+
+export function requiredScopeForMcpToolName(name: string): McpScope | undefined {
+  if (name === "ps3d_apply_preview") return "mcp:apply";
+  if (name === "ps3d_preview_electromechanical" || name === "ps3d_preview_operation") return "mcp:preview";
+  return READ_ONLY_MCP_TOOL_NAMES.has(name) ? "mcp:read" : undefined;
+}
+
+function scopeForTool(tool: McpToolDefinition): McpScope | undefined {
+  return requiredScopeForMcpToolName(tool.name);
 }
 
 function negotiatedProtocol(request: Request, message: Pick<JsonRpcRequest, "params">): string {

@@ -12,6 +12,9 @@ public service is therefore not guaranteed to remain cost-free at every scale.
   `api/`.
 - Supabase Auth owns password hashing, email verification, recovery sessions,
   OAuth 2.1 authorization, refresh tokens, and user JWTs.
+- Supabase OAuth user tokens receive read-only MCP access. Preview and apply
+  require an independently scoped, expiring PS3D personal token until the
+  identity provider can express and enforce those application scopes.
 - Vercel keeps the Supabase secret key and `MCP_TOKEN_PEPPER` as server-only
   environment values.
 - PostgreSQL stores only token metadata and keyed HMAC digests. It never stores
@@ -143,4 +146,3 @@ review provider advisories, rotate a suspected secret immediately, revoke
 exposed personal tokens, and pause token issuance during an incident. Vercel
 can roll code back to a previously reviewed deployment; database changes need a
 separately reviewed forward migration or tested backup restore.
-

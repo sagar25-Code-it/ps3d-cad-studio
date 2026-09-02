@@ -1,0 +1,10 @@
+{
+  "name": "@ps3d/render-exchange-core",
+  "version": "0.1.0-contract.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.test.json && node .test-dist/tests/run.js && node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\""
+  }
+}

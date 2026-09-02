@@ -33,21 +33,51 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export async function readJsonObject(request: Request, maxBytes = MAX_API_JSON_BYTES): Promise<Record<string, unknown>> {
-  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
-  if (!contentType.startsWith("application/json")) throw new RequestBodyError(415, "CONTENT_TYPE", "Send an application/json request body.");
+  const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (!(contentType === "application/json" || (contentType.startsWith("application/") && contentType.endsWith("+json")))) {
+    throw new RequestBodyError(415, "CONTENT_TYPE", "Send an application/json request body.");
+  }
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) throw new RequestBodyError(413, "BODY_TOO_LARGE", `The request body exceeds ${maxBytes} bytes.`);
-  const bytes = new Uint8Array(await request.arrayBuffer());
+  const bytes = await readBoundedBytes(request, maxBytes);
   if (bytes.byteLength === 0) throw new RequestBodyError(400, "EMPTY_BODY", "A JSON request body is required.");
-  if (bytes.byteLength > maxBytes) throw new RequestBodyError(413, "BODY_TOO_LARGE", `The request body exceeds ${maxBytes} bytes.`);
   let value: unknown;
   try {
-    value = JSON.parse(new TextDecoder().decode(bytes));
+    value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
     throw new RequestBodyError(400, "INVALID_JSON", "The request body is not valid JSON.");
   }
   if (!isRecord(value)) throw new RequestBodyError(400, "INVALID_BODY", "The request body must be one JSON object.");
   return value;
+}
+
+async function readBoundedBytes(request: Request, maxBytes: number): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new RequestBodyError(500, "BODY_LIMIT", "The request body limit is invalid.");
+  if (request.body === null) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new RequestBodyError(413, "BODY_TOO_LARGE", `The request body exceeds ${maxBytes} bytes.`);
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
 
 export class RequestBodyError extends Error {
@@ -68,27 +98,36 @@ export function requestBodyErrorResponse(error: unknown): Response | undefined {
 export function requireSameOrigin(request: Request): Response | undefined {
   const origin = request.headers.get("origin");
   if (origin === null) return apiError(403, "ORIGIN_REQUIRED", "Browser write requests must include an Origin header.");
-  const requestOrigin = new URL(request.url).origin;
-  const configuredOrigin = configuredPublicOrigin();
-  if (origin !== requestOrigin && origin !== configuredOrigin) return apiError(403, "ORIGIN_REJECTED", "This browser origin is not allowed.");
+  if (origin !== publicRequestOrigin(request)) return apiError(403, "ORIGIN_REJECTED", "This browser origin is not allowed.");
   return undefined;
 }
 
 export function isAllowedMcpOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (origin === null) return true;
-  const requestOrigin = new URL(request.url).origin;
-  return origin === requestOrigin || origin === configuredPublicOrigin();
+  return origin === publicRequestOrigin(request);
 }
 
 export function configuredPublicOrigin(): string | undefined {
   const value = process.env.PUBLIC_APP_URL?.trim();
   if (value === undefined || value.length === 0) return undefined;
   try {
-    return new URL(value).origin;
+    const parsed = new URL(value);
+    if (parsed.username.length > 0 || parsed.password.length > 0) return undefined;
+    const localHttp = parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname);
+    if (parsed.protocol !== "https:" && !localHttp) return undefined;
+    return parsed.origin;
   } catch {
     return undefined;
   }
+}
+
+export function publicRequestOrigin(request: Request): string {
+  return configuredPublicOrigin() ?? new URL(request.url).origin;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
 export function bearerToken(request: Request): string | undefined {
@@ -101,4 +140,3 @@ export function assertExactKeys(value: Readonly<Record<string, unknown>>, allowe
   const allow = new Set(allowed);
   return Object.keys(value).every((key) => allow.has(key));
 }
-

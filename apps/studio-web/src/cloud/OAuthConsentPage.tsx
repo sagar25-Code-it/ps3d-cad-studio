@@ -46,7 +46,7 @@ export function OAuthConsentPage(): React.JSX.Element {
   };
 
   const returnTarget = `/oauth/consent${location.search}`;
-  return <main className="public-page consent-page"><PublicPageHeader active="access" /><section className="consent-shell"><div className="consent-card"><span className="eyebrow">OAUTH 2.1 AUTHORIZATION</span><h1>Connect an AI client to PS3D?</h1>{authorizationId === null ? <p className="consent-error">This link has no authorization request identifier.</p> : session === undefined ? <><p>Sign in with the PS3D account that should own this AI connection. Your password is never shared with the requesting client.</p><a className="primary portal-primary link-button" href={`/access?return=${encodeURIComponent(returnTarget)}`}>Sign in to continue</a></> : details === undefined ? <p>{error ?? "Loading verified client details..."}</p> : <><div className="consent-client"><span>Requesting client</span><strong>{details.clientName}</strong><small>{details.redirectUri}</small></div><h2>This client is asking to:</h2><ul><li>Discover PS3D engineering tools and capability boundaries</li><li>Inspect project data that you explicitly provide to the client</li><li>Create bounded previews and receipt-gated returned project copies</li></ul><div className="consent-scopes">Scopes: {details.scopes.length === 0 ? "openid, email" : details.scopes.join(", ")}</div>{error !== undefined && <p className="consent-error">{error}</p>}<footer><button onClick={() => void decide("deny")} disabled={busy}>Deny</button><button className="primary" onClick={() => void decide("approve")} disabled={busy}>{busy ? "Working..." : "Approve connection"}</button></footer></>}</div><aside><strong>PS3D never gives the client your password.</strong><p>The client receives a revocable access token from the identity provider. The remote MCP server validates it for each request and stores no CAD project payload.</p></aside></section></main>;
+  return <main className="public-page consent-page"><PublicPageHeader active="access" /><section className="consent-shell"><div className="consent-card"><span className="eyebrow">OAUTH 2.1 AUTHORIZATION</span><h1>Connect an AI client to PS3D?</h1>{authorizationId === null ? <p className="consent-error">This link has no authorization request identifier.</p> : session === undefined ? <><p>Sign in with the PS3D account that should own this AI connection. Your password is never shared with the requesting client.</p><a className="primary portal-primary link-button" href={`/access?return=${encodeURIComponent(returnTarget)}`}>Sign in to continue</a></> : details === undefined ? <p>{error ?? "Loading verified client details..."}</p> : <><div className="consent-client"><span>Requesting client</span><strong>{details.clientName}</strong><small>{details.redirectUri}</small></div><h2>This client is asking to:</h2><ul><li>Discover PS3D engineering tools and capability boundaries</li><li>Inspect project data that you explicitly provide to the client</li></ul><p className="consent-scopes">OAuth access is read-only. Create a separately scoped personal MCP token when this client must preview or return confirmed CAD changes.</p><div className="consent-scopes">Identity scopes: {details.scopes.length === 0 ? "openid, email" : details.scopes.join(", ")}</div>{error !== undefined && <p className="consent-error">{error}</p>}<footer><button onClick={() => void decide("deny")} disabled={busy}>Deny</button><button className="primary" onClick={() => void decide("approve")} disabled={busy}>{busy ? "Working..." : "Approve read-only connection"}</button></footer></>}</div><aside><strong>PS3D never gives the client your password.</strong><p>The client receives a revocable, read-only access token from the identity provider. The remote MCP server validates it for each request and stores no CAD project payload.</p></aside></section></main>;
 }
 
 function normalizeConsent(value: unknown): ConsentDetails {
@@ -62,9 +62,19 @@ function normalizeConsent(value: unknown): ConsentDetails {
 function redirectFromConsent(value: unknown): string | undefined {
   if (!isRecord(value)) return undefined;
   const candidate = typeof value.redirect_url === "string" ? value.redirect_url : typeof value.redirect_uri === "string" ? value.redirect_uri : undefined;
+  return safeOAuthConsentRedirect(candidate);
+}
+
+export function safeOAuthConsentRedirect(candidate: string | undefined): string | undefined {
   if (candidate === undefined) return undefined;
-  try { const parsed = new URL(candidate); return parsed.protocol === "https:" || (parsed.protocol === "http:" && parsed.hostname === "localhost") ? parsed.toString() : undefined; }
-  catch { return undefined; }
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.username.length > 0 || parsed.password.length > 0) return undefined;
+    const loopback = parsed.hostname === "localhost" || parsed.hostname.endsWith(".localhost") || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]";
+    return parsed.protocol === "https:" || (parsed.protocol === "http:" && loopback) ? parsed.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function apiFailure(value: unknown, status: number): Error {
@@ -76,4 +86,3 @@ function apiFailure(value: unknown, status: number): Error {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-

@@ -6,6 +6,7 @@ export interface PublicCloudConfig {
   readonly authentication: string;
   readonly mcpEndpoint: string;
   readonly oauthIssuer: string | null;
+  readonly oauthMcpAccess: "read-only";
   readonly protectedResourceMetadata: string;
   readonly tokenPrefix: string;
   readonly tokenSecretCharacters: number;

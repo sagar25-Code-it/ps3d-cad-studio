@@ -67,9 +67,57 @@ importers:
         specifier: 'catalog:'
         version: 1.0.1
 
+  packages/ai-engineering-gateway: {}
+
+  packages/assembly-kinematics-core:
+    dependencies:
+      '@ps3d/cad-document-core':
+        specifier: workspace:*
+        version: link:../cad-document-core
+
+  packages/associative-drawing-core:
+    dependencies:
+      '@ps3d/exact-kernel-api':
+        specifier: workspace:*
+        version: link:../exact-kernel-api
+
+  packages/cad-document-core: {}
+
+  packages/cad-document-store:
+    dependencies:
+      '@ps3d/cad-document-core':
+        specifier: workspace:*
+        version: link:../cad-document-core
+
+  packages/cad-platform-acceptance:
+    dependencies:
+      '@ps3d/ai-engineering-gateway':
+        specifier: workspace:*
+        version: link:../ai-engineering-gateway
+      '@ps3d/cad-document-core':
+        specifier: workspace:*
+        version: link:../cad-document-core
+      '@ps3d/exact-kernel-api':
+        specifier: workspace:*
+        version: link:../exact-kernel-api
+      '@ps3d/parametric-cad-engine':
+        specifier: workspace:*
+        version: link:../parametric-cad-engine
+      '@ps3d/parametric-sketch-core':
+        specifier: workspace:*
+        version: link:../parametric-sketch-core
+
   packages/commands: {}
 
   packages/evidence: {}
+
+  packages/exact-kernel-api: {}
+
+  packages/exact-kernel-worker:
+    dependencies:
+      '@ps3d/exact-kernel-api':
+        specifier: workspace:*
+        version: link:../exact-kernel-api
 
   packages/exchange-3d: {}
 
@@ -79,7 +127,29 @@ importers:
 
   packages/model-worker: {}
 
+  packages/occt-kernel-adapter:
+    dependencies:
+      '@ps3d/exact-kernel-api':
+        specifier: workspace:*
+        version: link:../exact-kernel-api
+
+  packages/parametric-cad-engine:
+    dependencies:
+      '@ps3d/cad-document-core':
+        specifier: workspace:*
+        version: link:../cad-document-core
+      '@ps3d/exact-kernel-api':
+        specifier: workspace:*
+        version: link:../exact-kernel-api
+      '@ps3d/parametric-sketch-core':
+        specifier: workspace:*
+        version: link:../parametric-sketch-core
+
+  packages/parametric-sketch-core: {}
+
   packages/persistence: {}
+
+  packages/render-exchange-core: {}
 
   packages/sketch-kernel: {}
 
@@ -88,6 +158,21 @@ importers:
   packages/solid-kernel-api: {}
 
   packages/solid-manifold-adapter: {}
+
+  packages/surface-quality-core:
+    dependencies:
+      '@ps3d/exact-kernel-api':
+        specifier: workspace:*
+        version: link:../exact-kernel-api
+
+  packages/topology-reference-core:
+    dependencies:
+      '@ps3d/cad-document-core':
+        specifier: workspace:*
+        version: link:../cad-document-core
+      '@ps3d/exact-kernel-api':
+        specifier: workspace:*
+        version: link:../exact-kernel-api
 
   packages/viewport-three: {}
 

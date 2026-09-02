@@ -1,0 +1,13 @@
+{
+  "name": "@ps3d/assembly-kinematics-core",
+  "version": "0.1.0-contract.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.test.json && node .test-dist/assembly-kinematics-core/tests/run.js && node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@ps3d/cad-document-core": "workspace:*"
+  }
+}

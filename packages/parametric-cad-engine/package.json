@@ -1,0 +1,18 @@
+{
+  "name": "@ps3d/parametric-cad-engine",
+  "version": "0.1.0-preview.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "esbuild tests/engine.test.ts --bundle --platform=node --format=esm --target=node24 --tsconfig=tsconfig.json --outfile=.test-dist/engine.test.mjs && node --test .test-dist/engine.test.mjs && node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@ps3d/cad-document-core": "workspace:*",
+    "@ps3d/exact-kernel-api": "workspace:*",
+    "@ps3d/parametric-sketch-core": "workspace:*"
+  }
+}

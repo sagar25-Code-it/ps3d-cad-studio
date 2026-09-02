@@ -1,17 +1,24 @@
 import { readFileSync } from "node:fs";
 import {
   PERSONAL_TOKEN_PATTERN,
+  OAUTH_MCP_SCOPES,
+  authenticateMcpRequest,
   generatePersonalAccessToken,
   hashPersonalAccessToken,
+  normalizeSupabaseUrl,
   normalizeScopes
 } from "../api/_lib/cloud.js";
+import { parseJsonRpcRequest, requiredScopeForMcpToolName } from "../api/mcp.js";
+import { RequestBodyError, configuredPublicOrigin, isAllowedMcpOrigin, publicRequestOrigin, readJsonObject, requireSameOrigin } from "../api/_lib/http.js";
 import { classifyTokenStoreFailure } from "../api/_lib/token-store-error.js";
 import { PS3D_LEARNING_MANUAL } from "../apps/studio-web/src/learning/learning-content.js";
 import { buildLearningManualPdf } from "../apps/studio-web/src/learning/learning-pdf.js";
 import { PS3D_BRAND, PS3D_PUBLIC_TOOLS } from "../apps/studio-web/src/brand.js";
+import { safeOAuthConsentRedirect } from "../apps/studio-web/src/cloud/OAuthConsentPage.js";
 import { deriveFaultBrainNotices, mergeFaultBrainNotices, runtimeFaultNotice } from "../apps/studio-web/src/ui/fault-brain.js";
 import { createWorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { buildDesignHealthReport } from "../packages/workbench-health/src/index.js";
+import { WORKBENCH_MCP_TOOLS } from "../packages/workbench-mcp/src/index.js";
 import { assert, equal, type TestCase } from "./test-kit.js";
 
 const TEST_PEPPER = "ps3d-public-release-test-pepper-32-bytes-minimum";
@@ -52,6 +59,7 @@ export const publicReleaseTests: readonly TestCase[] = [
       const viteConfig = readFileSync("apps/studio-web/vite.config.mjs", "utf8");
       assert(viteConfig.includes("publicDir: false"), "Vite publicDir must remain disabled because MediaPipe imports its loader as a module");
       assert(viteConfig.includes("configureServer(server)"), "development must serve the reviewed hand runtime before Vite transform middleware");
+      assert(viteConfig.includes('url: "/ps3d-master-logo.png"'), "development and production must expose the reviewed PS3D logo even while publicDir is disabled");
       for (const runtimePath of [
         "/mediapipe/runtime-manifest.json",
         "/mediapipe/models/hand_landmarker-float16-v1.task",
@@ -100,6 +108,130 @@ export const publicReleaseTests: readonly TestCase[] = [
       const normalized = normalizeScopes(["mcp:apply", "mcp:read", "mcp:apply"]);
       assert(normalized !== undefined, "valid scope selection should normalize");
       equal(normalized.join(","), "mcp:read,mcp:apply", "scope order should be canonical and duplicates removed");
+      equal(OAUTH_MCP_SCOPES.join(","), "mcp:read", "provider OAuth tokens must fail closed to read-only access");
+    }
+  },
+  {
+    name: "every MCP tool has an explicit fail-closed authorization policy",
+    run: () => {
+      assert(WORKBENCH_MCP_TOOLS.every((tool) => requiredScopeForMcpToolName(tool.name) !== undefined), "every published tool must be assigned an explicit authorization scope");
+      equal(requiredScopeForMcpToolName("ps3d_guide"), "mcp:read", "guide discovery should require read scope");
+      equal(requiredScopeForMcpToolName("ps3d_preview_operation"), "mcp:preview", "candidate generation should require preview scope");
+      equal(requiredScopeForMcpToolName("ps3d_apply_preview"), "mcp:apply", "confirmed candidate return should require apply scope");
+      equal(requiredScopeForMcpToolName("ps3d_future_unreviewed_tool"), undefined, "an unreviewed future tool must not inherit read access");
+    }
+  },
+  {
+    name: "MCP JSON-RPC envelopes separate requests from notifications before dispatch",
+    run: () => {
+      assert(parseJsonRpcRequest({ jsonrpc: "2.0", id: "request-1", method: "tools/list" }) instanceof Response === false, "a request with a stable ID should parse");
+      assert(parseJsonRpcRequest({ jsonrpc: "2.0", method: "tools/call", params: { name: "ps3d_apply_preview" } }) instanceof Response, "an ID-less command request must fail before dispatch");
+      assert(parseJsonRpcRequest({ jsonrpc: "2.0", method: "notifications/initialized" }) instanceof Response === false, "a notification without an ID should parse");
+      assert(parseJsonRpcRequest({ jsonrpc: "2.0", id: 4, method: "notifications/initialized" }) instanceof Response, "a notification carrying an ID must be rejected as an invalid envelope");
+      assert(parseJsonRpcRequest({ jsonrpc: "2.0", id: null, method: "ping" }) instanceof Response, "null is not an MCP request ID");
+    }
+  },
+  {
+    name: "identity provider URLs accept only credential-free secure origins",
+    run: () => {
+      equal(normalizeSupabaseUrl("https://identity.example.test/"), "https://identity.example.test", "a secure identity origin should normalize");
+      equal(normalizeSupabaseUrl("http://localhost:54321"), "http://localhost:54321", "local Supabase development should remain available");
+      equal(normalizeSupabaseUrl("http://[::1]:54321"), "http://[::1]:54321", "IPv6 loopback development should remain available");
+      equal(normalizeSupabaseUrl("http://identity.example.test"), undefined, "public cleartext identity providers must be rejected");
+      equal(normalizeSupabaseUrl("https://user:password@identity.example.test"), undefined, "identity URLs must not carry credentials");
+      equal(normalizeSupabaseUrl("https://identity.example.test/proxy"), undefined, "unexpected identity URL paths must fail closed");
+      equal(normalizeSupabaseUrl("https://identity.example.test/?key=value"), undefined, "identity URL queries must fail closed");
+    }
+  },
+  {
+    name: "API JSON parsing is media-type exact, UTF-8 strict, and allocation bounded",
+    run: async () => {
+      const valid = await readJsonObject(new Request("https://cad.ps3d.example/api/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ value: 4 })
+      }), 64);
+      equal(valid.value, 4, "a bounded JSON object should parse");
+
+      for (const [contentType, body, expectedCode] of [
+        ["application/jsonp", "{}", "CONTENT_TYPE"],
+        ["application/json", new Uint8Array([0x7b, 0x22, 0x78, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d]), "INVALID_JSON"],
+        ["application/json", JSON.stringify({ value: "x".repeat(80) }), "BODY_TOO_LARGE"]
+      ] as const) {
+        let error: unknown;
+        try {
+          await readJsonObject(new Request("https://cad.ps3d.example/api/test", { method: "POST", headers: { "Content-Type": contentType }, body }), 64);
+        } catch (cause) {
+          error = cause;
+        }
+        assert(error instanceof RequestBodyError && error.code === expectedCode, `${contentType} should fail with ${expectedCode}`);
+      }
+    }
+  },
+  {
+    name: "public origin handling pins writes and redirects to the configured HTTPS deployment",
+    run: () => {
+      const previous = process.env.PUBLIC_APP_URL;
+      try {
+        process.env.PUBLIC_APP_URL = "https://cad.ps3d.example/app";
+        const request = new Request("https://untrusted-forwarded-host.example/api/auth", { headers: { Origin: "https://cad.ps3d.example" } });
+        equal(configuredPublicOrigin(), "https://cad.ps3d.example", "configured public URL should normalize to one origin");
+        equal(publicRequestOrigin(request), "https://cad.ps3d.example", "public links must not inherit a forwarded request host");
+        equal(requireSameOrigin(request), undefined, "the configured browser origin should be accepted");
+        assert(isAllowedMcpOrigin(request), "the configured browser origin should be accepted for MCP");
+
+        const forged = new Request("https://untrusted-forwarded-host.example/api/auth", { headers: { Origin: "https://untrusted-forwarded-host.example" } });
+        equal(requireSameOrigin(forged)?.status, 403, "a request-host origin must not override a configured deployment origin");
+        assert(!isAllowedMcpOrigin(forged), "MCP browser origins must remain pinned to the configured deployment");
+
+        process.env.PUBLIC_APP_URL = "http://public-insecure.example";
+        equal(configuredPublicOrigin(), undefined, "non-loopback HTTP deployment URLs must be rejected");
+        process.env.PUBLIC_APP_URL = "https://user:password@cad.ps3d.example";
+        equal(configuredPublicOrigin(), undefined, "deployment URLs containing credentials must be rejected");
+        process.env.PUBLIC_APP_URL = "http://127.0.0.1:5173/path";
+        equal(configuredPublicOrigin(), "http://127.0.0.1:5173", "loopback HTTP must remain available for local development");
+      } finally {
+        if (previous === undefined) delete process.env.PUBLIC_APP_URL;
+        else process.env.PUBLIC_APP_URL = previous;
+      }
+    }
+  },
+  {
+    name: "provider OAuth authentication exposes read tools without silently granting CAD mutation",
+    run: async () => {
+      const previousFetch = globalThis.fetch;
+      globalThis.fetch = async () => Response.json({
+        id: "user:oauth-audit",
+        email: "verified@example.test",
+        email_confirmed_at: "2026-09-02T00:00:00.000Z"
+      });
+      try {
+        const principal = await authenticateMcpRequest(new Request("https://cad.ps3d.example/api/mcp", {
+          headers: { Authorization: "Bearer provider-access-token" }
+        }), {
+          supabaseUrl: "https://identity.example.test",
+          publishableKey: "publishable-test-key",
+          adminKey: "admin-test-key",
+          tokenPepper: TEST_PEPPER
+        });
+        assert(!(principal instanceof Response), "a verified provider identity should authenticate");
+        if (principal instanceof Response) return;
+        equal(principal.kind, "oauth-access-token", "the credential kind should remain explicit");
+        equal(principal.scopes.join(","), "mcp:read", "OAuth must not imply preview or apply authorization");
+      } finally {
+        globalThis.fetch = previousFetch;
+      }
+    }
+  },
+  {
+    name: "OAuth consent accepts registered HTTPS and standards-compatible loopback redirects only",
+    run: () => {
+      equal(safeOAuthConsentRedirect("https://ai.example.test/callback?state=1"), "https://ai.example.test/callback?state=1", "registered HTTPS callbacks should remain usable");
+      equal(safeOAuthConsentRedirect("http://127.0.0.1:49152/callback"), "http://127.0.0.1:49152/callback", "IPv4 loopback callbacks should remain usable for desktop AI hosts");
+      equal(safeOAuthConsentRedirect("http://[::1]:49152/callback"), "http://[::1]:49152/callback", "IPv6 loopback callbacks should remain usable for desktop AI hosts");
+      equal(safeOAuthConsentRedirect("http://ai.example.test/callback"), undefined, "non-loopback cleartext callbacks must be rejected");
+      equal(safeOAuthConsentRedirect("https://user:password@ai.example.test/callback"), undefined, "callbacks containing URL credentials must be rejected");
+      equal(safeOAuthConsentRedirect("javascript:alert(1)"), undefined, "active-content callback schemes must be rejected");
     }
   },
   {

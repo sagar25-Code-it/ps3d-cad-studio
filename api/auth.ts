@@ -1,5 +1,5 @@
 import { CloudConfigurationError, cloudConfigurationErrorResponse, loadCloudEnvironment, supabaseAuthFetch } from "./_lib/cloud.js";
-import { apiError, assertExactKeys, isRecord, methodNotAllowed, readJsonObject, requestBodyErrorResponse, requireSameOrigin } from "./_lib/http.js";
+import { apiError, assertExactKeys, isRecord, methodNotAllowed, publicRequestOrigin, readJsonObject, requestBodyErrorResponse, requireSameOrigin } from "./_lib/http.js";
 
 type AuthAction = "sign-up" | "sign-in" | "refresh" | "sign-out" | "recover" | "update-password" | "user";
 
@@ -41,7 +41,7 @@ async function emailPasswordAction(request: Request, env: ReturnType<typeof load
   const password = normalizePassword(body.password);
   if (email === undefined) return apiError(400, "EMAIL_INVALID", "Enter a valid email address no longer than 254 characters.");
   if (password === undefined) return apiError(400, "PASSWORD_POLICY", "Use a password from 12 to 128 characters.");
-  const publicOrigin = new URL(request.url).origin;
+  const publicOrigin = publicRequestOrigin(request);
   const verificationRedirect = `${publicOrigin}/access?verified=1`;
   const path = action === "sign-up"
     ? `/signup?redirect_to=${encodeURIComponent(verificationRedirect)}`
@@ -72,7 +72,7 @@ async function recoverAction(request: Request, env: ReturnType<typeof loadCloudE
   if (!assertExactKeys(body, ["action", "email"])) return apiError(400, "AUTH_FIELDS", "The recovery request contains unsupported fields.");
   const email = normalizeEmail(body.email);
   if (email === undefined) return apiError(400, "EMAIL_INVALID", "Enter a valid email address.");
-  const redirectTo = `${new URL(request.url).origin}/access?recovery=1`;
+  const redirectTo = `${publicRequestOrigin(request)}/access?recovery=1`;
   const response = await supabaseAuthFetch(env, `/recover?redirect_to=${encodeURIComponent(redirectTo)}`, { method: "POST", body: JSON.stringify({ email }) });
   if (!response.ok) return forwardAuthResponse(response);
   return Response.json({ message: "If the account exists, a password-reset email has been sent." }, { headers: { "Cache-Control": "no-store" } });
