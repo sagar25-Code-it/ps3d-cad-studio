@@ -21,14 +21,14 @@
     "clean:test": "node -e \"for(const path of ['.test-dist','.mcp-dist','apps/mcp-server/dist'])require('node:fs').rmSync(path,{recursive:true,force:true})\""
   },
   "dependencies": {
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "three": "0.185.1"
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "three": "0.186.1"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
-    "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "@types/three": "0.185.4",
     "esbuild-wasm": "catalog:",
     "manifold-3d": "3.5.1",
