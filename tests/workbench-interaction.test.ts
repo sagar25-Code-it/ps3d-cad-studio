@@ -64,7 +64,7 @@ export const workbenchInteractionTests: readonly TestCase[] = [
       }
 
       const draggedRight = orbitViewAngles(10, 20, 20, 0);
-      assert(draggedRight[0] > 10, "dragging right should increase azimuth instead of reversing the pointer");
+      assert(draggedRight[0] < 10, "dragging right should turn the model to follow the pointer (decreasing azimuth), not mirror it");
       const draggedUp = orbitViewAngles(10, 20, 0, -20);
       assert(draggedUp[1] > 20, "dragging upward should raise camera elevation");
     }
