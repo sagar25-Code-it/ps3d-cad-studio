@@ -109,9 +109,9 @@ export function viewAnglesForOrientation(orientation: Exclude<ViewOrientation, "
   return ORIENTATION_ANGLES[orientation];
 }
 
-/** Fusion-style drag convention: right drag rotates the view to the right; up drag raises it. */
+/** Direct-manipulation drag convention: dragging right turns the model to follow the cursor (the grabbed surface tracks the pointer), and dragging up raises the view. */
 export function orbitViewAngles(azimuthDeg: number, elevationDeg: number, deltaX: number, deltaY: number, degreesPerPixel = 0.46): readonly [number, number] {
-  const azimuth = normalizeDegrees(azimuthDeg + deltaX * degreesPerPixel);
+  const azimuth = normalizeDegrees(azimuthDeg - deltaX * degreesPerPixel);
   const elevation = THREE.MathUtils.clamp(elevationDeg - deltaY * degreesPerPixel, -87.1, 87.1);
   return [azimuth, elevation];
 }
