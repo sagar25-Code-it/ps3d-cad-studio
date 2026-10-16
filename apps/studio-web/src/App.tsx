@@ -59,7 +59,7 @@ import {
   type ExchangeImportResult,
   type ExchangeUnit
 } from "../../../packages/exchange-3d/src/index.js";
-import { resolveQualifiedExtrusion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, resolveQualifiedExtrusion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import {
   ThreeViewportAdapter,
   viewAnglesForOrientation,
@@ -1063,7 +1063,53 @@ export function App(): React.JSX.Element {
       setStatusText("Join, Cut and Intersect require persistent B-rep topology and an overlap preview; no Boolean was attempted.");
       return;
     }
+    const selectedCircleProfiles = detectSketchProfiles(projectRef.current.sketch).filter((profile) => profileIds.includes(profile.id));
+    const circleProfile = selectedCircleProfiles.length === 1 && selectedCircleProfiles[0]!.boundary.kind === "circle" ? selectedCircleProfiles[0]! : undefined;
+    if (circleProfile !== undefined && circleProfile.boundary.kind === "circle") {
+      if (!Number.isFinite(distanceMm) || distanceMm < 1 || distanceMm > 100) {
+        setStatus("error");
+        setStatusText("The cylinder height must be between 1 mm and 100 mm.");
+        return;
+      }
+      const diameterMm = Math.round(circleProfile.boundary.radiusMm * 2 * 1000) / 1000;
+      if (operation === "new-component") {
+        const component: ComponentInstance = {
+          id: `component:sketch-cylinder-${crypto.randomUUID()}`,
+          name: `${projectRef.current.sketch.name} cylinder`,
+          shape: "cylinder",
+          grounded: false,
+          visible: true,
+          color: "#aeb3b8",
+          translationMm: [circleProfile.centroid[0], circleProfile.centroid[1], distanceMm / 2],
+          rotationDeg: [0, 0, 0],
+          sizeMm: [diameterMm, diameterMm, distanceMm],
+          explosionDirection: [0.2, -0.14, 0.65]
+        };
+        if (!applyProjectOperation({ kind: "add-assembly-component", component })) return;
+        switchWorkspace("assembly");
+        setSelectedId(component.id);
+      } else {
+        const ordinal = (projectRef.current.part.previewBodies?.length ?? 0) + 1;
+        const body: PartPreviewBody = {
+          id: `part-body:user-${crypto.randomUUID()}`,
+          name: `Cylinder ${ordinal}`,
+          shape: "cylinder",
+          visible: true,
+          color: partPreviewColor("cylinder"),
+          translationMm: [circleProfile.centroid[0], circleProfile.centroid[1], distanceMm / 2],
+          rotationDeg: [0, 0, 0],
+          sizeMm: [diameterMm, diameterMm, distanceMm]
+        };
+        if (!applyProjectOperation({ kind: "add-part-preview-bodies", bodies: [body] })) return;
+        switchWorkspace("part");
+        setSelectedId(body.id);
+      }
+      setStatus("ready");
+      setStatusText(`Extruded a Ø${diameterMm} mm circle into a ${distanceMm} mm cylinder ${operation === "new-component" ? "component" : "body"}.`);
+      return;
+    }
     const resolved = resolveQualifiedExtrusion(projectRef.current.sketch, profileIds, distanceMm);
+
     if (!resolved.ok) {
       const first = resolved.diagnostics[0];
       setDiagnostic(first === undefined ? undefined : { code: first.code, message: first.message, recovery: first.recovery });
@@ -1264,7 +1310,7 @@ export function App(): React.JSX.Element {
     setStatus("working");
     try {
       await queueProjectTransition(async () => {
-        const nextProject = createWorkbenchProject(`project:${crypto.randomUUID()}`);
+        const nextProject = { ...createWorkbenchProject(`project:${crypto.randomUUID()}`), name: "Untitled design" };
         const previous = projectRef.current;
         const prepared = await prepareQualifiedWorker(nextProject);
         if (prepared === undefined) return;
