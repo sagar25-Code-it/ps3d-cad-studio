@@ -153,7 +153,7 @@ const DEFAULT_VIEWPORT_STATE: ViewportViewState = {
   backgroundTone: "dark-gray",
   gridVisible: true,
   axesVisible: true,
-  azimuthDeg: 45,
+  azimuthDeg: -45,
   elevationDeg: 35.3
 };
 
