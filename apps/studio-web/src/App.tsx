@@ -1704,6 +1704,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const listener = (event: KeyboardEvent): void => {
       if (!(isThreeDimensional || projectRef.current.activeWorkspace === "sketch") || isEditableTarget(event.target) || globalThis.document.querySelector('[role="dialog"]') !== null) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
       const key = event.key.toLowerCase();
       if (key === "f") fitViewport();
       if (key === "1") setViewportOrientation("front");
