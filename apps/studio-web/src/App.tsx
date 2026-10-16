@@ -968,8 +968,7 @@ export function App(): React.JSX.Element {
         applyProjectOperation({ kind: "toggle-vehicle-layer", layer: action.layer });
         break;
       case "activate-sketch-tool":
-        setSketchTool(action.tool);
-        setStatusText(`${command.name} tool active from the command launcher.`);
+        activateSketchTool(action.tool, "from the command launcher");
         break;
       case "select-record":
         setSelectedId(action.selectionId);
@@ -1620,10 +1619,24 @@ export function App(): React.JSX.Element {
     setStatusText(mode === "measure" ? "Measure active: pick two visible model points." : `${mode[0]!.toUpperCase()}${mode.slice(1)} navigation active.`);
   };
 
+  const activateSketchTool = (tool: SketchTool, source: string): void => {
+    setSketchTool(tool);
+    setSketchDimensionMode(false);
+    if (tool !== "select") setViewportNavigation("select");
+    setStatusText(tool === "select"
+      ? `Select tool active ${source}: click entities or shaded profiles to pick them.`
+      : `${sketchToolLabel(tool)} tool active ${source}: left-click places points (NAV switched to Select); middle-drag or the ViewCube orbits.`);
+  };
+
   const setViewportSelectionFilter = (filter: SelectionFilter): void => {
     if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, selectionFilter: filter }));
     else viewportRef.current.setSelectionFilter(filter);
-    setStatusText(`${filter === "auto" ? "Automatic" : filter} selection priority active.`);
+    const switchedTool = projectRef.current.activeWorkspace === "sketch" && sketchTool !== "select";
+    if (switchedTool) { setSketchTool("select"); setSketchDimensionMode(false); }
+    const switchedNav = viewportState.navigationMode === "orbit" || viewportState.navigationMode === "pan";
+    if (switchedNav) setViewportNavigation("select");
+    const notes = [switchedTool ? "switched to the Select tool" : "", switchedNav ? "NAV set to Select" : ""].filter(Boolean).join(" and ");
+    setStatusText(`${filter === "auto" ? "Automatic" : filter} selection priority active${notes === "" ? "" : ` (${notes} so picks work)`}.`);
   };
 
   const setViewportOrientation = (orientation: Exclude<ViewOrientation, "custom">): void => {
@@ -1841,7 +1854,7 @@ export function App(): React.JSX.Element {
       sketchDimensionMode={sketchDimensionMode}
       assemblyExplodeMaxMm={assemblyExplodeMaxMm}
       selectedId={selectedId}
-      onSketchTool={(tool) => { setSketchTool(tool); setSketchDimensionMode(false); setStatusText(`${sketchToolLabel(tool)} tool active in the top ribbon.`); }}
+      onSketchTool={(tool) => activateSketchTool(tool, "in the top ribbon")}
       onSketchDimension={() => { setSketchTool("select"); setSketchDimensionMode(true); setViewportNavigation("select"); setViewportSelectionFilter("sketch-curve"); setStatusText("Sketch Dimension active: select a curve or two displayed definition points."); }}
       onToggleSketchEntityVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })}
       onFinishSketch={() => { switchWorkspace("part"); setStatusText("Sketch session finished. Revisioned sketch geometry remains linked to the Part workspace."); }}
