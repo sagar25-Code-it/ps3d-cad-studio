@@ -102,7 +102,7 @@ const ORIENTATION_ANGLES: Readonly<Record<Exclude<ViewOrientation, "custom">, re
   right: [0, 0],
   top: [-90, 89.994],
   bottom: [-90, -89.994],
-  isometric: [45, Math.asin(1 / Math.sqrt(3)) * 180 / Math.PI]
+  isometric: [-45, Math.asin(1 / Math.sqrt(3)) * 180 / Math.PI]
 };
 
 export function viewAnglesForOrientation(orientation: Exclude<ViewOrientation, "custom">): readonly [number, number] {
@@ -180,7 +180,7 @@ export class ThreeViewportAdapter {
   readonly #pickable: THREE.Object3D[] = [];
   #bodyId: string | undefined;
   #selectedId: string | undefined;
-  #azimuth = Math.PI / 4;
+  #azimuth = -Math.PI / 4;
   #elevation = Math.PI / 5;
   #radius = 0.16;
   #orientation: ViewOrientation = "isometric";
