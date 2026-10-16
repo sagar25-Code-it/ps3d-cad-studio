@@ -299,9 +299,14 @@ export function resolveQualifiedExtrusion(
   }
   const outer = rectangles[0]!;
   if (outer.boundary.kind !== "rectangle") throw new TypeError("Profile filter invariant failed.");
-  if (Math.abs(normalizeRotation(outer.boundary.rotationDeg)) > 1e-6) {
+  const outerRotation = normalizeRotation(outer.boundary.rotationDeg);
+  const quarterTurn = Math.abs(Math.abs(outerRotation) - 90) < 1e-6;
+  if (Math.abs(outerRotation) > 1e-6 && !quarterTurn) {
     return failure("UNSUPPORTED_CAPABILITY", "The qualified solid evaluator currently accepts an axis-aligned rectangle only.", outer.entityIds, "Use a 2-point or center rectangle aligned to the sketch axes.");
   }
+  // A rectangle drawn with a vertical first edge is stored at 90 degrees but is still axis-aligned; swap its sides so width/height map to the sketch axes.
+  const qualifiedWidthMm = quarterTurn ? outer.boundary.heightMm : outer.boundary.widthMm;
+  const qualifiedHeightMm = quarterTurn ? outer.boundary.widthMm : outer.boundary.heightMm;
   const explicitlySelectedCircles = selected.filter((profile) => profile.boundary.kind === "circle");
   const concentricCircles = profiles.filter((profile) => profile.boundary.kind === "circle" && distance(profile.centroid, outer.centroid) <= 0.01);
   const boreCandidates = explicitlySelectedCircles.length > 0 ? explicitlySelectedCircles : concentricCircles;
@@ -323,8 +328,8 @@ export function resolveQualifiedExtrusion(
     value: {
       outerProfileId: outer.id,
       boreProfileId: bore.id,
-      widthMm: outer.boundary.widthMm,
-      heightMm: outer.boundary.heightMm,
+      widthMm: qualifiedWidthMm,
+      heightMm: qualifiedHeightMm,
       holeDiameterMm,
       distanceMm
     }
