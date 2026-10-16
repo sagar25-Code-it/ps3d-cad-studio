@@ -1595,7 +1595,7 @@ export function App(): React.JSX.Element {
   };
 
   const setViewportAngles = (azimuthDeg: number, elevationDeg: number): void => {
-    if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, orientation: "custom", azimuthDeg, elevationDeg }));
+    if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, orientation: "custom", azimuthDeg: Math.round(azimuthDeg * 10) / 10, elevationDeg: Math.round(elevationDeg * 10) / 10 }));
     else viewportRef.current.setViewAngles(azimuthDeg, elevationDeg);
   };
 
