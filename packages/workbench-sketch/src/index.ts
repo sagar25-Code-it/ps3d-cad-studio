@@ -295,7 +295,7 @@ export function resolveQualifiedExtrusion(
   const selected = profiles.filter((profile) => selectedProfileIds.includes(profile.id));
   const rectangles = selected.filter((profile) => profile.boundary.kind === "rectangle");
   if (rectangles.length !== 1) {
-    return failure("INVALID_OPERATION", "Select exactly one closed rectangle profile for the qualified base extrusion.", selectedProfileIds, "Click inside one shaded rectangle region, then select its concentric circle with Shift.");
+    return failure("INVALID_OPERATION", "Extrude needs either one closed rectangle profile (with its concentric bore circle) for the qualified plate, or a single circle on its own for a cylinder.", selectedProfileIds, "Click inside one shaded rectangle region and Shift-select its concentric circle, or select a single circle to extrude a cylinder.");
   }
   const outer = rectangles[0]!;
   if (outer.boundary.kind !== "rectangle") throw new TypeError("Profile filter invariant failed.");
