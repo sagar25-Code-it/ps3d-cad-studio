@@ -240,7 +240,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const twoCompatible = selectedEntities.length === 2 && selectedEntities[0]!.kind === selectedEntities[1]!.kind;
 
   const handleCanvasPointerDown = (event: React.PointerEvent<SVGSVGElement>): void => {
-    const mode: NavigationMode = event.button === 1 ? event.shiftKey ? "orbit" : "pan" : props.viewportState.navigationMode;
+    const mode: NavigationMode = event.button === 1
+      ? event.shiftKey ? "orbit" : "pan"
+      : props.tool === "select" ? props.viewportState.navigationMode : "select";
     if (event.button === 2) return;
     if (mode === "orbit") {
       event.currentTarget.setPointerCapture(event.pointerId);
