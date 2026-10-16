@@ -220,6 +220,7 @@ export function App(): React.JSX.Element {
   const clientRef = useRef<GeometryWorkerClient | undefined>(undefined);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraCursorRef = useRef<HTMLDivElement>(null);
+  const historyActionRef = useRef<{ undo: () => void; redo: () => void }>({ undo: () => undefined, redo: () => undefined });
   const viewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
   const renderCanvasRef = useRef<HTMLCanvasElement>(null);
   const renderViewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
@@ -1773,7 +1774,7 @@ export function App(): React.JSX.Element {
       if (key === "v") setViewportNavigation("select");
       if (key === "o") setViewportNavigation("orbit");
       if (key === "p") setViewportNavigation("pan");
-      if (key === "m") setViewportNavigation("measure");
+      if (key === "m" && projectRef.current.activeWorkspace !== "sketch") setViewportNavigation("measure");
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
@@ -1796,6 +1797,9 @@ export function App(): React.JSX.Element {
       if (key === "n") { event.preventDefault(); void createNewProject(); }
       if (key === "p") { event.preventDefault(); window.print(); }
       if (key === "h" && event.shiftKey) { event.preventDefault(); openDesignHealth(); }
+      if (key === "z" && event.shiftKey) { event.preventDefault(); historyActionRef.current.redo(); }
+      else if (key === "z") { event.preventDefault(); historyActionRef.current.undo(); }
+      if (key === "y") { event.preventDefault(); historyActionRef.current.redo(); }
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
@@ -1804,6 +1808,10 @@ export function App(): React.JSX.Element {
   const redoLane = selectWorkbenchHistoryLane(project.activeWorkspace, redoDepth, projectRedoDepth);
   const canUndo = undoLane !== null;
   const canRedo = redoLane !== null;
+  historyActionRef.current = {
+    undo: () => { if (canUndo) { if (undoLane === "qualified-part") void moveHistory("undo"); else moveProjectHistory("undo"); } },
+    redo: () => { if (canRedo) { if (redoLane === "qualified-part") void moveHistory("redo"); else moveProjectHistory("redo"); } }
+  };
   const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo });
 
   return <main className="studio-app" data-workspace={renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace} aria-busy={status === "working"}>
