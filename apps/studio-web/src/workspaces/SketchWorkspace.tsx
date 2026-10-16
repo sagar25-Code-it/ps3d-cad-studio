@@ -116,6 +116,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [cursor, pending, props.tool]);
   const distanceMm = Number(extrudeDistance);
   const extrusion = useMemo(() => resolveQualifiedExtrusion(props.sketch, selectedProfileIds, distanceMm), [distanceMm, props.sketch, selectedProfileIds]);
+  const circleExtrusion = useMemo(() => {
+    if (!Number.isFinite(distanceMm) || distanceMm < 1 || distanceMm > 100) return undefined;
+    const selected = profiles.filter((profile) => selectedProfileIds.includes(profile.id));
+    const only = selected.length === 1 ? selected[0] : undefined;
+    if (only === undefined || only.boundary.kind !== "circle") return undefined;
+    return { diameterMm: Math.round(only.boundary.radiusMm * 2 * 1000) / 1000 };
+  }, [profiles, selectedProfileIds, distanceMm]);
+  const extrudable = extrusion.ok || circleExtrusion !== undefined;
   const sketchIsNormal = props.viewportState.orientation === "top" || Math.abs(props.viewportState.elevationDeg - 90) < 0.2;
   const sketchPlaneStyle = {
     "--sketch-orbit-x": `${Math.max(-78, Math.min(78, 90 - props.viewportState.elevationDeg))}deg`,
@@ -325,7 +333,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
         <PaletteToggle label="Constraints" active={showConstraints} onToggle={setShowConstraints} />
         <button className="palette-action" disabled={selectedEntity === undefined} onClick={() => selectedEntity !== undefined && props.onToggleConstruction(selectedEntity.id)}><CommandIcon name={selectedEntity?.construction === true ? "rectangle" : "construction"} />{selectedEntity?.construction === true ? "Profile geometry" : "Construction"}</button>
-        <button className="palette-action primary" disabled={selectedProfileIds.length === 0} onClick={() => props.onMessage(extrusion.ok ? "Closed profiles are ready. Confirm the extrusion in the inspector." : extrusion.diagnostics[0]?.message ?? "Select a closed profile.")}><CommandIcon name="extrude" />Extrude profiles</button>
+        <button className="palette-action primary" disabled={selectedProfileIds.length === 0} onClick={() => props.onMessage(extrudable ? "Closed profiles are ready. Confirm the extrusion in the inspector." : extrusion.diagnostics[0]?.message ?? "Select a closed profile.")}><CommandIcon name="extrude" />Extrude profiles</button>
       </div>
 
       <div className="canvas-hud"><span>XY plane · Z-up WCS</span><span>{props.dimensionMode ? "Dimension" : sketchToolLabel(props.tool)}</span><span>Grid {props.viewportState.gridVisible ? `${props.sketch.gridMm} mm` : "off"}</span><span>Snap {snapEnabled ? `${props.sketch.snapToleranceMm} mm` : "off"}</span><span>{visibleEntities.length}/{props.sketch.entities.length} entities visible</span><strong>{sketchIsNormal ? analysis.classification.replace("-", " ") : "3D orbit · Look At to draw"}</strong></div>
@@ -376,16 +384,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       <section className="inspector-section profile-controller"><header><strong>Closed profiles</strong><span>{profiles.length} found</span></header>
         <p className="profile-help">Profile selects a shaded region; Curve, Connected and Tangent intents use the shared top selection controller.</p>
         <div className="profile-list">{profiles.map((profile, index) => <button key={profile.id} className={selectedProfileIds.includes(profile.id) ? "selected" : ""} onClick={(event) => selectProfile(profile, event.shiftKey || event.ctrlKey || event.metaKey)}><span><b>P{index + 1}</b>{profileLabel(profile)}</span><small>{format(profile.areaMm2)} mm²</small></button>)}</div>
-        <form className={`extrude-controller ${extrusion.ok ? "ready" : "needs-input"}`} onSubmit={(event) => { event.preventDefault(); if (extrusion.ok && !props.working && (extrudeOperation === "new-body" || extrudeOperation === "new-component")) void props.onExtrudeProfiles(selectedProfileIds, distanceMm, extrudeOperation); }}>
+        <form className={`extrude-controller ${extrudable ? "ready" : "needs-input"}`} onSubmit={(event) => { event.preventDefault(); if (extrudable && !props.working && (extrudeOperation === "new-body" || extrudeOperation === "new-component")) void props.onExtrudeProfiles(selectedProfileIds, distanceMm, extrudeOperation); }}>
           <div className="feature-dialog-title"><span><CommandIcon name="extrude" /></span><div><small>SOLID / CREATE</small><strong>Extrude</strong></div></div>
           <label><span>Profiles</span><output>{selectedProfileIds.length === 0 ? "Select in canvas" : `${selectedProfileIds.length} selected`}</output></label>
           <label><span>Start</span><select aria-label="Extrude start" defaultValue="profile"><option value="profile">Profile plane</option></select></label>
           <label><span>Direction</span><select aria-label="Extrude direction" defaultValue="symmetric"><option value="symmetric">Symmetric</option></select></label>
           <label><span>Distance</span><div className="distance-entry"><input aria-label="Extrude distance in millimeters" inputMode="decimal" value={extrudeDistance} onChange={(event) => setExtrudeDistance(event.target.value)} /><small>mm</small></div></label>
           <label><span>Operation</span><select aria-label="Extrude operation" value={extrudeOperation} onChange={(event) => setExtrudeOperation(event.target.value as SketchExtrudeOperation)}><option value="new-body">New body (separate)</option><option value="new-component">New component</option><option value="join" disabled>Join — needs B-rep overlap</option><option value="cut" disabled>Cut — needs B-rep overlap</option><option value="intersect" disabled>Intersect — needs B-rep overlap</option></select></label>
-          <div className={`profile-readiness ${extrusion.ok ? "ready" : "blocked"}`}><CommandIcon name={extrusion.ok ? "cube-check" : "inspect"} /><span>{extrusion.ok ? `Qualified rectangle + bore · ${format(extrusion.value.widthMm)} × ${format(extrusion.value.heightMm)} × ${format(extrusion.value.distanceMm)} mm` : extrusion.diagnostics[0]?.message ?? "Select a profile."}</span></div>
+          <div className={`profile-readiness ${extrudable ? "ready" : "blocked"}`}><CommandIcon name={extrudable ? "cube-check" : "inspect"} /><span>{extrusion.ok ? `Qualified rectangle + bore · ${format(extrusion.value.widthMm)} × ${format(extrusion.value.heightMm)} × ${format(extrusion.value.distanceMm)} mm` : circleExtrusion !== undefined ? `Circle Ø${format(circleExtrusion.diameterMm)} mm → ${format(distanceMm)} mm cylinder` : extrusion.diagnostics[0]?.message ?? "Select a profile."}</span></div>
           <div className="kernel-boundary"><strong>Boolean availability</strong><span>Join, Cut and Intersect stay disabled until stable face/body topology and an overlap preview are available.</span></div>
-          <button className="extrude-submit" type="submit" disabled={!extrusion.ok || props.working || (extrudeOperation !== "new-body" && extrudeOperation !== "new-component")}><CommandIcon name="extrude" />{props.working ? "Regenerating…" : extrudeOperation === "new-component" ? "Extrude as component" : "Finish sketch & extrude"}</button>
+          <button className="extrude-submit" type="submit" disabled={!extrudable || props.working || (extrudeOperation !== "new-body" && extrudeOperation !== "new-component")}><CommandIcon name="extrude" />{props.working ? "Regenerating…" : extrudeOperation === "new-component" ? "Extrude as component" : "Finish sketch & extrude"}</button>
         </form>
       </section>
 
