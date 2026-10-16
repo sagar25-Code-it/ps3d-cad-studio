@@ -279,8 +279,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
 
   const finishCanvasDrag = (event: React.PointerEvent<SVGSVGElement>): void => {
+    const drag = orbitDrag.current;
     orbitDrag.current = undefined;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    // A plain click (no drag) while NAV is Orbit would otherwise do nothing silently; explain why nothing was picked.
+    if (drag !== undefined && drag.pointerId === event.pointerId && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) <= 3) {
+      props.onMessage("Orbit navigation is active, so clicks rotate the view. Switch NAV to Select (V) to pick sketch entities, or drag to orbit.");
+    }
   };
 
   return <>
