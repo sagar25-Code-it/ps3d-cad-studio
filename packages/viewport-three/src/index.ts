@@ -733,7 +733,22 @@ export class ThreeViewportAdapter {
 
   readonly #onWheel = (event: WheelEvent): void => {
     event.preventDefault();
-    this.#radius = THREE.MathUtils.clamp(this.#radius * Math.exp(event.deltaY * 0.001), 0.0001, 10_000);
+    const previousRadius = this.#radius;
+    const nextRadius = THREE.MathUtils.clamp(previousRadius * Math.exp(event.deltaY * 0.001), 0.0001, 10_000);
+    const scale = nextRadius / previousRadius;
+    this.#radius = nextRadius;
+    const rect = this.#canvas.getBoundingClientRect();
+    // Fusion-style dolly to cursor: keep the point under the pointer anchored while zooming.
+    if (scale !== 1 && rect.width > 0 && rect.height > 0) {
+      const camera = this.#activeCamera();
+      camera.updateMatrixWorld();
+      this.#pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+      this.#raycaster.setFromCamera(this.#pointer, camera);
+      const forward = new THREE.Vector3().subVectors(this.#target, camera.position).normalize();
+      const focusPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(forward, this.#target);
+      const cursorPoint = new THREE.Vector3();
+      if (this.#raycaster.ray.intersectPlane(focusPlane, cursorPoint)) this.#target.lerp(cursorPoint, 1 - scale);
+    }
     this.#updateCamera();
   };
 
