@@ -1302,12 +1302,20 @@ export function App(): React.JSX.Element {
     const nextIndex = projectHistoryIndexRef.current + delta;
     if (nextIndex < 0 || nextIndex >= projectHistoryRef.current.length) return;
     projectHistoryIndexRef.current = nextIndex;
-    const next = projectHistoryRef.current[nextIndex]!;
+    const stored = projectHistoryRef.current[nextIndex]!;
+    // Preserve the user's current workspace across history navigation: activeWorkspace is a
+    // view concern baked into each snapshot, so a broad undo/redo must not yank the user into
+    // whatever workspace was active when that revision was recorded.
+    const preservedWorkspace = projectRef.current.activeWorkspace;
+    const next = stored.activeWorkspace === preservedWorkspace ? stored : { ...stored, activeWorkspace: preservedWorkspace };
     projectRef.current = next;
     setProject(next);
     setProjectUndoDepth(nextIndex);
     setProjectRedoDepth(projectHistoryRef.current.length - nextIndex - 1);
     void persistBroadProject(next).catch(() => undefined);
+    // A successful restore supersedes any prior rejected-operation error state.
+    setDiagnostic(undefined);
+    setStatus("ready");
     setStatusText(`${direction === "undo" ? "Restored prior" : "Restored next"} broad project revision ${next.revision}.`);
   };
 
@@ -1797,8 +1805,8 @@ export function App(): React.JSX.Element {
   const runContextCommand = (commandId: string): void => {
     const selectionId = contextMenu?.selectionId ?? selectedId;
     setContextMenu(undefined);
-    if (commandId === "history.undo") { void moveHistory("undo"); return; }
-    if (commandId === "history.redo") { void moveHistory("redo"); return; }
+    if (commandId === "history.undo") { historyActionRef.current.undo(); return; }
+    if (commandId === "history.redo") { historyActionRef.current.redo(); return; }
     if (commandId === "view.fit") { fitViewport(); return; }
     if (commandId === "view.home") { homeViewport(); return; }
     if (commandId.startsWith("view.orientation.")) {
