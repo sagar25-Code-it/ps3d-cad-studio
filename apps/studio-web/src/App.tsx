@@ -2025,6 +2025,7 @@ export function App(): React.JSX.Element {
       onToggleVisibility={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })}
       onSurfaceMode={(mode) => applyProjectOperation({ kind: "set-surface-mode", mode })}
       onSurfaceParameter={(parameter, value) => applyProjectOperation({ kind: "set-surface-parameter", parameter, value })}
+      onSurfacePreset={(preset) => applyProjectOperation({ kind: "apply-surface-preset", preset })}
       onDrawingSheet={(sheet) => applyProjectOperation({ kind: "set-drawing-sheet", sheet })}
       onDrawingProjection={(projection) => applyProjectOperation({ kind: "set-drawing-projection", projection })}
       onDrawingScale={(scale) => applyProjectOperation({ kind: "set-drawing-scale", scale })}

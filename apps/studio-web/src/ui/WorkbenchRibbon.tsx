@@ -40,6 +40,7 @@ interface WorkbenchRibbonProps {
   readonly onToggleVisibility: (componentId: string) => void;
   readonly onSurfaceMode: (mode: SurfaceIntent["mode"]) => void;
   readonly onSurfaceParameter: (parameter: SurfaceParameter, value: number) => void;
+  readonly onSurfacePreset: (preset: "flatten" | "canopy") => void;
   readonly onDrawingSheet: (sheet: DrawingSettings["sheet"]) => void;
   readonly onDrawingProjection: (projection: DrawingSettings["projection"]) => void;
   readonly onDrawingScale: (scale: DrawingSettings["scale"]) => void;
@@ -229,8 +230,8 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="loft" label="Blended loft" hint="2 profiles" active={props.project.surface.mode === "loft"} onClick={() => props.onSurfaceMode("loft")} />
       </RibbonGroup>
       <RibbonGroup label="Shape presets">
-        <RibbonButton icon="flatten" label="Flatten" hint="C0" onClick={() => { props.onSurfaceParameter("crownMm", 0); props.onSurfaceParameter("twistDeg", 0); }} />
-        <RibbonButton icon="canopy" label="Canopy" hint="crown" onClick={() => { props.onSurfaceParameter("crownMm", 22); props.onSurfaceParameter("twistDeg", 12); }} />
+        <RibbonButton icon="flatten" label="Flatten" hint="C0" onClick={() => props.onSurfacePreset("flatten")} />
+        <RibbonButton icon="canopy" label="Canopy" hint="crown" onClick={() => props.onSurfacePreset("canopy")} />
         <RibbonButton icon="fit" label="Fit surface" hint="view" onClick={props.onFit} />
         <RibbonButton icon="exchange" label="3D Exchange" hint="scene out" onClick={props.onExchange} />
       </RibbonGroup>

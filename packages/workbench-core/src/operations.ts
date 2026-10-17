@@ -260,6 +260,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
     case "set-surface-parameter":
       if (!keys(input, [...common, "parameter", "value"]) || !SURFACE_PARAMETERS.includes(input.parameter as never) || !finite(input.value)) return invalidOperation("The surface parameter edit is invalid.");
       break;
+    case "apply-surface-preset":
+      if (!keys(input, [...common, "preset"]) || !["flatten", "canopy"].includes(String(input.preset))) return invalidOperation("The surface preset is invalid.");
+      break;
     case "set-drawing-sheet":
       if (!keys(input, [...common, "sheet"]) || !["A4", "A3"].includes(String(input.sheet))) return invalidOperation("The drawing sheet is invalid.");
       break;
@@ -744,6 +747,10 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     case "set-surface-parameter": {
       const descriptor = SURFACE_PARAMETER_LABELS[operation.parameter];
       return changed({ ...project, surface: { ...project.surface, [operation.parameter]: operation.value } }, [project.surface.id], `Set ${descriptor.label} to ${formatNumber(operation.value)}${descriptor.unit}.`);
+    }
+    case "apply-surface-preset": {
+      const preset = operation.preset === "flatten" ? { crownMm: 0, twistDeg: 0 } : { crownMm: 22, twistDeg: 12 };
+      return changed({ ...project, surface: { ...project.surface, ...preset } }, [project.surface.id], operation.preset === "flatten" ? "Applied the flat (C0) surface preset." : "Applied the crowned canopy surface preset.");
     }
     case "set-drawing-sheet":
       return changed({ ...project, drawing: { ...project.drawing, sheet: operation.sheet } }, [project.drawing.id], `Changed sheet to ${operation.sheet}.`);

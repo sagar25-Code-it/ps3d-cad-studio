@@ -849,6 +849,7 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly parameter: "widthMm" | "depthMm" | "crownMm" | "twistDeg" | "uSegments" | "vSegments";
       readonly value: number;
     }
+  | { readonly kind: "apply-surface-preset"; readonly preset: "flatten" | "canopy" }
   | { readonly kind: "set-drawing-sheet"; readonly sheet: "A4" | "A3" }
   | { readonly kind: "set-drawing-projection"; readonly projection: "first-angle" | "third-angle" }
   | { readonly kind: "set-drawing-scale"; readonly scale: 1 | 2 | 5 }
@@ -897,7 +898,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "boolean-part-bodies", "trim-part-body", "set-part-body-edge-treatment", "set-part-body-draft", "set-part-body-shell",
   "move-part-body-face", "replace-part-body-face", "delete-part-body-face", "update-part-model", "set-assembly-explode", "apply-assembly-template",
   "add-assembly-component", "add-assembly-components", "delete-assembly-component", "set-component-translation", "toggle-component-grounded",
-  "toggle-component-visibility", "add-assembly-mate", "delete-assembly-mate", "set-surface-mode", "set-surface-parameter", "set-drawing-sheet", "set-drawing-projection",
+  "toggle-component-visibility", "add-assembly-mate", "delete-assembly-mate", "set-surface-mode", "set-surface-parameter", "apply-surface-preset", "set-drawing-sheet", "set-drawing-projection",
   "set-drawing-scale", "set-drawing-dimensions", "set-drawing-view-preset", "set-drawing-display-style", "set-drawing-section-view",
   "set-drawing-drafting-standard", "set-drawing-gdt", "set-drawing-datum-scheme", "set-drawing-gdt-specification",
   "set-drawing-general-tolerance", "set-drawing-notes", "apply-electrical-template", "set-electrical-standard",
