@@ -25,6 +25,7 @@ interface VehicleWorkspaceProps {
   readonly onState: (state: VehicleIntent["state"]) => void;
   readonly onLayer: (layer: VehicleLayerId) => void;
   readonly onFit: () => void;
+  readonly onMessage: (message: string) => void;
 }
 
 type Conversion = "identity" | "mm" | "deg" | "kn-per-m" | "square-mm" | "mpa" | "percent" | "kmh" | "grade-percent" | "kwh" | "wh-per-km";
@@ -176,7 +177,8 @@ export function VehicleWorkspace(props: VehicleWorkspaceProps): React.JSX.Elemen
       return;
     }
     const accepted = props.onParameter(control.key, value);
-    if (!accepted) setDraft((previous) => ({ ...previous, [control.key]: toDisplay(props.intent.parameters[control.key], conversion) }));
+    if (accepted) props.onMessage(`Set ${control.label} to ${roundDraft(clamped, control.step)}${control.unit === "" ? "" : ` ${control.unit}`}.`);
+    else setDraft((previous) => ({ ...previous, [control.key]: toDisplay(props.intent.parameters[control.key], conversion) }));
   };
 
   return <aside className="inspector-panel vehicle-inspector" aria-label="Vehicle engineering workspace">
