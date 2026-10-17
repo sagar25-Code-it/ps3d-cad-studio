@@ -977,6 +977,61 @@ export function App(): React.JSX.Element {
     if (applyProjectOperation({ kind: "add-electrical-net", net })) setSelectedId(net.id);
   };
 
+  // Several ribbon buttons, tree rows, and commands target a virtual "action" id that is
+  // not a selectable entity with its own inspector panel. Routing those through setSelectedId
+  // would clear the live selection and render nothing, so handle them explicitly here with
+  // honest guidance (and keep the real selection intact). Returns true when handled.
+  const handleVirtualSelection = (selectionId: string): boolean => {
+    if (selectionId.startsWith("design-health:")) {
+      openDesignHealth();
+      return true;
+    }
+    if (selectionId === "analysis:interference" || selectionId === "assembly-action:clearance") {
+      const count = interferences.length;
+      setStatusText(count === 0
+        ? "Interference check: no visible-component AABB overlaps detected."
+        : `Interference check: ${count} candidate overlap${count === 1 ? "" : "s"} flagged — review the Interference panel in the Assembly inspector.`);
+      return true;
+    }
+    if (selectionId === "assembly-action:move") {
+      const hasComponent = selectedId?.startsWith("component:") === true;
+      setStatusText(hasComponent
+        ? "Move: edit the selected component's X / Y / Z position in the Assembly inspector."
+        : "Move: select a component in the viewport or tree first, then edit its X / Y / Z position in the Assembly inspector.");
+      return true;
+    }
+    if (selectionId === "assembly-action:mates") {
+      const firstMate = projectRef.current.assembly.mates[0];
+      if (firstMate !== undefined) { setSelectedId(firstMate.id); setStatusText(`Selected ${firstMate.name}. Direct-mate records are listed in the Assembly inspector.`); }
+      else setStatusText("No direct mates yet — add one from the Assembly inspector to create a fixed relationship.");
+      return true;
+    }
+    if (selectionId === "electrical-action:bom") {
+      setStatusText("The concept device index is drawn on the schematic sheet. Review the grouped device list on the Electrical workspace sheet (Download SVG to export).");
+      return true;
+    }
+    if (selectionId.startsWith("vehicle-analysis:")) {
+      const section = selectionId.slice("vehicle-analysis:".length);
+      setStatusText(`Open the ${section} section in the Vehicle workspace Results panel to review these calculations.`);
+      return true;
+    }
+    return false;
+  };
+
+  // Selection entry point for the ribbon and project tree: route virtual action ids to honest
+  // feedback / the right panel; everything else selects normally.
+  const routeSelection = (selectionId: string | null): void => {
+    if (selectionId !== null && handleVirtualSelection(selectionId)) return;
+    setSelectedId(selectionId);
+  };
+
+  // View / navigation / display commands act on the shared 3D viewport, so running one from
+  // another 3D workspace must not switch workspace and drop the user's context (finding: Point measure).
+  const isViewportGlobalAction = (kind: string): boolean =>
+    kind === "fit-view" || kind === "set-view-orientation" || kind === "set-view-projection"
+    || kind === "set-shading-mode" || kind === "set-background-tone" || kind === "set-navigation-mode"
+    || kind === "set-selection-filter";
+
   const executeCadCommand = (command: CadCommandRecord): void => {
     const action = command.action;
     if (action.kind === "open-design-health") {
@@ -990,7 +1045,7 @@ export function App(): React.JSX.Element {
     if (action.kind === "file-save-copy") { setSaveDialogMode("copy"); return; }
     if (action.kind === "file-workspace") { void connectFileWorkspace(); return; }
     if (action.kind === "open-render-studio") { openRenderStudio(); return; }
-    switchWorkspace(command.workspace);
+    if (!(isViewportGlobalAction(action.kind) && isThreeDimensional)) switchWorkspace(command.workspace);
     if (action.kind === "unavailable") {
       setSelectedId(command.id);
       setStatus("ready");
@@ -1031,6 +1086,7 @@ export function App(): React.JSX.Element {
         activateSketchTool(action.tool, "from the command launcher");
         break;
       case "select-record":
+        if (handleVirtualSelection(action.selectionId)) break;
         setSelectedId(action.selectionId);
         setStatusText(`${command.name} selected. ${command.description}`);
         break;
@@ -1940,7 +1996,7 @@ export function App(): React.JSX.Element {
       onToggleSketchEntityVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })}
       onFinishSketch={() => { switchWorkspace("part"); setStatusText("Sketch session finished. Revisioned sketch geometry remains linked to the Part workspace."); }}
       onCancelSketchPoints={() => { setSketchCancelVersion((version) => version + 1); setStatusText("Pending sketch points cleared from the top ribbon."); }}
-      onSelect={setSelectedId}
+      onSelect={routeSelection}
       onCreatePartPreviewBody={createPartPreviewBody}
       onPartPreviewAction={(operation, commandName) => runSelectedPartPreviewAction(operation, commandName)}
       onPartFeatureAction={(operation, commandName) => runPartFeatureAction(operation, commandName)}
@@ -1996,7 +2052,7 @@ export function App(): React.JSX.Element {
     />}
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
-      {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={setSelectedId} onContextMenu={openContextMenu} />}
+      {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
       {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} onExtrudeProfiles={extrudeSketchProfiles} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} onFit={() => setStatusText("Sketch fit is already bounded to all visible entities.")} onHome={homeViewport} onContextMenu={openContextMenu} working={status === "working"} onMessage={setStatusText} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />

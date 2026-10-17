@@ -212,7 +212,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="fit" label="Fit all" hint="view" onClick={props.onFit} />
       </RibbonGroup>
       <RibbonGroup label="Component state">
-        <RibbonButton icon="move" label="Move" hint="XYZ" active={props.selectedId === "assembly-action:move"} disabled={selectedComponent === undefined} onClick={() => { if (selectedComponent !== undefined) props.onSelect(selectedComponent.id); }} />
+        <RibbonButton icon="move" label="Move" hint="XYZ" active={selectedComponent !== undefined && props.selectedId === selectedComponent.id} disabled={selectedComponent === undefined} onClick={() => { if (selectedComponent !== undefined) props.onSelect(selectedComponent.id); }} />
         <RibbonButton icon="ground" label={selectedComponent?.grounded === true ? "Release" : "Ground"} hint="toggle" active={selectedComponent?.grounded === true} disabled={selectedComponent === undefined} onClick={() => { if (selectedComponent !== undefined) props.onToggleGrounded(selectedComponent.id); }} />
         <RibbonButton icon={selectedComponent?.visible === false ? "eye" : "eye-off"} label={selectedComponent?.visible === false ? "Show" : "Hide"} hint="preview" disabled={selectedComponent === undefined} onClick={() => { if (selectedComponent !== undefined) props.onToggleVisibility(selectedComponent.id); }} />
         <RibbonButton icon="trash" label="Delete" hint="component" disabled={selectedComponent === undefined} onClick={() => { if (selectedComponent !== undefined) props.onDeleteComponent(selectedComponent.id); }} />
@@ -226,7 +226,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
     {!props.masterCartOpen && props.project.activeWorkspace === "surface" && <>
       <RibbonGroup label="Surface creation">
         <RibbonButton icon="bezier" label="Bézier" hint="patch" active={props.project.surface.mode === "bezier"} onClick={() => props.onSurfaceMode("bezier")} />
-        <RibbonButton icon="loft" label="Ruled loft" hint="2 profiles" active={props.project.surface.mode === "loft"} onClick={() => props.onSurfaceMode("loft")} />
+        <RibbonButton icon="loft" label="Blended loft" hint="2 profiles" active={props.project.surface.mode === "loft"} onClick={() => props.onSurfaceMode("loft")} />
       </RibbonGroup>
       <RibbonGroup label="Shape presets">
         <RibbonButton icon="flatten" label="Flatten" hint="C0" onClick={() => { props.onSurfaceParameter("crownMm", 0); props.onSurfaceParameter("twistDeg", 0); }} />

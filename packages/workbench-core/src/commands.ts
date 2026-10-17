@@ -332,7 +332,7 @@ export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   unavailable("command:die-validation", "part", "inspect", "Die Validation", "Requires forming simulation, interference, force, springback, fatigue, tolerance, and tryout evidence.", ["mold and die", "verify", "stamping"]),
 
   command("command:surface-bezier", "surface", "create", "Bicubic Bézier patch", "Create a deterministic tessellated open patch.", "preview", { kind: "set-surface-mode", mode: "bezier" }, ["control net", "patch"]),
-  command("command:surface-loft", "surface", "create", "Ruled loft", "Create a deterministic two-section ruled loft preview.", "preview", { kind: "set-surface-mode", mode: "loft" }, ["profiles", "blend"]),
+  command("command:surface-loft", "surface", "create", "Blended loft", "Create a deterministic two-section blended loft preview with crown and twist shaping.", "preview", { kind: "set-surface-mode", mode: "loft" }, ["profiles", "blend"]),
   unavailable("command:surface-sweep", "surface", "create", "Surface sweep", "Requires exact curve-on-surface and continuity handling.", ["rail", "path"]),
   unavailable("command:surface-patch", "surface", "create", "Boundary patch", "Requires ordered boundary loops and continuity constraints.", ["fill", "network"]),
   unavailable("command:surface-trim", "surface", "modify", "Trim surface", "Requires exact surface intersections and parameter-space loops.", ["split", "cut"]),

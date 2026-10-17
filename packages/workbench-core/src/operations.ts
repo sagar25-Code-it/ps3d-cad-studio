@@ -627,9 +627,14 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
         return failure("RESOURCE_LIMIT", `The assembly reached its ${WORKBENCH_LIMITS.maxComponents}-component preview limit.`, [project.assembly.id], "Delete a component before inserting another one.");
       }
       if (project.assembly.components.some((component) => component.id === operation.component.id)) return invalidOperation("The assembly component ID already exists.");
+      const addSource = project.assembly.electromechanicalSource;
       return changed({
         ...project,
-        assembly: { ...project.assembly, components: [...project.assembly.components, operation.component] }
+        assembly: {
+          ...project.assembly,
+          components: [...project.assembly.components, operation.component],
+          ...(addSource === undefined ? {} : { electromechanicalSource: { ...addSource, status: "stale" as const } })
+        }
       }, [operation.component.id], `Inserted ${operation.component.name}.`);
     }
     case "add-assembly-components": {
@@ -639,9 +644,14 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const existingIds = new Set(project.assembly.components.map((component) => component.id));
       if (operation.components.some((component) => existingIds.has(component.id))) return invalidOperation("A grouped assembly component ID already exists.");
       const label = operation.components[0]?.masterCart?.templateId.replaceAll("-", " ") ?? `${operation.components.length}-body item`;
+      const addGroupSource = project.assembly.electromechanicalSource;
       return changed({
         ...project,
-        assembly: { ...project.assembly, components: [...project.assembly.components, ...operation.components] }
+        assembly: {
+          ...project.assembly,
+          components: [...project.assembly.components, ...operation.components],
+          ...(addGroupSource === undefined ? {} : { electromechanicalSource: { ...addGroupSource, status: "stale" as const } })
+        }
       }, operation.components.map((component) => component.id), `Inserted ${label} as one grouped ${operation.components.length}-body Master Cart item.`);
     }
     case "delete-assembly-component": {
@@ -713,7 +723,15 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const componentIds = new Set(project.assembly.components.map((component) => component.id));
       if (operation.mate.componentIds.some((componentId) => !componentIds.has(componentId))) return invalidOperation("The assembly mate references a missing component.");
       if (new Set(operation.mate.componentIds).size !== operation.mate.componentIds.length) return invalidOperation("A mate cannot reference the same component twice.");
-      return changed({ ...project, assembly: { ...project.assembly, mates: [...project.assembly.mates, operation.mate] } }, [operation.mate.id, ...operation.mate.componentIds], `Created ${operation.mate.name} as a validated direct-mate record.`);
+      const addMateSource = project.assembly.electromechanicalSource;
+      return changed({
+        ...project,
+        assembly: {
+          ...project.assembly,
+          mates: [...project.assembly.mates, operation.mate],
+          ...(addMateSource === undefined ? {} : { electromechanicalSource: { ...addMateSource, status: "stale" as const } })
+        }
+      }, [operation.mate.id, ...operation.mate.componentIds], `Created ${operation.mate.name} as a validated direct-mate record.`);
     }
     case "delete-assembly-mate": {
       const target = project.assembly.mates.find((mate) => mate.id === operation.mateId);
@@ -722,7 +740,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       return changed({ ...project, assembly: { ...project.assembly, mates: project.assembly.mates.filter((mate) => mate.id !== target.id) } }, [target.id], `Deleted mate ${target.name}.`);
     }
     case "set-surface-mode":
-      return changed({ ...project, surface: { ...project.surface, mode: operation.mode } }, [project.surface.id], `Switched to ${operation.mode === "bezier" ? "bicubic Bézier" : "ruled loft"} preview.`);
+      return changed({ ...project, surface: { ...project.surface, mode: operation.mode } }, [project.surface.id], `Switched to ${operation.mode === "bezier" ? "bicubic Bézier" : "blended loft"} preview.`);
     case "set-surface-parameter": {
       const descriptor = SURFACE_PARAMETER_LABELS[operation.parameter];
       return changed({ ...project, surface: { ...project.surface, [operation.parameter]: operation.value } }, [project.surface.id], `Set ${descriptor.label} to ${formatNumber(operation.value)}${descriptor.unit}.`);
