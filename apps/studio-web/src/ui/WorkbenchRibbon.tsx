@@ -92,15 +92,15 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
     </div>
     {props.masterCartOpen && <>
       <RibbonGroup label="Parametric catalog">
-        <RibbonButton icon="master-cart" label="25 families" hint="original PS3D" active />
-        <RibbonButton icon="fastener" label="Fasteners" hint="metric + inch" active />
-        <RibbonButton icon="bearing" label="Bearings" hint="rotary + linear" active />
-        <RibbonButton icon="gear" label="Power transmission" hint="gear · chain · belt" active />
+        <RibbonButton icon="master-cart" label="25 families" hint="original PS3D" active info />
+        <RibbonButton icon="fastener" label="Fasteners" hint="metric + inch" active info />
+        <RibbonButton icon="bearing" label="Bearings" hint="rotary + linear" active info />
+        <RibbonButton icon="gear" label="Power transmission" hint="gear · chain · belt" active info />
       </RibbonGroup>
       <RibbonGroup label="Supplier reference boundary">
-        <RibbonButton icon="shield" label="No copied assets" hint="source links only" active />
-        <RibbonButton icon="dimension" label="Editable sizes" hint="mm internal" active />
-        <RibbonButton icon="assemble" label="Grouped insert" hint="one revision" active />
+        <RibbonButton icon="shield" label="No copied assets" hint="source links only" active info />
+        <RibbonButton icon="dimension" label="Editable sizes" hint="mm internal" active info />
+        <RibbonButton icon="assemble" label="Grouped insert" hint="one revision" active info />
       </RibbonGroup>
       <RibbonGroup label="Return">
         <RibbonButton icon="assembly" label="Assembly" hint="close catalog" onClick={props.onCloseMasterCart} />
@@ -114,8 +114,8 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
       <RibbonGroup label="Sketch session">
         <RibbonButton icon="save" label="Finish Sketch" hint="to Part" onClick={props.onFinishSketch} />
-        <RibbonButton icon="cancel" label="Cancel points" hint="Esc" onClick={props.onCancelSketchPoints} />
-        <RibbonButton icon="plane" label="XY plane" hint={`${props.project.sketch.gridMm} mm`} active />
+        <RibbonButton icon="cancel" label="Cancel points" hint="clear" onClick={props.onCancelSketchPoints} />
+        <RibbonButton icon="plane" label="XY plane" hint={`${props.project.sketch.gridMm} mm`} active info />
       </RibbonGroup>
       <RibbonGroup label="Dimension & modify">
         <RibbonButton icon="dimension" label="Dimension" hint="points / curve" active={props.sketchDimensionMode} onClick={props.onSketchDimension} />
@@ -218,7 +218,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="trash" label="Delete" hint="component" disabled={selectedComponent === undefined} onClick={() => { if (selectedComponent !== undefined) props.onDeleteComponent(selectedComponent.id); }} />
       </RibbonGroup>
       <RibbonGroup label="Inspect & relationships">
-        <RibbonButton icon="mate" label="Mates" hint={`${props.project.assembly.mates.length}`} onClick={() => props.onSelect(props.project.assembly.mates[0]?.id ?? null)} />
+        <RibbonButton icon="mate" label="Mates" hint={`${props.project.assembly.mates.length}`} onClick={() => { const firstMate = props.project.assembly.mates[0]; if (firstMate !== undefined) props.onSelect(firstMate.id); }} />
         <RibbonButton icon="interference" label="Interference" hint="AABB" onClick={() => props.onSelect("analysis:interference")} />
         <RibbonButton icon="exchange" label="3D Exchange" hint="scene out" onClick={props.onExchange} />
       </RibbonGroup>
@@ -278,7 +278,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="electrical" label="IEC basis" hint="symbols" active={props.project.electrical.standard === "IEC"} onClick={() => props.onElectricalStandard("IEC")} />
         <RibbonButton icon="electrical" label="ANSI basis" hint="symbols" active={props.project.electrical.standard === "ANSI"} onClick={() => props.onElectricalStandard("ANSI")} />
         <RibbonButton icon="wire" label="Net editor" hint={`${props.project.electrical.nets.length} nets`} onClick={() => props.onSelect("electrical-action:nets")} />
-        <RibbonButton icon="inspect" label="Run ERC" hint="live" onClick={() => props.onSelect("electrical-action:erc")} />
+        <RibbonButton icon="inspect" label="Show ERC" hint="live" onClick={() => props.onSelect("electrical-action:erc")} />
         <RibbonButton icon="download" label="Download SVG" hint="vector" onClick={props.onElectricalDownload} />
       </RibbonGroup>
       <RibbonGroup label="ECAD → MCAD">
@@ -328,7 +328,10 @@ function RibbonGroup({ label, children }: { readonly label: string; readonly chi
   return <div className="ribbon-group" role="group" aria-label={label}><div>{children}</div><small>{label}</small></div>;
 }
 
-function RibbonButton(props: { readonly icon: string; readonly label: string; readonly hint: string; readonly active?: boolean; readonly disabled?: boolean; readonly onClick?: () => void }): React.JSX.Element {
+function RibbonButton(props: { readonly icon: string; readonly label: string; readonly hint: string; readonly active?: boolean; readonly disabled?: boolean; readonly info?: boolean; readonly onClick?: () => void }): React.JSX.Element {
+  if (props.info === true) {
+    return <div className={`ribbon-button tone-${iconTone(props.icon)} ${props.active === true ? "active" : ""}`} role="presentation" title={`${props.label} · ${props.hint}`}><span aria-hidden="true"><CommandIcon name={props.icon} /></span><strong>{props.label}</strong><small>{props.hint}</small></div>;
+  }
   return <button className={`ribbon-button tone-${iconTone(props.icon)} ${props.active === true ? "active" : ""}`} aria-pressed={props.active} disabled={props.disabled} onClick={props.onClick} title={`${props.label} · ${props.hint}`}><span aria-hidden="true"><CommandIcon name={props.icon} /></span><strong>{props.label}</strong><small>{props.hint}</small></button>;
 }
 

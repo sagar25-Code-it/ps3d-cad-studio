@@ -14,15 +14,21 @@ interface WorkbenchContextMenuProps {
 export function WorkbenchContextMenu(props: WorkbenchContextMenuProps): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement>(null);
   const [activeSubmenu, setActiveSubmenu] = useState<string>();
+  const onCloseRef = useRef(props.onClose);
+  onCloseRef.current = props.onClose;
+  const activeSubmenuRef = useRef(activeSubmenu);
+  activeSubmenuRef.current = activeSubmenu;
   useEffect(() => {
     menuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+  }, []);
+  useEffect(() => {
     const close = (event: PointerEvent): void => {
-      if (menuRef.current?.contains(event.target as Node) !== true) props.onClose();
+      if (menuRef.current?.contains(event.target as Node) !== true) onCloseRef.current();
     };
     const keyboard = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
-        if (activeSubmenu !== undefined) { event.preventDefault(); setActiveSubmenu(undefined); return; }
-        props.onClose();
+        if (activeSubmenuRef.current !== undefined) { event.preventDefault(); setActiveSubmenu(undefined); return; }
+        onCloseRef.current();
       }
       if (event.key === "ArrowRight" && globalThis.document.activeElement instanceof HTMLElement) {
         const submenuId = globalThis.document.activeElement.dataset["submenuId"];
@@ -32,9 +38,9 @@ export function WorkbenchContextMenu(props: WorkbenchContextMenuProps): React.JS
           window.requestAnimationFrame(() => menuRef.current?.querySelector<HTMLButtonElement>(`[data-submenu-panel="${submenuId}"] button:not(:disabled)`)?.focus());
         }
       }
-      if (event.key === "ArrowLeft" && activeSubmenu !== undefined) {
+      if (event.key === "ArrowLeft" && activeSubmenuRef.current !== undefined) {
         event.preventDefault();
-        const parent = menuRef.current?.querySelector<HTMLButtonElement>(`[data-submenu-id="${activeSubmenu}"]`);
+        const parent = menuRef.current?.querySelector<HTMLButtonElement>(`[data-submenu-id="${activeSubmenuRef.current}"]`);
         setActiveSubmenu(undefined);
         window.requestAnimationFrame(() => parent?.focus());
       }
@@ -42,7 +48,7 @@ export function WorkbenchContextMenu(props: WorkbenchContextMenuProps): React.JS
     window.addEventListener("pointerdown", close, true);
     window.addEventListener("keydown", keyboard, true);
     return () => { window.removeEventListener("pointerdown", close, true); window.removeEventListener("keydown", keyboard, true); };
-  }, [activeSubmenu, props.onClose]);
+  }, []);
   let priorGroup: WorkbenchContextCommand["group"] | undefined;
   return <div ref={menuRef} className={`workbench-context-menu ${props.x > window.innerWidth - 600 ? "flip-submenus" : ""}`} role="menu" aria-label={`Context commands for ${props.selectionLabel}`} style={{ left: Math.max(8, Math.min(props.x, window.innerWidth - 292)), top: Math.max(8, Math.min(props.y, window.innerHeight - 510)) }}>
     <header><span>CONTEXT</span><strong>{props.selectionLabel}</strong></header>
@@ -55,7 +61,7 @@ export function WorkbenchContextMenu(props: WorkbenchContextMenuProps): React.JS
           <CommandIcon name={command.icon} /><span>{command.label}</span>{command.shortcut !== undefined && <kbd>{command.shortcut}</kbd>}{hasChildren && <b aria-hidden="true">›</b>}{!command.enabled && <small>Unavailable</small>}
         </button>
         {hasChildren && activeSubmenu === command.id && <div className="context-submenu" role="menu" data-submenu-panel={command.id} aria-label={command.label}>
-          <header><span>VIEW</span><strong>{command.label}</strong></header>
+          <header><span>{command.group.toUpperCase()}</span><strong>{command.label}</strong></header>
           {command.children?.map((child) => <button key={child.id} role="menuitem" disabled={!child.enabled} title={child.disabledReason} onClick={() => { if (child.enabled) props.onRun(child.id); }}><CommandIcon name={child.icon} /><span>{child.label}</span>{child.shortcut !== undefined && <kbd>{child.shortcut}</kbd>}{!child.enabled && <small>Unavailable</small>}</button>)}
         </div>}
         {!command.enabled && command.disabledReason !== undefined && <p>{command.disabledReason}</p>}

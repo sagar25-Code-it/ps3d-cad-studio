@@ -20,6 +20,7 @@ export function DesignHealthCenter({ report, onClose, onWorkspace }: DesignHealt
   const dialogRef = useDialogFocus<HTMLElement>(true, onClose);
   const filtered = useMemo(() => filter === "all" ? report.findings : report.findings.filter((finding) => finding.severity === filter), [filter, report.findings]);
   const currentDependencies = report.dependencies.filter((dependency) => dependency.status === "current").length;
+  const staleDependencies = report.dependencies.filter((dependency) => dependency.status === "stale").length;
   const detachedDependencies = report.dependencies.filter((dependency) => dependency.status === "detached").length;
 
   const openWorkspace = (workspace: WorkspaceId): void => {
@@ -46,6 +47,7 @@ export function DesignHealthCenter({ report, onClose, onWorkspace }: DesignHealt
         <HealthFact icon="warning" label="Review" value={report.warnings} tone={report.warnings > 0 ? "warning" : "healthy"} />
         <HealthFact icon="command" label="Information" value={report.information} tone="info" />
         <HealthFact icon="assembly" label="Current links" value={currentDependencies} tone="healthy" />
+        <HealthFact icon="warning" label="Stale links" value={staleDependencies} tone={staleDependencies > 0 ? "warning" : "healthy"} />
         <HealthFact icon="unlink" label="Detached links" value={detachedDependencies} tone={detachedDependencies > 0 ? "warning" : "healthy"} />
       </div>
 

@@ -48,6 +48,14 @@ const PART_PARAMETERS: readonly (keyof Pick<PartIntent, "widthMm" | "heightMm" |
 const SURFACE_PARAMETERS: readonly (keyof Omit<SurfaceIntent, "id" | "name" | "mode">)[] = [
   "widthMm", "depthMm", "crownMm", "twistDeg", "uSegments", "vSegments"
 ];
+const SURFACE_PARAMETER_LABELS: Record<"widthMm" | "depthMm" | "crownMm" | "twistDeg" | "uSegments" | "vSegments", { readonly label: string; readonly unit: string }> = {
+  widthMm: { label: "Span", unit: " mm" },
+  depthMm: { label: "Depth", unit: " mm" },
+  crownMm: { label: "Crown height", unit: " mm" },
+  twistDeg: { label: "Twist", unit: "°" },
+  uSegments: { label: "U tessellation", unit: " seg" },
+  vSegments: { label: "V tessellation", unit: " seg" }
+};
 const VEHICLE_PARAMETERS = Object.keys(VEHICLE_PARAMETER_RANGES) as VehicleParameterKey[];
 const VEHICLE_LAYERS: readonly VehicleLayerId[] = ["skeleton", "hardpoints", "envelopes", "wheels", "chassis", "suspension", "steering", "brakes", "powertrain", "cg-loads"];
 const VEHICLE_TIRE_PARAMETERS: readonly VehicleParameterKey[] = ["frontLoadedRadiusM", "rearLoadedRadiusM", "frontRollingRadiusM", "rearRollingRadiusM", "frontTireWidthM", "rearTireWidthM", "tireFrictionCoefficient"];
@@ -674,19 +682,29 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     case "toggle-component-grounded": {
       const target = project.assembly.components.find((component) => component.id === operation.componentId);
       if (target === undefined) return broken(operation.componentId, "The assembly component does not exist.");
+      const source = project.assembly.electromechanicalSource;
       const groupedIds = project.assembly.components.filter((component) => target.masterCart === undefined ? component.id === target.id : component.masterCart?.instanceId === target.masterCart.instanceId).map((component) => component.id);
       return changed({
         ...project,
-        assembly: { ...project.assembly, components: project.assembly.components.map((component) => groupedIds.includes(component.id) ? { ...component, grounded: !target.grounded } : component) }
+        assembly: {
+          ...project.assembly,
+          components: project.assembly.components.map((component) => groupedIds.includes(component.id) ? { ...component, grounded: !target.grounded } : component),
+          ...(source === undefined ? {} : { electromechanicalSource: { ...source, status: "stale" as const } })
+        }
       }, groupedIds, `${target.grounded ? "Released" : "Grounded"} ${target.masterCart === undefined ? target.name : `${target.masterCart.templateId.replaceAll("-", " ")} grouped item`}.`);
     }
     case "toggle-component-visibility": {
       const target = project.assembly.components.find((component) => component.id === operation.componentId);
       if (target === undefined) return broken(operation.componentId, "The assembly component does not exist.");
+      const source = project.assembly.electromechanicalSource;
       const groupedIds = project.assembly.components.filter((component) => target.masterCart === undefined ? component.id === target.id : component.masterCart?.instanceId === target.masterCart.instanceId).map((component) => component.id);
       return changed({
         ...project,
-        assembly: { ...project.assembly, components: project.assembly.components.map((component) => groupedIds.includes(component.id) ? { ...component, visible: !target.visible } : component) }
+        assembly: {
+          ...project.assembly,
+          components: project.assembly.components.map((component) => groupedIds.includes(component.id) ? { ...component, visible: !target.visible } : component),
+          ...(source === undefined ? {} : { electromechanicalSource: { ...source, status: "stale" as const } })
+        }
       }, groupedIds, `${target.visible ? "Hid" : "Showed"} ${target.masterCart === undefined ? target.name : `${target.masterCart.templateId.replaceAll("-", " ")} grouped item`}.`);
     }
     case "add-assembly-mate": {
@@ -705,8 +723,10 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "set-surface-mode":
       return changed({ ...project, surface: { ...project.surface, mode: operation.mode } }, [project.surface.id], `Switched to ${operation.mode === "bezier" ? "bicubic Bézier" : "ruled loft"} preview.`);
-    case "set-surface-parameter":
-      return changed({ ...project, surface: { ...project.surface, [operation.parameter]: operation.value } }, [project.surface.id], `Set ${humanize(operation.parameter)} to ${formatNumber(operation.value)}.`);
+    case "set-surface-parameter": {
+      const descriptor = SURFACE_PARAMETER_LABELS[operation.parameter];
+      return changed({ ...project, surface: { ...project.surface, [operation.parameter]: operation.value } }, [project.surface.id], `Set ${descriptor.label} to ${formatNumber(operation.value)}${descriptor.unit}.`);
+    }
     case "set-drawing-sheet":
       return changed({ ...project, drawing: { ...project.drawing, sheet: operation.sheet } }, [project.drawing.id], `Changed sheet to ${operation.sheet}.`);
     case "set-drawing-projection":

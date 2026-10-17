@@ -153,6 +153,7 @@ export function analyzeWorkbenchSketch(sketch: WorkbenchSketch): SketchAnalysis 
 export function snapSketchPoint(point: Vec2, sketch: WorkbenchSketch): SnapResult {
   let closest: { id: string; point: Vec2; distance: number } | undefined;
   for (const entity of sketch.entities) {
+    if (entity.visible === false) continue;
     for (const candidate of entityPoints(entity)) {
       const distance = Math.hypot(candidate[0] - point[0], candidate[1] - point[1]);
       if (distance <= sketch.snapToleranceMm && (closest === undefined || distance < closest.distance)) closest = { id: entity.id, point: candidate, distance };
@@ -351,11 +352,18 @@ export function entityPoints(entity: SketchEntity): readonly Vec2[] {
   if (entity.kind === "rectangle") {
     const halfWidth = entity.widthMm / 2;
     const halfHeight = entity.heightMm / 2;
+    const radians = entity.rotationDeg * Math.PI / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const corner = (dx: number, dy: number): Vec2 => [
+      entity.center[0] + dx * cos - dy * sin,
+      entity.center[1] + dx * sin + dy * cos
+    ];
     return [
-      [entity.center[0] - halfWidth, entity.center[1] - halfHeight],
-      [entity.center[0] + halfWidth, entity.center[1] - halfHeight],
-      [entity.center[0] + halfWidth, entity.center[1] + halfHeight],
-      [entity.center[0] - halfWidth, entity.center[1] + halfHeight]
+      corner(-halfWidth, -halfHeight),
+      corner(halfWidth, -halfHeight),
+      corner(halfWidth, halfHeight),
+      corner(-halfWidth, halfHeight)
     ];
   }
   if (entity.kind === "circle") return [entity.center, [entity.center[0] + entity.radiusMm, entity.center[1]]];
@@ -414,7 +422,7 @@ export function sketchChainBranchCount(sketch: WorkbenchSketch, entityIds: reado
     const entity = sketch.entities.find((candidate) => candidate.id === id);
     return entity === undefined ? [] : curveEndpoints(entity);
   });
-  return endpoints.filter((point, index) => endpoints.filter((candidate, candidateIndex) => candidateIndex !== index && distance(point, candidate) <= toleranceMm).length > 2).length;
+  return endpoints.filter((point, index) => endpoints.filter((candidate, candidateIndex) => candidateIndex !== index && distance(point, candidate) <= toleranceMm).length >= 2).length;
 }
 
 function baseFreedom(entity: SketchEntity): number {

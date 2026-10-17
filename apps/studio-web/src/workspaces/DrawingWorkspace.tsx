@@ -30,22 +30,27 @@ interface DrawingWorkspaceProps {
 
 export function DrawingWorkspace(props: DrawingWorkspaceProps): React.JSX.Element {
   const [notes, setNotes] = useState(props.settings.notes);
-  const [linearTolerance, setLinearTolerance] = useState(props.artifact.generalTolerance.linearMm);
-  const [angularTolerance, setAngularTolerance] = useState(props.artifact.generalTolerance.angularDeg);
-  const [positionTolerance, setPositionTolerance] = useState(props.settings.gdtPositionToleranceMm ?? 0.2);
-  const [flatnessTolerance, setFlatnessTolerance] = useState(props.settings.gdtFlatnessToleranceMm ?? 0.1);
-  const [perpendicularityTolerance, setPerpendicularityTolerance] = useState(props.settings.gdtPerpendicularityToleranceMm ?? 0.1);
+  const [linearTolerance, setLinearTolerance] = useState(String(props.artifact.generalTolerance.linearMm));
+  const [angularTolerance, setAngularTolerance] = useState(String(props.artifact.generalTolerance.angularDeg));
+  const [positionTolerance, setPositionTolerance] = useState(String(props.settings.gdtPositionToleranceMm ?? 0.2));
+  const [flatnessTolerance, setFlatnessTolerance] = useState(String(props.settings.gdtFlatnessToleranceMm ?? 0.1));
+  const [perpendicularityTolerance, setPerpendicularityTolerance] = useState(String(props.settings.gdtPerpendicularityToleranceMm ?? 0.1));
   useEffect(() => setNotes(props.settings.notes), [props.settings.notes]);
-  useEffect(() => setLinearTolerance(props.artifact.generalTolerance.linearMm), [props.artifact.generalTolerance.linearMm]);
-  useEffect(() => setAngularTolerance(props.artifact.generalTolerance.angularDeg), [props.artifact.generalTolerance.angularDeg]);
-  useEffect(() => setPositionTolerance(props.settings.gdtPositionToleranceMm ?? 0.2), [props.settings.gdtPositionToleranceMm]);
-  useEffect(() => setFlatnessTolerance(props.settings.gdtFlatnessToleranceMm ?? 0.1), [props.settings.gdtFlatnessToleranceMm]);
-  useEffect(() => setPerpendicularityTolerance(props.settings.gdtPerpendicularityToleranceMm ?? 0.1), [props.settings.gdtPerpendicularityToleranceMm]);
+  useEffect(() => setLinearTolerance(String(props.artifact.generalTolerance.linearMm)), [props.artifact.generalTolerance.linearMm]);
+  useEffect(() => setAngularTolerance(String(props.artifact.generalTolerance.angularDeg)), [props.artifact.generalTolerance.angularDeg]);
+  useEffect(() => setPositionTolerance(String(props.settings.gdtPositionToleranceMm ?? 0.2)), [props.settings.gdtPositionToleranceMm]);
+  useEffect(() => setFlatnessTolerance(String(props.settings.gdtFlatnessToleranceMm ?? 0.1)), [props.settings.gdtFlatnessToleranceMm]);
+  useEffect(() => setPerpendicularityTolerance(String(props.settings.gdtPerpendicularityToleranceMm ?? 0.1)), [props.settings.gdtPerpendicularityToleranceMm]);
   const applyTolerance = (): void => {
-    if (Number.isFinite(linearTolerance) && Number.isFinite(angularTolerance)) props.onGeneralTolerance(linearTolerance, angularTolerance);
+    const linear = Number(linearTolerance);
+    const angular = Number(angularTolerance);
+    if (linearTolerance.trim() !== "" && angularTolerance.trim() !== "" && Number.isFinite(linear) && Number.isFinite(angular)) props.onGeneralTolerance(linear, angular);
   };
   const applyGdt = (): void => {
-    if ([positionTolerance, flatnessTolerance, perpendicularityTolerance].every(Number.isFinite)) props.onGdtSpecification(positionTolerance, flatnessTolerance, perpendicularityTolerance);
+    const position = Number(positionTolerance);
+    const flatness = Number(flatnessTolerance);
+    const perpendicularity = Number(perpendicularityTolerance);
+    if ([positionTolerance, flatnessTolerance, perpendicularityTolerance].every((value) => value.trim() !== "") && [position, flatness, perpendicularity].every(Number.isFinite)) props.onGdtSpecification(position, flatness, perpendicularity);
   };
   return <>
     <section className="workspace-canvas drawing-stage" aria-label="Standards-aware technical drawing preview">
@@ -83,8 +88,8 @@ export function DrawingWorkspace(props: DrawingWorkspaceProps): React.JSX.Elemen
       <section className="inspector-section tolerance-controller"><header><strong>General tolerance</strong><span>NON-GD&amp;T</span></header>
         <p className="tolerance-copy">Applies only to dimensions without an individual tolerance. It never creates datums and never calculates feature-control-frame values.</p>
         <div className="tolerance-grid">
-          <label><span>Linear ±</span><div><input aria-label="General linear tolerance in millimeters" type="number" min="0.001" max="10" step="0.01" value={linearTolerance} onChange={(event) => setLinearTolerance(Number(event.target.value))} /><small>mm</small></div></label>
-          <label><span>Angular ±</span><div><input aria-label="General angular tolerance in degrees" type="number" min="0.01" max="10" step="0.1" value={angularTolerance} onChange={(event) => setAngularTolerance(Number(event.target.value))} /><small>deg</small></div></label>
+          <label><span>Linear ±</span><div><input aria-label="General linear tolerance in millimeters" type="number" min="0.001" max="10" step="0.01" value={linearTolerance} onChange={(event) => setLinearTolerance(event.target.value)} /><small>mm</small></div></label>
+          <label><span>Angular ±</span><div><input aria-label="General angular tolerance in degrees" type="number" min="0.01" max="10" step="0.1" value={angularTolerance} onChange={(event) => setAngularTolerance(event.target.value)} /><small>deg</small></div></label>
         </div>
         <button onClick={applyTolerance}>Apply general tolerance</button>
         <div className="tolerance-note"><CommandIcon name="tolerance" /><span><strong>Unless otherwise specified</strong><small>LINEAR ±{formatTolerance(props.artifact.generalTolerance.linearMm)} mm · ANGULAR ±{formatTolerance(props.artifact.generalTolerance.angularDeg)}°</small></span></div>
@@ -95,9 +100,9 @@ export function DrawingWorkspace(props: DrawingWorkspaceProps): React.JSX.Elemen
         <label className="check-row"><input type="checkbox" checked={props.settings.showGdt ?? false} onChange={(event) => props.onGdt(event.target.checked)} /><span><strong>Show authored feature-control frames</strong><small>Flatness is datum-independent; orientation and position require a datum frame</small></span></label>
         <label className="field-row"><span>Datum frame</span><select aria-label="Datum scheme" value={props.settings.datumScheme ?? "none"} onChange={(event) => props.onDatumScheme(event.target.value as DrawingDatumScheme)}><option value="none">None</option><option value="plate-3-2-1">Plate 3-2-1 draft</option></select></label>
         <div className="gdt-spec-grid">
-          <label><span>Position ⌀</span><div><input aria-label="Position tolerance in millimeters" type="number" min="0.001" max="10" step="0.01" value={positionTolerance} onChange={(event) => setPositionTolerance(Number(event.target.value))} /><small>mm</small></div></label>
-          <label><span>Flatness</span><div><input aria-label="Flatness tolerance in millimeters" type="number" min="0.001" max="10" step="0.01" value={flatnessTolerance} onChange={(event) => setFlatnessTolerance(Number(event.target.value))} /><small>mm</small></div></label>
-          <label><span>Perpendicularity</span><div><input aria-label="Perpendicularity tolerance in millimeters" type="number" min="0.001" max="10" step="0.01" value={perpendicularityTolerance} onChange={(event) => setPerpendicularityTolerance(Number(event.target.value))} /><small>mm</small></div></label>
+          <label><span>Position ⌀</span><div><input aria-label="Position tolerance in millimeters" type="number" min="0.001" max="10" step="0.01" value={positionTolerance} onChange={(event) => setPositionTolerance(event.target.value)} /><small>mm</small></div></label>
+          <label><span>Flatness</span><div><input aria-label="Flatness tolerance in millimeters" type="number" min="0.001" max="10" step="0.01" value={flatnessTolerance} onChange={(event) => setFlatnessTolerance(event.target.value)} /><small>mm</small></div></label>
+          <label><span>Perpendicularity</span><div><input aria-label="Perpendicularity tolerance in millimeters" type="number" min="0.001" max="10" step="0.01" value={perpendicularityTolerance} onChange={(event) => setPerpendicularityTolerance(event.target.value)} /><small>mm</small></div></label>
         </div>
         <button onClick={applyGdt}>Apply explicit GD&amp;T values</button>
       </section>
@@ -114,7 +119,7 @@ export function DrawingWorkspace(props: DrawingWorkspaceProps): React.JSX.Elemen
 
 function GdtRow({ frame }: { readonly frame: DrawingGdtFrameRecord }): React.JSX.Element {
   const datums = frame.datumReferences.length === 0 ? "NO DATUM" : frame.datumReferences.join(" | ");
-  return <div className="gdt-row"><span className={`gdt-characteristic ${frame.characteristic}`} aria-hidden="true"><CommandIcon name={frame.characteristic === "position" ? "gdt-position" : frame.characteristic} /></span><strong>{titleCase(frame.characteristic)}</strong><small>{frame.diameterZone ? "⌀" : ""}{formatTolerance(frame.toleranceMm)} · {datums} · explicit</small></div>;
+  return <div className="gdt-row"><span className={`gdt-characteristic ${frame.characteristic}`} aria-hidden="true"><CommandIcon name={frame.characteristic === "position" ? "gdt-position" : frame.characteristic === "perpendicularity" ? "perpendicular" : frame.characteristic} /></span><strong>{titleCase(frame.characteristic)}</strong><small>{frame.diameterZone ? "⌀" : ""}{formatTolerance(frame.toleranceMm)} · {datums} · explicit</small></div>;
 }
 
 function titleCase(value: string): string {

@@ -221,6 +221,7 @@ export function App(): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraCursorRef = useRef<HTMLDivElement>(null);
   const historyActionRef = useRef<{ undo: () => void; redo: () => void }>({ undo: () => undefined, redo: () => undefined });
+  const fitViewportRef = useRef<() => void>(() => undefined);
   const viewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
   const renderCanvasRef = useRef<HTMLCanvasElement>(null);
   const renderViewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
@@ -430,7 +431,7 @@ export function App(): React.JSX.Element {
     const listener = (event: KeyboardEvent): void => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        if (!exchangeOpen && !electromechanicalReviewOpen && pendingAssemblyTemplate === undefined && pendingElectricalTemplate === undefined && pendingVehicleTemplate === undefined) setPaletteOpen(true);
+        if (!exchangeOpen && !electromechanicalReviewOpen && pendingAssemblyTemplate === undefined && pendingElectricalTemplate === undefined && pendingVehicleTemplate === undefined && globalThis.document.querySelector('[role="dialog"][aria-modal="true"]') === null) setPaletteOpen(true);
       }
       if (event.key === "Escape") setPaletteOpen(false);
     };
@@ -451,6 +452,7 @@ export function App(): React.JSX.Element {
       if (event.key === "Escape") {
         event.preventDefault();
         if (pendingElectricalTemplate !== undefined) setStatusText("Schematic replacement cancelled; the current devices and nets were preserved.");
+        if (pendingVehicleTemplate !== undefined) setStatusText("Vehicle replacement cancelled; the current topology and inputs were preserved.");
         setElectromechanicalReviewOpen(false);
         setElectromechanicalAcknowledged(false);
         setPendingAssemblyTemplate(undefined);
@@ -493,7 +495,7 @@ export function App(): React.JSX.Element {
       onSelectBody: setSelectedId,
       onViewChange: setViewportState,
       onMeasurePoint: acceptMeasurePoint,
-      onContextMenu: (request) => openContextMenu(request.clientX, request.clientY, request.semanticId, request.selectionKind === "body" || request.selectionKind === "component" ? request.selectionKind : undefined),
+      onContextMenu: (request) => openContextMenu(request.clientX, request.clientY, request.semanticId, (request.selectionKind === "body" || request.selectionKind === "component") && request.selectionKind === classifyWorkbenchSelection(request.semanticId) ? request.selectionKind : undefined),
       ...(project.activeWorkspace === "assembly" ? { assemblyTouchGestures: {
         getExplodeMm: () => assemblyExplodeRef.current,
         onExplodePreview: previewAssemblyExplode,
@@ -507,6 +509,7 @@ export function App(): React.JSX.Element {
   }, [acceptMeasurePoint, assemblyExplodeMaxMm, commitAssemblyExplode, isThreeDimensional, masterCartOpen, openContextMenu, previewAssemblyExplode, project.activeWorkspace]);
 
   useEffect(() => {
+    setMeasurePoints((current) => current.length === 0 ? current : []);
     const viewport = viewportRef.current;
     if (viewport === undefined) return;
     if (project.activeWorkspace === "part" && activeImport !== undefined) viewport.setExternalObject(activeImport.object);
@@ -563,19 +566,30 @@ export function App(): React.JSX.Element {
       rimIntensity: renderSettings.rimIntensity
     });
     viewport.setStudioGroundVisible(renderSettings.groundVisible);
+  }, [renderSettings, renderStudioOpen, activeImport, model, partScene, assemblyScene, surfacePreview.scene, vehiclePreview.scene]);
+
+  useEffect(() => {
+    const viewport = renderViewportRef.current;
+    if (viewport === undefined) return;
     viewport.setProjection(renderSettings.projection);
     viewport.setOrientation(renderSettings.orientation);
-  }, [renderSettings]);
+  }, [renderSettings.projection, renderSettings.orientation]);
 
   const switchWorkspace = (workspace: WorkspaceId): void => {
     setMasterCartOpen(false);
     setRenderStudioOpen(false);
+    const current = projectRef.current;
+    if (workspace === current.activeWorkspace) return;
     setContextMenu(undefined);
     setSelectedId(null);
     setMeasurePoints([]);
-    if (workspace !== "sketch") setViewportState((current) => ["sketch-curve", "profile", "connected", "tangent"].includes(current.selectionFilter) ? { ...current, selectionFilter: "auto" } : current);
-    const current = projectRef.current;
-    if (workspace === current.activeWorkspace) return;
+    setViewportState((currentState) => {
+      const filter = currentState.selectionFilter;
+      const sketchFilterInvalid = workspace !== "sketch" && (filter === "sketch-curve" || filter === "profile" || filter === "connected" || filter === "tangent");
+      const componentFilterInvalid = workspace === "part" && filter === "component";
+      const bodyFilterInvalid = (workspace === "assembly" || workspace === "surface" || workspace === "vehicle") && filter === "body";
+      return sketchFilterInvalid || componentFilterInvalid || bodyFilterInvalid ? { ...currentState, selectionFilter: "auto" } : currentState;
+    });
     const next = { ...current, activeWorkspace: workspace };
     projectRef.current = next;
     setProject(next);
@@ -769,15 +783,28 @@ export function App(): React.JSX.Element {
 
   const insertAssemblyComponent = (shape: "box" | "cylinder"): void => {
     const current = projectRef.current;
-    const ordinal = current.assembly.components.length + 1;
+    const label = shape === "box" ? "Box" : "Cylinder";
+    const pattern = new RegExp(`^${label} (\\d+)$`, "u");
+    const ordinal = current.assembly.components.reduce((max, component) => {
+      const match = pattern.exec(component.name);
+      const value = match === null ? 0 : Number(match[1]);
+      return Number.isSafeInteger(value) && value > max ? value : max;
+    }, 0) + 1;
+    const occupied = new Set(current.assembly.components.map((component) => {
+      const column = Math.round((component.translationMm[0] + 27) / 18);
+      const row = Math.round(component.translationMm[1] / 18);
+      return column >= 0 && column < 4 && row >= 0 ? row * 4 + column : -1;
+    }));
+    let slot = 0;
+    while (occupied.has(slot)) slot += 1;
     const component: ComponentInstance = {
       id: `component:user-${crypto.randomUUID()}`,
-      name: `${shape === "box" ? "Box" : "Cylinder"} ${ordinal}`,
+      name: `${label} ${ordinal}`,
       shape,
       grounded: false,
       visible: true,
       color: shape === "box" ? "#5cc2d6" : "#e3a34e",
-      translationMm: [((ordinal - 1) % 4) * 18 - 27, Math.floor((ordinal - 1) / 4) * 18, shape === "box" ? 8 : 14],
+      translationMm: [(slot % 4) * 18 - 27, Math.floor(slot / 4) * 18, shape === "box" ? 8 : 14],
       rotationDeg: [0, 0, 0],
       sizeMm: shape === "box" ? [24, 18, 12] : [14, 14, 24],
       explosionDirection: shape === "box" ? [0.45, 0.2, 0.35] : [-0.35, 0.25, 0.55]
@@ -789,8 +816,15 @@ export function App(): React.JSX.Element {
     const current = projectRef.current;
     const instanceId = `master-cart:${crypto.randomUUID()}`;
     const generated = buildMasterCartItem(templateId, configuration, instanceId);
-    const catalogInstanceCount = new Set(current.assembly.components.flatMap((component) => component.masterCart === undefined ? [] : [component.masterCart.instanceId])).size;
-    const placement: Vec3 = [105 + (catalogInstanceCount % 4) * 90, -55 + Math.floor(catalogInstanceCount / 4) * 90, 0];
+    const occupied = new Set(current.assembly.components.flatMap((component) => {
+      if (component.masterCart === undefined) return [];
+      const column = Math.round((component.translationMm[0] - 105) / 90);
+      const row = Math.round((component.translationMm[1] + 55) / 90);
+      return column >= 0 && column < 4 && row >= 0 ? [row * 4 + column] : [];
+    }));
+    let placementSlot = 0;
+    while (occupied.has(placementSlot)) placementSlot += 1;
+    const placement: Vec3 = [105 + (placementSlot % 4) * 90, -55 + Math.floor(placementSlot / 4) * 90, 0];
     const components = generated.components.map((component): ComponentInstance => ({
       ...component,
       translationMm: [component.translationMm[0] + placement[0], component.translationMm[1] + placement[1], component.translationMm[2] + placement[2]]
@@ -821,6 +855,26 @@ export function App(): React.JSX.Element {
     setSelectedId(component.id);
     setStatus("ready");
     setStatusText(`Inserted ${current.part.name} from part revision ${current.revision} as an editable assembly snapshot. Later part edits are not associative yet.`);
+  };
+
+  const createComponentFromPartBody = (body: PartPreviewBody): void => {
+    const component: ComponentInstance = {
+      id: `component:part-body-${crypto.randomUUID()}`,
+      name: `${body.name} · component`,
+      shape: body.shape === "block" ? "box" : body.shape === "revolved" ? "ring" : body.shape,
+      grounded: false,
+      visible: true,
+      color: body.color,
+      translationMm: body.translationMm,
+      rotationDeg: body.rotationDeg,
+      sizeMm: body.sizeMm,
+      explosionDirection: [0.2, -0.14, 0.62]
+    };
+    if (!applyProjectOperation({ kind: "add-assembly-component", component })) return;
+    switchWorkspace("assembly");
+    setSelectedId(component.id);
+    setStatus("ready");
+    setStatusText(`Created an assembly component from ${body.name}. Later part edits are not associative yet.`);
   };
 
   const deleteAssemblyComponent = (componentId: string): void => {
@@ -870,6 +924,11 @@ export function App(): React.JSX.Element {
   };
 
   const requestAssemblyTemplate = (template: ReplaceableAssemblyTemplate): void => {
+    if (projectRef.current.assembly.template === template) {
+      setStatus("ready");
+      setStatusText("That assembly template is already active; no components or mates were replaced.");
+      return;
+    }
     if (projectRef.current.assembly.electromechanicalSource === undefined) {
       applyProjectOperation({ kind: "apply-assembly-template", template });
       return;
@@ -1020,11 +1079,13 @@ export function App(): React.JSX.Element {
         setViewportProjection(action.projection);
         break;
       case "set-shading-mode":
-        viewportRef.current?.setShadingMode(action.mode);
+        if (viewportRef.current === undefined) setViewportState((currentState) => ({ ...currentState, shadingMode: action.mode }));
+        else viewportRef.current.setShadingMode(action.mode);
         setStatusText(`${command.name} display mode active.`);
         break;
       case "set-background-tone":
-        viewportRef.current?.setBackgroundTone(action.tone);
+        if (viewportRef.current === undefined) setViewportState((currentState) => ({ ...currentState, backgroundTone: action.tone }));
+        else viewportRef.current.setBackgroundTone(action.tone);
         setStatusText(`${command.name} viewport background active.`);
         break;
       case "set-navigation-mode":
@@ -1613,6 +1674,7 @@ export function App(): React.JSX.Element {
     if (projectRef.current.activeWorkspace === "surface") viewportRef.current?.fitPreview(surfacePreview.scene.boundsMm);
     if (projectRef.current.activeWorkspace === "vehicle") viewportRef.current?.fitPreview(vehiclePreview.scene.boundsMm);
   };
+  fitViewportRef.current = fitViewport;
 
   const setViewportNavigation = (mode: NavigationMode): void => {
     if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, navigationMode: mode }));
@@ -1694,15 +1756,18 @@ export function App(): React.JSX.Element {
     if (commandId === "inspect.measure") { setViewportNavigation("measure"); return; }
     if (commandId === "sketch.create" || commandId === "sketch.edit") { switchWorkspace("sketch"); if (selectionId !== null) setSelectedId(selectionId); return; }
     if (commandId === "sketch.finish") { switchWorkspace("part"); return; }
-    if (commandId === "sketch.select-profile") { setViewportSelectionFilter("profile"); return; }
-    if (commandId === "sketch.select-curve") { setViewportSelectionFilter("sketch-curve"); return; }
-    if (commandId === "sketch.select-connected") { setViewportSelectionFilter("connected"); return; }
-    if (commandId === "sketch.select-tangent") { setViewportSelectionFilter("tangent"); return; }
+    if (commandId === "sketch.select-profile" || commandId === "sketch.select-curve" || commandId === "sketch.select-connected" || commandId === "sketch.select-tangent") {
+      if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
+      setViewportSelectionFilter(commandId === "sketch.select-profile" ? "profile" : commandId === "sketch.select-curve" ? "sketch-curve" : commandId === "sketch.select-connected" ? "connected" : "tangent");
+      if (selectionId !== null) setSelectedId(selectionId);
+      return;
+    }
     if (commandId === "sketch.dimension") {
+      if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
       setSketchTool("select");
-      setSketchDimensionMode(true);
       setViewportNavigation("select");
       setViewportSelectionFilter("sketch-curve");
+      setSketchDimensionMode(true);
       if (selectionId !== null) setSelectedId(selectionId);
       setStatusText("Sketch Dimension active: select a curve or two displayed definition points, then edit the driving value in the inspector.");
       return;
@@ -1725,7 +1790,14 @@ export function App(): React.JSX.Element {
     if (commandId === "body.update-model") { runPartFeatureAction("update-model", "Update Model"); return; }
     if (commandId === "feature.edit" || commandId === "body.appearance" || commandId === "body.move") { switchWorkspace("part"); if (selectionId !== null) setSelectedId(selectionId); return; }
     if (commandId === "feature.reveal-inputs") { switchWorkspace("sketch"); setSelectedId(projectRef.current.sketch.id); setTreeRevealRequest((request) => request + 1); return; }
-    if (commandId === "body.create-component") { insertCurrentPartIntoAssembly(); return; }
+    if (commandId === "body.create-component") {
+      if (selectionId?.startsWith("part-body:") === true) {
+        const body = (projectRef.current.part.previewBodies ?? []).find((candidate) => candidate.id === selectionId);
+        if (body !== undefined) { createComponentFromPartBody(body); return; }
+      }
+      insertCurrentPartIntoAssembly();
+      return;
+    }
     if (commandId === "component.move" || commandId === "mate.create" || commandId === "mate.edit") { switchWorkspace("assembly"); if (selectionId !== null) setSelectedId(selectionId); return; }
     if (commandId === "component.ground" && selectionId !== null) { applyProjectOperation({ kind: "toggle-component-grounded", componentId: selectionId }); return; }
     if (commandId === "selection.toggle-visibility" && selectionId !== null) {
@@ -1763,10 +1835,11 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     const listener = (event: KeyboardEvent): void => {
-      if (!(isThreeDimensional || projectRef.current.activeWorkspace === "sketch") || isEditableTarget(event.target) || globalThis.document.querySelector('[role="dialog"]') !== null) return;
+      const sketch = projectRef.current.activeWorkspace === "sketch";
+      if (masterCartOpen || !(isThreeDimensional || sketch) || isEditableTarget(event.target) || globalThis.document.querySelector('[role="dialog"]') !== null) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const key = event.key.toLowerCase();
-      if (key === "f") fitViewport();
+      if (key === "f") { if (sketch) setStatusText("Sketch fit is already bounded to all visible entities."); else fitViewportRef.current(); return; }
       if (key === "1") setViewportOrientation("front");
       if (key === "2") setViewportOrientation("top");
       if (key === "3") setViewportOrientation("right");
@@ -1774,11 +1847,11 @@ export function App(): React.JSX.Element {
       if (key === "v") setViewportNavigation("select");
       if (key === "o") setViewportNavigation("orbit");
       if (key === "p") setViewportNavigation("pan");
-      if (key === "m" && projectRef.current.activeWorkspace !== "sketch") setViewportNavigation("measure");
+      if (key === "m" && !sketch) setViewportNavigation("measure");
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
-  }, [isThreeDimensional]);
+  }, [isThreeDimensional, masterCartOpen]);
 
   const downloadProject = (): void => downloadBlob(new Blob([JSON.stringify(projectRef.current, null, 2)], { type: "application/json" }), "ps3d-fixture-study.workbench.json");
   const downloadDrawing = (): void => downloadBlob(new Blob([drawing.svg], { type: "image/svg+xml" }), "ps3d-centered-bore-plate.svg");
@@ -1863,7 +1936,7 @@ export function App(): React.JSX.Element {
       assemblyExplodeMaxMm={assemblyExplodeMaxMm}
       selectedId={selectedId}
       onSketchTool={(tool) => activateSketchTool(tool, "in the top ribbon")}
-      onSketchDimension={() => { setSketchTool("select"); setSketchDimensionMode(true); setViewportNavigation("select"); setViewportSelectionFilter("sketch-curve"); setStatusText("Sketch Dimension active: select a curve or two displayed definition points."); }}
+      onSketchDimension={() => { setSketchTool("select"); setViewportNavigation("select"); setViewportSelectionFilter("sketch-curve"); setSketchDimensionMode(true); setStatusText("Sketch Dimension active: select a curve or two displayed definition points."); }}
       onToggleSketchEntityVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })}
       onFinishSketch={() => { switchWorkspace("part"); setStatusText("Sketch session finished. Revisioned sketch geometry remains linked to the Part workspace."); }}
       onCancelSketchPoints={() => { setSketchCancelVersion((version) => version + 1); setStatusText("Pending sketch points cleared from the top ribbon."); }}
@@ -1967,12 +2040,12 @@ export function App(): React.JSX.Element {
       {!masterCartOpen && <>
       {project.activeWorkspace === "part" && activeImport === undefined && <PartInspector part={project.part} model={model} working={status === "working"} bodyColor={viewportState.bodyColor} shadingMode={viewportState.shadingMode} selectedId={selectedId} onSelect={setSelectedId} onBodyColor={(color) => viewportRef.current?.setBodyColor(color)} onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)} onCommit={(parameter, value) => void commitPartParameter(parameter, value)} onInsertIntoAssembly={insertCurrentPartIntoAssembly} onCreatePreviewBody={createPartPreviewBody} onPreviewBodyTransform={(bodyId, translationMm, rotationDeg) => applyProjectOperation({ kind: "set-part-preview-body-transform", bodyId, translationMm, rotationDeg })} onPreviewBodySize={(bodyId, sizeMm) => applyProjectOperation({ kind: "set-part-preview-body-size", bodyId, sizeMm })} onPreviewBodyColor={(bodyId, color) => applyProjectOperation({ kind: "set-part-preview-body-color", bodyId, color })} onPreviewBodyVisibility={(bodyId) => applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId })} onPreviewBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId })) setSelectedId(null); }} />}
       {project.activeWorkspace === "part" && activeImport !== undefined && <ImportedModelInspector result={activeImport} onExchange={() => setExchangeOpen(true)} onClear={clearActiveImport} />}
-      {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={displayedAssembly} maxExplodeMm={assemblyExplodeMaxMm} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplodePreview={previewAssemblyExplode} onExplodeCommit={commitAssemblyExplode} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onAddMate={(mate) => applyProjectOperation({ kind: "add-assembly-mate", mate })} onDeleteMate={(mateId) => { if (applyProjectOperation({ kind: "delete-assembly-mate", mateId })) setSelectedId(null); }} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
+      {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={displayedAssembly} maxExplodeMm={assemblyExplodeMaxMm} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplodePreview={previewAssemblyExplode} onExplodeCommit={commitAssemblyExplode} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onAddMate={(mate) => applyProjectOperation({ kind: "add-assembly-mate", mate })} onDeleteMate={(mateId) => { if (applyProjectOperation({ kind: "delete-assembly-mate", mateId }) && selectedId === mateId) setSelectedId(null); }} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
       {project.activeWorkspace === "surface" && <SurfaceInspector surface={project.surface} metrics={surfacePreview.metrics} onParameter={(parameter, value) => applyProjectOperation({ kind: "set-surface-parameter", parameter, value })} />}
       {project.activeWorkspace === "drawing" && <DrawingWorkspace settings={project.drawing} artifact={drawing} onSheet={(sheet) => applyProjectOperation({ kind: "set-drawing-sheet", sheet })} onProjection={(projection) => applyProjectOperation({ kind: "set-drawing-projection", projection })} onScale={(scale) => applyProjectOperation({ kind: "set-drawing-scale", scale })} onDimensions={(show) => applyProjectOperation({ kind: "set-drawing-dimensions", show })} onViewPreset={(preset) => applyProjectOperation({ kind: "set-drawing-view-preset", preset })} onDisplayStyle={(style) => applyProjectOperation({ kind: "set-drawing-display-style", style })} onSectionView={(show) => applyProjectOperation({ kind: "set-drawing-section-view", show })} onDraftingStandard={(standard) => applyProjectOperation({ kind: "set-drawing-drafting-standard", standard })} onGdt={(show) => applyProjectOperation({ kind: "set-drawing-gdt", show })} onDatumScheme={(scheme) => applyProjectOperation({ kind: "set-drawing-datum-scheme", scheme })} onGdtSpecification={(positionMm, flatnessMm, perpendicularityMm) => applyProjectOperation({ kind: "set-drawing-gdt-specification", positionMm, flatnessMm, perpendicularityMm })} onGeneralTolerance={(linearMm, angularDeg) => applyProjectOperation({ kind: "set-drawing-general-tolerance", linearMm, angularDeg })} onNotes={(notes) => applyProjectOperation({ kind: "set-drawing-notes", notes })} />}
       {project.activeWorkspace === "electrical" && <ElectricalWorkspace intent={project.electrical} artifact={electrical} selectedId={selectedId} onSelect={setSelectedId} onTemplate={requestElectricalTemplate} onStandard={(standard) => applyProjectOperation({ kind: "set-electrical-standard", standard })} onInsertComponent={insertElectricalComponent} onMoveComponent={(componentId, position) => applyProjectOperation({ kind: "set-electrical-component-position", componentId, position })} onDeleteComponent={(componentId) => { if (applyProjectOperation({ kind: "delete-electrical-component", componentId })) setSelectedId(null); }} onAddNet={addElectricalNet} onDeleteNet={(netId) => { if (applyProjectOperation({ kind: "delete-electrical-net", netId })) setSelectedId(null); }} onNotes={(notes) => applyProjectOperation({ kind: "set-electrical-notes", notes })} onPhysicalize={requestElectromechanicalAssembly} onDownload={() => downloadBlob(new Blob([electrical.svg], { type: "image/svg+xml" }), "ps3d-electrical-concept.svg")} />}
       {project.activeWorkspace === "vehicle" && <VehicleWorkspace intent={project.vehicle} analysis={vehiclePreview.analysis} geometry={vehiclePreview.geometry} primitiveCountByLayer={vehiclePreview.primitiveCountByLayer} selectedId={selectedId} onSelect={setSelectedId} onTemplate={requestVehicleTemplate} onParameter={(parameter, value) => applyProjectOperation({ kind: "set-vehicle-parameter", parameter, value })} onState={(state) => applyProjectOperation({ kind: "set-vehicle-simulation-state", state })} onLayer={(layer) => applyProjectOperation({ kind: "toggle-vehicle-layer", layer })} onFit={fitViewport} />}
-      {project.activeWorkspace === "automate" && <AutomateWorkspace project={project} selectedId={selectedId} onSelect={setSelectedId} onApplyProject={(next, message) => { const valid = validateWorkbenchProject(next); if (valid.ok) { pushProject(valid.value); setStatusText(message); } }} onReviewElectromechanical={requestElectromechanicalAssembly} onMessage={setStatusText} />}
+      {project.activeWorkspace === "automate" && <AutomateWorkspace project={project} selectedId={selectedId} onSelect={setSelectedId} onApplyProject={(next, message) => { const valid = validateWorkbenchProject(next); if (valid.ok) { pushProject(valid.value); setStatusText(message); return; } const first = valid.diagnostics[0]; setDiagnostic(first === undefined ? undefined : { code: first.code, message: first.message, recovery: first.recovery }); setStatus("error"); setStatusText(first?.message ?? "The confirmed preview failed project validation and was not applied."); }} onReviewElectromechanical={requestElectromechanicalAssembly} onMessage={setStatusText} />}
       </>}
     </section>}
     {contextMenu !== undefined && <WorkbenchContextMenu x={contextMenu.x} y={contextMenu.y} selectionLabel={contextMenu.selectionId ?? `${project.activeWorkspace} canvas`} commands={contextCommands} onRun={runContextCommand} onClose={() => setContextMenu(undefined)} />}
@@ -1994,7 +2067,7 @@ export function App(): React.JSX.Element {
     </section></div>}
       {pendingAssemblyTemplate !== undefined && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog compact" role="dialog" aria-modal="true" aria-labelledby="assembly-replacement-title" aria-describedby="assembly-replacement-description"><header><div><span>LINKED ASSEMBLY PROTECTION</span><h2 id="assembly-replacement-title">Break ECAD trace and replace assembly?</h2></div><button onClick={() => setPendingAssemblyTemplate(undefined)} aria-label="Close linked assembly replacement review">×</button></header><div className="engineering-review-copy" id="assembly-replacement-description"><p>The current assembly has {project.assembly.electricalLinks?.length ?? 0} ECAD-linked packages and {project.assembly.electricalRoutes?.length ?? 0} conductor paths. Replacing it with <strong>{pendingAssemblyTemplate.replaceAll("-", " ")}</strong> removes that physical trace from Assembly, while preserving the source schematic. The replacement is one undoable revision.</p></div><footer><button data-dialog-initial-focus onClick={() => setPendingAssemblyTemplate(undefined)}>Cancel</button><button className="danger" onClick={() => { const template = pendingAssemblyTemplate; setPendingAssemblyTemplate(undefined); applyProjectOperation({ kind: "apply-assembly-template", template }); }}>Break link and replace</button></footer></section></div>}
     {pendingElectricalTemplate !== undefined && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog compact" role="dialog" aria-modal="true" aria-labelledby="electrical-template-replacement-title" aria-describedby="electrical-template-replacement-description"><header><div><span>SCHEMATIC REPLACEMENT REVIEW</span><h2 id="electrical-template-replacement-title">Replace current devices and nets?</h2></div><button onClick={cancelElectricalTemplateReview} aria-label="Close schematic replacement review">×</button></header><div className="engineering-review-copy" id="electrical-template-replacement-description"><p>Generating <strong>{pendingElectricalTemplate.replaceAll("-", " ")}</strong> replaces all {project.electrical.components.length} current devices and {project.electrical.nets.length} current nets, including local edits. The replacement is one undoable project revision.</p></div><footer><button data-dialog-initial-focus onClick={cancelElectricalTemplateReview}>Cancel</button><button className="danger" onClick={() => { const template = pendingElectricalTemplate; setPendingElectricalTemplate(undefined); if (applyProjectOperation({ kind: "apply-electrical-template", template })) setSelectedId(null); }}>Replace and generate</button></footer></section></div>}
-    {pendingVehicleTemplate !== undefined && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog compact" role="dialog" aria-modal="true" aria-labelledby="vehicle-template-replacement-title" aria-describedby="vehicle-template-replacement-description"><header><div><span>VEHICLE TOPOLOGY REPLACEMENT REVIEW</span><h2 id="vehicle-template-replacement-title">Replace the current engineering study?</h2></div><button onClick={() => setPendingVehicleTemplate(undefined)} aria-label="Close vehicle topology replacement review">×</button></header><div className="engineering-review-copy" id="vehicle-template-replacement-description"><p>Replacing <strong>{project.vehicle.template.replaceAll("-", " ")}</strong> with <strong>{pendingVehicleTemplate.replaceAll("-", " ")}</strong> resets all {Object.keys(project.vehicle.parameters).length} vehicle inputs, the suspension state, evidence-status fields, and layer visibility to the target generic template. The current {vehiclePreview.geometry.hardpoints.length}-hardpoint graph is removed. The replacement is one undoable project revision.</p><p>The new package remains illustrative and carries the same do-not-fabricate, roadworthiness, and homologation boundaries.</p></div><footer><button data-dialog-initial-focus onClick={() => { setPendingVehicleTemplate(undefined); setStatusText("Vehicle replacement cancelled; the current topology and inputs were preserved."); }}>Cancel</button><button className="danger" onClick={() => { const template = pendingVehicleTemplate; setPendingVehicleTemplate(undefined); if (applyProjectOperation({ kind: "apply-vehicle-template", template })) setSelectedId(null); }}>Replace topology and inputs</button></footer></section></div>}
+    {pendingVehicleTemplate !== undefined && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog compact" role="dialog" aria-modal="true" aria-labelledby="vehicle-template-replacement-title" aria-describedby="vehicle-template-replacement-description"><header><div><span>VEHICLE TOPOLOGY REPLACEMENT REVIEW</span><h2 id="vehicle-template-replacement-title">Replace the current engineering study?</h2></div><button onClick={() => { setPendingVehicleTemplate(undefined); setStatusText("Vehicle replacement cancelled; the current topology and inputs were preserved."); }} aria-label="Close vehicle topology replacement review">×</button></header><div className="engineering-review-copy" id="vehicle-template-replacement-description"><p>Replacing <strong>{project.vehicle.template.replaceAll("-", " ")}</strong> with <strong>{pendingVehicleTemplate.replaceAll("-", " ")}</strong> resets all {Object.keys(project.vehicle.parameters).length} vehicle inputs, the suspension state, evidence-status fields, and layer visibility to the target generic template. The current {vehiclePreview.geometry.hardpoints.length}-hardpoint graph is removed. The replacement is one undoable project revision.</p><p>The new package remains illustrative and carries the same do-not-fabricate, roadworthiness, and homologation boundaries.</p></div><footer><button data-dialog-initial-focus onClick={() => { setPendingVehicleTemplate(undefined); setStatusText("Vehicle replacement cancelled; the current topology and inputs were preserved."); }}>Cancel</button><button className="danger" onClick={() => { const template = pendingVehicleTemplate; setPendingVehicleTemplate(undefined); if (applyProjectOperation({ kind: "apply-vehicle-template", template })) setSelectedId(null); }}>Replace topology and inputs</button></footer></section></div>}
     <CommandPalette open={paletteOpen} workspace={project.activeWorkspace} onClose={() => setPaletteOpen(false)} onCommand={executeCadCommand} />
     <ExchangeCenter open={exchangeOpen} busy={exchangeBusy} hasScene={!masterCartOpen && isThreeDimensional} activeImport={activeImport} feedback={exchangeFeedback} onClose={() => setExchangeOpen(false)} onImport={(files, unit) => void importExchangeFiles(files, unit)} onExport={(format, unit) => void exportExchangeFormat(format, unit)} onPdfPackage={() => void exportPdfPackage()} onInteractivePdf={(file) => void exportInteractivePdf(file)} onClearImport={clearActiveImport} />
     {designHealthOpen && <DesignHealthCenter report={designHealth} onClose={() => setDesignHealthOpen(false)} onWorkspace={switchWorkspace} />}
@@ -2105,10 +2178,11 @@ function nextElectricalReference(references: readonly string[], prefix: string):
 }
 
 function nextElectricalPosition(positions: readonly (readonly [number, number])[]): readonly [number, number] | undefined {
-  const occupied = new Set(positions.map((position) => `${Math.round(position[0])}:${Math.round(position[1])}`));
-  for (const y of [190, 320, 450, 580] as const) {
+  for (const y of [200, 330, 460] as const) {
     for (const x of [150, 330, 510, 690, 870, 1050, 1230, 1410] as const) {
-      if (!occupied.has(`${x}:${y}`) && isElectricalSheetPositionAvailable([x, y])) return [x, y];
+      if (!isElectricalSheetPositionAvailable([x, y])) continue;
+      if (positions.some((position) => Math.abs(position[0] - x) < 90 && Math.abs(position[1] - y) < 65)) continue;
+      return [x, y];
     }
   }
   return undefined;

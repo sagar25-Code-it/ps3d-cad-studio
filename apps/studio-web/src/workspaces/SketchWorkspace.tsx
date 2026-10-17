@@ -216,10 +216,15 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setSelectionIds([point.entityId]);
     setSelectedProfileIds([]);
     props.onSelect(point.entityId);
-    setDimensionPoints((current) => current.some((candidate) => candidate.id === point.id)
-      ? current.filter((candidate) => candidate.id !== point.id)
-      : current.length < 2 ? [...current, point] : [point]);
-    props.onMessage(dimensionPoints.length === 0 ? `${point.label} selected. Pick a second definition point.` : "Point-to-point dimension selected; edit it when it maps to a supported driving parameter.");
+    const next = dimensionPoints.some((candidate) => candidate.id === point.id)
+      ? dimensionPoints.filter((candidate) => candidate.id !== point.id)
+      : dimensionPoints.length < 2 ? [...dimensionPoints, point] : [point];
+    setDimensionPoints(next);
+    props.onMessage(next.length === 0
+      ? "Definition point cleared. Pick a point to start a dimension."
+      : next.length === 1
+        ? `${next[0]!.label} selected. Pick a second definition point.`
+        : "Point-to-point dimension selected; edit it when it maps to a supported driving parameter.");
   };
 
   const selectProfile = (profile: SketchProfile, additive: boolean): void => {
@@ -380,11 +385,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           <dl className="compact-facts"><div><dt>Selection</dt><dd>{directDimension.first.label} → {directDimension.second.label}</dd></div><div><dt>Distance</dt><dd>{format(directDimension.valueMm)} mm</dd></div><div><dt>ΔX</dt><dd>{format(directDimension.delta[0])} mm</dd></div><div><dt>ΔY</dt><dd>{format(directDimension.delta[1])} mm</dd></div></dl>
           {directDimension.driving === undefined
             ? <div className="inline-warning">This is a reference measurement. Editing arbitrary cross-entity point pairs requires the nonlinear constraint solver.</div>
-            : <DimensionField label={directDimension.label} dimension={directDimension.driving.dimension} value={directDimension.valueMm} onApply={(dimension, value) => props.onSetDimension(directDimension.driving!.entityId, dimension, value)} />}
+            : <DimensionField label={directDimension.label} dimension={directDimension.driving.dimension} value={directDimension.valueMm} onApply={(dimension, value) => props.onSetDimension(directDimension.driving!.entityId, dimension, value)} onMessage={props.onMessage} />}
         </>}
       </section>}
 
-      {!props.dimensionMode && selectedEntity !== undefined && <section className="inspector-section dimension-controller"><header><strong>Driving dimensions</strong><span>mm</span></header><EntityDimensions entity={selectedEntity} onApply={(dimension, value) => props.onSetDimension(selectedEntity.id, dimension, value)} /></section>}
+      {!props.dimensionMode && selectedEntity !== undefined && <section className="inspector-section dimension-controller"><header><strong>Driving dimensions</strong><span>mm</span></header><EntityDimensions entity={selectedEntity} onApply={(dimension, value) => props.onSetDimension(selectedEntity.id, dimension, value)} onMessage={props.onMessage} /></section>}
 
       <section className="inspector-section profile-controller"><header><strong>Closed profiles</strong><span>{profiles.length} found</span></header>
         <p className="profile-help">Profile selects a shaded region; Curve, Connected and Tangent intents use the shared top selection controller.</p>
@@ -405,7 +410,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       <section className="inspector-section"><header><strong>Constraint records</strong><span>{props.sketch.constraints.length}</span></header>
         <div className="record-list">{props.sketch.constraints.slice(-10).reverse().map((constraint) => <button key={constraint.id} onClick={() => props.onDeleteConstraint(constraint.id)} title="Delete this constraint"><CommandIcon name={constraint.dimension === undefined ? constraint.kind : "dimension"} /><span>{constraint.kind}{constraint.dimension === undefined ? "" : ` · ${constraint.dimension}`}</span><small>{constraint.valueMm === undefined ? shortId(constraint.id) : `${format(constraint.valueMm)} mm`}</small></button>)}</div>
       </section>
-      <div className="scope-note"><strong>Preview solver boundary</strong><p>Dimension edits update bounded geometry and constraint records atomically. Pair constraints currently provide validated intent and freedom accounting, not a general nonlinear solve.</p></div>
+      <div className="scope-note"><strong>Preview solver boundary</strong><p>Dimension edits update bounded geometry and constraint records atomically. Horizontal, vertical and pair constraints currently provide validated intent and freedom accounting, not a general nonlinear solve; they record design intent without reorienting existing geometry.</p></div>
     </aside>
   </>;
 }
@@ -414,17 +419,17 @@ function PaletteToggle({ label, active, onToggle }: { readonly label: string; re
   return <label><span>{label}</span><input type="checkbox" checked={active} onChange={(event) => onToggle(event.target.checked)} /></label>;
 }
 
-function EntityDimensions({ entity, onApply }: { readonly entity: SketchEntity; readonly onApply: (dimension: DrivingDimension, value: number) => void }): React.JSX.Element {
-  if (entity.kind === "line") return <DimensionField label="Length" dimension="length" value={Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1])} onApply={onApply} />;
-  if (entity.kind === "rectangle") return <div className="dimension-stack"><DimensionField label="Width" dimension="width" value={entity.widthMm} onApply={onApply} /><DimensionField label="Height" dimension="height" value={entity.heightMm} onApply={onApply} /></div>;
-  if (entity.kind === "circle") return <><DimensionField label="Radius" dimension="radius" value={entity.radiusMm} onApply={onApply} /><div className="derived-dimension"><span>Diameter</span><strong>{format(entity.radiusMm * 2)} mm</strong></div></>;
+function EntityDimensions({ entity, onApply, onMessage }: { readonly entity: SketchEntity; readonly onApply: (dimension: DrivingDimension, value: number) => void; readonly onMessage: (message: string) => void }): React.JSX.Element {
+  if (entity.kind === "line") return <DimensionField label="Length" dimension="length" value={Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1])} onApply={onApply} onMessage={onMessage} />;
+  if (entity.kind === "rectangle") return <div className="dimension-stack"><DimensionField label="Width" dimension="width" value={entity.widthMm} onApply={onApply} onMessage={onMessage} /><DimensionField label="Height" dimension="height" value={entity.heightMm} onApply={onApply} onMessage={onMessage} /></div>;
+  if (entity.kind === "circle") return <><DimensionField label="Radius" dimension="radius" value={entity.radiusMm} onApply={onApply} onMessage={onMessage} /><div className="derived-dimension"><span>Diameter</span><strong>{format(entity.radiusMm * 2)} mm</strong></div></>;
   return <div className="derived-dimension"><span>Three-point arc</span><strong>reference only</strong></div>;
 }
 
-function DimensionField({ label, dimension, value, onApply }: { readonly label: string; readonly dimension: DrivingDimension; readonly value: number; readonly onApply: (dimension: DrivingDimension, value: number) => void }): React.JSX.Element {
+function DimensionField({ label, dimension, value, onApply, onMessage }: { readonly label: string; readonly dimension: DrivingDimension; readonly value: number; readonly onApply: (dimension: DrivingDimension, value: number) => void; readonly onMessage: (message: string) => void }): React.JSX.Element {
   const [draft, setDraft] = useState(String(Number(value.toFixed(3))));
   useEffect(() => setDraft(String(Number(value.toFixed(3)))), [value]);
-  return <form className="dimension-field" onSubmit={(event) => { event.preventDefault(); const next = Number(draft); if (Number.isFinite(next)) onApply(dimension, next); }}>
+  return <form className="dimension-field" onSubmit={(event) => { event.preventDefault(); const trimmed = draft.trim(); const next = Number(trimmed); if (trimmed !== "" && Number.isFinite(next)) onApply(dimension, next); else onMessage?.(`Enter a numeric ${label.toLowerCase()} value in millimeters.`); }}>
     <label><span>{label}</span><div><input aria-label={`${label} in millimeters`} inputMode="decimal" value={draft} onChange={(event) => setDraft(event.target.value)} /><small>mm</small><button type="submit"><CommandIcon name="dimension" />Apply</button></div></label>
   </form>;
 }
@@ -492,7 +497,40 @@ function SketchEntityShape({ entity, selected, onSelect, preview = false }: { re
   if (entity.kind === "line") return <line {...common} x1={entity.start[0]} y1={-entity.start[1]} x2={entity.end[0]} y2={-entity.end[1]} />;
   if (entity.kind === "rectangle") return <rect {...common} x={entity.center[0] - entity.widthMm / 2} y={-entity.center[1] - entity.heightMm / 2} width={entity.widthMm} height={entity.heightMm} transform={`rotate(${-entity.rotationDeg} ${entity.center[0]} ${-entity.center[1]})`} />;
   if (entity.kind === "circle") return <circle {...common} cx={entity.center[0]} cy={-entity.center[1]} r={entity.radiusMm} />;
-  return <path {...common} d={`M ${entity.start[0]} ${-entity.start[1]} Q ${entity.mid[0]} ${-entity.mid[1]} ${entity.end[0]} ${-entity.end[1]}`} />;
+  return <path {...common} d={arcPathData(entity.start, entity.mid, entity.end)} />;
+}
+
+function arcPathData(start: Vec2, mid: Vec2, end: Vec2): string {
+  // Work in screen space (the canvas plots sketch points as (x, -y)).
+  const s: Vec2 = [start[0], -start[1]];
+  const m: Vec2 = [mid[0], -mid[1]];
+  const e: Vec2 = [end[0], -end[1]];
+  const circle = sketchCircumcircle(s, m, e);
+  if (circle === undefined) return `M ${s[0]} ${s[1]} Q ${m[0]} ${m[1]} ${e[0]} ${e[1]}`;
+  const twoPi = Math.PI * 2;
+  const mod = (value: number): number => ((value % twoPi) + twoPi) % twoPi;
+  const angle = (p: Vec2): number => Math.atan2(p[1] - circle.center[1], p[0] - circle.center[0]);
+  const base = angle(s);
+  const spanToEnd = mod(angle(e) - base);
+  const spanToMid = mod(angle(m) - base);
+  // sweep-flag 1 traverses increasing angle in SVG user space; pick the direction that passes through mid.
+  const sweepFlag = spanToMid <= spanToEnd ? 1 : 0;
+  const span = sweepFlag === 1 ? spanToEnd : twoPi - spanToEnd;
+  const largeArc = span > Math.PI ? 1 : 0;
+  return `M ${s[0]} ${s[1]} A ${format(circle.radiusMm)} ${format(circle.radiusMm)} 0 ${largeArc} ${sweepFlag} ${e[0]} ${e[1]}`;
+}
+
+function sketchCircumcircle(a: Vec2, b: Vec2, c: Vec2): { readonly center: Vec2; readonly radiusMm: number } | undefined {
+  const determinant = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
+  if (Math.abs(determinant) < 1e-9) return undefined;
+  const a2 = a[0] ** 2 + a[1] ** 2;
+  const b2 = b[0] ** 2 + b[1] ** 2;
+  const c2 = c[0] ** 2 + c[1] ** 2;
+  const center: Vec2 = [
+    (a2 * (b[1] - c[1]) + b2 * (c[1] - a[1]) + c2 * (a[1] - b[1])) / determinant,
+    (a2 * (c[0] - b[0]) + b2 * (a[0] - c[0]) + c2 * (b[0] - a[0])) / determinant
+  ];
+  return { center, radiusMm: Math.hypot(center[0] - a[0], center[1] - a[1]) };
 }
 
 function SketchProfileShape({ profile, selected, onSelect }: { readonly profile: SketchProfile; readonly selected: boolean; readonly onSelect?: (additive: boolean) => void }): React.JSX.Element {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  VEHICLE_PARAMETER_RANGES,
   type VehicleAnalysis,
   type VehicleGeometryModel,
   type VehicleIntent,
@@ -160,11 +161,22 @@ export function VehicleWorkspace(props: VehicleWorkspaceProps): React.JSX.Elemen
   const issueCount = props.analysis.errors.length + props.analysis.warnings.length;
 
   const commit = (control: ParameterControl): void => {
+    const conversion = control.conversion ?? "identity";
     const shown = draft[control.key];
-    if (!Number.isFinite(shown)) return;
+    const current = props.intent.parameters[control.key];
+    if (!Number.isFinite(shown)) {
+      setDraft((previous) => ({ ...previous, [control.key]: toDisplay(current, conversion) }));
+      return;
+    }
     const clamped = Math.min(control.max, Math.max(control.min, shown));
-    const accepted = props.onParameter(control.key, fromDisplay(clamped, control.conversion ?? "identity"));
-    if (!accepted) setDraft((current) => ({ ...current, [control.key]: toDisplay(props.intent.parameters[control.key], control.conversion ?? "identity") }));
+    const range = VEHICLE_PARAMETER_RANGES[control.key];
+    const value = Math.min(range[1], Math.max(range[0], fromDisplay(clamped, conversion)));
+    if (Math.abs(value - current) <= Math.max(1e-9, Math.abs(current) * 1e-9)) {
+      setDraft((previous) => ({ ...previous, [control.key]: toDisplay(current, conversion) }));
+      return;
+    }
+    const accepted = props.onParameter(control.key, value);
+    if (!accepted) setDraft((previous) => ({ ...previous, [control.key]: toDisplay(props.intent.parameters[control.key], conversion) }));
   };
 
   return <aside className="inspector-panel vehicle-inspector" aria-label="Vehicle engineering workspace">
@@ -202,10 +214,10 @@ export function VehicleWorkspace(props: VehicleWorkspaceProps): React.JSX.Elemen
 
     <section className="vehicle-parameter-stack" aria-label="Vehicle parameter controls">{PARAMETER_GROUPS.map((group, index) => {
       const visibleControls = group.controls.filter((control) => (control.layouts === undefined || control.layouts.includes(props.intent.layout)) && (control.powertrains === undefined || control.powertrains.includes(props.intent.powertrain)));
-      return <details key={group.id} open={index === 0}><summary><span><CommandIcon name={group.id === "brakes" ? "brake" : group.id === "suspension" ? "suspension" : group.id === "powertrain" ? "motor" : group.id === "mass-load" ? "cg" : "hardpoint"} /></span><div><strong>{group.title}</strong><small>{group.hint}</small></div><b>{visibleControls.length}</b></summary><div className="vehicle-parameter-grid">{visibleControls.map((control) => <label key={control.key}><span>{control.label}<small>{control.unit}</small></span><input type="number" min={control.min} max={control.max} step={control.step} value={roundDraft(draft[control.key], control.step)} onChange={(event) => setDraft((current) => ({ ...current, [control.key]: Number(event.target.value) }))} onBlur={() => commit(control)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} aria-label={`${control.label} in ${control.unit}`} /></label>)}</div></details>;
+      return <details key={group.id} open={index === 0}><summary><span><CommandIcon name={group.id === "brakes" ? "brake" : group.id === "suspension" ? "suspension" : group.id === "powertrain" ? "motor" : group.id === "mass-load" ? "cg" : "hardpoint"} /></span><div><strong>{group.title}</strong><small>{group.hint}</small></div><b>{visibleControls.length}</b></summary><div className="vehicle-parameter-grid">{visibleControls.map((control) => <label key={control.key}><span>{control.label}<small>{control.unit}</small></span><input type="number" min={control.min} max={control.max} step={control.step} value={Number.isFinite(draft[control.key]) ? roundDraft(draft[control.key], control.step) : ""} onChange={(event) => { const raw = event.target.value; setDraft((current) => ({ ...current, [control.key]: raw === "" ? Number.NaN : Number(raw) })); }} onBlur={() => commit(control)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} aria-label={`${control.label} in ${control.unit}`} /></label>)}</div></details>;
     })}</section>
 
-    <details className="vehicle-hardpoint-table"><summary><span><CommandIcon name="hardpoint" /></span><div><strong>Hardpoint data</strong><small>Click a row to cross-probe the 3D model / millimeters</small></div><b>{props.analysis.hardpoints.length}</b></summary><div><header><span>ID / source</span><span>X</span><span>Y</span><span>Z</span></header>{props.analysis.hardpoints.map((point) => <button type="button" key={point.id} className={props.selectedId === point.id ? "selected" : ""} aria-pressed={props.selectedId === point.id} onClick={() => props.onSelect(point.id)}><span title={point.id}><i className={point.category} /><b>{point.label}</b><small>{point.source}{point.stateDependent ? " / state" : ""} / {point.side}</small></span>{point.positionM.map((value, index) => <code key={index}>{format(value * 1000, 1)}</code>)}</button>)}</div></details>
+    <details className="vehicle-hardpoint-table"><summary><span><CommandIcon name="hardpoint" /></span><div><strong>Hardpoint data</strong><small>Click a row to cross-probe the 3D model / millimeters</small></div><b>{props.analysis.hardpoints.length}</b></summary><div><header><span>ID / source</span><span>X</span><span>Y</span><span>Z</span></header>{props.analysis.hardpoints.map((point) => <button type="button" key={point.id} className={props.selectedId === point.id ? "selected" : ""} aria-pressed={props.selectedId === point.id} onClick={() => { if (!props.intent.layers.hardpoints) props.onLayer("hardpoints"); props.onSelect(point.id); }}><span title={point.id}><i className={point.category} /><b>{point.label}</b><small>{point.source}{point.stateDependent ? " / state" : ""} / {point.side}</small></span>{point.positionM.map((value, index) => <code key={index}>{format(value * 1000, 1)}</code>)}</button>)}</div></details>
 
     <section className="vehicle-assumption-panel"><header><strong>Model boundaries</strong><span>{props.analysis.assumptions.length}</span></header>{props.analysis.assumptions.map((assumption) => <p key={assumption}><i />{assumption}</p>)}</section>
   </aside>;
@@ -291,7 +303,8 @@ export function VehicleOrthographicDrawing({ intent, analysis, geometry, initial
           : <rect key={wheel.id} className="drawing-wheel-plane" x={wheel.center[0] - wheel.width / 2} y={wheel.center[1] - wheel.radius} width={wheel.width} height={wheel.radius * 2} rx="2" transform={`rotate(${wheel.camberDeg} ${wheel.center[0]} ${wheel.center[1]})`} />)}
       {drawing.points.map((point) => point.source === "authored" ? <rect key={point.id} className={`drawing-point ${point.category}`} x={point.xy[0] - 2.4} y={point.xy[1] - 2.4} width="4.8" height="4.8" /> : <circle key={point.id} className={`drawing-point ${point.category} ${point.stateDependent ? "state" : ""}`} cx={point.xy[0]} cy={point.xy[1]} r="2.3" />)}
       {view === "side" && <><line className="drawing-dimension" x1={drawing.dimensionA[0]} y1="177" x2={drawing.dimensionB[0]} y2="177" markerStart="url(#vehicle-dim-arrow)" markerEnd="url(#vehicle-dim-arrow)" /><line className="drawing-extension" x1={drawing.dimensionA[0]} y1={drawing.dimensionA[1]} x2={drawing.dimensionA[0]} y2="181" /><line className="drawing-extension" x1={drawing.dimensionB[0]} y1={drawing.dimensionB[1]} x2={drawing.dimensionB[0]} y2="181" /></>}
-      {view !== "side" && solvedTrackM > 0 && <><line className="drawing-dimension" x1="286" y1={drawing.dimensionA[1]} x2="286" y2={drawing.dimensionB[1]} markerStart="url(#vehicle-dim-arrow)" markerEnd="url(#vehicle-dim-arrow)" /><line className="drawing-extension" x1={drawing.dimensionA[0]} y1={drawing.dimensionA[1]} x2="290" y2={drawing.dimensionA[1]} /><line className="drawing-extension" x1={drawing.dimensionB[0]} y1={drawing.dimensionB[1]} x2="290" y2={drawing.dimensionB[1]} /></>}
+      {view === "top" && solvedTrackM > 0 && <><line className="drawing-dimension" x1="286" y1={drawing.dimensionA[1]} x2="286" y2={drawing.dimensionB[1]} markerStart="url(#vehicle-dim-arrow)" markerEnd="url(#vehicle-dim-arrow)" /><line className="drawing-extension" x1={drawing.dimensionA[0]} y1={drawing.dimensionA[1]} x2="290" y2={drawing.dimensionA[1]} /><line className="drawing-extension" x1={drawing.dimensionB[0]} y1={drawing.dimensionB[1]} x2="290" y2={drawing.dimensionB[1]} /></>}
+      {view === "front" && solvedTrackM > 0 && <><line className="drawing-dimension" x1={drawing.dimensionA[0]} y1="177" x2={drawing.dimensionB[0]} y2="177" markerStart="url(#vehicle-dim-arrow)" markerEnd="url(#vehicle-dim-arrow)" /><line className="drawing-extension" x1={drawing.dimensionA[0]} y1={drawing.dimensionA[1]} x2={drawing.dimensionA[0]} y2="181" /><line className="drawing-extension" x1={drawing.dimensionB[0]} y1={drawing.dimensionB[1]} x2={drawing.dimensionB[0]} y2="181" /></>}
       <text className="drawing-dimension-label" x="150" y="185">{dimensionLabel}</text>
       <text className="drawing-axis-label" x="8" y="14">{view === "side" ? "X / Z" : view === "top" ? "X / Y" : "Y / Z"}</text>
       <text className="drawing-state-label" x="292" y="14" textAnchor="end">{analysis.status.toUpperCase()}</text>

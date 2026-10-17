@@ -23,9 +23,12 @@ interface SurfaceInspectorProps {
 export function SurfaceInspector(props: SurfaceInspectorProps): React.JSX.Element {
   const [draft, setDraft] = useState<Record<SurfaceParameter, number>>(() => values(props.surface));
   useEffect(() => setDraft(values(props.surface)), [props.surface]);
+  const commit = (key: SurfaceParameter) => {
+    if (draft[key] !== props.surface[key]) props.onParameter(key, draft[key]);
+  };
   return <aside className="inspector-panel" aria-label="Surface inspector">
     <div className="inspector-title"><div><p>Surface laboratory</p><h2>{props.surface.name}</h2></div><CapabilityBadge level="preview" /></div>
-    <section className="surface-controls">{CONTROLS.map((control) => <label key={control.key}><span><strong>{control.label}</strong><output>{draft[control.key]} {control.unit}</output></span><input type="range" min={control.min} max={control.max} step={control.step} value={draft[control.key]} onChange={(event) => setDraft((current) => ({ ...current, [control.key]: Number(event.target.value) }))} onPointerUp={() => props.onParameter(control.key, draft[control.key])} onKeyUp={() => props.onParameter(control.key, draft[control.key])} /></label>)}</section>
+    <section className="surface-controls">{CONTROLS.map((control) => <label key={control.key}><span><strong>{control.label}</strong><output>{draft[control.key]} {control.unit}</output></span><input type="range" min={control.min} max={control.max} step={control.step} value={draft[control.key]} onChange={(event) => setDraft((current) => ({ ...current, [control.key]: Number(event.target.value) }))} onPointerUp={() => commit(control.key)} onKeyUp={() => commit(control.key)} /></label>)}</section>
     <small className="property-help">Surface type, shape presets, and Fit surface are available from the top ribbon.</small>
     <section className="inspector-section metrics-section"><header><strong>Tessellation metrics</strong><span>finite</span></header><dl className="metric-grid"><div><dt>Vertices</dt><dd>{props.metrics.vertices}</dd></div><div><dt>Triangles</dt><dd>{props.metrics.triangles}</dd></div><div><dt>Area</dt><dd>{props.metrics.approximateAreaSquareMm.toFixed(1)} mm²</dd></div><div><dt>Max normal step</dt><dd>{props.metrics.maximumNormalVariationDeg.toFixed(2)}°</dd></div><div><dt>Boundary edges</dt><dd>{props.metrics.boundaryEdges}</dd></div><div><dt>Control net</dt><dd>4 × 4</dd></div></dl></section>
     <section className="continuity-card"><span>C0</span><div><strong>Bounded patch continuity</strong><p>One deterministic patch with finite normals and explicit open boundaries.</p></div></section>

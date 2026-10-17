@@ -61,7 +61,11 @@ export function MasterCartWorkspace(props: MasterCartWorkspaceProps): React.JSX.
   useEffect(() => {
     viewportRef.current?.setScene(previewScene);
     viewportRef.current?.setSelectedId(selectedPreviewId);
-  }, [previewScene, selectedPreviewId]);
+  }, [previewScene]);
+
+  useEffect(() => {
+    viewportRef.current?.setSelectedId(selectedPreviewId);
+  }, [selectedPreviewId]);
 
   const visibleTemplates = MASTER_CART_TEMPLATES.filter((item) => item.categoryId === categoryId)
     .filter((item) => `${item.name} ${item.family} ${item.description}`.toLowerCase().includes(query.trim().toLowerCase()));
@@ -90,6 +94,8 @@ export function MasterCartWorkspace(props: MasterCartWorkspaceProps): React.JSX.
   const chooseUnit = (next: UnitFilter): void => {
     setUnitFilter(next);
     if (next === "all") return;
+    const currentSystem = selectedTemplate.sizeOptions.find((option) => option.id === configuration.sizeId)?.system;
+    if (currentSystem === next || currentSystem === "universal") return;
     const first = selectedTemplate.sizeOptions.find((option) => option.system === next || option.system === "universal");
     if (first !== undefined) setConfiguration((current) => ({ ...current, sizeId: first.id }));
   };
@@ -129,7 +135,7 @@ export function MasterCartWorkspace(props: MasterCartWorkspaceProps): React.JSX.
         <div className="master-cart-axis"><i /><b>X</b><em>Y</em><strong>Z</strong><span>WCS</span></div>
         <div className="master-cart-preview-facts"><span><small>Geometry</small><strong>original parametric</strong></span><span><small>Units</small><strong>mm internal</strong></span><span><small>Assembly</small><strong>grouped insert</strong></span></div>
       </div>
-      <footer><CommandIcon name="appearance" /><span>Neutral CAD gray and material cues are display-only. MMB pan · Shift+MMB / right drag orbit · wheel zoom.</span></footer>
+      <footer><CommandIcon name="appearance" /><span>Neutral CAD gray and material cues are display-only. MMB pan · Shift+MMB orbit · wheel zoom · right-click selects a detail.</span></footer>
     </section>
 
     <aside className="master-cart-config" aria-label="Master Cart configuration inspector">
@@ -138,7 +144,13 @@ export function MasterCartWorkspace(props: MasterCartWorkspaceProps): React.JSX.
       <label className="master-cart-field"><span>Nominal size / series</span><select value={configuration.sizeId} onChange={(event) => setConfiguration((current) => ({ ...current, sizeId: event.target.value }))} data-testid="master-cart-size">{!sizeOptions.some((option) => option.id === configuration.sizeId) ? <option value={configuration.sizeId}>{selectedTemplate.sizeOptions.find((option) => option.id === configuration.sizeId)?.label}</option> : null}{sizeOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
       <label className="master-cart-field"><span>Material</span><select value={configuration.materialId} onChange={(event) => setConfiguration((current) => ({ ...current, materialId: event.target.value }))} data-testid="master-cart-material">{selectedTemplate.materialOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
       <label className="master-cart-field"><span>Finish</span><select value={configuration.finishId} onChange={(event) => setConfiguration((current) => ({ ...current, finishId: event.target.value }))}>{selectedTemplate.finishOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
-      {selectedTemplate.editableFields.length > 0 && <section className="master-cart-editable"><header><strong>Editable geometry</strong><span>bounded</span></header><div>{selectedTemplate.editableFields.map((editable) => <label key={editable.id}><span>{editable.label}</span><span><input type="number" min={editable.minimum} max={editable.maximum} step={editable.step} value={configuration.values[editable.id] ?? editable.defaultValue} onChange={(event) => setConfiguration((current) => ({ ...current, values: { ...current.values, [editable.id]: Number(event.target.value) } }))} data-testid={`master-cart-field-${editable.id}`} /><small>{editable.unit === "count" ? "qty" : editable.unit}</small></span></label>)}</div></section>}
+      {selectedTemplate.editableFields.length > 0 && <section className="master-cart-editable"><header><strong>Editable geometry</strong><span>bounded</span></header><div>{selectedTemplate.editableFields.map((editable) => {
+        const raw = configuration.values[editable.id] ?? editable.defaultValue;
+        const bounded = Number.isFinite(raw) ? Math.min(editable.maximum, Math.max(editable.minimum, raw)) : editable.defaultValue;
+        const effective = editable.unit === "count" ? Math.round(bounded) : bounded;
+        const unitLabel = editable.unit === "count" ? "qty" : editable.unit;
+        return <label key={editable.id}><span>{editable.label}</span><span><input type="number" min={editable.minimum} max={editable.maximum} step={editable.step} aria-invalid={effective !== raw} value={raw} onChange={(event) => setConfiguration((current) => ({ ...current, values: { ...current.values, [editable.id]: Number(event.target.value) } }))} data-testid={`master-cart-field-${editable.id}`} /><small>{unitLabel}</small></span>{effective !== raw ? <small className="master-cart-field-note" role="status">Using {effective} {unitLabel} · allowed {editable.minimum}–{editable.maximum}</small> : null}</label>;
+      })}</div></section>}
       <section className="master-cart-dimensions"><header><strong>Resulting dimensions</strong><span>{preview.dimensions.length}</span></header><table><tbody>{preview.dimensions.map((dimension) => <tr key={dimension.key}><th>{dimension.symbol}</th><td>{dimension.label}</td><td>{formatDimension(dimension.value, dimension.unit)}{dimension.unit === "mm" ? " mm" : dimension.unit === "deg" ? "°" : ""}</td></tr>)}</tbody></table></section>
       <section className="master-cart-source"><header><CommandIcon name="link-file" /><strong>Selection reference</strong></header><p>{selectedTemplate.description}</p><a href={preview.sourceUrl} target="_blank" rel="noreferrer">Open related McMaster category <CommandIcon name="arrow-right" /></a><small>Reference link only · PS3D is not affiliated with or endorsed by McMaster-Carr.</small></section>
       <button className="master-cart-add" onClick={() => props.onAdd(templateId, configuration, preview.designation)} data-testid="master-cart-add-to-assembly"><CommandIcon name="assemble" /><span><strong>Add to Assembly</strong><small>One undoable grouped insertion · {preview.components.length} preview bodies</small></span><CommandIcon name="arrow-right" /></button>

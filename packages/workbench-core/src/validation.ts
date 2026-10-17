@@ -147,14 +147,14 @@ function validateVehicle(value: unknown): WorkbenchResult<VehicleIntent> {
     || (value.layout === "tadpole-2f1r" && parameters.trackM <= parameters.frontTireWidthM)) {
     return invalid("Paired-wheel track must exceed the corresponding tire width so wheel envelopes do not overlap.");
   }
-  if ((value.layout === "single-track" && parameters.trackM !== 0)
-    || (value.layout !== "single-track" && parameters.trackM <= 0)
-    || parameters.cgFromRearM >= parameters.wheelbaseM
-    || parameters.frontSagM > parameters.frontTravelM
-    || parameters.rearSagM > parameters.rearTravelM
-    || parameters.frontRollingRadiusM <= parameters.frontLoadedRadiusM
-    || parameters.rearRollingRadiusM <= parameters.rearLoadedRadiusM
-    || (value.powertrain === "electric" && parameters.batteryEnergyCapacityJ <= 0)) return invalid("Vehicle topology, CG, tire radii, energy source, or suspension state is inconsistent.");
+  if (value.layout === "single-track" && parameters.trackM !== 0) return invalid("A single-track vehicle must have a track of zero.");
+  if (value.layout !== "single-track" && parameters.trackM <= 0) return invalid("A multi-track vehicle must have a positive track width.");
+  if (parameters.cgFromRearM >= parameters.wheelbaseM) return invalid("The centre of gravity from the rear axle must be less than the wheelbase.");
+  if (parameters.frontSagM > parameters.frontTravelM) return invalid("Front suspension sag cannot exceed front suspension travel.");
+  if (parameters.rearSagM > parameters.rearTravelM) return invalid("Rear suspension sag cannot exceed rear suspension travel.");
+  if (parameters.frontRollingRadiusM <= parameters.frontLoadedRadiusM) return invalid("The front rolling radius must be greater than the front loaded radius.");
+  if (parameters.rearRollingRadiusM <= parameters.rearLoadedRadiusM) return invalid("The rear rolling radius must be greater than the rear loaded radius.");
+  if (value.powertrain === "electric" && parameters.batteryEnergyCapacityJ <= 0) return invalid("An electric powertrain requires a positive battery energy capacity.");
   if (value.layout === "tadpole-2f1r" && (parameters.frontSuspensionInboardHalfTrackM >= parameters.trackM / 2 - 0.06
     || parameters.frontUpperArmHeightM <= parameters.frontLowerArmHeightM + 0.05
     || parameters.wheelbaseM / Math.tan(parameters.steeringAngleRad) <= parameters.trackM / 2 + 0.05)) return invalid("Tadpole front-suspension or Ackermann target controls are geometrically inconsistent.");
@@ -416,7 +416,7 @@ function validateSurface(value: unknown): WorkbenchResult<SurfaceIntent> {
   if (!isRecord(value) || !exactKeys(value, ["id", "name", "mode", "widthMm", "depthMm", "crownMm", "twistDeg", "uSegments", "vSegments"])
     || value.id !== "surface:primary" || !shortText(value.name, 1, 120) || !["bezier", "loft"].includes(String(value.mode))
     || !finiteRange(value.widthMm, 1, 2_000) || !finiteRange(value.depthMm, 1, 2_000)
-    || !finiteRange(value.crownMm, -500, 500) || !finiteRange(value.twistDeg, -90, 90)
+    || !finiteRange(value.crownMm, -500, 500) || !finiteRange(value.twistDeg, -45, 45)
     || !integerRange(value.uSegments, 4, WORKBENCH_LIMITS.maxSurfaceSegments)
     || !integerRange(value.vSegments, 4, WORKBENCH_LIMITS.maxSurfaceSegments)) return invalid("The surface intent is outside its supported envelope.");
   return { ok: true, value: value as unknown as SurfaceIntent };

@@ -186,7 +186,8 @@ function runElectricalRuleCheckWithRoutes(intent: ElectricalIntent, routePlan: E
       });
     }
   }
-  return issues.sort((left, right) => left.id.localeCompare(right.id));
+  const severityRank = (severity: ElectricalErcIssue["severity"]): number => (severity === "error" ? 0 : 1);
+  return issues.sort((left, right) => severityRank(left.severity) - severityRank(right.severity) || left.id.localeCompare(right.id));
 }
 
 export function createElectricalBom(components: readonly ElectricalComponent[]): readonly ElectricalBomRow[] {

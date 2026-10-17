@@ -93,13 +93,13 @@ export function ElectricalWorkspace(props: ElectricalWorkspaceProps): React.JSX.
   }, [props.artifact.svg, props.selectedId]);
 
   const sheetPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    const element = event.target instanceof Element ? event.target.closest<SVGGElement>("[data-component-id]") : null;
+    const element = event.target instanceof Element ? event.target.closest<SVGGElement>("[data-component-id],[data-net-id]") : null;
     const id = element?.dataset["componentId"];
+    props.onSelect(id ?? element?.dataset["netId"] ?? null);
     if (id === undefined) return;
     const component = props.intent.components.find((item) => item.id === id);
     const point = eventToSvgPoint(event, sheetRef.current);
     if (component === undefined || point === undefined) return;
-    props.onSelect(id);
     dragRef.current = { id, pointerId: event.pointerId, offset: [component.position[0] - point[0], component.position[1] - point[1]], start: component.position, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -150,10 +150,7 @@ export function ElectricalWorkspace(props: ElectricalWorkspaceProps): React.JSX.
         <button onClick={() => setZoom((value) => clamp(value + 0.25, 0.75, 2))} aria-label="Zoom schematic in">+</button>
         <span>Drag symbols · arrow-key nudge · select nets</span>
       </div>
-      <div className="electrical-sheet-viewport" role="group" aria-label="Interactive schematic sheet; select a device from the model browser, then use arrow keys to move it by 10 sheet units or Shift plus arrow for one unit" tabIndex={0} onKeyDown={sheetKeyDown} onPointerDown={sheetPointerDown} onPointerMove={sheetPointerMove} onPointerUp={sheetPointerUp} onPointerCancel={() => { dragRef.current = undefined; }} onClick={(event) => {
-        const target = event.target instanceof Element ? event.target.closest<SVGGElement>("[data-component-id],[data-net-id]") : null;
-        props.onSelect(target?.dataset["componentId"] ?? target?.dataset["netId"] ?? null);
-      }}>
+      <div className="electrical-sheet-viewport" role="group" aria-label="Interactive schematic sheet; select a device from the model browser, then use arrow keys to move it by 10 sheet units or Shift plus arrow for one unit" tabIndex={0} onKeyDown={sheetKeyDown} onPointerDown={sheetPointerDown} onPointerMove={sheetPointerMove} onPointerUp={sheetPointerUp} onPointerCancel={() => { dragRef.current = undefined; }}>
         <div ref={sheetRef} className="electrical-sheet-frame" style={{ width: `${zoom * 100}%` }} dangerouslySetInnerHTML={{ __html: props.artifact.svg }} />
       </div>
       <div className="electrical-hud">

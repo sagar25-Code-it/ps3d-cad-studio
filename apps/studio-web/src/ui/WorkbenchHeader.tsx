@@ -77,6 +77,7 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLElement>(null);
   const is3d = !props.masterCartOpen && !props.renderStudioOpen && (props.project.activeWorkspace === "part" || props.project.activeWorkspace === "assembly" || props.project.activeWorkspace === "surface" || props.project.activeWorkspace === "vehicle");
+  const gridToggleEnabled = is3d || (!props.masterCartOpen && !props.renderStudioOpen && props.project.activeWorkspace === "sketch");
 
   useEffect(() => {
     if (openMenu === null || openMenu === "file") return;
@@ -106,7 +107,7 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
     { id: "view", label: "View", icon: "view", items: [
       { label: "Fit canvas", icon: "fit", shortcut: "F", disabled: !is3d, action: props.onFit },
       { label: "Home view", icon: "home", disabled: !is3d, action: props.onHome },
-      { label: props.gridVisible ? "Hide grid" : "Show grid", icon: "grid", disabled: !is3d, action: props.onToggleGrid },
+      { label: props.gridVisible ? "Hide grid" : "Show grid", icon: "grid", disabled: !gridToggleEnabled, action: props.onToggleGrid },
       { label: "Render Studio", icon: "appearance", action: props.onRenderStudio },
       { label: "Drawing workspace", icon: "drawing", action: () => props.onWorkspace("drawing") },
       { label: "Electrical workspace", icon: "electrical", action: () => props.onWorkspace("electrical") },
@@ -121,14 +122,12 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
     { id: "automate", label: "Automate", icon: "automate", items: [
       { label: "MCP workspace", icon: "mcp", action: () => props.onWorkspace("automate") },
       { label: "MCP account and tokens", icon: "mcp", action: props.onAccess },
-      { label: "Python linking", icon: "python", action: () => props.onWorkspace("automate") },
       { label: "Search automation commands", icon: "command", action: props.onCommandPalette }
     ] },
     { id: "help", label: "Help", icon: "help", items: [
       { label: "Learning Center and PDF manual", icon: "help", action: props.onLearning },
       { label: "Design readiness and dependencies", icon: "inspect", action: props.onDesignHealth },
-      { label: "Command and shortcut guide", icon: "command", shortcut: "Ctrl+K", action: props.onCommandPalette },
-      { label: "Capability truth labels", icon: "inspect", action: props.onCommandPalette }
+      { label: "Command and shortcut guide", icon: "command", shortcut: "Ctrl+K", action: props.onCommandPalette }
     ] }
   ];
 

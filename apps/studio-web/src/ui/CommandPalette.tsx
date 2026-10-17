@@ -41,6 +41,7 @@ export function CommandPalette({ open, workspace, onClose, onCommand }: CommandP
       if (scope !== "all" && command.workspace !== scope) return false;
       const haystack = [
         command.name, command.description, command.workspace, command.category, command.group, command.level,
+        command.shortcut ?? "",
         ...command.keywords, command.guide.selection, ...command.guide.steps, command.guide.result, command.guide.boundary
       ].join(" ").toLowerCase();
       const searchTokens = haystack.split(/[^a-z0-9]+/u).filter(Boolean);

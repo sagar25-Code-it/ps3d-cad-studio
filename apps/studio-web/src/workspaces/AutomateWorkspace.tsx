@@ -19,7 +19,7 @@ interface PendingPreview {
 }
 
 type ConnectionStatus = "setup" | "testing" | "verified" | "error";
-type DemoIntent = "part-thickness" | "surface-crown" | "drawing-tolerance" | "vehicle-state";
+type DemoIntent = "part-edge" | "surface-crown" | "drawing-tolerance" | "vehicle-state";
 
 const SERVER_PATH = "apps/mcp-server/dist/apps/mcp-server/src/server.js";
 const GENERIC_STDIO_CONFIG = JSON.stringify({
@@ -114,7 +114,7 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
   const [copiedLabel, setCopiedLabel] = useState<string>();
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("setup");
   const [goal, setGoal] = useState("Create a 100 x 50 x 3 mm RHS tube 1200 mm long with two diameter 12 mm holes 50 mm from each end.");
-  const [goalWorkspace, setGoalWorkspace] = useState<WorkspaceId>(props.project.activeWorkspace);
+  const [goalWorkspace, setGoalWorkspace] = useState<WorkspaceId | "all">("all");
   const [experienceLevel, setExperienceLevel] = useState<Ps3dExperienceLevel>("engineer");
   const [demoIntent, setDemoIntent] = useState<DemoIntent>("surface-crown");
   const [guideAcknowledgement, setGuideAcknowledgement] = useState<Readonly<Record<string, unknown>>>();
@@ -134,6 +134,9 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
   useEffect(() => {
     if (pending !== undefined && pending.projectRevision !== props.project.revision) setPending(undefined);
   }, [pending, props.project.revision]);
+  useEffect(() => {
+    setPending(undefined);
+  }, [demoIntent]);
 
   const publishResult = (next: WorkbenchMcpResult): void => {
     setResult(next);
@@ -150,11 +153,11 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
         next = await handleWorkbenchMcpTool(selected.name, {});
         if (selected.name === "ps3d_guide") rememberGuide(next);
       } else if (selected.name === "ps3d_agent_handshake") {
-        next = await handleWorkbenchMcpTool(selected.name, { request: goal, experienceLevel, workspace: goalWorkspace, clientName: "PS3D browser workbench", projectRevision: props.project.revision });
+        next = await handleWorkbenchMcpTool(selected.name, { request: goal, experienceLevel, ...(goalWorkspace === "all" ? {} : { workspace: goalWorkspace }), clientName: "PS3D browser workbench", projectRevision: props.project.revision });
       } else if (selected.name === "ps3d_plan_engineering_intent") {
-        next = await handleWorkbenchMcpTool(selected.name, { request: goal, unit: "mm", experienceLevel, workspace: goalWorkspace, projectRevision: props.project.revision, targetCad: ["ps3d"] });
+        next = await handleWorkbenchMcpTool(selected.name, { request: goal, unit: "mm", experienceLevel, ...(goalWorkspace === "all" ? {} : { workspace: goalWorkspace }), projectRevision: props.project.revision, targetCad: ["ps3d"] });
       } else if (selected.name === "ps3d_find_commands") {
-        next = await handleWorkbenchMcpTool(selected.name, { query: goal, workspace: goalWorkspace, limit: 6 });
+        next = await handleWorkbenchMcpTool(selected.name, { query: goal, ...(goalWorkspace === "all" ? {} : { workspace: goalWorkspace }), limit: 6 });
       } else if (selected.name === "ps3d_inspect_project" || selected.name === "ps3d_design_health" || selected.name === "ps3d_analyze_vehicle") {
         next = await handleWorkbenchMcpTool(selected.name, { project: props.project });
       } else if (selected.name === "ps3d_preview_electromechanical") {
@@ -181,6 +184,8 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
         }
       }
       publishResult(next);
+    } catch (error) {
+      publishResult(localError("HANDLER_FAILED", error instanceof Error ? error.message : "The built-in handler failed unexpectedly."));
     } finally {
       setBusy(false);
     }
@@ -189,30 +194,46 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
   const runSearch = async (): Promise<void> => {
     props.onSelect("mcp-tool:ps3d_find_commands");
     setConnectionStatus("testing");
-    const next = await handleWorkbenchMcpTool("ps3d_find_commands", { query: goal, workspace: goalWorkspace, limit: 6 });
-    publishResult(next);
+    try {
+      const next = await handleWorkbenchMcpTool("ps3d_find_commands", { query: goal, ...(goalWorkspace === "all" ? {} : { workspace: goalWorkspace }), limit: 6 });
+      publishResult(next);
+    } catch (error) {
+      publishResult(localError("HANDLER_FAILED", error instanceof Error ? error.message : "The built-in handler failed unexpectedly."));
+    }
   };
 
   const runEngineeringPlan = async (): Promise<void> => {
     props.onSelect("mcp-tool:ps3d_plan_engineering_intent");
     setConnectionStatus("testing");
-    const next = await handleWorkbenchMcpTool("ps3d_plan_engineering_intent", { request: goal, unit: "mm", workspace: goalWorkspace, experienceLevel, projectRevision: props.project.revision, targetCad: ["ps3d"] });
-    publishResult(next);
+    try {
+      const next = await handleWorkbenchMcpTool("ps3d_plan_engineering_intent", { request: goal, unit: "mm", ...(goalWorkspace === "all" ? {} : { workspace: goalWorkspace }), experienceLevel, projectRevision: props.project.revision, targetCad: ["ps3d"] });
+      publishResult(next);
+    } catch (error) {
+      publishResult(localError("HANDLER_FAILED", error instanceof Error ? error.message : "The built-in handler failed unexpectedly."));
+    }
   };
 
   const runAgentHandshake = async (): Promise<void> => {
     props.onSelect("mcp-tool:ps3d_agent_handshake");
     setConnectionStatus("testing");
-    const next = await handleWorkbenchMcpTool("ps3d_agent_handshake", { request: goal, experienceLevel, workspace: goalWorkspace, clientName: "PS3D browser workbench", projectRevision: props.project.revision });
-    publishResult(next);
+    try {
+      const next = await handleWorkbenchMcpTool("ps3d_agent_handshake", { request: goal, experienceLevel, ...(goalWorkspace === "all" ? {} : { workspace: goalWorkspace }), clientName: "PS3D browser workbench", projectRevision: props.project.revision });
+      publishResult(next);
+    } catch (error) {
+      publishResult(localError("HANDLER_FAILED", error instanceof Error ? error.message : "The built-in handler failed unexpectedly."));
+    }
   };
 
   const runGuide = async (): Promise<void> => {
     props.onSelect("mcp-tool:ps3d_guide");
     setConnectionStatus("testing");
-    const next = await handleWorkbenchMcpTool("ps3d_guide", {});
-    rememberGuide(next);
-    publishResult(next);
+    try {
+      const next = await handleWorkbenchMcpTool("ps3d_guide", {});
+      rememberGuide(next);
+      publishResult(next);
+    } catch (error) {
+      publishResult(localError("HANDLER_FAILED", error instanceof Error ? error.message : "The built-in handler failed unexpectedly."));
+    }
   };
 
   const rememberGuide = (guide: WorkbenchMcpResult): void => {
@@ -221,9 +242,13 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
   };
 
   const copyText = async (value: string, label: string): Promise<void> => {
-    await navigator.clipboard.writeText(value);
-    setCopiedLabel(label);
-    window.setTimeout(() => setCopiedLabel(undefined), 1600);
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedLabel(label);
+      window.setTimeout(() => setCopiedLabel(undefined), 1600);
+    } catch {
+      props.onMessage("Clipboard unavailable — select the text and copy it manually.");
+    }
   };
 
   return <>
@@ -257,9 +282,10 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
           <header><div><span>ENGINEERING INTENT COMPILER</span><h3>Describe the part or assembly in ordinary language.</h3><p>PS3D builds reusable definitions, ordered features, standards questions, interfaces, subassemblies, and approval gates inside the tool. Planning never executes geometry.</p></div><button onClick={() => void runGuide()}>Read AI guide</button></header>
           <div className="ai-command-form">
             <label className="engineering-request"><span>Engineering request</span><textarea value={goal} maxLength={12_000} rows={5} onChange={(event) => setGoal(event.target.value)} placeholder="Describe the required part, assembly, interfaces, dimensions, standards, and evidence you already have." /><small>{goal.length.toLocaleString()} / 12,000 characters</small></label>
-            <label><span>Workspace</span><select value={goalWorkspace} onChange={(event) => setGoalWorkspace(event.target.value as WorkspaceId)}>{WORKSPACES.map((workspace) => <option key={workspace} value={workspace}>{workspace}</option>)}</select></label>
+            <label><span>Workspace</span><select value={goalWorkspace} onChange={(event) => setGoalWorkspace(event.target.value as WorkspaceId | "all")}><option value="all">All workspaces</option>{WORKSPACES.map((workspace) => <option key={workspace} value={workspace}>{workspace}</option>)}</select></label>
             <label><span>Explanation level</span><select value={experienceLevel} onChange={(event) => setExperienceLevel(event.target.value as Ps3dExperienceLevel)}><option value="child">Child</option><option value="beginner">Beginner</option><option value="engineer">Engineer</option><option value="advanced">Advanced</option><option value="phd">PhD / research</option></select></label>
             <div className="ai-command-actions"><button className="primary" disabled={goal.trim().length < 2} onClick={() => void runEngineeringPlan()}>Build engineering plan</button><button disabled={goal.trim().length < 2 || goal.length > 500} title={goal.length > 500 ? "Coordination accepts up to 500 characters; the engineering planner accepts the complete request." : undefined} onClick={() => void runAgentHandshake()}>Coordinate</button><button disabled={goal.trim().length < 2 || goal.length > 160} title={goal.length > 160 ? "Command search accepts a short focused query after the engineering plan." : undefined} onClick={() => void runSearch()}>Find exact commands</button></div>
+            {goal.length > 160 && <p className="ai-command-limit" role="status">{goal.length > 500 ? "Coordinate accepts up to 500 characters and Find exact commands up to 160; the engineering planner accepts the complete request. Shorten the request to enable those buttons." : "Find exact commands accepts a short focused query (up to 160 characters) after the engineering plan."}</p>}
           </div>
           {engineeringPlan !== undefined && <EngineeringPlanReview plan={engineeringPlan} />}
           {result?.structuredContent["schema"] === "ps3d-agent-handshake/1" && <section className={`agent-contract-summary ${String(result.structuredContent["status"])}`} aria-label="PS3D collaboration agent result"><header><div><span>STATELESS COLLABORATION AGENT</span><strong>{String(result.structuredContent["status"]).replaceAll("-", " ")}</strong></div><b>{experienceLevel}</b></header><p>The host AI handles conversation and judgment; PS3D validates registered commands, stable IDs, project contracts, and recovery steps. No hidden model or CAD change ran during this handshake.</p>{agentFeedback.length > 0 && <ul>{agentFeedback.map((item, index) => <li key={`${String(item["code"])}-${index}`}><strong>{String(item["code"])}</strong><span>{String(item["message"])}</span><small>{String(item["recovery"])}</small></li>)}</ul>}</section>}
@@ -290,7 +316,8 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
         <div className="scope-note"><strong>Execution deferred on this system</strong><p>Build and run the subprocess only in a personal or IT-approved development environment.</p></div>
       </> : <>
         <section className="tool-detail"><details><summary>Protocol details</summary><code>{selected.name}</code></details><p>{selected.description}</p><dl className="compact-facts"><div><dt>Access</dt><dd>{selected.annotations.readOnlyHint ? "read-only" : "approval required"}</dd></div><div><dt>External write</dt><dd>none</dd></div><div><dt>Idempotent</dt><dd>{selected.annotations.idempotentHint ? "yes" : "no"}</dd></div><div><dt>Open world</dt><dd>no</dd></div></dl>
-          {(selected.name === "ps3d_preview_operation" || selected.name === "ps3d_apply_preview") && <label className="demo-intent"><span>Visible built-in test intent</span><select value={demoIntent} onChange={(event) => setDemoIntent(event.target.value as DemoIntent)}><option value="part-thickness">Part thickness +1 mm</option><option value="surface-crown">Surface crown +2 mm</option><option value="drawing-tolerance">General linear tolerance +0.05 mm</option><option value="vehicle-state">Toggle design ride / full bump</option></select><pre>{JSON.stringify(demoOperation, null, 2)}</pre></label>}
+          {view === "advanced" && (selected.name === "ps3d_agent_handshake" || selected.name === "ps3d_plan_engineering_intent" || selected.name === "ps3d_find_commands") && <div className="advanced-request-inputs"><label className="engineering-request"><span>Engineering request</span><textarea value={goal} maxLength={12_000} rows={4} onChange={(event) => setGoal(event.target.value)} placeholder="Describe the required part, assembly, interfaces, dimensions, standards, and evidence you already have." /><small>{goal.length.toLocaleString()} / 12,000 characters</small></label><label><span>Workspace</span><select value={goalWorkspace} onChange={(event) => setGoalWorkspace(event.target.value as WorkspaceId | "all")}><option value="all">All workspaces</option>{WORKSPACES.map((workspace) => <option key={workspace} value={workspace}>{workspace}</option>)}</select></label>{selected.name !== "ps3d_find_commands" && <label><span>Explanation level</span><select value={experienceLevel} onChange={(event) => setExperienceLevel(event.target.value as Ps3dExperienceLevel)}><option value="child">Child</option><option value="beginner">Beginner</option><option value="engineer">Engineer</option><option value="advanced">Advanced</option><option value="phd">PhD / research</option></select></label>}</div>}
+          {(selected.name === "ps3d_preview_operation" || selected.name === "ps3d_apply_preview") && <label className="demo-intent"><span>Visible built-in test intent</span><select value={demoIntent} onChange={(event) => setDemoIntent(event.target.value as DemoIntent)}><option value="part-edge">Part edge treatment +1 mm</option><option value="surface-crown">Surface crown +2 mm</option><option value="drawing-tolerance">General linear tolerance +0.05 mm</option><option value="vehicle-state">Toggle design ride / full bump</option></select><pre>{JSON.stringify(demoOperation, null, 2)}</pre></label>}
           <button className="primary full" disabled={busy || (selected.name === "ps3d_apply_preview" && pending === undefined)} onClick={() => void run()}>{busy ? "Testing…" : selected.name === "ps3d_apply_preview" ? "Confirm exact visible preview and apply" : "Run built-in handler test"}</button>
           {selected.name === "ps3d_apply_preview" && <small className="consent-copy">{pending === undefined ? "A matching preview at this revision is required first." : `Receipt ready for revision ${pending.projectRevision}: ${pending.receipt.slice(0, 12)}…`}</small>}
           {selected.name === "ps3d_preview_electromechanical" && <><button className="primary full" onClick={props.onReviewElectromechanical}>Open full circuit → 3D review</button><small className="consent-copy">Apply stays inside the complete replacement dialog; this test cannot silently assert approval.</small></>}
@@ -305,7 +332,7 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
 
 function createDemoOperation(project: WorkbenchProject, intent: DemoIntent): WorkbenchOperation {
   const envelope = { operationId: `operation:guided-${intent}-r${project.revision}`, expectedRevision: project.revision } as const;
-  if (intent === "part-thickness") return { ...envelope, kind: "set-part-parameter", parameter: "thicknessMm", value: Math.min(200, project.part.thicknessMm + 1) };
+  if (intent === "part-edge") return { ...envelope, kind: "set-part-parameter", parameter: "edgeTreatmentMm", value: Math.min(25, project.part.edgeTreatmentMm + 1) };
   if (intent === "drawing-tolerance") return { ...envelope, kind: "set-drawing-general-tolerance", linearMm: Math.min(10, (project.drawing.generalToleranceLinearMm ?? 0.2) + 0.05), angularDeg: project.drawing.generalToleranceAngularDeg ?? 0.5 };
   if (intent === "vehicle-state") return { ...envelope, kind: "set-vehicle-simulation-state", state: project.vehicle.state === "full-bump" ? "design-ride" : "full-bump" };
   return { ...envelope, kind: "set-surface-parameter", parameter: "crownMm", value: Math.min(80, project.surface.crownMm + 2) };

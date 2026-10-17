@@ -55,9 +55,9 @@ export const DEFAULT_RENDER_SETTINGS: RenderStudioSettings = {
   source: "part",
   environment: "softbox",
   materialPreset: "machined-aluminum",
-  bodyColor: "#aeb6bd",
-  roughness: 0.34,
-  metalness: 0.72,
+  bodyColor: "#b8c0c7",
+  roughness: 0.28,
+  metalness: 0.82,
   exposure: 1,
   keyIntensity: 2.45,
   fillIntensity: 0.78,
@@ -97,8 +97,8 @@ export function RenderStudioWorkspace(props: RenderStudioWorkspaceProps): React.
       <div className="render-context"><small>ACTIVE WORKSPACE</small><strong>Render Studio</strong><CapabilityBadge level="preview" /></div>
       <RenderRibbonGroup label="Scene">
         <RenderButton icon="insert" label="Linked model" hint={sourceLabel(props.settings.source)} active />
-        <RenderButton icon="fit" label="Fit scene" hint="F" onClick={props.onFit} />
-        <RenderButton icon="home" label="Isometric" hint="Home" onClick={() => set("orientation", "isometric")} />
+        <RenderButton icon="fit" label="Fit scene" hint="extents" onClick={props.onFit} />
+        <RenderButton icon="home" label="Isometric" hint="ISO" onClick={() => set("orientation", "isometric")} />
       </RenderRibbonGroup>
       <RenderRibbonGroup label="Appearance">
         <RenderButton icon="appearance" label="Material" hint={material.label} active />
@@ -128,7 +128,7 @@ export function RenderStudioWorkspace(props: RenderStudioWorkspaceProps): React.
 
       <section className="render-viewport-shell">
         <div className="render-viewport-toolbar">
-          <div><span>NAV</span><button title="Orbit with middle mouse drag"><CommandIcon name="orbit" />Orbit</button><button title="Pan with Shift + middle mouse drag"><CommandIcon name="pan" />Pan</button><button onClick={props.onFit}><CommandIcon name="fit" />Fit</button></div>
+          <div><span>NAV</span><button title="Left-drag or Shift + middle-drag to orbit"><CommandIcon name="orbit" />Orbit</button><button title="Middle-drag to pan"><CommandIcon name="pan" />Pan</button><button onClick={props.onFit}><CommandIcon name="fit" />Fit</button></div>
           <div><span>CAMERA</span><button className={props.settings.projection === "perspective" ? "active" : ""} onClick={() => set("projection", "perspective")}>Perspective</button><button className={props.settings.projection === "orthographic" ? "active" : ""} onClick={() => set("projection", "orthographic")}>Ortho</button></div>
         </div>
         <canvas ref={props.canvasRef} className="render-canvas" role="img" aria-label={`Real-time ${props.settings.source} render preview`} />
@@ -140,7 +140,7 @@ export function RenderStudioWorkspace(props: RenderStudioWorkspaceProps): React.
         <header><small>RENDER PROPERTIES</small><strong>Scene 01</strong><span>quality-controlled local output</span></header>
         <details open><summary>Material &amp; finish</summary><div className="render-property-content">
           <div className="material-preset-grid">{MATERIALS.map((preset) => <button key={preset.id} className={props.settings.materialPreset === preset.id ? "active" : ""} title={preset.label} onClick={() => props.onSettings({ ...props.settings, materialPreset: preset.id, bodyColor: preset.color, roughness: preset.roughness, metalness: preset.metalness })}><i style={{ background: preset.color }} /><span>{preset.label}</span></button>)}</div>
-          <label><span>Body color</span><input type="color" value={props.settings.bodyColor} onChange={(event) => set("bodyColor", event.target.value)} /></label>
+          <label><span>Body color</span><input type="color" value={props.settings.bodyColor} disabled={props.settings.materialPreset === "original"} title={props.settings.materialPreset === "original" ? "The Model colors preset keeps each body's own color; choose another preset to apply a single body color." : undefined} onChange={(event) => set("bodyColor", event.target.value)} /></label>
           <RangeControl label="Roughness" value={props.settings.roughness} min={0.04} max={1} step={0.01} onChange={(value) => set("roughness", value)} />
           <RangeControl label="Metalness" value={props.settings.metalness} min={0} max={1} step={0.01} onChange={(value) => set("metalness", value)} />
         </div></details>
@@ -155,7 +155,7 @@ export function RenderStudioWorkspace(props: RenderStudioWorkspaceProps): React.
         <details open><summary>Output</summary><div className="render-property-content output-controls">
           <label><span>Resolution</span><select value={props.settings.resolution} onChange={(event) => set("resolution", event.target.value as RenderResolution)}><option value="1280x720">1280 × 720 · HD</option><option value="1920x1080">1920 × 1080 · Full HD</option><option value="2048x2048">2048 × 2048 · Square</option><option value="2560x1440">2560 × 1440 · QHD</option><option value="3840x2160">3840 × 2160 · 4K</option></select></label>
           <label><span>Format</span><select value={props.settings.format} onChange={(event) => set("format", event.target.value as RenderImageFormat)}><option value="png">PNG · lossless</option><option value="jpeg">JPEG · compact</option></select></label>
-          <RangeControl label="Quality" value={props.settings.quality} min={0.5} max={1} step={0.01} onChange={(value) => set("quality", value)} />
+          {props.settings.format === "jpeg" && <RangeControl label="Quality" value={props.settings.quality} min={0.5} max={1} step={0.01} onChange={(value) => set("quality", value)} />}
           <button className="render-now" disabled={props.busy} onClick={props.onRender}><CommandIcon name="appearance" />{props.busy ? "Rendering image…" : "Render image"}<small>{props.settings.resolution} · {props.settings.format.toUpperCase()}</small></button>
         </div></details>
       </aside>

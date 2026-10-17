@@ -51,6 +51,19 @@ export function SmartFaultBrain(props: SmartFaultBrainProps): React.JSX.Element 
     setAnnouncement(next);
   }, [dismissedIds, notices]);
 
+  useEffect(() => {
+    const activeIds = new Set(notices.map((notice) => notice.id));
+    setDismissedIds((current) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of current) {
+        if (activeIds.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [notices]);
+
   const acknowledge = (id: string): void => {
     setDismissedIds((current) => new Set([...current, id]));
     if (announcement?.id === id) setAnnouncement(undefined);
@@ -68,7 +81,7 @@ export function SmartFaultBrain(props: SmartFaultBrainProps): React.JSX.Element 
       <p>{announcement.message}</p>
       <div><button onClick={() => setOpen(true)}>Review</button><button onClick={() => acknowledge(announcement.id)}>Acknowledge</button></div>
     </div>}
-    {open && <aside id="fault-brain-panel" className="fault-brain-panel" role="dialog" aria-label="Smart Brain fault notifications">
+    {open && <aside id="fault-brain-panel" className="fault-brain-panel" role="complementary" aria-label="Smart Brain fault notifications">
       <header><div><span>SMART FAULT BRAIN</span><h2>{visible.length === 0 ? "No active faults" : `${errors} fault · ${visible.length - errors} review`}</h2></div><button onClick={() => setOpen(false)} aria-label="Close Smart Brain">×</button></header>
       <p className="fault-brain-boundary">Deterministic Design Health, dependency, operation, and browser-runtime monitoring. It reports faults; it does not silently repair or change CAD.</p>
       <div className="fault-brain-list">

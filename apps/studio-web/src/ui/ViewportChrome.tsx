@@ -101,12 +101,14 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
           <button disabled title="Persistent edge topology is not available in this bounded mesh kernel."><CommandIcon name="edge" />Edge</button>
         </>}
       </div>
-      <div className="controller-separator" />
-      <div className="controller-group compact" aria-label="Projection mode">
-        <span>VIEW</span>
-        <button className={props.state.projection === "perspective" ? "active" : ""} aria-pressed={props.state.projection === "perspective"} onClick={() => props.onProjection("perspective")}><CommandIcon name="projection" />Perspective</button>
-        <button className={props.state.projection === "orthographic" ? "active" : ""} aria-pressed={props.state.projection === "orthographic"} onClick={() => props.onProjection("orthographic")}><CommandIcon name="projection" />Ortho</button>
-      </div>
+      {!sketch && <>
+        <div className="controller-separator" />
+        <div className="controller-group compact" aria-label="Projection mode">
+          <span>VIEW</span>
+          <button className={props.state.projection === "perspective" ? "active" : ""} aria-pressed={props.state.projection === "perspective"} onClick={() => props.onProjection("perspective")}><CommandIcon name="projection" />Perspective</button>
+          <button className={props.state.projection === "orthographic" ? "active" : ""} aria-pressed={props.state.projection === "orthographic"} onClick={() => props.onProjection("orthographic")}><CommandIcon name="projection" />Ortho</button>
+        </div>
+      </>}
     </div>
 
     <ViewCube state={props.state} onOrientation={props.onOrientation} onViewAngles={props.onViewAngles} />
@@ -117,7 +119,7 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
       <button onClick={props.onFit} title="Fit all visible geometry (F)"><CommandIcon name="fit" />Fit</button>
       {sketch && <button onClick={() => props.onOrientation("top")} title="Look normal to the active XY sketch plane"><CommandIcon name="view" />Look At</button>}
       <button className={props.state.gridVisible ? "active" : ""} aria-pressed={props.state.gridVisible} onClick={() => props.onGrid(!props.state.gridVisible)}><CommandIcon name="grid" />Grid</button>
-      <button className={props.state.axesVisible ? "active" : ""} aria-pressed={props.state.axesVisible} onClick={() => props.onAxes(!props.state.axesVisible)}><CommandIcon name="axes" />Axes</button>
+      {!sketch && <button className={props.state.axesVisible ? "active" : ""} aria-pressed={props.state.axesVisible} onClick={() => props.onAxes(!props.state.axesVisible)}><CommandIcon name="axes" />Axes</button>}
       {props.workspace === "part" && <button
         className={displayOpen ? "active" : ""}
         aria-expanded={displayOpen}
@@ -143,9 +145,9 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
       </div>
       {delta !== undefined && distance !== undefined && <dl className="measure-result">
         <div><dt>Distance</dt><dd>{format(distance)} mm</dd></div>
-        <div><dt>ΔX</dt><dd>{format(delta[0])}</dd></div>
-        <div><dt>ΔY</dt><dd>{format(delta[1])}</dd></div>
-        <div><dt>ΔZ</dt><dd>{format(delta[2])}</dd></div>
+        <div><dt>ΔX</dt><dd>{format(delta[0])} mm</dd></div>
+        <div><dt>ΔY</dt><dd>{format(delta[1])} mm</dd></div>
+        <div><dt>ΔZ</dt><dd>{format(delta[2])} mm</dd></div>
       </dl>}
       <small>Triangle-ray intersection · preview measurement</small>
     </aside>}
@@ -189,9 +191,11 @@ function ViewCube({ state, onOrientation, onViewAngles }: { readonly state: View
         onViewAngles(azimuth, elevation);
       }}
       onPointerUp={(event) => {
-        if (drag.current?.moved !== true) suppressClick.current = false;
+        const moved = drag.current?.moved === true;
         drag.current = undefined;
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        if (moved) window.setTimeout(() => { suppressClick.current = false; }, 0);
+        else suppressClick.current = false;
       }}
       onPointerCancel={() => { drag.current = undefined; suppressClick.current = false; }}>
       {visibleFaces.map((face) => {

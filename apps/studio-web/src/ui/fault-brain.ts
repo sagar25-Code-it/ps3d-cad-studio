@@ -34,14 +34,14 @@ export function deriveFaultBrainNotices(report: DesignHealthReport, diagnostic?:
       revision: report.projectRevision
     }));
   const dependencies = report.dependencies
-    .filter((dependency) => dependency.status !== "current")
+    .filter((dependency) => dependency.status === "stale")
     .map((dependency): FaultBrainNotice => ({
       id: `dependency:${dependency.id}:${dependency.status}`,
       source: "dependency",
-      severity: dependency.status === "stale" ? "error" : "warning",
+      severity: "warning",
       title: `${dependency.label} is ${dependency.status}`,
       message: dependency.detail,
-      recovery: `Review the ${dependency.from} to ${dependency.to} dependency and rebuild or relink it before release.`,
+      recovery: `Regenerate the complete ${dependency.from} to ${dependency.to} candidate before release; do not silently patch individual packages.`,
       workspace: dependency.to,
       revision: report.projectRevision
     }));

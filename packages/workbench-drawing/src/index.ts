@@ -200,7 +200,7 @@ export function createDrawingSvg(part: PartIntent, settings: DrawingSettings): D
     `<svg xmlns="http://www.w3.org/2000/svg" width="${sheetWidth}mm" height="${sheetHeight}mm" viewBox="0 0 ${sheetWidth} ${sheetHeight}" role="img" aria-labelledby="drawing-title drawing-desc" data-projection="${settings.projection}" data-standard="${plan.draftingStandard}" data-display-style="${plan.displayStyle}" data-view-preset="${plan.viewPreset}">`,
     `<title id="drawing-title">${escapeXml(settings.title)} engineering drawing preview</title>`,
     `<desc id="drawing-desc">Parent base view with aligned projections, ${plan.sectionViewEnabled ? "a full section, " : ""}${plan.dimensions.length} selective dimensions, and ${plan.gdtFrames.length} explicitly specified draft GD&amp;T frames. Not released.</desc>`,
-    `<defs><marker id="arrow" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0,0 L6,3 L0,6 z" fill="#173346"/></marker><marker id="leader-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#173346"/></marker><pattern id="section-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="#416171" stroke-width="0.35"/></pattern></defs>`,
+    `<defs><marker id="arrow" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M0,0 L6,3 L0,6 z" fill="#173346"/></marker><marker id="leader-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="#173346"/></marker><pattern id="section-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="#416171" stroke-width="0.35"/></pattern></defs>`,
     `<rect width="${sheetWidth}" height="${sheetHeight}" fill="#f9fbfc"/>`,
     `<text x="${sheetWidth / 2}" y="${sheetHeight / 2}" text-anchor="middle" transform="rotate(-24 ${sheetWidth / 2} ${sheetHeight / 2})" fill="#b24646" fill-opacity="0.075" font-family="Arial,sans-serif" font-weight="700" font-size="26">NOT RELEASED</text>`,
     `<rect x="${frame}" y="${frame}" width="${sheetWidth - frame * 2}" height="${sheetHeight - frame * 2}" fill="none" stroke="#173346" stroke-width="0.7"/>`,
@@ -316,7 +316,11 @@ function renderDimensions(plan: DrawingGenerationPlan, part: PartIntent, factor:
   const heightDimension = byId.get("dimension:overall-height");
   if (heightDimension !== undefined) markup.push(verticalDimension(heightDimension, front.y - geometry.height / 2, front.y + geometry.height / 2, front.x - geometry.width / 2, front.x - geometry.width / 2 - 12));
   const thicknessDimension = byId.get("dimension:thickness");
-  if (thicknessDimension !== undefined) markup.push(verticalDimension(thicknessDimension, top.y - geometry.thickness / 2, top.y + geometry.thickness / 2, top.x + geometry.width / 2, top.x + geometry.width / 2 + 10));
+  if (thicknessDimension !== undefined) {
+    const thicknessClamped = part.thicknessMm * factor < 3;
+    const thicknessRecord = thicknessClamped ? { ...thicknessDimension, label: `${thicknessDimension.label} NTS` } : thicknessDimension;
+    markup.push(verticalDimension(thicknessRecord, top.y - geometry.thickness / 2, top.y + geometry.thickness / 2, top.x + geometry.width / 2, top.x + geometry.width / 2 + 10));
+  }
   const diameter = byId.get("dimension:centered-bore-diameter");
   if (diameter !== undefined) {
     const radius = part.holeDiameterMm / 2 * factor;
@@ -353,12 +357,12 @@ function renderDatums(plan: DrawingGenerationPlan, positions: Record<DrawingView
   if (plan.datums.length === 0) return "";
   const front = positions.front;
   const top = positions.top;
-  return `<g class="drawing-datums" data-datum-count="${plan.datums.length}" data-datum-scheme="${plan.datumScheme}">${datumSymbol("A", top.x + geometry.width * 0.26, top.y + geometry.thickness / 2, "down")}${datumSymbol("B", front.x - geometry.width / 2, front.y - geometry.height * 0.18, "left")}${datumSymbol("C", front.x + geometry.width * 0.20, front.y + geometry.height / 2, "down")}</g>`;
+  return `<g class="drawing-datums" data-datum-count="${plan.datums.length}" data-datum-scheme="${plan.datumScheme}">${datumSymbol("A", top.x + geometry.width * 0.26, top.y + geometry.thickness / 2, "down")}${datumSymbol("B", front.x - geometry.width / 2, front.y - geometry.height * 0.18, "left", 16)}${datumSymbol("C", front.x + geometry.width * 0.20, front.y + geometry.height / 2, "down", 12)}</g>`;
 }
 
-function datumSymbol(label: "A" | "B" | "C", x: number, y: number, direction: "down" | "left"): string {
-  if (direction === "left") return `<g class="datum-symbol" data-datum="${label}" fill="#173346" stroke="#173346" stroke-width="0.4"><path d="M${n(x)} ${n(y)}l-4 -2v4z"/><path d="M${n(x - 4)} ${n(y)}h-6"/><rect x="${n(x - 17)}" y="${n(y - 3.5)}" width="7" height="7" fill="#f9fbfc"/><text x="${n(x - 13.5)}" y="${n(y + 1.5)}" text-anchor="middle" stroke="none" font-family="ui-monospace,monospace" font-size="4">${label}</text></g>`;
-  return `<g class="datum-symbol" data-datum="${label}" fill="#173346" stroke="#173346" stroke-width="0.4"><path d="M${n(x)} ${n(y)}l-2 4h4z"/><path d="M${n(x)} ${n(y + 4)}v6"/><rect x="${n(x - 3.5)}" y="${n(y + 10)}" width="7" height="7" fill="#f9fbfc"/><text x="${n(x)}" y="${n(y + 15)}" text-anchor="middle" stroke="none" font-family="ui-monospace,monospace" font-size="4">${label}</text></g>`;
+function datumSymbol(label: "A" | "B" | "C", x: number, y: number, direction: "down" | "left", lead = 6): string {
+  if (direction === "left") return `<g class="datum-symbol" data-datum="${label}" fill="#173346" stroke="#173346" stroke-width="0.4"><path d="M${n(x)} ${n(y)}l-4 -2v4z"/><path d="M${n(x - 4)} ${n(y)}h-${n(lead)}"/><rect x="${n(x - 11 - lead)}" y="${n(y - 3.5)}" width="7" height="7" fill="#f9fbfc"/><text x="${n(x - 7.5 - lead)}" y="${n(y + 1.5)}" text-anchor="middle" stroke="none" font-family="ui-monospace,monospace" font-size="4">${label}</text></g>`;
+  return `<g class="datum-symbol" data-datum="${label}" fill="#173346" stroke="#173346" stroke-width="0.4"><path d="M${n(x)} ${n(y)}l-2 4h4z"/><path d="M${n(x)} ${n(y + 4)}v${n(lead)}"/><rect x="${n(x - 3.5)}" y="${n(y + 4 + lead)}" width="7" height="7" fill="#f9fbfc"/><text x="${n(x)}" y="${n(y + 9 + lead)}" text-anchor="middle" stroke="none" font-family="ui-monospace,monospace" font-size="4">${label}</text></g>`;
 }
 
 function renderGdt(plan: DrawingGenerationPlan, positions: Record<DrawingViewId, Point>, geometry: DrawingGeometry): string {
@@ -372,12 +376,16 @@ function renderGdt(plan: DrawingGenerationPlan, positions: Record<DrawingViewId,
       const y = front.y + geometry.height / 2 - 7;
       frames.push(`<g data-gdt-id="${record.id}" data-value-source="${record.valueSource}"><path d="M${n(front.x + geometry.radius * 0.7)} ${n(front.y + geometry.radius * 0.7)}L${n(x - 2)} ${n(y + 3.5)}" fill="none" stroke="#173346" stroke-width="0.4" marker-start="url(#leader-arrow)"/>${featureControlFrame(record, x, y)}</g>`);
     } else if (record.characteristic === "flatness") {
-      const x = top.x - geometry.width / 2;
-      const y = top.y - geometry.thickness / 2 - 20;
-      frames.push(`<g data-gdt-id="${record.id}" data-value-source="${record.valueSource}"><path d="M${n(top.x - geometry.width * 0.18)} ${n(top.y - geometry.thickness / 2)}L${n(x + 8)} ${n(y + 7)}" fill="none" stroke="#173346" stroke-width="0.4"/>${featureControlFrame(record, x, y)}</g>`);
+      const frontOnly = plan.viewPreset === "front-only";
+      const anchorX = frontOnly ? front.x : top.x;
+      const anchorY = frontOnly ? front.y : top.y;
+      const anchorHalf = frontOnly ? geometry.height / 2 : geometry.thickness / 2;
+      const x = anchorX - geometry.width / 2;
+      const y = anchorY - anchorHalf - 20;
+      frames.push(`<g data-gdt-id="${record.id}" data-value-source="${record.valueSource}"><path d="M${n(anchorX - geometry.width * 0.18)} ${n(anchorY - anchorHalf)}L${n(x + 8)} ${n(y + 7)}" fill="none" stroke="#173346" stroke-width="0.4"/>${featureControlFrame(record, x, y)}</g>`);
     } else {
       const x = front.x - geometry.width / 2 - 10;
-      const y = front.y - geometry.height / 2 - 18;
+      const y = front.y - geometry.height / 2 - 26;
       frames.push(`<g data-gdt-id="${record.id}" data-value-source="${record.valueSource}"><path d="M${n(front.x - geometry.width / 2)} ${n(front.y - geometry.height * 0.18)}L${n(x + 8)} ${n(y + 7)}" fill="none" stroke="#173346" stroke-width="0.4"/>${featureControlFrame(record, x, y)}</g>`);
     }
   }

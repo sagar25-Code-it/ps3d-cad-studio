@@ -24,6 +24,7 @@ export interface WorkbenchContextRequest {
 
 const TOPOLOGY_REASON = "Requires persistent general B-rep face/body topology and an overlap preview; the bounded analytic kernel cannot execute this safely.";
 const ANALYTIC_BODY_REASON = "Select an independent analytic body. Qualified worker bodies remain immutable from this direct-modeling menu.";
+const PROPERTIES_REASON = "Property values for the current selection are shown in the inspector panel; there is no separate properties action in this preview.";
 
 export function classifyWorkbenchSelection(selectionId: string | null): WorkbenchSelectionKind {
   if (selectionId === null) return "empty";
@@ -66,34 +67,38 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
     );
   }
 
-  if (kind === "sketch") commands.push(
-    command("sketch.edit", "Edit Sketch", "sketch", "edit"),
-    command("sketch.select-connected", "Select Connected Curves", "chain", "select"),
-    command("sketch.select-tangent", "Select Tangent Chain", "tangent", "select"),
-    command("sketch.dimension", "Driving Dimension", "dimension", "edit"),
-    command("sketch.toggle-construction", "Normal / Construction", "construction", "edit"),
-    command("selection.toggle-visibility", "Show / Hide Sketch Entity", "show", "visibility"),
-    command("selection.delete", "Delete Sketch Entity", "trash", "edit", true, undefined, true)
-  );
+  if (kind === "sketch") {
+    const sketchEntity = request.selectionId?.startsWith("entity:") === true;
+    const sketchNodeReason = "Select an individual sketch entity; the sketch node itself only supports Edit Sketch and selection filters.";
+    commands.push(
+      command("sketch.edit", "Edit Sketch", "sketch", "edit"),
+      command("sketch.select-connected", "Select Connected Curves", "chain", "select"),
+      command("sketch.select-tangent", "Select Tangent Chain", "tangent", "select"),
+      command("sketch.dimension", "Driving Dimension", "dimension", "edit"),
+      command("sketch.toggle-construction", "Normal / Construction", "construction", "edit", sketchEntity, sketchEntity ? undefined : sketchNodeReason),
+      command("selection.toggle-visibility", "Show / Hide Sketch Entity", "show", "visibility", sketchEntity, sketchEntity ? undefined : sketchNodeReason),
+      command("selection.delete", "Delete Sketch Entity", "trash", "edit", sketchEntity, sketchEntity ? undefined : sketchNodeReason, true)
+    );
+  }
 
   if (kind === "profile") commands.push(
     command("feature.extrude", "Extrude Profile", "extrude", "create"),
     command("feature.revolve", "Revolve Profile", "revolve", "create", false, "Revolve remains a parameter study, not profile-driven solid topology."),
-    command("sketch.select-loop", "Select Boundary Loop", "chain", "select"),
-    command("inspect.properties", "Profile Area & Properties", "inspect", "inspect")
+    command("sketch.select-loop", "Select Boundary Loop", "chain", "select", false, "Boundary-loop selection is not wired in this preview; use Select Connected Curves."),
+    command("inspect.properties", "Profile Area & Properties", "inspect", "inspect", false, PROPERTIES_REASON)
   );
 
   if (kind === "feature") commands.push(
     command("feature.edit", "Edit Feature Parameters", "edit", "edit"),
     command("feature.reveal-inputs", "Show Parent Sketch", "sketch", "select"),
     command("feature.suppress", "Suppress Feature", "hide", "edit", false, "Feature suppression requires an ordered dependency graph."),
-    command("inspect.properties", "Properties", "inspect", "inspect")
+    command("inspect.properties", "Properties", "inspect", "inspect", false, PROPERTIES_REASON)
   );
 
   if (kind === "body") {
     const analyticBody = request.selectionId?.startsWith("part-body:") === true;
     commands.push(
-      command("selection.toggle-visibility", "Show / Hide Body", "show", "visibility"),
+      command("selection.toggle-visibility", "Show / Hide Body", "show", "visibility", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
       command("selection.isolate", "Isolate Body", "isolate", "visibility", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
       command("body.appearance", "Appearance", "appearance", "edit"),
       command("body.move", "Move / Copy", "move", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
@@ -118,7 +123,7 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
       command("body.boolean-cut", "Subtract", "subtract", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
       command("body.boolean-intersect", "Intersect", "boolean", "edit", false, TOPOLOGY_REASON),
       command("body.update-model", "Update Model", "update-model", "history", true),
-      command("inspect.properties", "Physical Properties", "inspect", "inspect"),
+      command("inspect.properties", "Physical Properties", "inspect", "inspect", false, PROPERTIES_REASON),
       command("selection.delete", "Delete Body", "trash", "edit", analyticBody, analyticBody ? undefined : "The qualified base body is revision-controlled and cannot be deleted here.", true)
     );
   }
@@ -130,12 +135,12 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
     command("selection.isolate", "Isolate Component", "isolate", "visibility", false, "Assembly isolate-all-except is not yet a persisted operation."),
     command("component.move", "Move Component", "move", "edit"),
     command("mate.create", "Joint / Mate", "mate", "assembly"),
-    command("inspect.properties", "Component Properties", "inspect", "inspect"),
+    command("inspect.properties", "Component Properties", "inspect", "inspect", false, PROPERTIES_REASON),
     command("selection.delete", "Delete Component", "trash", "edit", true, undefined, true)
   );
 
   if (kind === "mate") commands.push(
-    command("mate.edit", "Edit Mate", "mate", "assembly"),
+    command("mate.edit", "Edit Mate", "mate", "assembly", false, "Mate records are delete-and-recreate in this preview; delete the mate and create a new one."),
     command("mate.select-components", "Select Components", "select", "select"),
     command("mate.drive", "Drive / Animate", "play", "assembly", false, "Kinematic mate solving is not available in the direct-transform preview."),
     command("selection.delete", "Delete Mate", "trash", "edit", true, undefined, true)
@@ -144,21 +149,28 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
   if (kind === "datum") commands.push(
     command("sketch.create", "Create Sketch on Plane", "sketch", "create"),
     command("view.look-at", "Look At", "view", "view"),
-    command("inspect.properties", "Datum Properties", "inspect", "inspect")
+    command("inspect.properties", "Datum Properties", "inspect", "inspect", false, PROPERTIES_REASON)
   );
 
-  commands.push(
-    submenu("view.named-views", "Named Views & Projection", "view", "view", [
-      command("view.orientation.front", "Front", "view", "view", true, undefined, false, "1"),
-      command("view.orientation.top", "Top", "view", "view", true, undefined, false, "2"),
-      command("view.orientation.right", "Right", "view", "view", true, undefined, false, "3"),
-      command("view.orientation.isometric", "Isometric", "home", "view", true, undefined, false, "4"),
-      command("view.projection.perspective", "Perspective", "view", "view"),
-      command("view.projection.orthographic", "Orthographic", "view", "view")
-    ]),
-    command("view.fit", "Fit", "fit", "view", true, undefined, false, "F"),
-    command("view.home", "Home / Isometric", "home", "view", true, undefined, false, "Home")
+  if (kind === "surface") commands.push(
+    command("sketch.create", "Create Sketch", "sketch", "create"),
+    command("inspect.measure", "Measure", "measure", "inspect")
   );
+
+  if (["part", "assembly", "surface", "vehicle"].includes(request.workspace)) {
+    commands.push(
+      submenu("view.named-views", "Named Views & Projection", "view", "view", [
+        command("view.orientation.front", "Front", "view", "view", true, undefined, false, "1"),
+        command("view.orientation.top", "Top", "view", "view", true, undefined, false, "2"),
+        command("view.orientation.right", "Right", "view", "view", true, undefined, false, "3"),
+        command("view.orientation.isometric", "Isometric", "home", "view", true, undefined, false, "4"),
+        command("view.projection.perspective", "Perspective", "view", "view"),
+        command("view.projection.orthographic", "Orthographic", "view", "view")
+      ]),
+      command("view.fit", "Fit", "fit", "view", true, undefined, false, "F"),
+      command("view.home", "Home / Isometric", "home", "view")
+    );
+  }
   return commands;
 }
 

@@ -180,6 +180,7 @@ export class ThreeViewportAdapter {
   readonly #pickable: THREE.Object3D[] = [];
   #bodyId: string | undefined;
   #selectedId: string | undefined;
+  #lastSceneId: string | undefined;
   #azimuth = -Math.PI / 4;
   #elevation = Math.PI / 5;
   #radius = 0.16;
@@ -488,10 +489,15 @@ export class ThreeViewportAdapter {
   }
 
   setScene(scene: PreviewScene): void {
+    const previousSelectedId = this.#selectedId;
     this.#clearBody();
     for (const primitive of scene.primitives) this.#addPrimitive(primitive);
     this.#bodyId = undefined;
-    this.fitPreview(scene.boundsMm);
+    this.setSelectedId(previousSelectedId ?? null);
+    if (scene.id !== this.#lastSceneId) {
+      this.#lastSceneId = scene.id;
+      this.fitPreview(scene.boundsMm);
+    }
   }
 
   setExternalObject(source: THREE.Object3D): void {
@@ -754,6 +760,7 @@ export class ThreeViewportAdapter {
 
   readonly #onContextMenu = (event: MouseEvent): void => {
     event.preventDefault();
+    if (this.#options.onContextMenu === undefined) return;
     const hit = this.#hitObject(event.clientX, event.clientY);
     const semanticId = typeof hit?.userData["semanticId"] === "string" ? hit.userData["semanticId"] as string : null;
     const selectionKind = typeof hit?.userData["selectionKind"] === "string" ? hit.userData["selectionKind"] as string : null;
@@ -877,6 +884,7 @@ export class ThreeViewportAdapter {
     this.#camera.far = far;
     this.#orthographicCamera.near = near;
     this.#orthographicCamera.far = far;
+    this.#camera.aspect = aspect;
     this.#camera.updateProjectionMatrix();
     this.#orthographicCamera.updateProjectionMatrix();
   }

@@ -73,6 +73,22 @@ export function AccessPortal(): React.JSX.Element {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("verified") === "1") {
+      setFeedback("Email verified. Sign in to create and manage MCP tokens.");
+    }
+    if (location.hash.length > 1) {
+      const fragment = new URLSearchParams(location.hash.slice(1));
+      const providerError = fragment.get("error_description") ?? fragment.get("error");
+      if (providerError !== null) {
+        setError(providerError);
+        history.replaceState(null, "", `${location.pathname}${location.search}`);
+      } else if (fragment.get("access_token") !== null && fragment.get("type") !== "recovery") {
+        history.replaceState(null, "", `${location.pathname}${location.search}`);
+      }
+    }
+  }, []);
+
   const jsonConfig = useMemo(() => created === undefined || config === undefined ? "" : JSON.stringify({
     mcpServers: { ps3d: { url: config.mcpEndpoint, headers: { Authorization: `Bearer ${created.token}` } } }
   }, null, 2), [config, created]);

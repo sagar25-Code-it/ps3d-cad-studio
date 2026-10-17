@@ -35,7 +35,7 @@ export function buildSurfacePreview(surface: SurfaceIntent): SurfacePreview {
     wireframe: false,
     doubleSided: true
   };
-  const controlLines = controlNetLines(controlNet);
+  const controlLines = surface.mode === "bezier" ? controlNetLines(controlNet) : [];
   const scene = {
     id: surface.id,
     kind: "surface" as const,
@@ -84,13 +84,12 @@ export function loftPoint(surface: SurfaceIntent, u: number, v: number): Vec3 {
   const x = xNormalized * halfWidth * scale;
   const z = surface.crownMm * (1 - xNormalized * xNormalized) * (0.65 + 0.35 * Math.sin(v * Math.PI));
   const y = (v - 0.5) * surface.depthMm;
-  return [x * Math.cos(angle) - y * Math.sin(angle), x * Math.sin(angle) + y * Math.cos(angle), z];
+  return [x * Math.cos(angle) - z * Math.sin(angle), y, x * Math.sin(angle) + z * Math.cos(angle)];
 }
 
 function surfaceMetrics(positions: readonly number[], indices: readonly number[], surface: SurfaceIntent): SurfaceMetrics {
   let area = 0;
-  let maximumVariation = 0;
-  let priorNormal: Vec3 | undefined;
+  const triangleNormals: Vec3[] = [];
   for (let index = 0; index < indices.length; index += 3) {
     const a = point(positions, indices[index]!);
     const b = point(positions, indices[index + 1]!);
@@ -98,12 +97,19 @@ function surfaceMetrics(positions: readonly number[], indices: readonly number[]
     const cross = cross3(subtract(b, a), subtract(c, a));
     const length = Math.hypot(...cross);
     area += length / 2;
-    const normal: Vec3 = length === 0 ? [0, 0, 1] : [cross[0] / length, cross[1] / length, cross[2] / length];
-    if (priorNormal !== undefined) {
-      const cosine = clamp(dot(priorNormal, normal), -1, 1);
-      maximumVariation = Math.max(maximumVariation, Math.acos(cosine) * 180 / Math.PI);
+    triangleNormals.push(length === 0 ? [0, 0, 1] : [cross[0] / length, cross[1] / length, cross[2] / length]);
+  }
+  let maximumVariation = 0;
+  const stepBetween = (first: Vec3, second: Vec3): number => Math.acos(clamp(dot(first, second), -1, 1)) * 180 / Math.PI;
+  for (let v = 0; v < surface.vSegments; v += 1) {
+    for (let u = 0; u < surface.uSegments; u += 1) {
+      const quad = v * surface.uSegments + u;
+      const lower = triangleNormals[quad * 2]!;
+      const upper = triangleNormals[quad * 2 + 1]!;
+      maximumVariation = Math.max(maximumVariation, stepBetween(lower, upper));
+      if (u + 1 < surface.uSegments) maximumVariation = Math.max(maximumVariation, stepBetween(lower, triangleNormals[(quad + 1) * 2 + 1]!));
+      if (v + 1 < surface.vSegments) maximumVariation = Math.max(maximumVariation, stepBetween(upper, triangleNormals[(quad + surface.uSegments) * 2]!));
     }
-    priorNormal = normal;
   }
   if (!Number.isFinite(area) || positions.some((value) => !Number.isFinite(value))) throw new Error("Surface tessellation produced a non-finite value.");
   return {

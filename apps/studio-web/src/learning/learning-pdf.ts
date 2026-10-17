@@ -74,17 +74,33 @@ function modulePage(item: LearningModule): string {
   // Leave a deliberate gutter below the shared page subtitle. Module summaries
   // may wrap to two lines, so starting at the subtitle baseline caused visual
   // collisions in rendered PDFs even though the PDF structure was valid.
-  let y = wrap(moduleTitle, 42).length > 1 ? 635 : 660;
-  for (const line of wrap(item.summary, 80)) { out.push(text(48, y, 11, "F1", line, "0.15 0.24 0.30")); y -= 17; }
-  y -= 18;
-  y = listSection(out, y, "LEARNING OUTCOMES", item.outcomes, "0.08 0.70 0.60");
-  y -= 8;
-  y = listSection(out, y, "GUIDED PRACTICE", item.practice, "0.03 0.54 0.72");
-  y -= 8;
-  y = listSection(out, y, "VERIFICATION GATE", item.verification, "0.55 0.25 0.82");
-  y -= 8;
+  const startY = wrap(moduleTitle, 42).length > 1 ? 635 : 660;
+  const summaryLines = wrap(item.summary, 80);
   const boundaryLines = wrap(item.boundary, 72);
   const boundaryHeight = 40 + boundaryLines.length * 15;
+  // Compress the body spacing just enough that the professional-boundary box
+  // (and its text) always clears the page footer. Long modules such as 11
+  // "Secure model-neutral AI collaboration" otherwise ran the box over the
+  // footer disclaimer and page number near y=10. Short modules keep scale = 1
+  // and are laid out exactly as before.
+  const sectionDescent = (items: readonly string[]): number =>
+    20 + items.reduce((sum, value) => sum + wrap(value, 76).length * 14 + 9, 0);
+  const naturalDescent =
+    summaryLines.length * 17 + 18 +
+    sectionDescent(item.outcomes) + 8 +
+    sectionDescent(item.practice) + 8 +
+    sectionDescent(item.verification) + 8;
+  const minBoxTop = boundaryHeight + 54;
+  const scale = naturalDescent > 0 ? Math.min(1, (startY - minBoxTop) / naturalDescent) : 1;
+  let y = startY;
+  for (const line of summaryLines) { out.push(text(48, y, 11, "F1", line, "0.15 0.24 0.30")); y -= 17 * scale; }
+  y -= 18 * scale;
+  y = listSection(out, y, "LEARNING OUTCOMES", item.outcomes, "0.08 0.70 0.60", scale);
+  y -= 8 * scale;
+  y = listSection(out, y, "GUIDED PRACTICE", item.practice, "0.03 0.54 0.72", scale);
+  y -= 8 * scale;
+  y = listSection(out, y, "VERIFICATION GATE", item.verification, "0.55 0.25 0.82", scale);
+  y -= 8 * scale;
   out.push(rect(48, y - boundaryHeight, 499, boundaryHeight, "0.99 0.94 0.91"));
   out.push(text(66, y - 21, 9, "F2", "PROFESSIONAL BOUNDARY", "0.72 0.22 0.16"));
   boundaryLines.forEach((line, index) => out.push(text(66, y - 41 - index * 15, 9, "F1", line, "0.30 0.25 0.23")));
@@ -127,14 +143,14 @@ function pageFrame(titleValue: string, subtitle: string, page: number, total: nu
   return out;
 }
 
-function listSection(out: string[], y: number, heading: string, items: readonly string[], color: string): number {
+function listSection(out: string[], y: number, heading: string, items: readonly string[], color: string, scale = 1): number {
   out.push(text(48, y, 9, "F2", heading, color));
-  y -= 20;
+  y -= 20 * scale;
   for (const item of items) {
     const lines = wrap(item, 76);
     out.push(rect(50, y - 2, 5, 5, color));
-    lines.forEach((line, index) => out.push(text(66, y - index * 14, 8.7, "F1", line, "0.20 0.27 0.31")));
-    y -= lines.length * 14 + 9;
+    lines.forEach((line, index) => out.push(text(66, y - index * 14 * scale, 8.7, "F1", line, "0.20 0.27 0.31")));
+    y -= lines.length * 14 * scale + 9 * scale;
   }
   return y;
 }

@@ -56,7 +56,7 @@ export function AssemblyInspector(props: AssemblyInspectorProps): React.JSX.Elem
           type="range"
           min="0"
           max={props.maxExplodeMm}
-          step="0.5"
+          step="0.1"
           value={props.assembly.explodeMm}
           onChange={(event) => props.onExplodePreview(Number(event.target.value))}
           onPointerUp={(event) => props.onExplodeCommit(Number(event.currentTarget.value))}
@@ -76,16 +76,24 @@ export function AssemblyInspector(props: AssemblyInspectorProps): React.JSX.Elem
         <label><span>Type</span><select value={mateKind} onChange={(event) => setMateKind(event.target.value as AssemblyMate["kind"])}><option value="aligned-axis">Aligned axis</option><option value="coincident-origin">Coincident origins</option><option value="fixed">Fixed</option></select></label>
         {mateKind !== "fixed" && <label><span>Second</span><select value={mateTargetId} onChange={(event) => setMateTargetId(event.target.value)}>{mateTargets.map((component) => <option key={component.id} value={component.id}>{component.name}</option>)}</select></label>}
         {mateKind === "aligned-axis" && <label><span>Axis</span><select value={mateAxis} onChange={(event) => setMateAxis(event.target.value as "x" | "y" | "z")}><option value="x">X axis</option><option value="y">Y axis</option><option value="z">Z axis</option></select></label>}
-        <button className="primary" disabled={mateKind !== "fixed" && mateTargetId.length === 0} onClick={() => props.onAddMate({ id: `mate:user-${crypto.randomUUID()}`, name: mateKind === "fixed" ? `${selected.name} fixed` : `${selected.name} / ${mateTargets.find((component) => component.id === mateTargetId)?.name ?? "component"}`, kind: mateKind, componentIds: mateKind === "fixed" ? [selected.id] : [selected.id, mateTargetId], ...(mateKind === "aligned-axis" ? { axis: mateAxis } : {}), status: "satisfied" })}>Create mate record</button>
+        <button className="primary" disabled={mateKind !== "fixed" && mateTargetId.length === 0} onClick={() => { const target = mateTargets.find((component) => component.id === mateTargetId); props.onAddMate({ id: `mate:user-${crypto.randomUUID()}`, name: mateKind === "fixed" ? `${selected.name} fixed` : `${selected.name} / ${target?.name ?? "component"}`, kind: mateKind, componentIds: mateKind === "fixed" ? [selected.id] : [selected.id, mateTargetId], ...(mateKind === "aligned-axis" ? { axis: mateAxis } : {}), status: mateStatus(mateKind, mateAxis, selected.translationMm, target?.translationMm) }); }}>Create mate record</button>
         <small>Direct-mate records validate references and browser relationships; they do not claim a full kinematic solver.</small>
       </div>}
     </section>
     <section className="inspector-section"><header><strong>Direct mates</strong><span>{satisfied}/{props.assembly.mates.length} satisfied</span></header><div className="mate-list">{props.assembly.mates.map((mate) => <div key={mate.id} className="mate-record"><button onClick={() => props.onSelect(mate.id)} className={mate.id === props.selectedId ? "selected" : ""}><span className={`mate-status ${mate.status}`} aria-label={mate.status} /><span><strong>{mate.name}</strong><small>{mate.kind}{mate.axis === undefined ? "" : ` · ${mate.axis.toUpperCase()} axis`}</small></span></button><button className="mate-delete" onClick={() => props.onDeleteMate(mate.id)} aria-label={`Delete ${mate.name}`}>×</button></div>)}</div></section>
-    <section className={`interference-card ${props.interferences.length === 0 ? "clear" : "warning"}`}><header><strong>AABB interference</strong><span>{props.interferences.length} candidate{props.interferences.length === 1 ? "" : "s"}</span></header><p>{props.interferences.length === 0 ? "No conservative overlap at this exploded distance." : `${names(props.interferences[0]!)} overlap by approximately ${props.interferences[0]!.volumeCubicMm.toFixed(1)} mm³.`}</p></section>
+    <section className={`interference-card ${props.interferences.length === 0 ? "clear" : "warning"}`}><header><strong>AABB interference</strong><span>{props.interferences.length} candidate{props.interferences.length === 1 ? "" : "s"}</span></header>{props.interferences.length === 0 ? <p>No conservative overlap at this exploded distance.</p> : props.interferences.map((candidate) => <p key={candidate.componentIds.join("|")}>{names(candidate, props.assembly.components)} overlap by approximately {candidate.volumeCubicMm.toFixed(1)} mm³.</p>)}</section>
     <div className="scope-note"><strong>Preview boundary</strong><p>{props.assembly.template === "electrical-panel" ? "Device bodies are generic panel-scale proxies; conductor diameter and color are visualization only. Mates use deterministic direct transforms and interference uses conservative axis-aligned boxes." : "Mates use ordered direct transforms. Interference uses conservative axis-aligned boxes, not exact collision geometry."}</p></div>
   </aside>;
 }
 
-function names(candidate: InterferenceCandidate): string {
-  return candidate.componentIds.map((id) => id.split(":")[1]).join(" / ");
+function names(candidate: InterferenceCandidate, components: readonly { readonly id: string; readonly name: string }[]): string {
+  return candidate.componentIds.map((id) => components.find((component) => component.id === id)?.name ?? id.split(":")[1] ?? id).join(" / ");
+}
+
+function mateStatus(kind: AssemblyMate["kind"], axis: "x" | "y" | "z", first: readonly number[], second: readonly number[] | undefined): AssemblyMate["status"] {
+  if (kind === "fixed" || second === undefined) return "satisfied";
+  const matches = (index: number): boolean => Math.abs((first[index] ?? 0) - (second[index] ?? 0)) <= 1e-6;
+  if (kind === "coincident-origin") return matches(0) && matches(1) && matches(2) ? "satisfied" : "conflict";
+  const axisIndex = axis === "x" ? 0 : axis === "y" ? 1 : 2;
+  return matches(axisIndex) ? "satisfied" : "conflict";
 }

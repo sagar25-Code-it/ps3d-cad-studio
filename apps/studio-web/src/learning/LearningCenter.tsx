@@ -21,7 +21,11 @@ export function LearningCenter(): React.JSX.Element {
     const next = new Set(completed);
     if (next.has(id)) next.delete(id); else next.add(id);
     setCompleted(next);
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify([...next]));
+    try {
+      localStorage.setItem(PROGRESS_KEY, JSON.stringify([...next]));
+    } catch {
+      // Storage may be blocked (private mode, cleared/blocked site data); progress stays in-memory only.
+    }
   };
 
   const downloadManual = (): void => {
@@ -50,7 +54,7 @@ export function LearningCenter(): React.JSX.Element {
 
     <section className="learning-principles" aria-label="Learning principles"><div><strong>Qualified</strong><span>Bounded behavior with executed evidence gates</span></div><div><strong>Preview</strong><span>Useful deterministic assistance with explicit limitations</span></div><div><strong>Unavailable</strong><span>Professional-kernel or certification behavior not honestly implemented</span></div></section>
 
-    <section className="learning-controls"><div role="tablist" aria-label="Learning level">{(["All", ...LEARNING_LEVELS] as const).map((item) => <button className={level === item ? "active" : ""} key={item} onClick={() => setLevel(item)}>{item}</button>)}</div><label><span>Search curriculum</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sketch, GD&T, vehicle, MCP..." /></label></section>
+    <section className="learning-controls"><div role="tablist" aria-label="Learning level">{(["All", ...LEARNING_LEVELS] as const).map((item) => <button role="tab" aria-selected={level === item} className={level === item ? "active" : ""} key={item} onClick={() => setLevel(item)}>{item}</button>)}</div><label><span>Search curriculum</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Sketch, GD&T, vehicle, MCP..." /></label></section>
 
     <section className="module-grid" aria-label="PS3D learning modules">{modules.map((item) => <article className={`learning-module level-${item.level.toLowerCase()} ${completed.has(item.id) ? "complete" : ""}`} id={item.id} key={item.id}>
       <header><span className="module-number">{item.number}</span><div><span>{item.level} / {item.workspace}</span><h2>{item.title}</h2></div><button className="completion-button" onClick={() => toggleComplete(item.id)} aria-pressed={completed.has(item.id)}>{completed.has(item.id) ? "Verified complete" : "Mark complete"}</button></header>
