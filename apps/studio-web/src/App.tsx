@@ -104,7 +104,6 @@ import { CameraGestureControl, type CameraCursorState } from "./ui/CameraGesture
 import { DesignHealthCenter } from "./ui/DesignHealthCenter.js";
 import { SmartFaultBrain } from "./ui/SmartFaultBrain.js";
 import { WorkbenchContextMenu } from "./ui/WorkbenchContextMenu.js";
-import { selectWorkbenchHistoryLane } from "./ui/history-lane.js";
 import { SketchWorkspace, type SketchExtrudeOperation } from "./workspaces/SketchWorkspace.js";
 import { PartInspector } from "./workspaces/PartInspector.js";
 import { ImportedModelInspector } from "./workspaces/ImportedModelInspector.js";
@@ -180,6 +179,15 @@ export function App(): React.JSX.Element {
   const projectHistoryIndexRef = useRef(0);
   const [projectUndoDepth, setProjectUndoDepth] = useState(0);
   const [projectRedoDepth, setProjectRedoDepth] = useState(0);
+  // Chronological undo/redo timeline across the two lanes (qualified-part worker + broad-project).
+  // Each committed edit appends its lane; a single Undo/Redo acts on the most-recent edit regardless
+  // of lane, so order — not a fixed worker-first priority — decides what is reverted.
+  const laneTimelineRef = useRef<("qualified-part" | "broad-project")[]>([]);
+  const laneTimelineIndexRef = useRef(0);
+  const [laneTimelineIndex, setLaneTimelineIndex] = useState(0);
+  const [laneTimelineLength, setLaneTimelineLength] = useState(0);
+  const workerNavigatingRef = useRef(false);
+  const prevWorkerUndoDepthRef = useRef(0);
   const [model, setModel] = useState<ModelSuccessResponse>();
   const modelRef = useRef<ModelSuccessResponse | undefined>(undefined);
   const [status, setStatus] = useState<"starting" | "ready" | "working" | "error">("starting");
@@ -261,6 +269,19 @@ export function App(): React.JSX.Element {
     return queued;
   }, []);
 
+  const syncTimelineState = useCallback((): void => {
+    setLaneTimelineIndex(laneTimelineIndexRef.current);
+    setLaneTimelineLength(laneTimelineRef.current.length);
+  }, []);
+
+  const recordLane = useCallback((lane: "qualified-part" | "broad-project"): void => {
+    const log = laneTimelineRef.current.slice(0, laneTimelineIndexRef.current);
+    log.push(lane);
+    laneTimelineRef.current = log;
+    laneTimelineIndexRef.current = log.length;
+    syncTimelineState();
+  }, [syncTimelineState]);
+
   const pushProject = useCallback((next: WorkbenchProject, persist = true): void => {
     const history = projectHistoryRef.current.slice(0, projectHistoryIndexRef.current + 1);
     history.push(next);
@@ -270,20 +291,25 @@ export function App(): React.JSX.Element {
     setProjectRedoDepth(0);
     projectRef.current = next;
     setProject(next);
+    recordLane("broad-project");
     if (persist) void persistBroadProject(next).catch((error: unknown) => {
       setStatus("error");
       setStatusText(error instanceof Error ? error.message : "The broad project could not be persisted.");
     });
-  }, [persistBroadProject]);
+  }, [persistBroadProject, recordLane]);
 
   const resetProject = useCallback((next: WorkbenchProject): void => {
     projectHistoryRef.current = [next];
     projectHistoryIndexRef.current = 0;
     setProjectUndoDepth(0);
     setProjectRedoDepth(0);
+    laneTimelineRef.current = [];
+    laneTimelineIndexRef.current = 0;
+    prevWorkerUndoDepthRef.current = 0;
+    syncTimelineState();
     projectRef.current = next;
     setProject(next);
-  }, []);
+  }, [syncTimelineState]);
 
   const queueProjectTransition = useCallback((transition: () => Promise<void>): Promise<void> => {
     const queued = projectTransitionQueueRef.current.then(transition);
@@ -345,6 +371,25 @@ export function App(): React.JSX.Element {
     setAssemblyExplodePreviewMm(null);
   }, [project.id, project.assembly.explodeMm]);
 
+  // Mirror the worker's qualified parameters into the CURRENT broad-project slot in place, without
+  // pushing a new broad-history entry. The worker owns its own undo history for these params, so a
+  // worker edit must not also create a separate broad-lane undo step (which desynced the two lanes).
+  const replaceQualifiedParams = useCallback((values: readonly [PartParameter, number][]): void => {
+    let project = projectRef.current;
+    let changedAny = false;
+    for (const [parameter, value] of values) {
+      if (Math.abs(project.part[parameter] - value) <= 1e-9) continue;
+      const operation = { kind: "set-part-parameter", parameter, value, operationId: `operation:worker-sync-${crypto.randomUUID()}`, expectedRevision: project.revision } as WorkbenchOperation;
+      const applied = applyWorkbenchOperation(project, operation);
+      if (applied.ok) { project = applied.value.project; changedAny = true; }
+    }
+    if (!changedAny) return;
+    projectRef.current = project;
+    setProject(project);
+    projectHistoryRef.current[projectHistoryIndexRef.current] = project;
+    void persistBroadProject(project).catch(() => undefined);
+  }, [persistBroadProject]);
+
   const acceptModel = useCallback((response: ModelSuccessResponse): void => {
     setModel(response);
     modelRef.current = response;
@@ -358,13 +403,15 @@ export function App(): React.JSX.Element {
       ["thicknessMm", parameterByKey(response.document, "thickness").valueMeters * 1000],
       ["holeDiameterMm", parameterByKey(response.document, "holeDiameter").valueMeters * 1000]
     ];
-    for (const [parameter, value] of values) {
-      if (Math.abs(projectRef.current.part[parameter] - value) > 1e-9) applyProjectOperation({ kind: "set-part-parameter", parameter, value }, false);
-    }
+    replaceQualifiedParams(values);
+    // A genuine new worker edit (not undo/redo navigation, not bootstrap/load) advances the worker's
+    // own undo depth; record one chronological marker per such advance so the shared Undo stays in step.
+    if (!workerNavigatingRef.current && response.history.undoDepth > prevWorkerUndoDepthRef.current) recordLane("qualified-part");
+    prevWorkerUndoDepthRef.current = response.history.undoDepth;
     setDiagnostic(undefined);
     setStatus("ready");
     setStatusText(response.recoveredFromLocal ? `Recovered qualified solid revision ${response.currentRevision}.` : `Qualified solid revision ${response.currentRevision} validated.`);
-  }, [applyProjectOperation]);
+  }, [replaceQualifiedParams, recordLane]);
 
   const acceptResponse = useCallback((response: WorkerResponse): boolean => {
     if (response.status === "error") {
@@ -385,8 +432,11 @@ export function App(): React.JSX.Element {
     const client = clientRef.current;
     if (client === undefined) return;
     void client.bootstrap(documentRef.current, true, modelRef.current?.evidence ?? null).then(async (response) => {
-      if (response.status === "error" && response.diagnostics[0]?.code === "PERSISTENCE_FAILURE") acceptResponse(await client.bootstrap(documentRef.current, false, modelRef.current?.evidence ?? null));
-      else acceptResponse(response);
+      workerNavigatingRef.current = true;
+      try {
+        if (response.status === "error" && response.diagnostics[0]?.code === "PERSISTENCE_FAILURE") acceptResponse(await client.bootstrap(documentRef.current, false, modelRef.current?.evidence ?? null));
+        else acceptResponse(response);
+      } finally { workerNavigatingRef.current = false; }
     }).catch(() => undefined);
   }, [acceptResponse]);
 
@@ -401,7 +451,9 @@ export function App(): React.JSX.Element {
       const response = await client.bootstrap(fallbackDocument, false, null);
       if (clientRef.current !== client) return;
       resetProject(authoritativeProject);
-      acceptResponse(response);
+      workerNavigatingRef.current = true;
+      try { acceptResponse(response); }
+      finally { workerNavigatingRef.current = false; }
       if (stored !== undefined && response.status !== "error") setStatusText(`Recovered synchronized workbench project revision ${stored.revision}.`);
     })().catch((error: unknown) => {
       if (clientRef.current !== client) return;
@@ -1293,12 +1345,14 @@ export function App(): React.JSX.Element {
   };
 
   const moveHistory = async (direction: "undo" | "redo"): Promise<void> => {
-    if (projectRef.current.activeWorkspace !== "part") { moveProjectHistory(direction); return; }
     const client = clientRef.current;
     if (client === undefined) return;
     setStatus("working");
     const response = await client.history(documentRef.current.revision, direction, `command:${direction}-${crypto.randomUUID()}`).catch(() => undefined);
-    if (response !== undefined) acceptResponse(response);
+    // Navigation, not a new edit: suppress a chronological marker while the worker reverts/replays.
+    workerNavigatingRef.current = true;
+    try { if (response !== undefined) acceptResponse(response); }
+    finally { workerNavigatingRef.current = false; }
   };
 
   const moveProjectHistory = (direction: "undo" | "redo"): void => {
@@ -1311,7 +1365,15 @@ export function App(): React.JSX.Element {
     // view concern baked into each snapshot, so a broad undo/redo must not yank the user into
     // whatever workspace was active when that revision was recorded.
     const preservedWorkspace = projectRef.current.activeWorkspace;
-    const next = stored.activeWorkspace === preservedWorkspace ? stored : { ...stored, activeWorkspace: preservedWorkspace };
+    // Qualified part parameters are owned by the worker lane, so a broad restore must keep the
+    // current worker values instead of reinstating whatever they were when this broad revision
+    // was recorded (which would clobber worker state and desync the lanes).
+    const currentPart = projectRef.current.part;
+    const next = {
+      ...stored,
+      activeWorkspace: preservedWorkspace,
+      part: { ...stored.part, widthMm: currentPart.widthMm, heightMm: currentPart.heightMm, thicknessMm: currentPart.thicknessMm, holeDiameterMm: currentPart.holeDiameterMm }
+    };
     projectRef.current = next;
     setProject(next);
     setProjectUndoDepth(nextIndex);
@@ -1352,7 +1414,10 @@ export function App(): React.JSX.Element {
     clientRef.current = prepared.client;
     prepared.activate();
     previous?.dispose();
-    acceptModel(prepared.response);
+    // Loading a project re-establishes a fresh baseline, not a new undoable edit.
+    workerNavigatingRef.current = true;
+    try { acceptModel(prepared.response); }
+    finally { workerNavigatingRef.current = false; }
   };
 
   const saveVisibleProject = async (mode: "save" | "save-as" | "copy", suggestedName: string): Promise<void> => {
@@ -1603,7 +1668,12 @@ export function App(): React.JSX.Element {
     clientRef.current.restart();
     const response = await clientRef.current.bootstrap(parsed.value.document, false, parsed.value.evidence);
     if (response.status === "error" || response.kind !== "model") acceptResponse(response);
-    else { await clientRef.current.persist(response.currentRevision); acceptModel(response); setStatusText(`Imported and validated native solid revision ${response.currentRevision}.`); }
+    else {
+      await clientRef.current.persist(response.currentRevision);
+      workerNavigatingRef.current = true;
+      try { acceptModel(response); } finally { workerNavigatingRef.current = false; }
+      setStatusText(`Imported and validated native solid revision ${response.currentRevision}.`);
+    }
   };
 
   const downloadNative = async (): Promise<void> => {
@@ -1958,13 +2028,23 @@ export function App(): React.JSX.Element {
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
   }, [openDesignHealth, renderStudioOpen]);
-  const undoLane = selectWorkbenchHistoryLane(project.activeWorkspace, undoDepth, projectUndoDepth);
-  const redoLane = selectWorkbenchHistoryLane(project.activeWorkspace, redoDepth, projectRedoDepth);
-  const canUndo = undoLane !== null;
-  const canRedo = redoLane !== null;
+  const canUndo = laneTimelineIndex > 0;
+  const canRedo = laneTimelineIndex < laneTimelineLength;
   historyActionRef.current = {
-    undo: () => { if (canUndo) { if (undoLane === "qualified-part") void moveHistory("undo"); else moveProjectHistory("undo"); } },
-    redo: () => { if (canRedo) { if (redoLane === "qualified-part") void moveHistory("redo"); else moveProjectHistory("redo"); } }
+    undo: () => {
+      if (laneTimelineIndexRef.current <= 0) return;
+      const lane = laneTimelineRef.current[laneTimelineIndexRef.current - 1];
+      laneTimelineIndexRef.current -= 1;
+      syncTimelineState();
+      if (lane === "qualified-part") void moveHistory("undo"); else moveProjectHistory("undo");
+    },
+    redo: () => {
+      if (laneTimelineIndexRef.current >= laneTimelineRef.current.length) return;
+      const lane = laneTimelineRef.current[laneTimelineIndexRef.current];
+      laneTimelineIndexRef.current += 1;
+      syncTimelineState();
+      if (lane === "qualified-part") void moveHistory("redo"); else moveProjectHistory("redo");
+    }
   };
   const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo });
 
@@ -1996,8 +2076,8 @@ export function App(): React.JSX.Element {
       onRecoverProject={() => void recoverAutosave()}
       onClearFileCache={() => void clearFileCaches()}
       onPrint={() => window.print()}
-      onUndo={() => undoLane === "qualified-part" ? void moveHistory("undo") : moveProjectHistory("undo")}
-      onRedo={() => redoLane === "qualified-part" ? void moveHistory("redo") : moveProjectHistory("redo")}
+      onUndo={() => historyActionRef.current.undo()}
+      onRedo={() => historyActionRef.current.redo()}
       onFit={fitViewport}
       onHome={homeViewport}
       onToggleGrid={() => setViewportGrid(!viewportState.gridVisible)}
