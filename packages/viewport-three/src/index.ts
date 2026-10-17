@@ -944,7 +944,10 @@ export class ThreeViewportAdapter {
           });
           const tube = new THREE.Mesh(geometry, material);
           tube.userData["ps3dConductorVisualization"] = true;
-          this.#addObject(tube, false);
+          tube.userData["semanticId"] = primitive.id;
+          tube.userData["selectionKind"] = primitive.id.startsWith("component:") ? "component" : "body";
+          tube.userData["baseColor"] = primitive.color;
+          this.#addObject(tube, primitive.selectable);
           return;
         }
       }

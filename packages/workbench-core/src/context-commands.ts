@@ -39,7 +39,7 @@ export function classifyWorkbenchSelection(selectionId: string | null): Workbenc
   if (namespace === "surface") return "surface";
   if (namespace === "drawing" || namespace === "drawing-view") return "drawing";
   if (namespace === "electrical" || namespace === "electromechanical" || namespace === "electrical-component" || namespace === "electrical-net") return "electrical";
-  if (namespace === "vehicle") return "vehicle";
+  if (namespace === "vehicle" || namespace?.startsWith("vehicle-") === true) return "vehicle";
   if (namespace === "project") return "project";
   return "other";
 }
@@ -167,6 +167,12 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
   if (kind === "surface") commands.push(
     command("sketch.create", "Create Sketch", "sketch", "create"),
     command("inspect.measure", "Measure", "measure", "inspect")
+  );
+
+  if (kind === "vehicle") commands.push(
+    command("inspect.measure", "Measure", "measure", "inspect"),
+    command("view.look-at", "Look At", "view", "view"),
+    command("inspect.properties", "Member / Hardpoint Properties", "inspect", "inspect", false, PROPERTIES_REASON)
   );
 
   if (["part", "assembly", "surface", "vehicle"].includes(request.workspace)) {
