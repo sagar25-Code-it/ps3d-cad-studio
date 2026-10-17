@@ -17,6 +17,7 @@ interface WorkbenchRibbonProps {
   readonly selectedId: string | null;
   readonly onSketchTool: (tool: SketchTool) => void;
   readonly onSketchDimension: () => void;
+  readonly onOpenSketchOptions: () => void;
   readonly onToggleSketchEntityVisibility: (entityId: string) => void;
   readonly onFinishSketch: () => void;
   readonly onCancelSketchPoints: () => void;
@@ -137,7 +138,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="dimension" label="Relax Dimensions" hint="solver req." disabled />
         <RibbonButton icon="constraint" label="Relax Relations" hint="solver req." disabled />
         <RibbonButton icon="shield" label="Sketch Checking" hint="solver req." disabled />
-        <RibbonButton icon="display" label="Options" hint="palette" disabled />
+        <RibbonButton icon="display" label="Options" hint="palette" onClick={props.onOpenSketchOptions} />
       </RibbonGroup>
     </>}
     {!props.masterCartOpen && props.project.activeWorkspace === "part" && <>

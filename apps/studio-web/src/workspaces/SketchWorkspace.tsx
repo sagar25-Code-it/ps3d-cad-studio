@@ -76,6 +76,7 @@ interface SketchWorkspaceProps {
   readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null) => void;
   readonly working: boolean;
   readonly onMessage: (message: string) => void;
+  readonly optionsRevealRequest: number;
 }
 
 export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element {
@@ -91,6 +92,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [extrudeDistance, setExtrudeDistance] = useState("10");
   const [extrudeOperation, setExtrudeOperation] = useState<SketchExtrudeOperation>("new-body");
   const orbitDrag = useRef<{ readonly pointerId: number; readonly startX: number; readonly startY: number; readonly azimuthDeg: number; readonly elevationDeg: number } | undefined>(undefined);
+  const paletteRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (props.optionsRevealRequest === 0) return undefined;
+    const palette = paletteRef.current;
+    if (palette === null) return undefined;
+    palette.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    palette.classList.add("palette-reveal");
+    const timer = window.setTimeout(() => palette.classList.remove("palette-reveal"), 1200);
+    return () => window.clearTimeout(timer);
+  }, [props.optionsRevealRequest]);
   const visibleEntities = useMemo(() => props.sketch.entities.filter((entity) => entity.visible !== false), [props.sketch.entities]);
   const visibleSketch = useMemo<WorkbenchSketch>(() => ({
     ...props.sketch,
@@ -335,7 +346,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
       <ViewportChrome workspace="sketch" state={props.viewportState} measurePoints={[]} onNavigationMode={props.onNavigationMode} onSelectionFilter={props.onSelectionFilter} onOrientation={props.onOrientation} onViewAngles={props.onViewAngles} onProjection={props.onProjection} onGrid={props.onGrid} onAxes={props.onAxes} onShadingMode={() => undefined} onBodyColor={() => undefined} onBackgroundTone={() => undefined} onFit={props.onFit} onHome={props.onHome} onClearMeasure={() => undefined} />
 
-      <div className="sketch-palette" aria-label="Sketch palette">
+      <div className="sketch-palette" ref={paletteRef} aria-label="Sketch palette">
         <header><div><span>SKETCH</span><strong>Palette</strong></div><button onClick={() => props.onOrientation("top")}><CommandIcon name="view" />Look at</button></header>
         <PaletteToggle label="Sketch grid" active={props.viewportState.gridVisible} onToggle={props.onGrid} />
         <PaletteToggle label="Snap" active={snapEnabled} onToggle={setSnapEnabled} />

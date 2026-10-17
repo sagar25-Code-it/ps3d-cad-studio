@@ -187,6 +187,7 @@ export function App(): React.JSX.Element {
   const [diagnostic, setDiagnostic] = useState<UiDiagnostic>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [treeRevealRequest, setTreeRevealRequest] = useState(0);
+  const [sketchOptionsRevealRequest, setSketchOptionsRevealRequest] = useState(0);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -1085,6 +1086,9 @@ export function App(): React.JSX.Element {
       case "activate-sketch-tool":
         activateSketchTool(action.tool, "from the command launcher");
         break;
+      case "activate-sketch-dimension":
+        activateSketchDimension("from the command launcher");
+        break;
       case "select-record":
         if (handleVirtualSelection(action.selectionId)) break;
         setSelectedId(action.selectionId);
@@ -1755,6 +1759,15 @@ export function App(): React.JSX.Element {
       : `${sketchToolLabel(tool)} tool active ${source}: left-click places points (NAV switched to Select); middle-drag or the ViewCube orbits.`);
   };
 
+  const activateSketchDimension = (source: string): void => {
+    if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
+    setSketchTool("select");
+    setViewportNavigation("select");
+    setViewportSelectionFilter("sketch-curve");
+    setSketchDimensionMode(true);
+    setStatusText(`Sketch Dimension active ${source}: select a curve or two displayed definition points, then edit the driving value in the inspector.`);
+  };
+
   const setViewportSelectionFilter = (filter: SelectionFilter): void => {
     if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, selectionFilter: filter }));
     else viewportRef.current.setSelectionFilter(filter);
@@ -1827,13 +1840,8 @@ export function App(): React.JSX.Element {
       return;
     }
     if (commandId === "sketch.dimension") {
-      if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
-      setSketchTool("select");
-      setViewportNavigation("select");
-      setViewportSelectionFilter("sketch-curve");
-      setSketchDimensionMode(true);
+      activateSketchDimension("from the context menu");
       if (selectionId !== null) setSelectedId(selectionId);
-      setStatusText("Sketch Dimension active: select a curve or two displayed definition points, then edit the driving value in the inspector.");
       return;
     }
     if (commandId === "feature.extrude") { switchWorkspace("sketch"); if (selectionId !== null) setSelectedId(selectionId); setStatusText("Extrude ready: review the selected closed profile and operation in the right inspector."); return; }
@@ -2009,7 +2017,8 @@ export function App(): React.JSX.Element {
       assemblyExplodeMaxMm={assemblyExplodeMaxMm}
       selectedId={selectedId}
       onSketchTool={(tool) => activateSketchTool(tool, "in the top ribbon")}
-      onSketchDimension={() => { setSketchTool("select"); setViewportNavigation("select"); setViewportSelectionFilter("sketch-curve"); setSketchDimensionMode(true); setStatusText("Sketch Dimension active: select a curve or two displayed definition points."); }}
+      onSketchDimension={() => activateSketchDimension("in the top ribbon")}
+      onOpenSketchOptions={() => { if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch"); setSketchOptionsRevealRequest((request) => request + 1); setStatusText("Sketch palette: grid, snap, profile shading, dimensions, constraints, and construction toggles are in the right-side panel."); }}
       onToggleSketchEntityVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })}
       onFinishSketch={() => { switchWorkspace("part"); setStatusText("Sketch session finished. Revisioned sketch geometry remains linked to the Part workspace."); }}
       onCancelSketchPoints={() => { setSketchCancelVersion((version) => version + 1); setStatusText("Pending sketch points cleared from the top ribbon."); }}
@@ -2071,7 +2080,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} onExtrudeProfiles={extrudeSketchProfiles} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} onFit={() => setStatusText("Sketch fit is already bounded to all visible entities.")} onHome={homeViewport} onContextMenu={openContextMenu} working={status === "working"} onMessage={setStatusText} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} onExtrudeProfiles={extrudeSketchProfiles} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} onFit={() => setStatusText("Sketch fit is already bounded to all visible entities.")} onHome={homeViewport} onContextMenu={openContextMenu} working={status === "working"} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl

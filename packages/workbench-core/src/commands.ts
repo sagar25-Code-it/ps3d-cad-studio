@@ -14,6 +14,7 @@ export type CadCommandAction =
   | { readonly kind: "open-render-studio" }
   | { readonly kind: "finish-sketch" }
   | { readonly kind: "activate-sketch-tool"; readonly tool: CadSketchTool }
+  | { readonly kind: "activate-sketch-dimension" }
   | { readonly kind: "select-record"; readonly selectionId: string }
   | { readonly kind: "insert-current-part-into-assembly" }
   | { readonly kind: "create-part-preview-body"; readonly shape: PartPreviewBodyShape }
@@ -85,7 +86,7 @@ export interface CadCommandAuditReport {
 
 export const CAD_EXECUTABLE_ACTION_KINDS = [
   "open-workspace", "file-new", "file-open", "file-save", "file-save-as", "file-save-copy", "file-workspace",
-  "open-render-studio", "finish-sketch", "activate-sketch-tool", "select-record", "insert-current-part-into-assembly",
+  "open-render-studio", "finish-sketch", "activate-sketch-tool", "activate-sketch-dimension", "select-record", "insert-current-part-into-assembly",
   "create-part-preview-body", "selected-part-preview-body-action", "part-feature-action", "set-part-preview-bodies-visibility", "insert-component",
   "apply-assembly-template", "selected-component-action", "set-surface-mode", "fit-view", "set-view-orientation",
   "set-view-projection", "set-shading-mode", "set-background-tone", "set-navigation-mode", "set-selection-filter",
@@ -109,7 +110,7 @@ export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   unavailable("command:sketch-trim", "sketch", "modify", "Trim", "Requires robust curve intersection and reference repair.", ["extend", "split"]),
   unavailable("command:sketch-offset", "sketch", "modify", "Offset", "Requires robust curve offsetting and corner resolution.", ["parallel", "distance"]),
   unavailable("command:sketch-project", "sketch", "construct", "Project geometry", "Requires persistent topology references from a qualified solid kernel.", ["include", "reference"]),
-  command("command:sketch-dimension", "sketch", "construct", "Driving dimension", "Edit bounded line length, rectangle width/height, and circle radius dimensions.", "preview", { kind: "open-workspace" }, ["constraint", "measure"]),
+  command("command:sketch-dimension", "sketch", "construct", "Driving dimension", "Activate Dimension mode, then select a line, rectangle, or circle to edit its driving value.", "preview", { kind: "activate-sketch-dimension" }, ["constraint", "measure"]),
   command("command:sketch-pair-constraints", "sketch", "construct", "Pair constraints", "Shift-select two entities for parallel, perpendicular, collinear, concentric, equal, or tangent intent.", "preview", { kind: "open-workspace" }, ["horizontal", "vertical", "parallel", "perpendicular", "concentric"]),
   command("command:sketch-palette", "sketch", "inspect", "Sketch palette", "Control grid, snap, profile shading, dimensions, constraints, and construction geometry.", "preview", { kind: "open-workspace" }, ["grid", "snap", "show", "hide"]),
   command("command:sketch-create", "sketch", "construct", "Create Sketch", "Open the sketch workspace on the current bounded XY datum plane.", "preview", { kind: "open-workspace" }, ["sketch", "construction", "plane"]),
