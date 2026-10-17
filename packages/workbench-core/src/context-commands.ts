@@ -38,7 +38,7 @@ export function classifyWorkbenchSelection(selectionId: string | null): Workbenc
   if (namespace === "datum") return "datum";
   if (namespace === "surface") return "surface";
   if (namespace === "drawing" || namespace === "drawing-view") return "drawing";
-  if (namespace === "electrical" || namespace === "electromechanical") return "electrical";
+  if (namespace === "electrical" || namespace === "electromechanical" || namespace === "electrical-component" || namespace === "electrical-net") return "electrical";
   if (namespace === "vehicle") return "vehicle";
   if (namespace === "project") return "project";
   return "other";
@@ -138,6 +138,18 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
     command("inspect.properties", "Component Properties", "inspect", "inspect", false, PROPERTIES_REASON),
     command("selection.delete", "Delete Component", "trash", "edit", true, undefined, true)
   );
+
+  if (kind === "electrical") {
+    const isComponent = request.selectionId?.startsWith("electrical-component:") === true;
+    const isNet = request.selectionId?.startsWith("electrical-net:") === true;
+    const deletable = isComponent || isNet;
+    const selectReason = "Select a device or net on the schematic sheet first.";
+    commands.push(
+      command("electrical.edit", "Edit in Inspector", "edit", "edit", deletable, deletable ? undefined : selectReason),
+      command("inspect.properties", isNet ? "Net Properties" : "Device Properties", "inspect", "inspect", false, PROPERTIES_REASON),
+      command("selection.delete", isNet ? "Delete Net" : "Delete Device", "trash", "edit", deletable, deletable ? undefined : selectReason, true)
+    );
+  }
 
   if (kind === "mate") commands.push(
     command("mate.edit", "Edit Mate", "mate", "assembly", false, "Mate records are delete-and-recreate in this preview; delete the mate and create a new one."),

@@ -1868,7 +1868,16 @@ export function App(): React.JSX.Element {
       else if (selectionId.startsWith("part-body:")) applyProjectOperation({ kind: "delete-part-preview-body", bodyId: selectionId });
       else if (selectionId.startsWith("component:")) deleteAssemblyComponent(selectionId);
       else if (selectionId.startsWith("mate:")) applyProjectOperation({ kind: "delete-assembly-mate", mateId: selectionId });
+      else if (selectionId.startsWith("electrical-component:")) applyProjectOperation({ kind: "delete-electrical-component", componentId: selectionId });
+      else if (selectionId.startsWith("electrical-net:")) applyProjectOperation({ kind: "delete-electrical-net", netId: selectionId });
       setSelectedId(null);
+      return;
+    }
+    if (commandId === "electrical.edit" && selectionId !== null) {
+      if (projectRef.current.activeWorkspace !== "electrical") switchWorkspace("electrical");
+      setSelectedId(selectionId);
+      setTreeRevealRequest((request) => request + 1);
+      setStatusText(selectionId.startsWith("electrical-net:") ? "Net selected — edit its name, class, or endpoints in the Electrical inspector." : "Device selected — edit its reference, value, or position in the Electrical inspector.");
       return;
     }
     if (commandId === "mate.select-components" && selectionId !== null) {
