@@ -873,6 +873,7 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "set-electrical-notes"; readonly notes: string }
   | { readonly kind: "apply-vehicle-template"; readonly template: VehicleTemplateId }
   | { readonly kind: "set-vehicle-parameter"; readonly parameter: VehicleParameterKey; readonly value: number }
+  | { readonly kind: "set-vehicle-evidence-status"; readonly field: "input" | "tire" | "brake"; readonly reviewed: boolean }
   | { readonly kind: "set-vehicle-simulation-state"; readonly state: VehicleSimulationState }
   | { readonly kind: "toggle-vehicle-layer"; readonly layer: VehicleLayerId }
   | {
@@ -904,7 +905,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "set-drawing-general-tolerance", "set-drawing-notes", "apply-electrical-template", "set-electrical-standard",
   "set-electrical-component-position", "add-electrical-component", "delete-electrical-component", "add-electrical-net",
   "delete-electrical-net", "set-electrical-notes", "apply-vehicle-template", "set-vehicle-parameter",
-  "set-vehicle-simulation-state", "toggle-vehicle-layer", "generate-electromechanical-realization"
+  "set-vehicle-evidence-status", "set-vehicle-simulation-state", "toggle-vehicle-layer", "generate-electromechanical-realization"
 ] as const satisfies readonly WorkbenchOperation["kind"][];
 
 const WORKBENCH_OPERATION_KIND_COMPLETENESS: Record<

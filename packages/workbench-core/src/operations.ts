@@ -334,6 +334,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
     case "set-vehicle-parameter":
       if (!keys(input, [...common, "parameter", "value"]) || !VEHICLE_PARAMETERS.includes(input.parameter as VehicleParameterKey) || !finite(input.value)) return invalidOperation("The vehicle parameter edit is invalid.");
       break;
+    case "set-vehicle-evidence-status":
+      if (!keys(input, [...common, "field", "reviewed"]) || !["input", "tire", "brake"].includes(String(input.field)) || typeof input.reviewed !== "boolean") return invalidOperation("The vehicle evidence-status edit is invalid.");
+      break;
     case "set-vehicle-simulation-state":
       if (!keys(input, [...common, "state"]) || !["full-droop", "design-ride", "full-bump"].includes(String(input.state))) return invalidOperation("The vehicle suspension state is invalid.");
       break;
@@ -826,6 +829,15 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const tireDataStatus = VEHICLE_TIRE_PARAMETERS.includes(operation.parameter) ? "unverified" : project.vehicle.tireDataStatus;
       const brakeDataStatus = VEHICLE_BRAKE_PARAMETERS.includes(operation.parameter) ? "unverified" : project.vehicle.brakeDataStatus;
       return changed({ ...project, vehicle: { ...project.vehicle, parameters: { ...project.vehicle.parameters, [operation.parameter]: operation.value }, inputStatus: "illustrative-unvalidated", tireDataStatus, brakeDataStatus } }, [project.vehicle.id], `Set vehicle ${humanize(operation.parameter)}.`);
+    }
+    case "set-vehicle-evidence-status": {
+      const patch = operation.field === "input"
+        ? { inputStatus: operation.reviewed ? "user-reviewed" as const : "illustrative-unvalidated" as const }
+        : operation.field === "tire"
+          ? { tireDataStatus: operation.reviewed ? "supplier-reviewed" as const : "unverified" as const }
+          : { brakeDataStatus: operation.reviewed ? "supplier-reviewed" as const : "unverified" as const };
+      const label = operation.field === "input" ? "illustrative inputs" : operation.field === "tire" ? "tire data" : "brake data";
+      return changed({ ...project, vehicle: { ...project.vehicle, ...patch } }, [project.vehicle.id], `${operation.reviewed ? "Attested" : "Cleared the attestation for"} vehicle ${label}.`);
     }
     case "set-vehicle-simulation-state":
       return changed({ ...project, vehicle: { ...project.vehicle, state: operation.state } }, [project.vehicle.id], `Set vehicle suspension state to ${humanize(operation.state)}.`);

@@ -18,7 +18,7 @@ export const workbenchMcpTests: readonly TestCase[] = [
       assert(result.isError !== true, "capability query should succeed");
       equal(result.structuredContent["schema"], "ps3d-capabilities/1", "capability schema should be versioned");
       equal((result.structuredContent["operationKinds"] as readonly string[]).length, PS3D_OPERATION_KINDS.length, "capability response should enumerate canonical operation kinds");
-      equal(PS3D_OPERATION_KINDS.length, 68, "all validated workbench operation kinds should be AI-visible");
+      equal(PS3D_OPERATION_KINDS.length, 69, "all validated workbench operation kinds should be AI-visible");
       equal(JSON.stringify(PS3D_OPERATION_KINDS), JSON.stringify(WORKBENCH_OPERATION_KINDS), "MCP operation discovery must use the core canonical registry without drift");
       assert(PS3D_OPERATION_KINDS.includes("add-assembly-components"), "grouped Master Cart insertion must remain AI-visible");
     }

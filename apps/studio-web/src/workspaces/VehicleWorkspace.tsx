@@ -26,6 +26,7 @@ interface VehicleWorkspaceProps {
   readonly onLayer: (layer: VehicleLayerId) => void;
   readonly onFit: () => void;
   readonly onMessage: (message: string) => void;
+  readonly onEvidenceStatus: (field: "input" | "tire" | "brake", reviewed: boolean) => void;
 }
 
 type Conversion = "identity" | "mm" | "deg" | "kn-per-m" | "square-mm" | "mpa" | "percent" | "kmh" | "grade-percent" | "kwh" | "wh-per-km";
@@ -212,7 +213,7 @@ export function VehicleWorkspace(props: VehicleWorkspaceProps): React.JSX.Elemen
 
     <VehicleGeometryChecks analysis={props.analysis} />
 
-    <VehicleResults intent={props.intent} analysis={props.analysis} />
+    <VehicleResults intent={props.intent} analysis={props.analysis} onEvidenceStatus={props.onEvidenceStatus} />
 
     <section className="vehicle-parameter-stack" aria-label="Vehicle parameter controls">{PARAMETER_GROUPS.map((group, index) => {
       const visibleControls = group.controls.filter((control) => (control.layouts === undefined || control.layouts.includes(props.intent.layout)) && (control.powertrains === undefined || control.powertrains.includes(props.intent.powertrain)));
@@ -225,7 +226,11 @@ export function VehicleWorkspace(props: VehicleWorkspaceProps): React.JSX.Elemen
   </aside>;
 }
 
-function VehicleResults({ intent, analysis }: { readonly intent: VehicleIntent; readonly analysis: VehicleAnalysis }): React.JSX.Element {
+function VehicleResults({ intent, analysis, onEvidenceStatus }: { readonly intent: VehicleIntent; readonly analysis: VehicleAnalysis; readonly onEvidenceStatus: (field: "input" | "tire" | "brake", reviewed: boolean) => void }): React.JSX.Element {
+  const inputReviewed = intent.inputStatus === "user-reviewed";
+  const tireReviewed = intent.tireDataStatus === "supplier-reviewed";
+  const brakeReviewed = intent.brakeDataStatus === "supplier-reviewed";
+  const attestedCount = (inputReviewed ? 1 : 0) + (tireReviewed ? 1 : 0) + (brakeReviewed ? 1 : 0);
   return <section className="vehicle-results">
     <header><div><strong>Live engineering screen</strong><small>Deterministic preliminary SI calculations</small></div><span className={analysis.status}>{analysis.status}</span></header>
     <div className="vehicle-result-hero">
@@ -268,6 +273,12 @@ function VehicleResults({ intent, analysis }: { readonly intent: VehicleIntent; 
       {analysis.minimumSupportLoadN !== null && <Result label="Minimum support load" value={`${format(analysis.minimumSupportLoadN, 0)} N`} status="screening" />}
     </dl>{analysis.supportWheelLoadsN !== null && <div className="vehicle-support-loads">{analysis.supportWheelLoadsN.map((load) => <span key={load.contactId}><small>{load.contactId}</small><strong>{format(load.loadN, 0)} N</strong></span>)}</div>}</details>
     {(analysis.errors.length > 0 || analysis.warnings.length > 0) && <details open className="vehicle-findings"><summary>Engineering findings · {analysis.errors.length} blocked / {analysis.warnings.length} review</summary><div>{analysis.errors.map((error) => <p className="error" key={error}><CommandIcon name="shield" />{error}</p>)}{analysis.warnings.map((warning) => <p className="warning" key={warning}><CommandIcon name="inspect" />{warning}</p>)}</div></details>}
+    <details className="vehicle-evidence-review"><summary>Evidence attestation · {attestedCount}/3 confirmed</summary><div>
+      <label className="render-checkbox"><input type="checkbox" checked={inputReviewed} onChange={(event) => onEvidenceStatus("input", event.target.checked)} /><span>Illustrative template inputs reviewed</span></label>
+      <label className="render-checkbox"><input type="checkbox" checked={tireReviewed} onChange={(event) => onEvidenceStatus("tire", event.target.checked)} /><span>Tire data supplier-verified</span></label>
+      <label className="render-checkbox"><input type="checkbox" checked={brakeReviewed} onChange={(event) => onEvidenceStatus("brake", event.target.checked)} /><span>Brake data supplier-verified</span></label>
+      <small>Attestation records that you have reviewed these illustrative inputs; editing any related parameter resets it. It is not tool certification or roadworthiness approval.</small>
+    </div></details>
     <footer><span>{intent.layout.replaceAll("-", " ")}</span><span>{intent.powertrain}</span><span>{intent.inputStatus.replaceAll("-", " ")}</span></footer>
   </section>;
 }
