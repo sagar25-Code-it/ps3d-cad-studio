@@ -4,6 +4,7 @@ import {
   createVehicleTemplate,
   createWorkbenchProject,
   solveVehicleGeometry,
+  validateWorkbenchOperation,
   validateWorkbenchProject,
   vehicleHardPoints,
   type Vec3,
@@ -182,6 +183,37 @@ export const workbenchVehicleTests: readonly TestCase[] = [
       const brakeEdit = applyWorkbenchOperation(tireEdit.value.project, { kind: "set-vehicle-parameter", operationId: "operation:test-brake-edit", expectedRevision: 1, parameter: "frontBrakeInputForceN", value: reviewedVehicle.parameters.frontBrakeInputForceN + 1 });
       assert(brakeEdit.ok, "reviewed brake edit should apply");
       equal(brakeEdit.value.project.vehicle.brakeDataStatus, "unverified", "brake parameter edit must reset supplier brake review");
+    }
+  },
+  {
+    name: "vehicle evidence attestation clears and restores the three review warnings honestly",
+    run: () => {
+      const W_INPUT = "Template dimensions and masses are illustrative, unvalidated inputs.";
+      const W_TIRE = "Tire loaded radius, rolling radius, approved rim, pressure, load index, speed capability, and evidence source require supplier verification.";
+      const W_BRAKE = "Brake pressure, equivalent clamp area, pad friction, effective radius, efficiency, and ratings require supplier or test evidence.";
+      const v = createVehicleTemplate("ev-street-motorcycle");
+      const fresh = analyzeVehicle(v).warnings;
+      assert(fresh.includes(W_INPUT) && fresh.includes(W_TIRE) && fresh.includes(W_BRAKE), "a fresh template must show all three evidence warnings");
+      let project = { ...createWorkbenchProject("project:test-vehicle-evidence-attest"), vehicle: v };
+      const steps = [
+        { field: "input" as const, warn: W_INPUT, get: (x: VehicleIntent): string => x.inputStatus, reviewed: "user-reviewed" },
+        { field: "tire" as const, warn: W_TIRE, get: (x: VehicleIntent): string => x.tireDataStatus, reviewed: "supplier-reviewed" },
+        { field: "brake" as const, warn: W_BRAKE, get: (x: VehicleIntent): string => x.brakeDataStatus, reviewed: "supplier-reviewed" }
+      ];
+      steps.forEach((step, index) => {
+        const applied = applyWorkbenchOperation(project, { kind: "set-vehicle-evidence-status", operationId: `operation:test-attest-${step.field}`, expectedRevision: index, field: step.field, reviewed: true });
+        assert(applied.ok, `attesting ${step.field} should apply`);
+        project = applied.value.project;
+        equal(step.get(project.vehicle), step.reviewed, `${step.field} status must become reviewed`);
+        assert(!analyzeVehicle(project.vehicle).warnings.includes(step.warn), `attesting ${step.field} must drop its review warning`);
+      });
+      const cleared = applyWorkbenchOperation(project, { kind: "set-vehicle-evidence-status", operationId: "operation:test-attest-tire-off", expectedRevision: 3, field: "tire", reviewed: false });
+      assert(cleared.ok, "clearing the tire attestation should apply");
+      equal(cleared.value.project.vehicle.tireDataStatus, "unverified", "clearing the tire attestation must reset to unverified");
+      assert(analyzeVehicle(cleared.value.project.vehicle).warnings.includes(W_TIRE), "clearing the tire attestation must bring back the tire warning");
+      assert(validateWorkbenchOperation({ kind: "set-vehicle-evidence-status", operationId: "operation:test-valid", expectedRevision: 0, field: "input", reviewed: true }).ok, "a valid evidence op must validate");
+      assert(!validateWorkbenchOperation({ kind: "set-vehicle-evidence-status", operationId: "operation:test-bad-field", expectedRevision: 0, field: "foo", reviewed: true }).ok, "an unknown evidence field must be rejected");
+      assert(!validateWorkbenchOperation({ kind: "set-vehicle-evidence-status", operationId: "operation:test-bad-reviewed", expectedRevision: 0, field: "input", reviewed: "yes" }).ok, "a non-boolean reviewed flag must be rejected");
     }
   },
   {

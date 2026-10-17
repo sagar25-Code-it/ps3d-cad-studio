@@ -188,6 +188,9 @@ export function App(): React.JSX.Element {
   const [laneTimelineLength, setLaneTimelineLength] = useState(0);
   const workerNavigatingRef = useRef(false);
   const prevWorkerUndoDepthRef = useRef(0);
+  // Serializes worker-lane history moves: the worker round-trip is async, so a second Undo must not
+  // be dispatched (nor the timeline index advanced) until the first resolves.
+  const workerHistoryBusyRef = useRef(false);
   const [model, setModel] = useState<ModelSuccessResponse>();
   const modelRef = useRef<ModelSuccessResponse | undefined>(undefined);
   const [status, setStatus] = useState<"starting" | "ready" | "working" | "error">("starting");
@@ -1344,21 +1347,23 @@ export function App(): React.JSX.Element {
     if (response !== undefined) acceptResponse(response);
   };
 
-  const moveHistory = async (direction: "undo" | "redo"): Promise<void> => {
+  const moveHistory = async (direction: "undo" | "redo"): Promise<boolean> => {
     const client = clientRef.current;
-    if (client === undefined) return;
+    if (client === undefined) { workerHistoryBusyRef.current = false; return false; }
     setStatus("working");
     const response = await client.history(documentRef.current.revision, direction, `command:${direction}-${crypto.randomUUID()}`).catch(() => undefined);
     // Navigation, not a new edit: suppress a chronological marker while the worker reverts/replays.
     workerNavigatingRef.current = true;
-    try { if (response !== undefined) acceptResponse(response); }
-    finally { workerNavigatingRef.current = false; }
+    let moved = false;
+    try { moved = response !== undefined && acceptResponse(response); }
+    finally { workerNavigatingRef.current = false; workerHistoryBusyRef.current = false; }
+    return moved;
   };
 
-  const moveProjectHistory = (direction: "undo" | "redo"): void => {
+  const moveProjectHistory = (direction: "undo" | "redo"): boolean => {
     const delta = direction === "undo" ? -1 : 1;
     const nextIndex = projectHistoryIndexRef.current + delta;
-    if (nextIndex < 0 || nextIndex >= projectHistoryRef.current.length) return;
+    if (nextIndex < 0 || nextIndex >= projectHistoryRef.current.length) return false;
     projectHistoryIndexRef.current = nextIndex;
     const stored = projectHistoryRef.current[nextIndex]!;
     // Preserve the user's current workspace across history navigation: activeWorkspace is a
@@ -1383,6 +1388,7 @@ export function App(): React.JSX.Element {
     setDiagnostic(undefined);
     setStatus("ready");
     setStatusText(`${direction === "undo" ? "Restored prior" : "Restored next"} broad project revision ${next.revision}.`);
+    return true;
   };
 
   const serializeProjectText = (): string => `${JSON.stringify(projectRef.current, null, 2)}\n`;
@@ -1670,6 +1676,10 @@ export function App(): React.JSX.Element {
     if (response.status === "error" || response.kind !== "model") acceptResponse(response);
     else {
       await clientRef.current.persist(response.currentRevision);
+      // Importing a native revision re-bootstraps a fresh worker session, so re-baseline the shared
+      // history timeline (like every other worker-replacing path) before syncing — otherwise stale
+      // lane markers would drive Undo/Redo against a worker that no longer has that history.
+      resetProject(projectRef.current);
       workerNavigatingRef.current = true;
       try { acceptModel(response); } finally { workerNavigatingRef.current = false; }
       setStatusText(`Imported and validated native solid revision ${response.currentRevision}.`);
@@ -2032,18 +2042,38 @@ export function App(): React.JSX.Element {
   const canRedo = laneTimelineIndex < laneTimelineLength;
   historyActionRef.current = {
     undo: () => {
-      if (laneTimelineIndexRef.current <= 0) return;
-      const lane = laneTimelineRef.current[laneTimelineIndexRef.current - 1];
-      laneTimelineIndexRef.current -= 1;
-      syncTimelineState();
-      if (lane === "qualified-part") void moveHistory("undo"); else moveProjectHistory("undo");
+      const prev = laneTimelineIndexRef.current;
+      if (prev <= 0) return;
+      const lane = laneTimelineRef.current[prev - 1];
+      const rollback = (): void => { laneTimelineIndexRef.current = prev; syncTimelineState(); };
+      if (lane === "qualified-part") {
+        if (workerHistoryBusyRef.current) return; // a worker move is still in flight
+        workerHistoryBusyRef.current = true;
+        laneTimelineIndexRef.current = prev - 1;
+        syncTimelineState();
+        void moveHistory("undo").then((moved) => { if (!moved) rollback(); });
+      } else {
+        laneTimelineIndexRef.current = prev - 1;
+        syncTimelineState();
+        if (!moveProjectHistory("undo")) rollback();
+      }
     },
     redo: () => {
-      if (laneTimelineIndexRef.current >= laneTimelineRef.current.length) return;
-      const lane = laneTimelineRef.current[laneTimelineIndexRef.current];
-      laneTimelineIndexRef.current += 1;
-      syncTimelineState();
-      if (lane === "qualified-part") void moveHistory("redo"); else moveProjectHistory("redo");
+      const prev = laneTimelineIndexRef.current;
+      if (prev >= laneTimelineRef.current.length) return;
+      const lane = laneTimelineRef.current[prev];
+      const rollback = (): void => { laneTimelineIndexRef.current = prev; syncTimelineState(); };
+      if (lane === "qualified-part") {
+        if (workerHistoryBusyRef.current) return;
+        workerHistoryBusyRef.current = true;
+        laneTimelineIndexRef.current = prev + 1;
+        syncTimelineState();
+        void moveHistory("redo").then((moved) => { if (!moved) rollback(); });
+      } else {
+        laneTimelineIndexRef.current = prev + 1;
+        syncTimelineState();
+        if (!moveProjectHistory("redo")) rollback();
+      }
     }
   };
   const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo });
