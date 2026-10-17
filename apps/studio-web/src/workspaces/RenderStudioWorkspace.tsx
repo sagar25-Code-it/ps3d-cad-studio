@@ -169,8 +169,14 @@ export function RenderStudioWorkspace(props: RenderStudioWorkspaceProps): React.
 }
 
 function RenderRibbonGroup({ label, children }: { readonly label: string; readonly children: React.ReactNode }): React.JSX.Element { return <div className="render-ribbon-group"><div>{children}</div><small>{label}</small></div>; }
-function RenderButton({ icon, label, hint, active = false, disabled = false, primary = false, onClick }: { readonly icon: string; readonly label: string; readonly hint: string; readonly active?: boolean; readonly disabled?: boolean; readonly primary?: boolean; readonly onClick?: () => void }): React.JSX.Element { return <button className={`${active ? "active" : ""} ${primary ? "primary" : ""}`.trim()} disabled={disabled} onClick={onClick}><span><CommandIcon name={icon} /></span><strong>{label}</strong><small>{hint}</small></button>; }
-function TreeRow({ icon, label, value, level, open = false }: { readonly icon: string; readonly label: string; readonly value: string; readonly level: number; readonly open?: boolean }): React.JSX.Element { return <button style={{ paddingLeft: `${0.55 + level * 0.75}rem` }}><i>{open ? "⌄" : level === 0 ? "›" : ""}</i><CommandIcon name={icon} /><span><strong>{label}</strong><small>{value}</small></span><b>●</b></button>; }
+function RenderButton({ icon, label, hint, active = false, disabled = false, primary = false, onClick }: { readonly icon: string; readonly label: string; readonly hint: string; readonly active?: boolean; readonly disabled?: boolean; readonly primary?: boolean; readonly onClick?: () => void }): React.JSX.Element {
+  const className = `${active ? "active" : ""} ${primary ? "primary" : ""}`.trim();
+  const content = <><span><CommandIcon name={icon} /></span><strong>{label}</strong><small>{hint}</small></>;
+  // Informational chips (no handler) render as a non-interactive element, not a dead focusable button.
+  if (onClick === undefined) return <div className={`render-chip ${className}`.trim()}>{content}</div>;
+  return <button type="button" className={className} disabled={disabled} onClick={onClick}>{content}</button>;
+}
+function TreeRow({ icon, label, value, level, open = false }: { readonly icon: string; readonly label: string; readonly value: string; readonly level: number; readonly open?: boolean }): React.JSX.Element { return <div className="render-tree-row" style={{ paddingLeft: `${0.55 + level * 0.75}rem` }}><i>{open ? "⌄" : level === 0 ? "›" : ""}</i><CommandIcon name={icon} /><span><strong>{label}</strong><small>{value}</small></span><b>●</b></div>; }
 function RangeControl({ label, value, min, max, step, onChange }: { readonly label: string; readonly value: number; readonly min: number; readonly max: number; readonly step: number; readonly onChange: (value: number) => void }): React.JSX.Element { return <label className="range-control"><span>{label}<output>{value.toFixed(2)}</output></span><input type="range" value={value} min={min} max={max} step={step} onChange={(event) => onChange(Number(event.target.value))} /></label>; }
 
 function sourceCounts(project: WorkbenchProject, source: RenderSource): { readonly primary: number; readonly geometry: number } {

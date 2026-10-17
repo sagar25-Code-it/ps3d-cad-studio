@@ -136,14 +136,14 @@
 .render-ribbon-group { display: grid; grid-template-rows: minmax(0, 1fr) auto; flex: 0 0 auto; padding: 0.35rem 0.35rem 0.2rem; border-right: 1px solid #c2c9cd; }
 .render-ribbon-group > div { display: flex; gap: 0.22rem; }
 .render-ribbon-group > small { padding-top: 0.12rem; color: #718087; font-size: 0.43rem; text-align: center; text-transform: uppercase; }
-.render-ribbon-group button { display: grid; grid-template-columns: 34px minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; min-width: 94px; padding: 0.3rem 0.42rem; border: 1px solid transparent; border-radius: 4px; color: #3e494f; background: transparent; text-align: left; }
-.render-ribbon-group button:hover:not(:disabled), .render-ribbon-group button.active { border-color: #93b9cf; background: #e6f3f9; }
-.render-ribbon-group button.primary { border-color: #166aa3; color: #fff; background: linear-gradient(#2a88c4, #17689f); }
-.render-ribbon-group button > span { display: grid; grid-row: 1 / 3; width: 31px; height: 31px; place-items: center; border: 1px solid #b5c1c8; border-radius: 5px; color: #267db2; background: #f7fafb; }
-.render-ribbon-group button.primary > span { border-color: #fff6; color: #fff; background: #ffffff18; }
-.render-ribbon-group button strong { font-size: 0.56rem; white-space: nowrap; }
-.render-ribbon-group button small { color: #758189; font: 0.42rem var(--mono); white-space: nowrap; }
-.render-ribbon-group button.primary small { color: #d8edf8; }
+.render-ribbon-group :where(button, .render-chip) { display: grid; grid-template-columns: 34px minmax(0, 1fr); grid-template-rows: auto auto; align-items: center; min-width: 94px; padding: 0.3rem 0.42rem; border: 1px solid transparent; border-radius: 4px; color: #3e494f; background: transparent; text-align: left; }
+.render-ribbon-group button:hover:not(:disabled), .render-ribbon-group :where(button, .render-chip).active { border-color: #93b9cf; background: #e6f3f9; }
+.render-ribbon-group :where(button, .render-chip).primary { border-color: #166aa3; color: #fff; background: linear-gradient(#2a88c4, #17689f); }
+.render-ribbon-group :where(button, .render-chip) > span { display: grid; grid-row: 1 / 3; width: 31px; height: 31px; place-items: center; border: 1px solid #b5c1c8; border-radius: 5px; color: #267db2; background: #f7fafb; }
+.render-ribbon-group :where(button, .render-chip).primary > span { border-color: #fff6; color: #fff; background: #ffffff18; }
+.render-ribbon-group :where(button, .render-chip) strong { font-size: 0.56rem; white-space: nowrap; }
+.render-ribbon-group :where(button, .render-chip) small { color: #758189; font: 0.42rem var(--mono); white-space: nowrap; }
+.render-ribbon-group :where(button, .render-chip).primary small { color: #d8edf8; }
 .render-studio-grid { display: grid; grid-template-columns: 230px minmax(360px, 1fr) 300px; grid-template-rows: minmax(0, 1fr) 118px; min-width: 0; min-height: 0; }
 .render-scene-browser, .render-properties { min-width: 0; min-height: 0; overflow: auto; border-color: #53616a; background: #20282e; }
 .render-scene-browser { border-right: 1px solid #53616a; }
@@ -156,14 +156,13 @@
 .render-source-select span { color: #a5b3bb; font-size: 0.48rem; }
 .render-source-select select, .render-properties select { width: 100%; padding: 0.38rem; border: 1px solid #5f707a; border-radius: 3px; color: #e1eaee; background: #171e23; font-size: 0.54rem; }
 .render-tree { padding: 0.35rem 0; }
-.render-tree > button { display: grid; grid-template-columns: 12px 17px minmax(0, 1fr) auto; align-items: center; gap: 0.35rem; width: 100%; min-height: 42px; padding-block: 0.35rem; padding-right: 0.55rem; border: 0; color: #ccd7dc; background: transparent; text-align: left; }
-.render-tree > button:hover { background: #2b3942; }
-.render-tree > button > i { color: #83949d; font-style: normal; }
-.render-tree > button > .command-icon { color: #73c9df; }
-.render-tree > button strong, .render-tree > button small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.render-tree > button strong { font-size: 0.54rem; }
-.render-tree > button small { color: #83939c; font-size: 0.44rem; }
-.render-tree > button > b { color: #39be8d; font-size: 0.45rem; }
+.render-tree > .render-tree-row { display: grid; grid-template-columns: 12px 17px minmax(0, 1fr) auto; align-items: center; gap: 0.35rem; width: 100%; min-height: 42px; padding-block: 0.35rem; padding-right: 0.55rem; border: 0; color: #ccd7dc; background: transparent; text-align: left; }
+.render-tree > .render-tree-row > i { color: #83949d; font-style: normal; }
+.render-tree > .render-tree-row > .command-icon { color: #73c9df; }
+.render-tree > .render-tree-row strong, .render-tree > .render-tree-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.render-tree > .render-tree-row strong { font-size: 0.54rem; }
+.render-tree > .render-tree-row small { color: #83939c; font-size: 0.44rem; }
+.render-tree > .render-tree-row > b { color: #39be8d; font-size: 0.45rem; }
 .render-scene-status { margin: 0.55rem; padding: 0.55rem; border: 1px solid #3e6f65; border-radius: 4px; color: #8cd9c0; background: #142e29; }
 .render-scene-status span { display: flex; align-items: center; gap: 0.35rem; font-size: 0.5rem; font-weight: 800; }
 .render-scene-status i { width: 7px; height: 7px; border-radius: 50%; background: #36d29e; box-shadow: 0 0 8px #36d29e99; }

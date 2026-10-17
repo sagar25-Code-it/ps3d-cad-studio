@@ -630,6 +630,7 @@
   }
 
   .studio-app .controller-group > span { display: none; }
+  .studio-app .controller-group button .control-label { display: none; }
   .studio-app .viewbox { right: 0.2rem; }
   .studio-app .camera-gesture-launcher { bottom: 10.75rem; }
   .studio-app .camera-gesture-panel {

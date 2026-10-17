@@ -82,7 +82,8 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
           aria-pressed={props.state.navigationMode === mode}
           onClick={() => props.onNavigationMode(mode)}
           title={navigationTitle(mode, sketch)}
-        ><CommandIcon name={mode} />{mode === "select" ? "Select" : mode === "measure" ? "Measure" : capitalize(mode)}</button>)}
+          aria-label={mode === "select" ? "Select" : mode === "measure" ? "Measure" : capitalize(mode)}
+        ><CommandIcon name={mode} /><span className="control-label">{mode === "select" ? "Select" : mode === "measure" ? "Measure" : capitalize(mode)}</span></button>)}
       </div>
       <div className="controller-separator" />
       <div className="controller-group selection-priority" aria-label="Selection intent">
@@ -97,16 +98,16 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
           <SelectionButton id="auto" label="Auto" icon="select" state={props.state} onSelect={props.onSelectionFilter} />
           <SelectionButton id="body" label="Body" icon="part" state={props.state} onSelect={props.onSelectionFilter} disabled={props.workspace === "assembly"} />
           <SelectionButton id="component" label="Component" icon="assembly" state={props.state} onSelect={props.onSelectionFilter} disabled={props.workspace !== "assembly"} />
-          <button disabled title="Persistent face topology is not available in this bounded mesh kernel."><CommandIcon name="surface" />Face</button>
-          <button disabled title="Persistent edge topology is not available in this bounded mesh kernel."><CommandIcon name="edge" />Edge</button>
+          <button disabled aria-label="Face" title="Persistent face topology is not available in this bounded mesh kernel."><CommandIcon name="surface" /><span className="control-label">Face</span></button>
+          <button disabled aria-label="Edge" title="Persistent edge topology is not available in this bounded mesh kernel."><CommandIcon name="edge" /><span className="control-label">Edge</span></button>
         </>}
       </div>
       {!sketch && <>
         <div className="controller-separator" />
         <div className="controller-group compact" aria-label="Projection mode">
           <span>VIEW</span>
-          <button className={props.state.projection === "perspective" ? "active" : ""} aria-pressed={props.state.projection === "perspective"} onClick={() => props.onProjection("perspective")}><CommandIcon name="projection" />Perspective</button>
-          <button className={props.state.projection === "orthographic" ? "active" : ""} aria-pressed={props.state.projection === "orthographic"} onClick={() => props.onProjection("orthographic")}><CommandIcon name="projection" />Ortho</button>
+          <button className={props.state.projection === "perspective" ? "active" : ""} aria-pressed={props.state.projection === "perspective"} aria-label="Perspective" onClick={() => props.onProjection("perspective")}><CommandIcon name="projection" /><span className="control-label">Perspective</span></button>
+          <button className={props.state.projection === "orthographic" ? "active" : ""} aria-pressed={props.state.projection === "orthographic"} aria-label="Orthographic" onClick={() => props.onProjection("orthographic")}><CommandIcon name="projection" /><span className="control-label">Ortho</span></button>
         </div>
       </>}
     </div>
@@ -134,7 +135,7 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
       <header><div><span>DISPLAY SETTINGS</span><strong>Part appearance</strong></div><button onClick={() => setDisplayOpen(false)} aria-label="Close display settings"><CommandIcon name="cancel" /></button></header>
       <PartAppearanceControls compact bodyColor={props.state.bodyColor} shadingMode={props.state.shadingMode} onBodyColor={props.onBodyColor} onShadingMode={props.onShadingMode} />
       <fieldset className="background-tone-controls"><legend>Viewport background</legend>{(["charcoal", "dark-gray", "light-gray", "white"] as const).map((tone) => <button key={tone} className={props.state.backgroundTone === tone ? "active" : ""} aria-pressed={props.state.backgroundTone === tone} onClick={() => props.onBackgroundTone(tone)}><i data-tone={tone} />{tone.replace("-", " ")}</button>)}</fieldset>
-      <small>Display-only settings do not change qualified geometry or mass properties.</small>
+      <small>Display-only settings do not change qualified geometry or mass properties. Shaded / wireframe style applies to the qualified model body; analytic preview bodies keep their reference edges.</small>
     </aside>}
 
     {props.state.navigationMode === "measure" && !sketch && <aside className="measure-panel" aria-label="Point to point measurement">
@@ -155,7 +156,7 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
 }
 
 function SelectionButton({ id, label, icon, state, onSelect, disabled = false }: { readonly id: SelectionFilter; readonly label: string; readonly icon: string; readonly state: ViewportViewState; readonly onSelect: (filter: SelectionFilter) => void; readonly disabled?: boolean }): React.JSX.Element {
-  return <button className={state.selectionFilter === id ? "active" : ""} aria-pressed={state.selectionFilter === id} disabled={disabled} onClick={() => onSelect(id)}><CommandIcon name={icon} />{label}</button>;
+  return <button className={state.selectionFilter === id ? "active" : ""} aria-pressed={state.selectionFilter === id} aria-label={label} disabled={disabled} onClick={() => onSelect(id)}><CommandIcon name={icon} /><span className="control-label">{label}</span></button>;
 }
 
 function ViewCube({ state, onOrientation, onViewAngles }: { readonly state: ViewportViewState; readonly onOrientation: (orientation: Exclude<ViewOrientation, "custom">) => void; readonly onViewAngles: (azimuthDeg: number, elevationDeg: number) => void }): React.JSX.Element {
