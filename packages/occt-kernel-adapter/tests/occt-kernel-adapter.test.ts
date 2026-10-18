@@ -923,3 +923,24 @@ test("the browser prism facade returns exact topology, volume, and stable named 
   });
   assert.equal(result.faces.find((face) => face.role === "face.cap-top")!.key, rebuilt.faces.find((face) => face.role === "face.cap-top")!.key, "the cap-top key survives a dimensional rebuild");
 });
+
+test("the revolve facade builds a genus-1 full ring and a genus-0 partial sweep with named faces", async () => {
+  const { evaluateProfileRevolution } = await import("../src/index.js");
+  const profile: readonly (readonly [number, number])[] = [[0.01, -0.002], [0.02, -0.002], [0.02, 0.002], [0.01, 0.002]];
+  const analyticVolume = (0.01 * 0.004) * 0.015; // area * centroid radius, times the sweep angle below
+
+  const full = await evaluateProfileRevolution({ operationId: "operation:ring", semanticId: "body:ring", profilePoints: profile, degrees: 360 });
+  assert.deepEqual(full.topology, { vertices: 0, edges: 4, wires: 4, faces: 4, shells: 1, solids: 1, components: 1, closed: true, manifold: true });
+  assert.deepEqual(full.faces.map((face) => face.role).sort(), ["face.revolve-0", "face.revolve-1", "face.revolve-2", "face.revolve-3"]);
+  const fullVolume = meshVolume(Float64Array.from(full.positionsMeters), Uint32Array.from(full.indices));
+  const fullExact = analyticVolume * 2 * Math.PI;
+  assert.ok(fullVolume > fullExact * 0.99 && fullVolume <= fullExact + 1e-12, `full revolve volume ${fullVolume} vs ${fullExact}`);
+
+  const quarter = await evaluateProfileRevolution({ operationId: "operation:ring", semanticId: "body:ring", profilePoints: profile, degrees: 90 });
+  assert.deepEqual(quarter.topology, { vertices: 8, edges: 12, wires: 6, faces: 6, shells: 1, solids: 1, components: 1, closed: true, manifold: true });
+  assert.deepEqual(quarter.faces.map((face) => face.role).sort(), ["face.cap-end", "face.cap-start", "face.swept-0", "face.swept-1", "face.swept-2", "face.swept-3"]);
+  const quarterVolume = meshVolume(Float64Array.from(quarter.positionsMeters), Uint32Array.from(quarter.indices));
+  const quarterExact = analyticVolume * (Math.PI / 2);
+  assert.ok(quarterVolume > quarterExact * 0.99 && quarterVolume <= quarterExact + 1e-12, `quarter revolve volume ${quarterVolume} vs ${quarterExact}`);
+  assert.ok(full.faces.every((face) => /^face:[a-f0-9]{40}$/u.test(face.key)), "revolve faces carry stable keys");
+});

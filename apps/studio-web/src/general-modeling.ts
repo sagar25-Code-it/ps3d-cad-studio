@@ -1,6 +1,6 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
 import { tessellateRevolve, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
-import { evaluateProfilePrism } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
+import { evaluateProfilePrism, evaluateProfileRevolution } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import type { SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 
 /** Sketch-plane identifier shared with the solid builder UI. */
@@ -46,6 +46,13 @@ function planeNormal(plane: SketchPlane): WorldPoint {
   if (plane === "xz") return [0, -1, 0];
   if (plane === "yz") return [1, 0, 0];
   return [0, 0, 1];
+}
+
+/** Rotate a kernel local-space revolve point (revolved about Y) onto its datum plane, matching the analytic tessellator. */
+function rotateLocalToPlane(point: WorldPoint, plane: SketchPlane): WorldPoint {
+  if (plane === "xz") return [point[0], -point[2], point[1]];
+  if (plane === "yz") return [point[2], point[1], -point[0]];
+  return point;
 }
 
 export interface CreateGeneralSolidRequest {
@@ -110,6 +117,41 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
       };
     } catch {
       return { ok: false, message: "The solid kernel could not extrude this profile." };
+    }
+  }
+
+  // Revolve through the B-rep kernel when the profile stays on one side of the axis;
+  // otherwise fall back to the analytic tessellator (which tolerates axis-crossing profiles).
+  const profilePoints = polygonMm.map((point) => [point[0] / 1000, point[1] / 1000] as const);
+  if (profilePoints.every((point) => point[0] > 1e-9)) {
+    try {
+      const revolution = await evaluateProfileRevolution({
+        operationId: request.bodyId,
+        semanticId: request.bodyId,
+        profilePoints,
+        degrees: request.valueMm
+      });
+      if (revolution.indices.length >= 3) {
+        const positionsMm: number[] = [];
+        for (let index = 0; index + 2 < revolution.positionsMeters.length; index += 3) {
+          const world = rotateLocalToPlane([revolution.positionsMeters[index]!, revolution.positionsMeters[index + 1]!, revolution.positionsMeters[index + 2]!], request.plane);
+          positionsMm.push(world[0] * 1000, world[1] * 1000, world[2] * 1000);
+        }
+        return {
+          ok: true,
+          body: {
+            ...base,
+            positionsMm,
+            indices: revolution.indices,
+            brep: {
+              topology: { vertices: revolution.topology.vertices, edges: revolution.topology.edges, faces: revolution.topology.faces },
+              faces: revolution.faces.map((face) => ({ role: face.role, key: face.key }))
+            }
+          }
+        };
+      }
+    } catch {
+      // fall through to the analytic tessellator
     }
   }
 

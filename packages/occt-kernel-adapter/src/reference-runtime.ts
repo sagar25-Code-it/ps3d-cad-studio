@@ -312,6 +312,145 @@ function prismGeometry(points: readonly Vec3[], normal: Vec3, height: number): S
   };
 }
 
+/**
+ * Revolve a closed planar profile (radius, axial) around the local Y axis.
+ * A partial sweep is a genus-0 solid (two caps + N swept faces, Euler 2); a
+ * full 360 degree sweep is a genus-1 ring of N surfaces of revolution with
+ * circular edges and no vertices (Euler 0). The profile must lie entirely on
+ * one side of the axis.
+ */
+function revolveGeometry(profile: readonly (readonly [number, number])[], degrees: number, segments: number): SolidGeometry {
+  const count = profile.length;
+  if (count < 3) throw new Error("Revolve profile needs at least three points.");
+  if (profile.some(([radius]) => radius <= 1e-9)) throw new Error("Revolve profile must lie on one side of the axis (all radii > 0).");
+  const sweepDegrees = Math.min(360, Math.max(1, Math.abs(degrees)));
+  const full = Math.abs(sweepDegrees - 360) < 1e-6;
+  const sweep = (sweepDegrees * Math.PI) / 180;
+  const tangent = (theta: number): Vec3 => [-Math.sin(theta), 0, Math.cos(theta)];
+  const revolve = (point: readonly [number, number], theta: number): Vec3 => [point[0] * Math.cos(theta), point[1], point[0] * Math.sin(theta)];
+  const centroid2D = polygonCentroid2D(profile);
+  // Outward surface normal of the swept face for profile edge j at angle theta:
+  // the in-plane edge normal oriented away from the profile interior, then revolved.
+  const sweptOutward = (j: number, theta: number): Vec3 => {
+    const pj = profile[j]!;
+    const pn = profile[(j + 1) % count]!;
+    let nr = pn[1] - pj[1];
+    let na = -(pn[0] - pj[0]);
+    const towardOutX = (pj[0] + pn[0]) / 2 - centroid2D[0];
+    const towardOutY = (pj[1] + pn[1]) / 2 - centroid2D[1];
+    if (nr * towardOutX + na * towardOutY < 0) { nr = -nr; na = -na; }
+    const length = Math.hypot(nr, na) || 1;
+    return [(nr / length) * Math.cos(theta), na / length, (nr / length) * Math.sin(theta)];
+  };
+
+  const builder = new TessellationBuilder();
+  for (let step = 0; step < segments; step += 1) {
+    const theta0 = (sweep * step) / segments;
+    const theta1 = (sweep * (step + 1)) / segments;
+    const midTheta = (theta0 + theta1) / 2;
+    for (let j = 0; j < count; j += 1) {
+      const nextJ = (j + 1) % count;
+      builder.addQuad(revolve(profile[j]!, theta0), revolve(profile[nextJ]!, theta0), revolve(profile[nextJ]!, theta1), revolve(profile[j]!, theta1), sweptOutward(j, midTheta));
+    }
+  }
+  if (!full) {
+    const startPoints = profile.map((point) => revolve(point, 0));
+    const endPoints = profile.map((point) => revolve(point, sweep));
+    const startCentroid = centroid(startPoints);
+    const endCentroid = centroid(endPoints);
+    for (let j = 0; j < count; j += 1) {
+      const nextJ = (j + 1) % count;
+      builder.addTriangle(startCentroid, startPoints[nextJ]!, startPoints[j]!, negate(tangent(0)));
+      builder.addTriangle(endCentroid, endPoints[j]!, endPoints[nextJ]!, tangent(sweep));
+    }
+  }
+
+  const allPositions: Vec3[] = [];
+  for (let step = 0; step <= segments; step += 1) for (const point of profile) allPositions.push(revolve(point, (sweep * step) / segments));
+  const bounds = boundsOf(allPositions);
+  const area = Math.abs(shoelaceArea(profile));
+  const radiusCentroid = polygonCentroidRadius(profile);
+
+  const sweptRoles = Array.from({ length: count }, (_, j) => full ? `face.revolve-${j}` : `face.swept-${j}`);
+  const faces: FaceSpec[] = [];
+  if (!full) {
+    const startBounds = boundsOf(profile.map((point) => revolve(point, 0)));
+    const endBounds = boundsOf(profile.map((point) => revolve(point, sweep)));
+    faces.push({ role: "face.cap-start", geometryClass: "plane", centroid: centroid(profile.map((point) => revolve(point, 0))), area, bounds: startBounds, normal: negate(tangent(0)), adjacentRoles: sweptRoles });
+    faces.push({ role: "face.cap-end", geometryClass: "plane", centroid: centroid(profile.map((point) => revolve(point, sweep))), area, bounds: endBounds, normal: tangent(sweep), adjacentRoles: sweptRoles });
+  }
+  for (let j = 0; j < count; j += 1) {
+    const nextJ = (j + 1) % count;
+    const midRadius = (profile[j]![0] + profile[nextJ]![0]) / 2;
+    const midAxial = (profile[j]![1] + profile[nextJ]![1]) / 2;
+    const slant = Math.hypot(profile[nextJ]![0] - profile[j]![0], profile[nextJ]![1] - profile[j]![1]);
+    const sweptBounds = boundsOf([revolve(profile[j]!, 0), revolve(profile[nextJ]!, 0), revolve(profile[j]!, sweep / 2), revolve(profile[nextJ]!, sweep / 2), revolve(profile[j]!, sweep), revolve(profile[nextJ]!, sweep)]);
+    const neighbors = full
+      ? [sweptRoles[(j + count - 1) % count]!, sweptRoles[nextJ]!]
+      : ["face.cap-start", "face.cap-end", sweptRoles[(j + count - 1) % count]!, sweptRoles[nextJ]!];
+    faces.push({
+      role: sweptRoles[j]!, geometryClass: "cylinder",
+      centroid: revolve([midRadius, midAxial], sweep / 2), area: sweep * midRadius * slant,
+      bounds: sweptBounds, normal: sweptOutward(j, sweep / 2), adjacentRoles: neighbors
+    });
+  }
+
+  const topology: KernelTopologySummary = full
+    ? { vertices: 0, edges: count, wires: count, faces: count, shells: 1, solids: 1, components: 1, closed: true, manifold: true }
+    : { vertices: 2 * count, edges: 3 * count, wires: count + 2, faces: count + 2, shells: 1, solids: 1, components: 1, closed: true, manifold: true };
+  return {
+    topology, bounds,
+    descriptor: { profile: profile.map((point) => [...point]), degrees: sweepDegrees },
+    tessellation: builder.finish(),
+    volumeCubicMeters: area * radiusCentroid * sweep,
+    faces
+  };
+}
+
+function shoelaceArea(polygon: readonly (readonly [number, number])[]): number {
+  let area = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const current = polygon[i]!;
+    const next = polygon[(i + 1) % polygon.length]!;
+    area += current[0] * next[1] - next[0] * current[1];
+  }
+  return area / 2;
+}
+
+/** Area-weighted 2D centroid of a closed polygon. */
+function polygonCentroid2D(polygon: readonly (readonly [number, number])[]): readonly [number, number] {
+  let cx = 0;
+  let cy = 0;
+  let signedArea = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const current = polygon[i]!;
+    const next = polygon[(i + 1) % polygon.length]!;
+    const cross2 = current[0] * next[1] - next[0] * current[1];
+    cx += (current[0] + next[0]) * cross2;
+    cy += (current[1] + next[1]) * cross2;
+    signedArea += cross2;
+  }
+  if (Math.abs(signedArea) < 1e-18) {
+    const mean = polygon.reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]] as [number, number], [0, 0] as [number, number]);
+    return [mean[0] / polygon.length, mean[1] / polygon.length];
+  }
+  return [cx / (3 * signedArea), cy / (3 * signedArea)];
+}
+
+/** Signed-area-weighted centroid radius (x-coordinate) of a closed polygon. */
+function polygonCentroidRadius(polygon: readonly (readonly [number, number])[]): number {
+  let cx = 0;
+  let signedArea = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const current = polygon[i]!;
+    const next = polygon[(i + 1) % polygon.length]!;
+    const cross2 = current[0] * next[1] - next[0] * current[1];
+    cx += (current[0] + next[0]) * cross2;
+    signedArea += cross2;
+  }
+  return Math.abs(signedArea) < 1e-18 ? 0 : Math.abs(cx / (3 * signedArea));
+}
+
 /** Request for the browser-facing prism facade: a closed planar loop (metres) extruded along its normal. */
 export interface ProfilePrismRequest {
   /** Stable feature identity that anchors the persistent face names across rebuilds. */
@@ -353,6 +492,44 @@ export async function evaluateProfilePrism(request: ProfilePrismRequest): Promis
   const geometry = prismGeometry(points, normal, request.heightMeters);
   const toleranceMeters = request.toleranceMeters ?? 1e-6;
   const entities = await buildFaceEntities({ operationId: request.operationId, operationKind: "solid.extrude", semanticId: request.semanticId, toleranceMeters }, geometry.faces);
+  const faces: NamedFace[] = entities.map((entity, position) => ({
+    role: entity.stableReference.producer.role,
+    key: entity.stableReference.key,
+    semanticId: entity.stableReference.semanticId,
+    areaSquareMeters: geometry.faces[position]!.area
+  }));
+  return {
+    positionsMeters: Array.from(geometry.tessellation.positions),
+    indices: Array.from(geometry.tessellation.indices),
+    topology: geometry.topology,
+    boundsMeters: geometry.bounds,
+    volumeCubicMeters: geometry.volumeCubicMeters,
+    faces
+  };
+}
+
+/** Request for the browser-facing revolve facade: a closed (radius, axial) profile revolved about the local Y axis. */
+export interface ProfileRevolutionRequest {
+  readonly operationId: string;
+  readonly semanticId: string;
+  /** Profile points as (radius-from-axis, axial) pairs in metres; all radii must be positive. */
+  readonly profilePoints: readonly (readonly [number, number])[];
+  readonly degrees: number;
+  readonly segments?: number;
+  readonly toleranceMeters?: number;
+}
+
+/**
+ * Browser-facing kernel entry: builds a solid of revolution B-rep from a planar
+ * profile and returns its local-space tessellation (revolved about the Y axis),
+ * topology summary, volume, and stable, lineage-anchored face names. The live
+ * viewport applies the datum-plane placement to the returned positions.
+ */
+export async function evaluateProfileRevolution(request: ProfileRevolutionRequest): Promise<ProfilePrismResult> {
+  const segments = Math.max(3, Math.min(256, request.segments ?? 64));
+  const geometry = revolveGeometry(request.profilePoints, request.degrees, segments);
+  const toleranceMeters = request.toleranceMeters ?? 1e-6;
+  const entities = await buildFaceEntities({ operationId: request.operationId, operationKind: "solid.revolve", semanticId: request.semanticId, toleranceMeters }, geometry.faces);
   const faces: NamedFace[] = entities.map((entity, position) => ({
     role: entity.stableReference.producer.role,
     key: entity.stableReference.key,
