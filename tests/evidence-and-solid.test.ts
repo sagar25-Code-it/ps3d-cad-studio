@@ -5,7 +5,7 @@ import { exportBinaryStl } from "../packages/import-export/src/index.js";
 import { createBracketDocument } from "../packages/model-schema/src/index.js";
 import { BracketSolidKernel } from "../packages/solid-bracket-kernel/src/index.js";
 import { ManifoldSolidKernel } from "../packages/solid-manifold-adapter/src/adapter.js";
-import { extrudeProfileSolid, revolveProfileSolid } from "../packages/solid-manifold-adapter/src/general.js";
+import { combineSolids, extrudeProfileSolid, revolveProfileSolid } from "../packages/solid-manifold-adapter/src/general.js";
 import type { ModelMesh } from "../packages/solid-kernel-api/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
@@ -198,6 +198,41 @@ export const evidenceAndSolidTests: readonly TestCase[] = [
       // pi*(R^2 - r^2)*h = pi*(0.0004 - 0.0001)*0.01 ~= 9.42e-6; faceted volume is slightly under.
       assert(revolved.value.measurements.volumeCubicMeters > 9.0e-6 && revolved.value.measurements.volumeCubicMeters < 9.5e-6, "revolved ring volume must approximate the analytic annulus");
       assert(!revolveProfileSolid(module, { bodyId: "body:bad", profileMeters: [[-0.01, 0], [0.01, 0], [0, 0.01]], degrees: 360 }).ok, "a profile crossing the revolve axis must be rejected");
+    }
+  },
+  {
+    name: "Stage 1 feature evaluator composes primitives, booleans, and plane placement",
+    run: async () => {
+      const module = await Module();
+      module.setup();
+
+      // Primitive box 20 x 20 x 10 mm (centered) -> volume 4e-6 m^3.
+      const box = combineSolids(module, "body:box", [{ kind: "box", sizeMeters: [0.02, 0.02, 0.01] }], "union");
+      assert(box.ok, "a box primitive must evaluate");
+      near(box.value.measurements.volumeCubicMeters, 4e-6, 1e-10, "box volume must equal the product of its sizes");
+
+      // Boolean subtract: 60 x 40 x 10 mm plate minus a Ø10 mm through-bore -> plate with a hole.
+      const plate = combineSolids(module, "body:plate", [
+        { kind: "box", sizeMeters: [0.06, 0.04, 0.01] },
+        { kind: "cylinder", radiusMeters: 0.005, heightMeters: 0.02, circularSegments: 128 }
+      ], "subtract");
+      assert(plate.ok, "box minus cylinder must evaluate into a plate with a bore");
+      equal(plate.value.topology.components, 1, "a plate with a through-bore is a single body");
+      equal(plate.value.topology.genus, 1, "a through-bore makes the plate genus 1");
+      const expectedPlateVolume = 0.06 * 0.04 * 0.01 - Math.PI * 0.005 * 0.005 * 0.01;
+      assert(Math.abs(plate.value.measurements.volumeCubicMeters - expectedPlateVolume) / expectedPlateVolume < 5e-3, "plate-with-bore volume must approximate block minus cylinder");
+
+      // Plane placement: extrude a 20 x 20 mm square to 10 mm on the XZ (Front) plane -> extrude axis is Y.
+      const square: readonly (readonly [number, number])[] = [[-0.01, -0.01], [0.01, -0.01], [0.01, 0.01], [-0.01, 0.01]];
+      const onFront = combineSolids(module, "body:front", [{ kind: "extrude", profileMeters: square, heightMeters: 0.01, plane: "xz" }], "union");
+      assert(onFront.ok, "an XZ-plane extrude must evaluate");
+      const size = onFront.value.measurements.boundsMeters.size;
+      near(size[1], 0.01, 1e-6, "an XZ-plane extrude must place the 10 mm extrude depth along world Y");
+      near(size[0], 0.02, 1e-6, "the profile width must remain along world X");
+      near(size[2], 0.02, 1e-6, "the profile height must stand along world Z");
+
+      // Empty feature list is rejected.
+      assert(!combineSolids(module, "body:empty", [], "union").ok, "an empty feature list must be rejected");
     }
   }
 ];
