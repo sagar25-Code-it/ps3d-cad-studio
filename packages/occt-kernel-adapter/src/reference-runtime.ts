@@ -2,11 +2,14 @@ import { kernelSha256 } from "../../exact-kernel-api/src/canonical.js";
 import type {
   ExecuteKernelOperationRequest,
   ExactShapeHandle,
+  GeometricSignature,
   KernelBounds,
   KernelTopologySummary,
   OperationResultDraft,
+  ResolvedTopologyEntity,
   ShapeProvenance,
   ShapeValidationReport,
+  StableTopologyReference,
   TessellationResult,
   Vector3
 } from "../../exact-kernel-api/src/index.js";
@@ -56,6 +59,22 @@ interface SolidGeometry {
   readonly descriptor: Record<string, unknown>;
   readonly tessellation: { readonly positions: Float64Array; readonly normals: Float32Array; readonly indices: Uint32Array };
   readonly volumeCubicMeters: number;
+  readonly faces: readonly FaceSpec[];
+}
+
+/**
+ * A boundary face described by a construction-stable role plus its current
+ * geometry. The role (not a transient index) anchors the persistent name, so a
+ * rebuilt feature keeps the same reference even when dimensions change.
+ */
+interface FaceSpec {
+  readonly role: string;
+  readonly geometryClass: GeometricSignature["geometryClass"];
+  readonly centroid: Vec3;
+  readonly area: number;
+  readonly bounds: KernelBounds;
+  readonly normal: Vec3;
+  readonly adjacentRoles: readonly string[];
 }
 
 /** A solid retained in the session so later feature operations can consume its exact geometry. */
@@ -116,17 +135,68 @@ async function evaluate(store: Map<string, Map<string, StoredSolid>>, request: E
     triangleFaceReferenceKeys: [],
     contentDigest: await kernelSha256({ positions: Array.from(geometry.tessellation.positions), indices: Array.from(geometry.tessellation.indices) })
   };
+  const topologyEntities = await buildFaceEntities(operation, geometry.faces);
   const inputDigests = inputShapeDigests(session, operation);
   const provenanceBase = {
     operationId: operation.operationId, operationKind: operation.kind,
-    inputShapeDigests: inputDigests, outputShapeDigests: [contentDigest], topologyEntities: [] as ShapeProvenance["topologyEntities"]
+    inputShapeDigests: inputDigests, outputShapeDigests: [contentDigest], topologyEntities: topologyEntities as ShapeProvenance["topologyEntities"]
   };
   const provenance: ShapeProvenance = { ...provenanceBase, provenanceDigest: await kernelSha256(provenanceBase) };
   return {
     operationId: operation.operationId, operationKind: operation.kind,
     outputs: [output], validation: [validation], provenance,
-    diagnostics: [], exchangeArtifacts: [], tessellations: [tessellation], topologyEntities: []
+    diagnostics: [], exchangeArtifacts: [], tessellations: [tessellation], topologyEntities
   };
+}
+
+/**
+ * Emits one stable reference per boundary face. The key and lineage digest are
+ * derived from the feature's stable operation identity and the face's role, so
+ * they are invariant under dimensional edits; the geometric signature carries
+ * the current centroid, area, and normal for the resolver's secondary checks.
+ */
+async function buildFaceEntities(operation: ExecuteKernelOperationRequest["operation"], faces: readonly FaceSpec[]): Promise<readonly ResolvedTopologyEntity[]> {
+  const operationId = operation.operationId;
+  const operationKind = operation.kind;
+  const semantic = operation.semanticOutputIds[0] ?? "body:unnamed";
+  const semanticLocal = sanitizeIdentifier(semantic.includes(":") ? semantic.slice(semantic.indexOf(":") + 1) : semantic);
+  const keyByRole = new Map<string, string>();
+  for (const face of faces) keyByRole.set(face.role, `face:${(await kernelSha256({ operationId, role: face.role })).slice(0, 40)}`);
+  const entities: ResolvedTopologyEntity[] = [];
+  for (const face of faces) {
+    const key = keyByRole.get(face.role)!;
+    const lineageDigest = await kernelSha256({ operationId, operationKind, role: face.role });
+    const signatureDigest = await kernelSha256({ geometryClass: face.geometryClass, centroid: face.centroid, area: face.area, bounds: face.bounds, normal: face.normal });
+    const signature: GeometricSignature = {
+      geometryClass: face.geometryClass, centroidMeters: face.centroid, measure: face.area,
+      boundsMeters: face.bounds, orientationHint: face.normal, signatureDigest
+    };
+    const roleSuffix = sanitizeIdentifier(face.role.startsWith("face.") ? face.role.slice("face.".length) : face.role);
+    const stableReference: StableTopologyReference = {
+      referenceVersion: 1, key, semanticId: `face:${semanticLocal}.${roleSuffix}`, expectedKind: "face",
+      producer: { operationId, operationKind, outputIndex: 0, role: face.role },
+      ancestry: [], signature, lineageDigest
+    };
+    entities.push({
+      entityId: key, kind: "face", stableReference, orientation: "external",
+      toleranceMeters: operation.linearToleranceMeters,
+      adjacentReferenceKeys: face.adjacentRoles.map((role) => keyByRole.get(role)!).sort()
+    });
+  }
+  return entities;
+}
+
+/** Lowercases and reduces a string to the stable-identifier alphabet [a-z0-9._-], starting on an alphanumeric. */
+function sanitizeIdentifier(value: string): string {
+  const reduced = value.toLowerCase().replace(/[^a-z0-9._-]/gu, "-").replace(/^[^a-z0-9]+/u, "");
+  return reduced.length > 0 ? reduced : "x";
+}
+
+/** Face metadata for a convex quad (centroid, planar area, AABB). */
+function quadFace(role: string, corners: readonly [Vec3, Vec3, Vec3, Vec3], normal: Vec3, adjacentRoles: readonly string[]): FaceSpec {
+  const center = centroid(corners);
+  const area = Math.hypot(...cross(subtract(corners[1], corners[0]), subtract(corners[3], corners[0])));
+  return { role, geometryClass: "plane", centroid: center, area, bounds: boundsOf(corners), normal, adjacentRoles };
 }
 
 function inputShapeDigests(session: Map<string, StoredSolid>, operation: ExecuteKernelOperationRequest["operation"]): readonly string[] {
@@ -150,23 +220,30 @@ function boxSolid(size: Vector3, origin: Vector3, xDirection: Vector3, normal: V
     ]);
   }
   const index = (i: number, j: number, k: number): number => i + 2 * j + 4 * k;
-  const faces: { readonly quad: readonly [number, number, number, number]; readonly normal: Vec3 }[] = [
-    { quad: [index(0, 0, 0), index(0, 1, 0), index(0, 1, 1), index(0, 0, 1)], normal: negate(frame.x) },
-    { quad: [index(1, 0, 0), index(1, 1, 0), index(1, 1, 1), index(1, 0, 1)], normal: frame.x },
-    { quad: [index(0, 0, 0), index(1, 0, 0), index(1, 0, 1), index(0, 0, 1)], normal: negate(frame.y) },
-    { quad: [index(0, 1, 0), index(1, 1, 0), index(1, 1, 1), index(0, 1, 1)], normal: frame.y },
-    { quad: [index(0, 0, 0), index(1, 0, 0), index(1, 1, 0), index(0, 1, 0)], normal: negate(frame.z) },
-    { quad: [index(0, 0, 1), index(1, 0, 1), index(1, 1, 1), index(0, 1, 1)], normal: frame.z }
+  const faceDefs: { readonly role: string; readonly quad: readonly [number, number, number, number]; readonly normal: Vec3 }[] = [
+    { role: "face.x-min", quad: [index(0, 0, 0), index(0, 1, 0), index(0, 1, 1), index(0, 0, 1)], normal: negate(frame.x) },
+    { role: "face.x-max", quad: [index(1, 0, 0), index(1, 1, 0), index(1, 1, 1), index(1, 0, 1)], normal: frame.x },
+    { role: "face.y-min", quad: [index(0, 0, 0), index(1, 0, 0), index(1, 0, 1), index(0, 0, 1)], normal: negate(frame.y) },
+    { role: "face.y-max", quad: [index(0, 1, 0), index(1, 1, 0), index(1, 1, 1), index(0, 1, 1)], normal: frame.y },
+    { role: "face.z-min", quad: [index(0, 0, 0), index(1, 0, 0), index(1, 1, 0), index(0, 1, 0)], normal: negate(frame.z) },
+    { role: "face.z-max", quad: [index(0, 0, 1), index(1, 0, 1), index(1, 1, 1), index(0, 1, 1)], normal: frame.z }
   ];
   const builder = new TessellationBuilder();
-  for (const face of faces) builder.addQuad(corners[face.quad[0]]!, corners[face.quad[1]]!, corners[face.quad[2]]!, corners[face.quad[3]]!, face.normal);
+  for (const face of faceDefs) builder.addQuad(corners[face.quad[0]]!, corners[face.quad[1]]!, corners[face.quad[2]]!, corners[face.quad[3]]!, face.normal);
   const bounds = boundsOf(corners);
+  const faceSpecs = faceDefs.map((face, position) => quadFace(
+    face.role,
+    [corners[face.quad[0]]!, corners[face.quad[1]]!, corners[face.quad[2]]!, corners[face.quad[3]]!],
+    face.normal,
+    faceDefs.filter((_, other) => other !== position && other !== (position ^ 1)).map((other) => other.role)
+  ));
   const geometry: SolidGeometry = {
     topology: { vertices: 8, edges: 12, wires: 6, faces: 6, shells: 1, solids: 1, components: 1, closed: true, manifold: true },
     bounds,
     descriptor: { size: [sx, sy, sz], origin, xDirection: frame.x, normal: frame.z },
     tessellation: builder.finish(),
-    volumeCubicMeters: sx * sy * sz
+    volumeCubicMeters: sx * sy * sz,
+    faces: faceSpecs
   };
   const baseLoop = [index(0, 0, 0), index(1, 0, 0), index(1, 1, 0), index(0, 1, 0)].map((corner) => corners[corner]!);
   return {
@@ -201,12 +278,27 @@ function extrudeSolid(session: Map<string, StoredSolid>, operation: Extract<Exec
     builder.addQuad(points[step]!, points[next]!, top[next]!, top[step]!, sideNormal(points[step]!, points[next]!, normal));
   }
   const area = planarPolygonArea(points, normal);
+  const sideRoles = Array.from({ length: count }, (_, step) => `face.side-${step}`);
+  const faces: FaceSpec[] = [
+    { role: "face.cap-bottom", geometryClass: "plane", centroid: bottomCentroid, area, bounds: boundsOf(points), normal: negate(normal), adjacentRoles: sideRoles },
+    { role: "face.cap-top", geometryClass: "plane", centroid: topCentroid, area, bounds: boundsOf(top), normal, adjacentRoles: sideRoles },
+    ...Array.from({ length: count }, (_, step): FaceSpec => {
+      const next = (step + 1) % count;
+      return quadFace(
+        `face.side-${step}`,
+        [points[step]!, points[next]!, top[next]!, top[step]!],
+        sideNormal(points[step]!, points[next]!, normal),
+        ["face.cap-bottom", "face.cap-top", `face.side-${(step + count - 1) % count}`, `face.side-${next}`]
+      );
+    })
+  ];
   const geometry: SolidGeometry = {
     topology: { vertices: 2 * count, edges: 3 * count, wires: count + 2, faces: count + 2, shells: 1, solids: 1, components: 1, closed: true, manifold: true },
     bounds: boundsOf([...points, ...top]),
     descriptor: { profile: points.map((point) => [...point]), normal, height },
     tessellation: builder.finish(),
-    volumeCubicMeters: area * height
+    volumeCubicMeters: area * height,
+    faces
   };
   return { geometry };
 }
@@ -296,12 +388,20 @@ function cylinderGeometry(radius: number, height: number, origin: Vector3, direc
     builder.addTriangle(bottomCenter, bottom[next]!, bottom[step]!, negate(frame.z));
     builder.addTriangle(topCenter, top[step]!, top[next]!, frame.z);
   }
+  const bounds = boundsOf([...bottom, ...top]);
+  const capArea = Math.PI * radius * radius;
+  const faces: FaceSpec[] = [
+    { role: "face.lateral", geometryClass: "cylinder", centroid: [origin[0] + frame.z[0] * height / 2, origin[1] + frame.z[1] * height / 2, origin[2] + frame.z[2] * height / 2], area: 2 * Math.PI * radius * height, bounds, normal: frame.z, adjacentRoles: ["face.cap-bottom", "face.cap-top"] },
+    { role: "face.cap-bottom", geometryClass: "plane", centroid: bottomCenter, area: capArea, bounds: boundsOf(bottom), normal: negate(frame.z), adjacentRoles: ["face.lateral"] },
+    { role: "face.cap-top", geometryClass: "plane", centroid: topCenter, area: capArea, bounds: boundsOf(top), normal: frame.z, adjacentRoles: ["face.lateral"] }
+  ];
   return {
     topology: { vertices: 2, edges: 3, wires: 3, faces: 3, shells: 1, solids: 1, components: 1, closed: true, manifold: true },
-    bounds: boundsOf([...bottom, ...top]),
+    bounds,
     descriptor: { radius, height, origin, direction: frame.z, xDirection: frame.x },
     tessellation: builder.finish(),
-    volumeCubicMeters: Math.PI * radius * radius * height
+    volumeCubicMeters: capArea * height,
+    faces
   };
 }
 

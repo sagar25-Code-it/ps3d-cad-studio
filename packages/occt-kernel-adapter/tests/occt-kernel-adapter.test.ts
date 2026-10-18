@@ -882,3 +882,23 @@ test("the reference Boolean rejects a general non-convex configuration explicitl
   const b = (await runtime.execute(customBoxRequest("request:b", "operation:b", [0.1, 0.1, 0.1], [0.05, 0.05, 0.05]))).outputs[0]!;
   await assert.rejects(runtime.execute(booleanRequest("join", a, b)));
 });
+
+test("box faces carry stable lineage-anchored references that survive a dimensional rebuild", async () => {
+  const runtime = createReferenceBrepRuntime();
+  await runtime.openSession("session:test");
+  const first = await runtime.execute(customBoxRequest("request:r1", "operation:plate", [0.1, 0.2, 0.3], [0, 0, 0]));
+  const second = await runtime.execute(customBoxRequest("request:r2", "operation:plate", [0.5, 0.6, 0.7], [0, 0, 0]));
+  assert.equal(first.topologyEntities.length, 6);
+  const roles = first.topologyEntities.map((entity) => entity.stableReference.producer.role).sort();
+  assert.deepEqual(roles, ["face.x-max", "face.x-min", "face.y-max", "face.y-min", "face.z-max", "face.z-min"]);
+  assert.ok(first.topologyEntities.every((entity) => entity.adjacentReferenceKeys.length === 4), "each box face has four first-ring neighbors");
+  const keyByRole = (entities: readonly import("../../exact-kernel-api/src/index.js").ResolvedTopologyEntity[]) => new Map(entities.map((entity) => [entity.stableReference.producer.role, entity.stableReference.key]));
+  const firstKeys = keyByRole(first.topologyEntities);
+  const secondKeys = keyByRole(second.topologyEntities);
+  for (const role of roles) assert.equal(firstKeys.get(role), secondKeys.get(role), `the ${role} key must survive the rebuild`);
+  const zTop1 = first.topologyEntities.find((entity) => entity.stableReference.producer.role === "face.z-max")!;
+  const zTop2 = second.topologyEntities.find((entity) => entity.stableReference.producer.role === "face.z-max")!;
+  assert.equal(zTop1.stableReference.lineageDigest, zTop2.stableReference.lineageDigest);
+  assert.notEqual(zTop1.stableReference.signature.signatureDigest, zTop2.stableReference.signature.signatureDigest);
+  assert.ok(Math.abs(zTop1.stableReference.signature.measure - 0.1 * 0.2) < 1e-9, "the top face area is width*depth");
+});
