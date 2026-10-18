@@ -96,6 +96,7 @@ import {
 import { WorkbenchHeader } from "./ui/WorkbenchHeader.js";
 import { WorkbenchRibbon } from "./ui/WorkbenchRibbon.js";
 import { SaveProjectDialog } from "./ui/SaveProjectDialog.js";
+import { NewProjectDialog } from "./ui/NewProjectDialog.js";
 import { ProjectTree } from "./ui/ProjectTree.js";
 import { CommandPalette } from "./ui/CommandPalette.js";
 import { ExchangeCenter } from "./ui/ExchangeCenter.js";
@@ -243,6 +244,7 @@ export function App(): React.JSX.Element {
   const [exchangeOpen, setExchangeOpen] = useState(false);
   const [designHealthOpen, setDesignHealthOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [masterCartOpen, setMasterCartOpen] = useState(false);
   const [renderStudioOpen, setRenderStudioOpen] = useState(false);
   const [renderSettings, setRenderSettings] = useState<RenderStudioSettings>(DEFAULT_RENDER_SETTINGS);
@@ -1133,7 +1135,7 @@ export function App(): React.JSX.Element {
       openDesignHealth();
       return;
     }
-    if (action.kind === "file-new") { void createNewProject(); return; }
+    if (action.kind === "file-new") { setNewDialogOpen(true); return; }
     if (action.kind === "file-open") { void openProjectFromSystem(); return; }
     if (action.kind === "file-save") { void saveAll(); return; }
     if (action.kind === "file-save-as") { setSaveDialogMode("save-as"); return; }
@@ -1545,11 +1547,11 @@ export function App(): React.JSX.Element {
     }
   };
 
-  const createNewProject = async (): Promise<void> => {
+  const createNewProject = async (name = "Untitled design", startWorkspace: WorkspaceId = "part"): Promise<void> => {
     setStatus("working");
     try {
       await queueProjectTransition(async () => {
-        const nextProject = { ...createWorkbenchProject(`project:${crypto.randomUUID()}`), name: "Untitled design" };
+        const nextProject = { ...createWorkbenchProject(`project:${crypto.randomUUID()}`), name: name.trim().length === 0 ? "Untitled design" : name.trim(), activeWorkspace: startWorkspace };
         const previous = projectRef.current;
         const prepared = await prepareQualifiedWorker(nextProject);
         if (prepared === undefined) return;
@@ -1574,7 +1576,7 @@ export function App(): React.JSX.Element {
         activateQualifiedWorker(prepared);
         await refreshFileWorkspace();
         setStatus("ready");
-        setStatusText("Created a new unsaved PS3D design with a clean, synchronized history and independent recovery identity.");
+        setStatusText(`Created new design "${nextProject.name}" in the ${startWorkspace} environment with a clean, synchronized history.`);
       });
     } catch (error) {
       setStatus("error");
@@ -2067,7 +2069,7 @@ export function App(): React.JSX.Element {
       if (key === "s" && event.shiftKey) { event.preventDefault(); setSaveDialogMode("save-as"); }
       else if (key === "s") { event.preventDefault(); void saveAll(); }
       if (key === "o") { event.preventDefault(); void openProjectFromSystem(); }
-      if (key === "n") { event.preventDefault(); void createNewProject(); }
+      if (key === "n") { event.preventDefault(); setNewDialogOpen(true); }
       if (key === "p") { event.preventDefault(); window.print(); }
       if (key === "h" && event.shiftKey) { event.preventDefault(); openDesignHealth(); }
       if (key === "z" && event.shiftKey) { event.preventDefault(); historyActionRef.current.redo(); }
@@ -2147,7 +2149,7 @@ export function App(): React.JSX.Element {
       onExchange={() => setExchangeOpen(true)}
       onLearning={() => window.location.assign("/learn")}
       onAccess={() => window.location.assign("/access")}
-      onNew={() => void createNewProject()}
+      onNew={() => setNewDialogOpen(true)}
       onSave={() => void saveAll()}
       onSaveAs={() => setSaveDialogMode("save-as")}
       onSaveCopy={() => setSaveDialogMode("copy")}
@@ -2327,6 +2329,7 @@ export function App(): React.JSX.Element {
     <ExchangeCenter open={exchangeOpen} busy={exchangeBusy} hasScene={!masterCartOpen && isThreeDimensional} activeImport={activeImport} feedback={exchangeFeedback} onClose={() => setExchangeOpen(false)} onImport={(files, unit) => void importExchangeFiles(files, unit)} onExport={(format, unit) => void exportExchangeFormat(format, unit)} onPdfPackage={() => void exportPdfPackage()} onInteractivePdf={(file) => void exportInteractivePdf(file)} onClearImport={clearActiveImport} />
     {designHealthOpen && <DesignHealthCenter report={designHealth} onClose={() => setDesignHealthOpen(false)} onWorkspace={switchWorkspace} />}
     <SaveProjectDialog open={saveDialogMode !== undefined} mode={saveDialogMode ?? "save-as"} projectName={project.name} workspaceStatus={fileWorkspaceStatus} onConfirm={(fileName) => void confirmSaveDialog(fileName)} onClose={() => setSaveDialogMode(undefined)} />
+    <NewProjectDialog open={newDialogOpen} onConfirm={(name, workspace) => { setNewDialogOpen(false); void createNewProject(name, workspace); }} onClose={() => setNewDialogOpen(false)} />
   </main>;
 }
 
