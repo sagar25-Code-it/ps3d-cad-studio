@@ -1874,10 +1874,15 @@ export function App(): React.JSX.Element {
   const activateSketchTool = (tool: SketchTool, source: string): void => {
     setSketchTool(tool);
     setSketchDimensionMode(false);
-    if (tool !== "select") setViewportNavigation("select");
+    if (tool !== "select") {
+      setViewportNavigation("select");
+      // Snap the view normal to the sketch plane so a drawing tool can place points immediately,
+      // instead of silently requiring a manual "Look At" first.
+      if (projectRef.current.activeWorkspace === "sketch" && viewportState.orientation !== "top") setViewportOrientation("top");
+    }
     setStatusText(tool === "select"
       ? `Select tool active ${source}: click entities or shaded profiles to pick them.`
-      : `${sketchToolLabel(tool)} tool active ${source}: left-click places points (NAV switched to Select); middle-drag or the ViewCube orbits.`);
+      : `${sketchToolLabel(tool)} tool active ${source}: left-click places points on the sketch plane; middle-drag or the ViewCube orbits.`);
   };
 
   const activateSketchDimension = (source: string): void => {
