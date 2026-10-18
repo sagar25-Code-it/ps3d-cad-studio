@@ -77,7 +77,7 @@ export function applyWorkbenchOperation(
   const operationResult = validateWorkbenchOperation(operationInput);
   if (!operationResult.ok) return operationResult;
   const operation = operationResult.value;
-  const intentKey = canonicalizeJson(operation);
+  const intentKey = boundedIntentKey(operation);
   const prior = current.value.audit.find((entry) => entry.operationId === operation.operationId);
   if (prior !== undefined) {
     if (prior.intentKey !== intentKey) {
@@ -110,6 +110,34 @@ export function applyWorkbenchOperation(
   const validated = validateWorkbenchProject(next);
   if (!validated.ok) return validated;
   return { ok: true, value: { project: validated.value, changedIds: changed.value.changedIds, summary: changed.value.summary, exactRetry: false } };
+}
+
+/** Audit entries cap the intent key at 8,192 characters (see validateAudit). */
+const INTENT_KEY_INLINE_LIMIT = 8_000;
+
+/**
+ * Idempotency fingerprint of an operation. Small operations keep their exact
+ * canonical JSON. Operations that carry bulk data (a tessellated general body
+ * can hold tens of thousands of numbers) collapse to a length-and-digest form,
+ * so the audit stays within its bound while an exact retry still matches and a
+ * reused operation ID with different content still conflicts.
+ */
+function boundedIntentKey(operation: WorkbenchOperation): string {
+  const canonical = canonicalizeJson(operation);
+  if (canonical.length <= INTENT_KEY_INLINE_LIMIT) return canonical;
+  return `digest:${operation.kind}:${operation.operationId}:${canonical.length}:${fingerprint64(canonical)}`;
+}
+
+/** Synchronous 64-bit fingerprint (two independent FNV-1a lanes); for idempotency comparison, not security. */
+function fingerprint64(text: string): string {
+  let high = 0xcbf29ce4 >>> 0;
+  let low = 0x84222325 >>> 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    low = Math.imul(low ^ code, 0x01000193) >>> 0;
+    high = Math.imul(high ^ (code + index), 0x01000193) >>> 0;
+  }
+  return `${high.toString(16).padStart(8, "0")}${low.toString(16).padStart(8, "0")}`;
 }
 
 export function validateWorkbenchOperation(input: unknown): WorkbenchResult<WorkbenchOperation> {

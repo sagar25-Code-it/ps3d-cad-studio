@@ -77,7 +77,7 @@ interface SketchWorkspaceProps {
   readonly working: boolean;
   readonly onMessage: (message: string) => void;
   readonly optionsRevealRequest: number;
-  readonly onCreateSolid: (profileId: string | undefined, plane: "xy" | "xz" | "yz", operation: "extrude" | "revolve", valueMm: number) => void;
+  readonly onCreateSolid: (profileId: string | undefined, plane: "xy" | "xz" | "yz", operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }) => void;
   readonly activePlane: "xy" | "xz" | "yz";
 }
 
@@ -91,6 +91,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   useEffect(() => { setSolidPlane(props.activePlane); }, [props.activePlane]);
   const [solidOp, setSolidOp] = useState<"extrude" | "revolve">("extrude");
   const [solidValue, setSolidValue] = useState("10");
+  const [edgeKind, setEdgeKind] = useState<"none" | "chamfer" | "fillet">("none");
+  const [edgeSize, setEdgeSize] = useState("2");
   const [showProfiles, setShowProfiles] = useState(true);
   const [showDimensions, setShowDimensions] = useState(true);
   const [showConstraints, setShowConstraints] = useState(true);
@@ -381,7 +383,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             <input aria-label={solidOp === "extrude" ? "Height in millimetres" : "Angle in degrees"} type="number" min={solidOp === "extrude" ? 0.1 : 1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "extrude" ? 1 : 5} value={solidValue} onChange={(event) => setSolidValue(event.target.value)} />
             <small>{solidOp === "extrude" ? "mm" : "°"}</small>
           </div>
-          <button className="palette-action primary" disabled={profiles.length === 0} onClick={() => props.onCreateSolid(selectedProfileIds[0], solidPlane, solidOp, Number(solidValue))}><CommandIcon name="box" />Create solid</button>
+          {solidOp === "extrude" && <div className="make-solid-row" aria-label="Edge treatment">
+            <select aria-label="Edge treatment" value={edgeKind} onChange={(event) => setEdgeKind(event.target.value as "none" | "chamfer" | "fillet")}>
+              <option value="none">Edges: sharp</option>
+              <option value="chamfer">Edges: chamfer</option>
+              <option value="fillet">Edges: fillet</option>
+            </select>
+            {edgeKind !== "none" && <>
+              <input aria-label={edgeKind === "chamfer" ? "Chamfer distance in millimetres" : "Fillet radius in millimetres"} type="number" min={0.1} step={0.5} value={edgeSize} onChange={(event) => setEdgeSize(event.target.value)} />
+              <small>mm</small>
+            </>}
+          </div>}
+          <button className="palette-action primary" disabled={profiles.length === 0} onClick={() => props.onCreateSolid(selectedProfileIds[0], solidPlane, solidOp, Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined)}><CommandIcon name="box" />Create solid</button>
         </div>
       </div>
 

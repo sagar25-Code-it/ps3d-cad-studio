@@ -944,3 +944,69 @@ test("the revolve facade builds a genus-1 full ring and a genus-0 partial sweep 
   assert.ok(quarterVolume > quarterExact * 0.99 && quarterVolume <= quarterExact + 1e-12, `quarter revolve volume ${quarterVolume} vs ${quarterExact}`);
   assert.ok(full.faces.every((face) => /^face:[a-f0-9]{40}$/u.test(face.key)), "revolve faces carry stable keys");
 });
+
+test("chamfering every corner of a prism builds bevel faces with exact area, volume, and Euler-valid topology", async () => {
+  const { evaluateProfilePrism } = await import("../src/index.js");
+  const rectangle: readonly (readonly [number, number, number])[] = [[0, 0, 0], [0.02, 0, 0], [0.02, 0.01, 0], [0, 0.01, 0]];
+  const plain = await evaluateProfilePrism({ operationId: "operation:plate", semanticId: "body:plate", profilePointsMeters: rectangle, normal: [0, 0, 1], heightMeters: 0.005 });
+  const chamfered = await evaluateProfilePrism({
+    operationId: "operation:plate", semanticId: "body:plate", profilePointsMeters: rectangle, normal: [0, 0, 1], heightMeters: 0.005,
+    cornerTreatment: { kind: "chamfer", sizeMeters: 0.002 }
+  });
+  // 4 sides + 4 chamfers + 2 caps = 10 faces; 8 side faces -> 16 vertices, 24 edges (Euler 16 - 24 + 10 = 2).
+  assert.deepEqual(chamfered.topology, { vertices: 16, edges: 24, wires: 10, faces: 10, shells: 1, solids: 1, components: 1, closed: true, manifold: true });
+  assert.deepEqual(chamfered.faces.map((face) => face.role).sort(), [
+    "face.cap-bottom", "face.cap-top", "face.chamfer-0", "face.chamfer-1", "face.chamfer-2", "face.chamfer-3",
+    "face.side-0", "face.side-1", "face.side-2", "face.side-3"
+  ]);
+  // Four triangular corners of 0.5 * 2 mm * 2 mm are removed from the 200 mm^2 rectangle.
+  const exactArea = 200e-6 - 4 * 0.5 * 0.002 * 0.002;
+  const volume = meshVolume(Float64Array.from(chamfered.positionsMeters), Uint32Array.from(chamfered.indices));
+  assert.ok(Math.abs(volume - exactArea * 0.005) < 1e-12, `chamfered volume ${volume} vs ${exactArea * 0.005}`);
+  const chamferArea = chamfered.faces.find((face) => face.role === "face.chamfer-0")!.areaSquareMeters;
+  assert.ok(Math.abs(chamferArea - Math.hypot(0.002, 0.002) * 0.005) < 1e-12, "a bevel face is its slant width times the height");
+  // The original side faces keep the very same stable keys when corners are chamfered.
+  for (const role of ["face.side-0", "face.side-1", "face.side-2", "face.side-3", "face.cap-top", "face.cap-bottom"]) {
+    assert.equal(plain.faces.find((face) => face.role === role)!.key, chamfered.faces.find((face) => face.role === role)!.key, `${role} key survives the chamfer`);
+  }
+  assert.equal(chamfered.faceTriangles.length * 3, chamfered.indices.length);
+});
+
+test("filleting a prism builds one cylindrical face per corner whose volume matches the rounded outline", async () => {
+  const { evaluateProfilePrism } = await import("../src/index.js");
+  const radius = 0.002;
+  const filleted = await evaluateProfilePrism({
+    operationId: "operation:plate", semanticId: "body:plate",
+    profilePointsMeters: [[0, 0, 0], [0.02, 0, 0], [0.02, 0.01, 0], [0, 0.01, 0]], normal: [0, 0, 1], heightMeters: 0.005,
+    cornerTreatment: { kind: "fillet", sizeMeters: radius }
+  });
+  // Each fillet is a single face however many facets approximate it: 4 sides + 4 fillets + 2 caps.
+  assert.equal(filleted.topology.faces, 10);
+  assert.equal(filleted.topology.vertices - filleted.topology.edges + filleted.topology.faces, 2);
+  assert.ok(filleted.faces.some((face) => face.role === "face.fillet-2"));
+  const exactArea = 200e-6 - 4 * (radius * radius - (Math.PI * radius * radius) / 4);
+  const volume = meshVolume(Float64Array.from(filleted.positionsMeters), Uint32Array.from(filleted.indices));
+  // The faceted arc sits just inside the true arc, so the mesh is marginally under the analytic volume.
+  assert.ok(volume < exactArea * 0.005 + 1e-15 && volume > exactArea * 0.005 * 0.9995, `filleted volume ${volume} vs ${exactArea * 0.005}`);
+  const arcArea = filleted.faces.find((face) => face.role === "face.fillet-0")!.areaSquareMeters;
+  assert.ok(arcArea < (Math.PI / 2) * radius * 0.005 && arcArea > (Math.PI / 2) * radius * 0.005 * 0.99, `fillet face area ${arcArea}`);
+});
+
+test("corner treatment can target a subset, rejects oversized settings, and normalises clockwise loops", async () => {
+  const { evaluateProfilePrism } = await import("../src/index.js");
+  const base = { operationId: "operation:plate", semanticId: "body:plate", normal: [0, 0, 1] as const, heightMeters: 0.005 };
+  const counterClockwise: readonly (readonly [number, number, number])[] = [[0, 0, 0], [0.02, 0, 0], [0.02, 0.01, 0], [0, 0.01, 0]];
+
+  const single = await evaluateProfilePrism({ ...base, profilePointsMeters: counterClockwise, cornerTreatment: { kind: "chamfer", sizeMeters: 0.002, cornerIndices: [2] } });
+  assert.equal(single.topology.faces, 7, "one chamfer adds exactly one face");
+  assert.ok(single.faces.some((face) => face.role === "face.chamfer-2") && !single.faces.some((face) => face.role === "face.chamfer-0"));
+
+  await assert.rejects(evaluateProfilePrism({ ...base, profilePointsMeters: counterClockwise, cornerTreatment: { kind: "chamfer", sizeMeters: 0.006 } }), /too large/u);
+  await assert.rejects(evaluateProfilePrism({ ...base, profilePointsMeters: counterClockwise, cornerTreatment: { kind: "fillet", sizeMeters: 0 } }), /positive/u);
+
+  // A clockwise loop must still produce an outward-wound solid of positive volume.
+  const clockwise = [...counterClockwise].reverse();
+  const reversed = await evaluateProfilePrism({ ...base, profilePointsMeters: clockwise });
+  const volume = meshVolume(Float64Array.from(reversed.positionsMeters), Uint32Array.from(reversed.indices));
+  assert.ok(Math.abs(volume - 200e-6 * 0.005) < 1e-12, `clockwise loop volume ${volume}`);
+});

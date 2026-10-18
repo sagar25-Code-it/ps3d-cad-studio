@@ -142,6 +142,39 @@ export const workbenchCoreTests: readonly TestCase[] = [
     }
   },
   {
+    name: "bulky tessellated bodies stay within the audit bound yet remain idempotent and conflict-safe",
+    run: () => {
+      // A filleted or round-profile solid carries thousands of mesh numbers, far beyond the 8,192-character audit key.
+      const largeBody = (id: string, scale: number) => {
+        const triangles = 400;
+        const positionsMm: number[] = [];
+        const indices: number[] = [];
+        for (let triangle = 0; triangle < triangles; triangle += 1) {
+          const base = triangle * 3;
+          positionsMm.push(triangle * 0.5, 0, 0, triangle * 0.5 + scale, 1, 0, triangle * 0.5, 0, scale);
+          indices.push(base, base + 1, base + 2);
+        }
+        return {
+          id, name: "Large body", visible: true, color: "#b9c2c8", positionsMm, indices,
+          brep: { topology: { vertices: 2, edges: 3, faces: 1 }, faces: [{ role: "face.a", key: "face:aaaa", areaMm2: 1 }], faceTriangles: Array.from({ length: triangles }, () => 0) }
+        };
+      };
+      const project = createWorkbenchProject("project:test-bulky-body");
+      const operation = { kind: "add-general-body" as const, operationId: "operation:test-bulky", expectedRevision: 0, body: largeBody("general-body:bulky", 2) };
+      const added = applyWorkbenchOperation(project, operation);
+      assert(added.ok, "a bulky tessellated body must not overflow the audit intent key");
+      assert((added.value.project.audit[0]?.intentKey.length ?? Infinity) <= 8_192, "the stored audit intent key must stay within its bound");
+
+      const retry = applyWorkbenchOperation(added.value.project, operation);
+      assert(retry.ok && retry.value.exactRetry, "an exact retry of the same bulky operation must be an idempotent no-op");
+      equal(retry.ok ? retry.value.project.revision : -1, 1, "an exact retry must not add a revision");
+
+      const conflict = applyWorkbenchOperation(added.value.project, { ...operation, body: largeBody("general-body:bulky", 3) });
+      assert(!conflict.ok, "reusing an operation ID for different bulky content must conflict");
+      equal(conflict.ok ? "" : conflict.diagnostics[0]?.code, "IDEMPOTENCY_CONFLICT", "the conflict must be reported as an idempotency conflict");
+    }
+  },
+  {
     name: "general sketch tools build entities and snap deterministically",
     run: () => {
       const project = createWorkbenchProject("project:test-sketch-tools");

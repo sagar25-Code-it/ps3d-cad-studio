@@ -273,10 +273,30 @@ function extrudeSolid(session: Map<string, StoredSolid>, operation: Extract<Exec
   return { geometry };
 }
 
-/** Exact prism from a closed planar loop extruded along its normal: 2N vertices, 3N edges, N+2 faces. */
-function prismGeometry(points: readonly Vec3[], normal: Vec3, height: number): SolidGeometry {
+/**
+ * A run of consecutive profile edges that sweeps into one boundary face: a
+ * single planar side, a planar chamfer bevel, or a multi-facet cylindrical fillet.
+ */
+interface EdgeGroup {
+  readonly role: string;
+  readonly geometryClass: "plane" | "cylinder";
+  readonly edgeCount: number;
+}
+
+/**
+ * Exact prism from a closed planar loop extruded along its normal. With G
+ * boundary side faces it has 2G vertices, 3G edges and G+2 faces (Euler 2).
+ * By default every profile edge is its own planar side face; `groups` lets
+ * consecutive edges merge into one face (used for fillet arcs).
+ */
+function prismGeometry(points: readonly Vec3[], normal: Vec3, height: number, groups?: readonly EdgeGroup[]): SolidGeometry {
   const count = points.length;
   if (count < 3) throw new Error("Extrude profile loop needs at least three points.");
+  const edgeGroups: readonly EdgeGroup[] = groups ?? points.map((_, step) => ({ role: `face.side-${step}`, geometryClass: "plane" as const, edgeCount: 1 }));
+  if (edgeGroups.reduce((total, group) => total + group.edgeCount, 0) !== count) throw new Error("Prism edge groups must cover every profile edge exactly once.");
+  const groupOfEdge: number[] = [];
+  edgeGroups.forEach((group, groupIndex) => { for (let edge = 0; edge < group.edgeCount; edge += 1) groupOfEdge.push(groupIndex); });
+
   const top = points.map((point) => [point[0] + normal[0] * height, point[1] + normal[1] * height, point[2] + normal[2] * height] as Vec3);
   const builder = new TessellationBuilder();
   const bottomCentroid = centroid(points);
@@ -285,31 +305,118 @@ function prismGeometry(points: readonly Vec3[], normal: Vec3, height: number): S
     const next = (step + 1) % count;
     builder.addTriangle(bottomCentroid, points[next]!, points[step]!, negate(normal), 0);
     builder.addTriangle(topCentroid, top[step]!, top[next]!, normal, 1);
-    builder.addQuad(points[step]!, points[next]!, top[next]!, top[step]!, sideNormal(points[step]!, points[next]!, normal), 2 + step);
+    builder.addQuad(points[step]!, points[next]!, top[next]!, top[step]!, sideNormal(points[step]!, points[next]!, normal), 2 + groupOfEdge[step]!);
   }
   const area = planarPolygonArea(points, normal);
-  const sideRoles = Array.from({ length: count }, (_, step) => `face.side-${step}`);
+  const sideRoles = edgeGroups.map((group) => group.role);
+  const groupCount = edgeGroups.length;
+  let firstEdge = 0;
+  const sideFaces = edgeGroups.map((group, groupIndex): FaceSpec => {
+    const edgeIndices = Array.from({ length: group.edgeCount }, (_, offset) => firstEdge + offset);
+    firstEdge += group.edgeCount;
+    const corners: Vec3[] = [];
+    let groupArea = 0;
+    const midpoints: Vec3[] = [];
+    for (const edge of edgeIndices) {
+      const next = (edge + 1) % count;
+      corners.push(points[edge]!, points[next]!, top[edge]!, top[next]!);
+      groupArea += Math.hypot(...subtract(points[next]!, points[edge]!)) * height;
+      midpoints.push([(points[edge]![0] + points[next]![0]) / 2 + normal[0] * height / 2, (points[edge]![1] + points[next]![1]) / 2 + normal[1] * height / 2, (points[edge]![2] + points[next]![2]) / 2 + normal[2] * height / 2]);
+    }
+    const middleEdge = edgeIndices[Math.floor(edgeIndices.length / 2)]!;
+    return {
+      role: group.role,
+      geometryClass: group.geometryClass,
+      centroid: centroid(midpoints),
+      area: groupArea,
+      bounds: boundsOf(corners),
+      normal: sideNormal(points[middleEdge]!, points[(middleEdge + 1) % count]!, normal),
+      adjacentRoles: ["face.cap-bottom", "face.cap-top", sideRoles[(groupIndex + groupCount - 1) % groupCount]!, sideRoles[(groupIndex + 1) % groupCount]!]
+    };
+  });
   const faces: FaceSpec[] = [
     { role: "face.cap-bottom", geometryClass: "plane", centroid: bottomCentroid, area, bounds: boundsOf(points), normal: negate(normal), adjacentRoles: sideRoles },
     { role: "face.cap-top", geometryClass: "plane", centroid: topCentroid, area, bounds: boundsOf(top), normal, adjacentRoles: sideRoles },
-    ...Array.from({ length: count }, (_, step): FaceSpec => {
-      const next = (step + 1) % count;
-      return quadFace(
-        `face.side-${step}`,
-        [points[step]!, points[next]!, top[next]!, top[step]!],
-        sideNormal(points[step]!, points[next]!, normal),
-        ["face.cap-bottom", "face.cap-top", `face.side-${(step + count - 1) % count}`, `face.side-${next}`]
-      );
-    })
+    ...sideFaces
   ];
   return {
-    topology: { vertices: 2 * count, edges: 3 * count, wires: count + 2, faces: count + 2, shells: 1, solids: 1, components: 1, closed: true, manifold: true },
+    topology: { vertices: 2 * groupCount, edges: 3 * groupCount, wires: groupCount + 2, faces: groupCount + 2, shells: 1, solids: 1, components: 1, closed: true, manifold: true },
     bounds: boundsOf([...points, ...top]),
-    descriptor: { profile: points.map((point) => [...point]), normal, height },
+    descriptor: { profile: points.map((point) => [...point]), normal, height, groups: edgeGroups.map((group) => [group.role, group.edgeCount]) },
     tessellation: builder.finish(),
     volumeCubicMeters: area * height,
     faces
   };
+}
+
+/** Corner treatment applied to a prism's vertical edges, expressed on the planar profile. */
+export interface CornerTreatment {
+  readonly kind: "chamfer" | "fillet";
+  /** Chamfer setback along each adjacent edge, or fillet radius, in metres. */
+  readonly sizeMeters: number;
+  /** Profile corner indices to treat; defaults to every corner. */
+  readonly cornerIndices?: readonly number[];
+}
+
+/**
+ * Rounds or bevels profile corners. A chamfer replaces corner P with the two
+ * points a setback `size` along each adjacent edge; a fillet replaces it with a
+ * circular arc of radius `size` tangent to both edges. Each treated corner
+ * becomes its own named face (`face.chamfer-i` / `face.fillet-i`) and the
+ * untouched edges keep their `face.side-j` names, so earlier references survive.
+ */
+function treatProfileCorners(points: readonly Vec3[], treatment: CornerTreatment): { readonly points: Vec3[]; readonly groups: EdgeGroup[] } {
+  const count = points.length;
+  if (!(treatment.sizeMeters > 0)) throw new Error("Corner treatment size must be positive.");
+  const treated = new Set(treatment.cornerIndices ?? points.map((_, index) => index));
+  for (const index of treated) if (!Number.isInteger(index) || index < 0 || index >= count) throw new Error(`Corner index ${index} is outside the profile.`);
+  const edgeLength = (edge: number): number => Math.hypot(...subtract(points[(edge + 1) % count]!, points[edge]!));
+  const outPoints: Vec3[] = [];
+  const groups: EdgeGroup[] = [];
+  for (let corner = 0; corner < count; corner += 1) {
+    const point = points[corner]!;
+    if (!treated.has(corner)) {
+      outPoints.push(point);
+    } else {
+      const previous = points[(corner + count - 1) % count]!;
+      const next = points[(corner + 1) % count]!;
+      const toPrevious = unit(subtract(previous, point));
+      const toNext = unit(subtract(next, point));
+      const cosine = Math.min(1, Math.max(-1, dot(toPrevious, toNext)));
+      const interiorAngle = Math.acos(cosine);
+      if (interiorAngle < 1e-6 || interiorAngle > Math.PI - 1e-6) throw new Error(`Corner ${corner} is degenerate or straight and cannot be treated.`);
+      const setback = treatment.kind === "chamfer" ? treatment.sizeMeters : treatment.sizeMeters / Math.tan(interiorAngle / 2);
+      const limit = 0.5 * Math.min(edgeLength((corner + count - 1) % count), edgeLength(corner));
+      if (setback > limit + 1e-12) throw new Error(`The ${treatment.kind} on corner ${corner} is too large for its adjacent edges (needs ${setback.toFixed(6)} m, limit ${limit.toFixed(6)} m).`);
+      const start: Vec3 = [point[0] + toPrevious[0] * setback, point[1] + toPrevious[1] * setback, point[2] + toPrevious[2] * setback];
+      const end: Vec3 = [point[0] + toNext[0] * setback, point[1] + toNext[1] * setback, point[2] + toNext[2] * setback];
+      if (treatment.kind === "chamfer") {
+        outPoints.push(start, end);
+        groups.push({ role: `face.chamfer-${corner}`, geometryClass: "plane", edgeCount: 1 });
+      } else {
+        const bisector = unit([toPrevious[0] + toNext[0], toPrevious[1] + toNext[1], toPrevious[2] + toNext[2]]);
+        const centerDistance = treatment.sizeMeters / Math.sin(interiorAngle / 2);
+        const center: Vec3 = [point[0] + bisector[0] * centerDistance, point[1] + bisector[1] * centerDistance, point[2] + bisector[2] * centerDistance];
+        const arc = Math.PI - interiorAngle;
+        const segments = Math.max(2, Math.ceil((arc / (Math.PI / 2)) * 8));
+        const fromCenterToStart = subtract(start, center);
+        const fromCenterToEnd = subtract(end, center);
+        for (let step = 0; step <= segments; step += 1) {
+          const fraction = step / segments;
+          const weightStart = Math.sin((1 - fraction) * arc) / Math.sin(arc);
+          const weightEnd = Math.sin(fraction * arc) / Math.sin(arc);
+          outPoints.push([
+            center[0] + fromCenterToStart[0] * weightStart + fromCenterToEnd[0] * weightEnd,
+            center[1] + fromCenterToStart[1] * weightStart + fromCenterToEnd[1] * weightEnd,
+            center[2] + fromCenterToStart[2] * weightStart + fromCenterToEnd[2] * weightEnd
+          ]);
+        }
+        groups.push({ role: `face.fillet-${corner}`, geometryClass: "cylinder", edgeCount: segments });
+      }
+    }
+    groups.push({ role: `face.side-${corner}`, geometryClass: "plane", edgeCount: 1 });
+  }
+  return { points: outPoints, groups };
 }
 
 /**
@@ -461,6 +568,8 @@ export interface ProfilePrismRequest {
   readonly normal: readonly [number, number, number];
   readonly heightMeters: number;
   readonly toleranceMeters?: number;
+  /** Optional chamfer or fillet of the prism's vertical edges (applied to the counter-clockwise-normalised loop). */
+  readonly cornerTreatment?: CornerTreatment;
 }
 
 export interface NamedFace {
@@ -490,9 +599,13 @@ export interface ProfilePrismResult {
  */
 export async function evaluateProfilePrism(request: ProfilePrismRequest): Promise<ProfilePrismResult> {
   if (!(request.heightMeters > 0)) throw new Error("Extrude distance must be positive.");
-  const points = request.profilePointsMeters.map((point) => [point[0], point[1], point[2]] as Vec3);
+  let points = request.profilePointsMeters.map((point) => [point[0], point[1], point[2]] as Vec3);
   const normal = unit([request.normal[0], request.normal[1], request.normal[2]]);
-  const geometry = prismGeometry(points, normal, request.heightMeters);
+  // Side normals are derived from loop winding, so a clockwise loop would face inward: normalise to counter-clockwise about the normal.
+  if (planarSignedArea(points, normal) < 0) points = [...points].reverse();
+  const geometry = request.cornerTreatment === undefined
+    ? prismGeometry(points, normal, request.heightMeters)
+    : (() => { const treated = treatProfileCorners(points, request.cornerTreatment); return prismGeometry(treated.points, normal, request.heightMeters, treated.groups); })();
   const toleranceMeters = request.toleranceMeters ?? 1e-6;
   const entities = await buildFaceEntities({ operationId: request.operationId, operationKind: "solid.extrude", semanticId: request.semanticId, toleranceMeters }, geometry.faces);
   const faces: NamedFace[] = entities.map((entity, position) => ({
@@ -706,7 +819,8 @@ function sideNormal(from: Vec3, to: Vec3, extrudeNormal: Vec3): Vec3 {
   return unit(cross(subtract(to, from), extrudeNormal));
 }
 
-function planarPolygonArea(points: readonly Vec3[], normal: Vec3): number {
+/** Signed polygon area about `normal`: positive when the loop winds counter-clockwise viewed against the normal. */
+function planarSignedArea(points: readonly Vec3[], normal: Vec3): number {
   let accumulator: Vec3 = [0, 0, 0];
   for (let step = 0; step < points.length; step += 1) {
     const next = (step + 1) % points.length;
@@ -716,7 +830,11 @@ function planarPolygonArea(points: readonly Vec3[], normal: Vec3): number {
       accumulator[2] + (points[step]![0] * points[next]![1] - points[step]![1] * points[next]![0])
     ];
   }
-  return Math.abs(dot(accumulator, unit(normal))) / 2;
+  return dot(accumulator, unit(normal)) / 2;
+}
+
+function planarPolygonArea(points: readonly Vec3[], normal: Vec3): number {
+  return Math.abs(planarSignedArea(points, normal));
 }
 
 function boundsOf(points: readonly Vec3[]): KernelBounds {

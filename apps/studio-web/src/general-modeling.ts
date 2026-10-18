@@ -64,6 +64,8 @@ export interface CreateGeneralSolidRequest {
   readonly bodyId: string;
   readonly name: string;
   readonly color: string;
+  /** Optional chamfer or fillet of the extruded prism's vertical edges (extrude only). */
+  readonly edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number };
 }
 
 export type CreateGeneralSolidResult =
@@ -94,13 +96,18 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
   };
 
   if (request.operation === "extrude") {
+    if (request.edge !== undefined) {
+      if (request.profile.boundary.kind === "circle") return { ok: false, message: "Chamfer and fillet apply to polygon and rectangle profiles; a circle has no corners to treat." };
+      if (!Number.isFinite(request.edge.sizeMm) || request.edge.sizeMm <= 0) return { ok: false, message: `Enter a positive ${request.edge.kind === "chamfer" ? "chamfer distance" : "fillet radius"}.` };
+    }
     try {
       const prism = await evaluateProfilePrism({
         operationId: request.bodyId,
         semanticId: request.bodyId,
         profilePointsMeters: polygonMm.map((point) => placeOnPlane(point, request.plane)),
         normal: planeNormal(request.plane),
-        heightMeters: Math.abs(request.valueMm) / 1000
+        heightMeters: Math.abs(request.valueMm) / 1000,
+        ...(request.edge === undefined ? {} : { cornerTreatment: { kind: request.edge.kind, sizeMeters: request.edge.sizeMm / 1000 } })
       });
       if (prism.indices.length < 3) return { ok: false, message: "The profile could not be converted into a solid." };
       return {
@@ -116,8 +123,10 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
           }
         }
       };
-    } catch {
-      return { ok: false, message: "The solid kernel could not extrude this profile." };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "";
+      // Treatment errors name the corner and the limit, which the user can act on directly.
+      return { ok: false, message: request.edge !== undefined && /too large|degenerate|straight/u.test(detail) ? detail : "The solid kernel could not extrude this profile." };
     }
   }
 
