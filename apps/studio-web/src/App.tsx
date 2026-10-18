@@ -98,6 +98,7 @@ import { WorkbenchHeader } from "./ui/WorkbenchHeader.js";
 import { WorkbenchRibbon } from "./ui/WorkbenchRibbon.js";
 import { SaveProjectDialog } from "./ui/SaveProjectDialog.js";
 import { NewProjectDialog } from "./ui/NewProjectDialog.js";
+import { SketchPlaneDialog } from "./ui/SketchPlaneDialog.js";
 import { ProjectTree } from "./ui/ProjectTree.js";
 import { CommandPalette } from "./ui/CommandPalette.js";
 import { ExchangeCenter } from "./ui/ExchangeCenter.js";
@@ -246,6 +247,8 @@ export function App(): React.JSX.Element {
   const [designHealthOpen, setDesignHealthOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [newDialogOpen, setNewDialogOpen] = useState(false);
+  const [sketchPlaneDialogOpen, setSketchPlaneDialogOpen] = useState(false);
+  const [activeSketchPlane, setActiveSketchPlane] = useState<SketchPlane>("xy");
   const [masterCartOpen, setMasterCartOpen] = useState(false);
   const [renderStudioOpen, setRenderStudioOpen] = useState(false);
   const [renderSettings, setRenderSettings] = useState<RenderStudioSettings>(DEFAULT_RENDER_SETTINGS);
@@ -695,6 +698,24 @@ export function App(): React.JSX.Element {
     void persistBroadProject(next).catch(() => undefined);
     setStatus("ready");
     setStatusText(`Opened ${workspace === "automate" ? "Automate" : `${workspace[0]!.toUpperCase()}${workspace.slice(1)}`} workspace without changing engineering revision ${current.revision}.`);
+  };
+
+  // Fusion-style sketch entry: picking the Sketch tab from elsewhere asks which datum plane first.
+  const requestWorkspace = (workspace: WorkspaceId): void => {
+    if (workspace === "sketch" && projectRef.current.activeWorkspace !== "sketch" && !masterCartOpen && !renderStudioOpen) {
+      setSketchPlaneDialogOpen(true);
+      return;
+    }
+    switchWorkspace(workspace);
+  };
+
+  const confirmSketchPlane = (plane: SketchPlane): void => {
+    setSketchPlaneDialogOpen(false);
+    setActiveSketchPlane(plane);
+    switchWorkspace("sketch");
+    const orientation = plane === "xy" ? "top" : plane === "xz" ? "front" : "right";
+    setViewportOrientation(orientation);
+    setStatusText(`New sketch on the ${plane.toUpperCase()} plane (${orientation} view). Draw a closed profile, then Create Solid extrudes along this plane.`);
   };
 
   const openMasterCart = (): void => {
@@ -2174,7 +2195,7 @@ export function App(): React.JSX.Element {
       status={status}
       fileWorkspaceStatus={fileWorkspaceStatus}
       recentProjects={recentProjects}
-      onWorkspace={switchWorkspace}
+      onWorkspace={requestWorkspace}
       onMasterCart={openMasterCart}
       onRenderStudio={openRenderStudio}
       onCommandPalette={() => setPaletteOpen(true)}
@@ -2278,7 +2299,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} onExtrudeProfiles={extrudeSketchProfiles} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} onFit={() => setStatusText("Sketch fit is already bounded to all visible entities.")} onHome={homeViewport} onContextMenu={openContextMenu} working={status === "working"} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} onCreateSolid={(profileId, plane, operation, valueMm) => void createGeneralSolid(profileId, plane, operation, valueMm)} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} onExtrudeProfiles={extrudeSketchProfiles} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} onFit={() => setStatusText("Sketch fit is already bounded to all visible entities.")} onHome={homeViewport} onContextMenu={openContextMenu} working={status === "working"} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} onCreateSolid={(profileId, plane, operation, valueMm) => void createGeneralSolid(profileId, plane, operation, valueMm)} activePlane={activeSketchPlane} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl
@@ -2363,6 +2384,7 @@ export function App(): React.JSX.Element {
     {designHealthOpen && <DesignHealthCenter report={designHealth} onClose={() => setDesignHealthOpen(false)} onWorkspace={switchWorkspace} />}
     <SaveProjectDialog open={saveDialogMode !== undefined} mode={saveDialogMode ?? "save-as"} projectName={project.name} workspaceStatus={fileWorkspaceStatus} onConfirm={(fileName) => void confirmSaveDialog(fileName)} onClose={() => setSaveDialogMode(undefined)} />
     <NewProjectDialog open={newDialogOpen} onConfirm={(name, workspace) => { setNewDialogOpen(false); void createNewProject(name, workspace); }} onClose={() => setNewDialogOpen(false)} />
+    <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={activeSketchPlane} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
   </main>;
 }
 

@@ -78,6 +78,7 @@ interface SketchWorkspaceProps {
   readonly onMessage: (message: string) => void;
   readonly optionsRevealRequest: number;
   readonly onCreateSolid: (profileId: string | undefined, plane: "xy" | "xz" | "yz", operation: "extrude" | "revolve", valueMm: number) => void;
+  readonly activePlane: "xy" | "xz" | "yz";
 }
 
 export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element {
@@ -86,7 +87,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [selectionIds, setSelectionIds] = useState<readonly string[]>(props.selectedId === null ? [] : [props.selectedId]);
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
-  const [solidPlane, setSolidPlane] = useState<"xy" | "xz" | "yz">("xy");
+  const [solidPlane, setSolidPlane] = useState<"xy" | "xz" | "yz">(props.activePlane);
+  useEffect(() => { setSolidPlane(props.activePlane); }, [props.activePlane]);
   const [solidOp, setSolidOp] = useState<"extrude" | "revolve">("extrude");
   const [solidValue, setSolidValue] = useState("10");
   const [showProfiles, setShowProfiles] = useState(true);

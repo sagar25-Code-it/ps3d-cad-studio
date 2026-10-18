@@ -211,6 +211,10 @@
 .viewcube-edge { stroke: #60717c; stroke-width: 0.025; pointer-events: none; }
 .viewcube-corner { fill: transparent; stroke: transparent; stroke-width: 0.03; cursor: pointer; transition: fill 120ms ease, stroke 120ms ease; }
 .viewcube-corner:hover { fill: #166eaa26; stroke: #166eaa; }
+/* A mouse click must never leave a black focus ring on the cube; keyboard focus still shows a blue outline. */
+.viewcube-face:focus, .viewcube-corner:focus { outline: none; }
+.viewcube-face:focus-visible polygon { stroke: #166eaa; stroke-width: 0.075; }
+.viewcube-corner:focus-visible { fill: #166eaa26; stroke: #166eaa; }
 .viewcube-home { position: absolute; top: 82px; left: 40px; width: 52px; padding: 0.2rem 0; border-color: #aeb6bd; color: #4e575e; background: #f4f6f7eb; font: 700 0.4rem var(--mono); }
 .viewcube-home:hover,
 .viewcube-home.active { border-color: #a91c28; color: #fff; background: #c62836; }
