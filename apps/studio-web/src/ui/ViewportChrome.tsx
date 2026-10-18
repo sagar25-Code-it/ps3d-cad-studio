@@ -213,7 +213,7 @@ function ViewCube({ state, onOrientation, onViewAngles }: { readonly state: View
         const direction = add3(CUBE_VERTICES[first]!, CUBE_VERTICES[second]!);
         return <line key={`${first}:${second}`} className="viewcube-edge" x1={left[0]} y1={left[1]} x2={right[0]} y2={right[1]} data-direction={`${direction[0]},${direction[1]},${direction[2]}`} />;
       })}
-      {projected.map((point, index) => <rect key={index} className="viewcube-corner" x={point[0] - 0.085} y={point[1] - 0.085} width="0.17" height="0.17" rx="0.035" onClick={() => chooseDirection(CUBE_VERTICES[index]!)} />)}
+      {projected.map((point, index) => <circle key={index} className="viewcube-corner" cx={point[0]} cy={point[1]} r="0.12" onClick={() => chooseDirection(CUBE_VERTICES[index]!)} />)}
     </svg>
     <button className={`viewcube-home ${state.orientation === "isometric" ? "active" : ""}`} onClick={() => onOrientation("isometric")} title="Isometric home view">HOME</button>
     <div className="viewbox-more" aria-label="Standard named views">
