@@ -376,6 +376,11 @@
 .studio-app .sketch-palette header span { color: #a41c28; }
 .studio-app .sketch-palette header strong { color: #2c3237; }
 .studio-app .sketch-palette > label { border-bottom-color: #dfe2e5; color: #555d64; }
+.sketch-make-solid { display: grid; gap: 0.3rem; margin-top: 0.35rem; padding-top: 0.4rem; border-top: 1px solid #d0d4d8; }
+.sketch-make-solid .make-solid-title { color: #155ead; font: 700 0.46rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.sketch-make-solid .make-solid-row { display: grid; grid-template-columns: 1fr 1fr auto auto; align-items: center; gap: 0.25rem; }
+.sketch-make-solid select, .sketch-make-solid input { min-width: 0; padding: 0.25rem; border: 1px solid #aeb5bb; border-radius: 3px; color: #2c3237; background: #fff; font-size: 0.52rem; }
+.sketch-make-solid small { color: #6b7880; font-size: 0.5rem; }
 .studio-app .sketch-palette .palette-action.primary {
   border-color: #d39ba2;
   color: #991923;

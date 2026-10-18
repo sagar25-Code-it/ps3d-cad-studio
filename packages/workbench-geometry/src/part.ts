@@ -27,12 +27,42 @@ export function buildPartPreview(part: PartIntent): PreviewScene {
     [halfWidth, halfHeight, halfThickness]
   ];
   for (const body of bodies) points.push(...previewBodyBounds(body));
+  const generalBodies = (part.generalBodies ?? []).filter((body) => body.visible);
+  for (const body of generalBodies) {
+    primitives.push({
+      id: body.id,
+      name: `${body.name} · general solid`,
+      color: body.color,
+      opacity: 1,
+      selectable: true,
+      kind: "mesh",
+      positionsMm: body.positionsMm,
+      indices: body.indices,
+      wireframe: false,
+      doubleSided: true
+    });
+    points.push(...generalBodyBounds(body.positionsMm));
+  }
   return {
     id: "part-scene:native-with-analytic-bodies",
     kind: "part",
     primitives,
     boundsMm: boundsFromPoints(points)
   };
+}
+
+function generalBodyBounds(positionsMm: readonly number[]): readonly Vec3[] {
+  if (positionsMm.length < 3) return [];
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (let index = 0; index + 2 < positionsMm.length; index += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = positionsMm[index + axis]!;
+      if (value < min[axis]!) min[axis] = value;
+      if (value > max[axis]!) max[axis] = value;
+    }
+  }
+  return [min, max];
 }
 
 function partPreviewPrimitive(body: PartPreviewBody): PreviewPrimitive {

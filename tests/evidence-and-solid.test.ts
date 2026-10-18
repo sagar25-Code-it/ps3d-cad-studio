@@ -6,6 +6,7 @@ import { createBracketDocument } from "../packages/model-schema/src/index.js";
 import { BracketSolidKernel } from "../packages/solid-bracket-kernel/src/index.js";
 import { ManifoldSolidKernel } from "../packages/solid-manifold-adapter/src/adapter.js";
 import { combineSolids, extrudeProfileSolid, revolveProfileSolid } from "../packages/solid-manifold-adapter/src/general.js";
+import { tessellateExtrude, tessellateRevolve } from "../packages/workbench-geometry/src/index.js";
 import type { ModelMesh } from "../packages/solid-kernel-api/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
@@ -234,5 +235,61 @@ export const evidenceAndSolidTests: readonly TestCase[] = [
       // Empty feature list is rejected.
       assert(!combineSolids(module, "body:empty", [], "union").ok, "an empty feature list must be rejected");
     }
+  },
+  {
+    name: "browser tessellator matches the Manifold kernel by volume and handles concave profiles",
+    run: async () => {
+      const module = await Module();
+      module.setup();
+
+      // Rectangle 20 x 10 mm extruded 5 mm -> exactly 1000 mm^3.
+      const rectangleMm: readonly (readonly [number, number])[] = [[-10, -5], [10, -5], [10, 5], [-10, 5]];
+      const rectangleMesh = tessellateExtrude(rectangleMm, 5, "xy");
+      near(meshVolumeMm3(rectangleMesh), 1000, 1e-6, "an extruded rectangle must have volume width*height*depth");
+
+      // Same prism through the qualified kernel (metres) must agree with the browser mesh.
+      const rectangleMeters = rectangleMm.map(([x, y]) => [x / 1000, y / 1000] as const);
+      const kernelPrism = extrudeProfileSolid(module, { bodyId: "body:xcheck", profileMeters: rectangleMeters, heightMeters: 0.005 });
+      assert(kernelPrism.ok, "the kernel prism must evaluate");
+      near(meshVolumeMm3(rectangleMesh) / 1e9, kernelPrism.value.measurements.volumeCubicMeters, 1e-12, "browser and kernel prism volumes must match");
+
+      // Concave L-shaped profile exercises ear-clipping; volume must equal shoelace area * height.
+      const lShapeMm: readonly (readonly [number, number])[] = [[0, 0], [20, 0], [20, 10], [10, 10], [10, 20], [0, 20]];
+      const lMesh = tessellateExtrude(lShapeMm, 4, "xy");
+      near(meshVolumeMm3(lMesh), shoelaceAreaMm2(lShapeMm) * 4, 1e-6, "a concave extrude volume must equal its planar area times height");
+      assert(shoelaceAreaMm2(lShapeMm) > 299 && shoelaceAreaMm2(lShapeMm) < 301, "the L-shape planar area must be 300 mm^2");
+
+      // A full revolve of an off-axis rectangle closes into a solid ring with positive volume.
+      const revolveMm: readonly (readonly [number, number])[] = [[10, -2], [20, -2], [20, 2], [10, 2]];
+      const ringMesh = tessellateRevolve(revolveMm, 360, "xy");
+      // Pappus: V = 2*pi*R_centroid*A = 2*pi*15*(10*4) ~= 3769.9 mm^3; the 64-facet mesh is marginally under.
+      assert(meshVolumeMm3(ringMesh) > 3740 && meshVolumeMm3(ringMesh) < 3775, "a revolved ring must approximate the analytic annulus volume");
+    }
   }
 ];
+
+/** Absolute signed volume of a closed triangle mesh, in cubic millimetres. */
+function meshVolumeMm3(mesh: { readonly positionsMm: readonly number[]; readonly indices: readonly number[] }): number {
+  let total = 0;
+  for (let i = 0; i < mesh.indices.length; i += 3) {
+    const a = mesh.indices[i]! * 3;
+    const b = mesh.indices[i + 1]! * 3;
+    const c = mesh.indices[i + 2]! * 3;
+    const ax = mesh.positionsMm[a]!; const ay = mesh.positionsMm[a + 1]!; const az = mesh.positionsMm[a + 2]!;
+    const bx = mesh.positionsMm[b]!; const by = mesh.positionsMm[b + 1]!; const bz = mesh.positionsMm[b + 2]!;
+    const cx = mesh.positionsMm[c]!; const cy = mesh.positionsMm[c + 1]!; const cz = mesh.positionsMm[c + 2]!;
+    total += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+  }
+  return Math.abs(total) / 6;
+}
+
+/** Shoelace area of a polygon, in square millimetres. */
+function shoelaceAreaMm2(polygon: readonly (readonly [number, number])[]): number {
+  let area = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const current = polygon[i]!;
+    const next = polygon[(i + 1) % polygon.length]!;
+    area += current[0] * next[1] - next[0] * current[1];
+  }
+  return Math.abs(area) / 2;
+}

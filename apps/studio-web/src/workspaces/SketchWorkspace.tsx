@@ -77,6 +77,7 @@ interface SketchWorkspaceProps {
   readonly working: boolean;
   readonly onMessage: (message: string) => void;
   readonly optionsRevealRequest: number;
+  readonly onCreateSolid: (profileId: string | undefined, plane: "xy" | "xz" | "yz", operation: "extrude" | "revolve", valueMm: number) => void;
 }
 
 export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element {
@@ -85,6 +86,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [selectionIds, setSelectionIds] = useState<readonly string[]>(props.selectedId === null ? [] : [props.selectedId]);
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
+  const [solidPlane, setSolidPlane] = useState<"xy" | "xz" | "yz">("xy");
+  const [solidOp, setSolidOp] = useState<"extrude" | "revolve">("extrude");
+  const [solidValue, setSolidValue] = useState("10");
   const [showProfiles, setShowProfiles] = useState(true);
   const [showDimensions, setShowDimensions] = useState(true);
   const [showConstraints, setShowConstraints] = useState(true);
@@ -360,6 +364,23 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Constraints" active={showConstraints} onToggle={setShowConstraints} />
         <button className="palette-action" disabled={selectedEntity === undefined} onClick={() => selectedEntity !== undefined && props.onToggleConstruction(selectedEntity.id)}><CommandIcon name={selectedEntity?.construction === true ? "rectangle" : "construction"} />{selectedEntity?.construction === true ? "Profile geometry" : "Construction"}</button>
         <button className="palette-action primary" disabled={selectedProfileIds.length === 0} onClick={() => props.onMessage(extrudable ? "Closed profiles are ready. Confirm the extrusion in the inspector." : extrusion.diagnostics[0]?.message ?? "Select a closed profile.")}><CommandIcon name="extrude" />Extrude profiles</button>
+        <div className="sketch-make-solid" aria-label="Create a general solid from a profile">
+          <span className="make-solid-title">Make solid (any plane)</span>
+          <div className="make-solid-row">
+            <select aria-label="Operation" value={solidOp} onChange={(event) => { setSolidOp(event.target.value as "extrude" | "revolve"); setSolidValue(event.target.value === "revolve" ? "360" : "10"); }}>
+              <option value="extrude">Extrude</option>
+              <option value="revolve">Revolve</option>
+            </select>
+            <select aria-label="Plane" value={solidPlane} onChange={(event) => setSolidPlane(event.target.value as "xy" | "xz" | "yz")}>
+              <option value="xy">Top (XY)</option>
+              <option value="xz">Front (XZ)</option>
+              <option value="yz">Right (YZ)</option>
+            </select>
+            <input aria-label={solidOp === "extrude" ? "Height in millimetres" : "Angle in degrees"} type="number" min={solidOp === "extrude" ? 0.1 : 1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "extrude" ? 1 : 5} value={solidValue} onChange={(event) => setSolidValue(event.target.value)} />
+            <small>{solidOp === "extrude" ? "mm" : "°"}</small>
+          </div>
+          <button className="palette-action primary" disabled={profiles.length === 0} onClick={() => props.onCreateSolid(selectedProfileIds[0], solidPlane, solidOp, Number(solidValue))}><CommandIcon name="box" />Create solid</button>
+        </div>
       </div>
 
       <div className="canvas-hud"><span>XY plane · Z-up WCS</span><span>{props.dimensionMode ? "Dimension" : sketchToolLabel(props.tool)}</span><span>Grid {props.viewportState.gridVisible ? `${props.sketch.gridMm} mm` : "off"}</span><span>Snap {snapEnabled ? `${props.sketch.snapToleranceMm} mm` : "off"}</span><span>{visibleEntities.length}/{props.sketch.entities.length} entities visible</span><strong>{sketchIsNormal ? analysis.classification.replace("-", " ") : "3D orbit · Look At to draw"}</strong></div>

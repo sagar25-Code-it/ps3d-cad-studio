@@ -183,6 +183,12 @@ export interface PartIntent {
    * Optional for backward compatibility with earlier workbench/1 documents.
    */
   readonly previewBodies?: readonly PartPreviewBody[];
+  /**
+   * General mesh-solid bodies from the Stage 1 Manifold evaluator (arbitrary profile extrude/
+   * revolve on any datum plane). Separate from the qualified body and the analytic preview bodies.
+   * Optional for backward compatibility with earlier documents.
+   */
+  readonly generalBodies?: readonly GeneralSolidBody[];
 }
 
 export type PartPreviewBodyShape = "block" | "cylinder" | "cone" | "sphere";
@@ -236,6 +242,29 @@ export interface PartPreviewBody {
   readonly revolveAngleDeg?: number;
   /** Stable trace used by feature history, Update Model, and MCP inspection. */
   readonly featureTrace?: PartBodyFeatureTrace;
+}
+
+/**
+ * A general mesh-solid body produced by the Stage 1 Manifold evaluator (arbitrary sketch
+ * profile extruded/revolved on a datum plane, optionally boolean-combined). The baked closed
+ * triangle mesh is stored for deterministic rendering; `feature` records the generating
+ * definition for future parametric rebuild.
+ */
+export interface GeneralSolidBody {
+  readonly id: string;
+  readonly name: string;
+  readonly visible: boolean;
+  readonly color: string;
+  /** Flat [x,y,z,...] vertex positions in millimetres; length is a multiple of 3. */
+  readonly positionsMm: readonly number[];
+  /** Flat triangle vertex indices; length is a multiple of 3. */
+  readonly indices: readonly number[];
+  readonly feature?: {
+    readonly operation: "extrude" | "revolve";
+    readonly plane: "xy" | "xz" | "yz";
+    /** Extrusion height in mm, or revolve angle in degrees. */
+    readonly valueMm: number;
+  };
 }
 
 export type MasterCartTemplateId =
@@ -813,6 +842,9 @@ export type WorkbenchOperation = OperationEnvelope & (
     }
   | { readonly kind: "add-part-preview-bodies"; readonly bodies: readonly PartPreviewBody[] }
   | { readonly kind: "delete-part-preview-body"; readonly bodyId: string }
+  | { readonly kind: "add-general-body"; readonly body: GeneralSolidBody }
+  | { readonly kind: "delete-general-body"; readonly bodyId: string }
+  | { readonly kind: "toggle-general-body-visibility"; readonly bodyId: string }
   | { readonly kind: "set-part-preview-body-transform"; readonly bodyId: string; readonly translationMm: Vec3; readonly rotationDeg: Vec3 }
   | { readonly kind: "set-part-preview-body-size"; readonly bodyId: string; readonly sizeMm: Vec3 }
   | { readonly kind: "set-part-preview-body-color"; readonly bodyId: string; readonly color: string }
@@ -910,6 +942,7 @@ export type WorkbenchOperation = OperationEnvelope & (
 export const WORKBENCH_OPERATION_KINDS = [
   "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
   "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
+  "add-general-body", "delete-general-body", "toggle-general-body-visibility",
   "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
   "isolate-part-preview-body", "set-part-preview-bodies-visibility", "create-part-revolve", "pattern-part-feature", "mirror-part-feature",
   "boolean-part-bodies", "trim-part-body", "set-part-body-edge-treatment", "set-part-body-draft", "set-part-body-shell",

@@ -12,6 +12,7 @@ import {
   type ElectricalNet,
   type OperationAuditEntry,
   type PartIntent,
+  type GeneralSolidBody,
   type PartPreviewBody,
   type SketchEntity,
   type SurfaceIntent,
@@ -251,7 +252,7 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
 
 function validatePart(value: unknown): WorkbenchResult<PartIntent> {
   const required = ["id", "name", "widthMm", "heightMm", "thicknessMm", "holeDiameterMm", "edgeTreatmentMm", "patternCount", "revolveAngleDeg"];
-  const optional = ["previewBodies", "modelUpdateSerial"];
+  const optional = ["previewBodies", "modelUpdateSerial", "generalBodies"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key))
     || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || value.id !== "part:mounting-plate" || !shortText(value.name, 1, 120)
@@ -268,10 +269,39 @@ function validatePart(value: unknown): WorkbenchResult<PartIntent> {
       ids.add(body.id);
     }
   }
+  if (Object.hasOwn(value, "generalBodies") && (!Array.isArray(value.generalBodies) || value.generalBodies.length > 64)) return invalid("The part general-body collection is invalid.");
+  if (Array.isArray(value.generalBodies)) {
+    const generalIds = new Set<string>();
+    for (const body of value.generalBodies) {
+      if (!validateGeneralSolidBody(body) || generalIds.has(body.id)) return invalid("A part general body is invalid or duplicated.");
+      generalIds.add(body.id);
+    }
+  }
   if ((Math.min(value.widthMm as number, value.heightMm as number) - (value.holeDiameterMm as number)) / 2 < 1) {
     return failure("DEGENERATE_GEOMETRY", "The bore leaves less than the 1 mm wall allowance.", ["part:mounting-plate"], "Reduce the bore or enlarge the plate.");
   }
   return { ok: true, value: value as unknown as PartIntent };
+}
+
+function validateGeneralSolidBody(value: unknown): value is GeneralSolidBody {
+  const required = ["id", "name", "visible", "color", "positionsMm", "indices"];
+  const optional = ["feature"];
+  if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
+    || !stableId(value.id) || !shortText(value.name, 1, 120)
+    || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)) return false;
+  const positions = value.positionsMm;
+  if (!Array.isArray(positions) || positions.length < 12 || positions.length % 3 !== 0 || positions.length > 300_000
+    || positions.some((entry) => typeof entry !== "number" || !Number.isFinite(entry) || Math.abs(entry) > 1_000_000)) return false;
+  const vertexCount = positions.length / 3;
+  const indices = value.indices;
+  if (!Array.isArray(indices) || indices.length < 3 || indices.length % 3 !== 0 || indices.length > 300_000
+    || indices.some((entry) => typeof entry !== "number" || !Number.isInteger(entry) || entry < 0 || entry >= vertexCount)) return false;
+  if (Object.hasOwn(value, "feature")) {
+    const feature = value.feature;
+    if (!isRecord(feature) || !["extrude", "revolve"].includes(String(feature.operation)) || !["xy", "xz", "yz"].includes(String(feature.plane))
+      || typeof feature.valueMm !== "number" || !Number.isFinite(feature.valueMm)) return false;
+  }
+  return true;
 }
 
 function validatePartPreviewBody(value: unknown): value is PartPreviewBody {

@@ -5,6 +5,7 @@ import type {
   ElectricalComponent,
   ElectricalIntent,
   ElectricalNet,
+  GeneralSolidBody,
   PartIntent,
   PartPreviewBody,
   SketchEntity,
@@ -158,6 +159,13 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "set-part-preview-bodies-visibility":
       if (!keys(input, [...common, "visible"]) || typeof input.visible !== "boolean") return invalidOperation("The preview-body visibility value is invalid.");
+      break;
+    case "add-general-body":
+      if (!keys(input, [...common, "body"]) || !validGeneralSolidBodyPayload(input.body)) return invalidOperation("The general body insertion is invalid.");
+      break;
+    case "delete-general-body":
+    case "toggle-general-body-visibility":
+      if (!keys(input, [...common, "bodyId"]) || !stableId(input.bodyId)) return invalidOperation("The general body ID is invalid.");
       break;
     case "create-part-revolve":
       if (!keys(input, [...common, "bodyId", "name", "outerDiameterMm", "innerDiameterMm", "heightMm", "angleDeg", "translationMm"])
@@ -474,6 +482,24 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const target = currentBodies.find((body) => body.id === operation.bodyId);
       if (target === undefined) return broken(operation.bodyId, "The preview body does not exist.");
       return changed({ ...project, part: { ...project.part, previewBodies: currentBodies.filter((body) => body.id !== target.id) } }, [target.id], `Deleted preview body ${target.name}.`);
+    }
+    case "add-general-body": {
+      const current = project.part.generalBodies ?? [];
+      if (current.length >= 64) return failure("RESOURCE_LIMIT", "The part reached its general mesh-body limit.", [project.part.id], "Delete a general body before adding another.");
+      if (current.some((body) => body.id === operation.body.id)) return invalidOperation("The general body ID already exists.");
+      return changed({ ...project, part: { ...project.part, generalBodies: [...current, operation.body] } }, [operation.body.id], `Created ${operation.body.name}.`);
+    }
+    case "delete-general-body": {
+      const current = project.part.generalBodies ?? [];
+      const target = current.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The general body does not exist.");
+      return changed({ ...project, part: { ...project.part, generalBodies: current.filter((body) => body.id !== target.id) } }, [target.id], `Deleted ${target.name}.`);
+    }
+    case "toggle-general-body-visibility": {
+      const current = project.part.generalBodies ?? [];
+      const target = current.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The general body does not exist.");
+      return changed({ ...project, part: { ...project.part, generalBodies: current.map((body) => body.id === target.id ? { ...body, visible: !body.visible } : body) } }, [target.id], `${target.visible ? "Hid" : "Showed"} ${target.name}.`);
     }
     case "set-part-preview-body-transform": {
       const currentBodies = project.part.previewBodies ?? [];
@@ -977,6 +1003,28 @@ function validPartPreviewBodyPayload(value: unknown): value is PartPreviewBody {
   if (Object.hasOwn(value, "edgeTreatment") && !validPartEdgeTreatment(value.edgeTreatment)) return false;
   if (Object.hasOwn(value, "featureTrace") && !validPartFeatureTrace(value.featureTrace)) return false;
   return validatePartFeatureStack(value as unknown as PartPreviewBody).ok;
+}
+
+function validGeneralSolidBodyPayload(value: unknown): value is GeneralSolidBody {
+  const required = ["id", "name", "visible", "color", "positionsMm", "indices"];
+  const optional = ["feature"];
+  if (!isRecord(value)
+    || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
+    || !stableId(value.id) || !shortText(value.name, 1, 120)
+    || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)) return false;
+  const positions = value.positionsMm;
+  if (!Array.isArray(positions) || positions.length < 12 || positions.length % 3 !== 0 || positions.length > 300_000
+    || positions.some((entry) => typeof entry !== "number" || !Number.isFinite(entry) || Math.abs(entry) > WORKBENCH_LIMITS.maxCoordinateMm)) return false;
+  const vertexCount = positions.length / 3;
+  const indices = value.indices;
+  if (!Array.isArray(indices) || indices.length < 3 || indices.length % 3 !== 0 || indices.length > 300_000
+    || indices.some((entry) => typeof entry !== "number" || !Number.isInteger(entry) || entry < 0 || entry >= vertexCount)) return false;
+  if (Object.hasOwn(value, "feature")) {
+    const feature = value.feature;
+    if (!isRecord(feature) || !["extrude", "revolve"].includes(String(feature.operation)) || !["xy", "xz", "yz"].includes(String(feature.plane))
+      || typeof feature.valueMm !== "number" || !Number.isFinite(feature.valueMm)) return false;
+  }
+  return true;
 }
 
 function normalizePartPreviewSize(shape: PartPreviewBody["shape"], size: readonly [number, number, number]): readonly [number, number, number] | undefined {

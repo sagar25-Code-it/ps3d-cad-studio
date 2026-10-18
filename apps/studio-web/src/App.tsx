@@ -60,6 +60,7 @@ import {
   type ExchangeUnit
 } from "../../../packages/exchange-3d/src/index.js";
 import { detectSketchProfiles, resolveQualifiedExtrusion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
+import { createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 import {
   ThreeViewportAdapter,
   viewAnglesForOrientation,
@@ -1274,6 +1275,31 @@ export function App(): React.JSX.Element {
     if (response !== undefined) acceptResponse(response);
   };
 
+  const createGeneralSolid = async (profileId: string | undefined, plane: SketchPlane, operation: "extrude" | "revolve", valueMm: number): Promise<void> => {
+    const profiles = detectSketchProfiles(projectRef.current.sketch);
+    const profile = (profileId !== undefined ? profiles.find((candidate) => candidate.id === profileId) : undefined) ?? profiles[0];
+    if (profile === undefined) { setStatus("error"); setStatusText("Draw or select a closed profile before creating a solid."); return; }
+    if (!Number.isFinite(valueMm) || valueMm <= 0) { setStatus("error"); setStatusText(operation === "extrude" ? "Enter a positive extrusion distance." : "Enter a revolve angle between 1 and 360 degrees."); return; }
+    setStatus("working");
+    setStatusText(`Building ${operation === "extrude" ? "extruded" : "revolved"} solid…`);
+    const result = await createGeneralSolidBody({
+      profile,
+      plane,
+      operation,
+      valueMm,
+      bodyId: `general-body:${crypto.randomUUID()}`,
+      name: `${operation === "extrude" ? "Extrude" : "Revolve"} ${plane.toUpperCase()}`,
+      color: "#b9c2c8"
+    });
+    if (!result.ok) { setStatus("error"); setStatusText(result.message); return; }
+    if (applyProjectOperation({ kind: "add-general-body", body: result.body })) {
+      switchWorkspace("part");
+      setSelectedId(result.body.id);
+      setStatus("ready");
+      setStatusText(`Created ${result.body.name} as a general mesh solid (${result.body.positionsMm.length / 3} vertices). Opened in the Part workspace.`);
+    }
+  };
+
   const extrudeSketchProfiles = async (profileIds: readonly string[], distanceMm: number, operation: SketchExtrudeOperation): Promise<void> => {
     if (operation !== "new-body" && operation !== "new-component") {
       setStatus("error");
@@ -2250,7 +2276,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} onExtrudeProfiles={extrudeSketchProfiles} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} onFit={() => setStatusText("Sketch fit is already bounded to all visible entities.")} onHome={homeViewport} onContextMenu={openContextMenu} working={status === "working"} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} onExtrudeProfiles={extrudeSketchProfiles} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} onFit={() => setStatusText("Sketch fit is already bounded to all visible entities.")} onHome={homeViewport} onContextMenu={openContextMenu} working={status === "working"} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} onCreateSolid={(profileId, plane, operation, valueMm) => void createGeneralSolid(profileId, plane, operation, valueMm)} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl
