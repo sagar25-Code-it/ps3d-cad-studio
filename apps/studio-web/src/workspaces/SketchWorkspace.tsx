@@ -93,7 +93,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [extrudeOperation, setExtrudeOperation] = useState<SketchExtrudeOperation>("new-body");
   const orbitDrag = useRef<{ readonly pointerId: number; readonly startX: number; readonly startY: number; readonly azimuthDeg: number; readonly elevationDeg: number } | undefined>(undefined);
   const paletteRef = useRef<HTMLDivElement>(null);
+  // Seed with the current request so a fresh mount (this panel remounts on every workspace switch)
+  // is a no-op; only an actual increment while mounted — i.e. a real Options click — reveals the palette.
+  const handledOptionsRevealRef = useRef(props.optionsRevealRequest);
   useEffect(() => {
+    if (props.optionsRevealRequest === handledOptionsRevealRef.current) return undefined;
+    handledOptionsRevealRef.current = props.optionsRevealRequest;
     if (props.optionsRevealRequest === 0) return undefined;
     const palette = paletteRef.current;
     if (palette === null) return undefined;

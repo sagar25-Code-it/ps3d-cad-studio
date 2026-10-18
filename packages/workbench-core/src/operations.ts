@@ -773,8 +773,15 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       return changed({ ...project, drawing: { ...project.drawing, draftingStandard: operation.standard, projection: operation.standard === "ASME" ? "third-angle" : "first-angle" } }, [project.drawing.id], `Set the drafting basis to ${operation.standard} with its conventional projection default.`);
     case "set-drawing-gdt":
       return changed({ ...project, drawing: { ...project.drawing, showGdt: operation.show } }, [project.drawing.id], `${operation.show ? "Shown" : "Hidden"} explicitly configured datum and GD&T annotations.`);
-    case "set-drawing-datum-scheme":
-      return changed({ ...project, drawing: { ...project.drawing, datumScheme: operation.scheme, ...(operation.scheme === "plate-3-2-1" ? { showGdt: true } : {}) } }, [project.drawing.id], operation.scheme === "none" ? "Set datum scheme to none." : "Set datum scheme to plate 3-2-1 draft and enabled feature-control frames.");
+    case "set-drawing-datum-scheme": {
+      const enablesGdt = operation.scheme === "plate-3-2-1" && !project.drawing.showGdt;
+      const datumSummary = operation.scheme === "none"
+        ? "Set datum scheme to none."
+        : enablesGdt
+          ? "Set datum scheme to plate 3-2-1 draft and enabled feature-control frames."
+          : "Set datum scheme to plate 3-2-1 draft.";
+      return changed({ ...project, drawing: { ...project.drawing, datumScheme: operation.scheme, ...(operation.scheme === "plate-3-2-1" ? { showGdt: true } : {}) } }, [project.drawing.id], datumSummary);
+    }
     case "set-drawing-gdt-specification":
       return changed({ ...project, drawing: { ...project.drawing, gdtPositionToleranceMm: operation.positionMm, gdtFlatnessToleranceMm: operation.flatnessMm, gdtPerpendicularityToleranceMm: operation.perpendicularityMm } }, [project.drawing.id], "Updated explicit GD&T values without changing the general tolerance.");
     case "set-drawing-general-tolerance":
