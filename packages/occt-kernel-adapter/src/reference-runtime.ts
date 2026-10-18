@@ -13,7 +13,8 @@ import type {
 import type { OcctRuntimePort } from "./types.js";
 
 /**
- * A real, deterministic analytic B-rep runtime for the primitive subset.
+ * A real, deterministic analytic B-rep runtime for a primitive-and-feature
+ * subset.
  *
  * This is not OCCT: it is a pure-TypeScript exact evaluator that constructs
  * genuine boundary topology (vertices, edges, faces, shells, solids),
@@ -21,19 +22,29 @@ import type { OcctRuntimePort } from "./types.js";
  * through the Euler characteristic, and emits a watertight triangle
  * tessellation. It implements the same OcctRuntimePort the attested adapter
  * drives, so the adapter has a working backend instead of recorded fixtures.
- * Topological naming (stable face references) is deliberately left to the
- * Stage 4 topology layer; topologyEntities stay empty here.
+ *
+ * It is stateful per session so that feature operations can consume the exact
+ * geometry of earlier outputs: extrude reads a stored planar profile loop, and
+ * Boolean operates on stored axis-aligned boxes. Configurations that need
+ * general curved-surface CSG are rejected explicitly rather than approximated.
+ * Topological naming (stable face references) is deferred to the Stage 4
+ * topology layer; topologyEntities stay empty here.
  */
 export function createReferenceBrepRuntime(): OcctRuntimePort {
-  const sessions = new Set<string>();
+  const store = new Map<string, Map<string, StoredSolid>>();
   return {
-    async openSession(sessionId: string): Promise<void> { sessions.add(sessionId); },
-    async execute(request: ExecuteKernelOperationRequest): Promise<OperationResultDraft> { return evaluate(request); },
-    async releaseShapes(_sessionId: string, shapeIds: readonly string[]): Promise<readonly string[]> { return [...shapeIds]; },
-    async closeSession(sessionId: string): Promise<void> { sessions.delete(sessionId); },
+    async openSession(sessionId: string): Promise<void> { if (!store.has(sessionId)) store.set(sessionId, new Map()); },
+    async execute(request: ExecuteKernelOperationRequest): Promise<OperationResultDraft> { return evaluate(store, request); },
+    async releaseShapes(sessionId: string, shapeIds: readonly string[]): Promise<readonly string[]> {
+      const session = store.get(sessionId);
+      const released: string[] = [];
+      for (const shapeId of shapeIds) if (session?.delete(shapeId) === true) released.push(shapeId);
+      return released;
+    },
+    async closeSession(sessionId: string): Promise<void> { store.delete(sessionId); },
     async cancel(_targetRequestId: string): Promise<void> { /* in-process evaluation completes synchronously; there is nothing to interrupt */ },
-    terminate(): void { /* no isolated process to kill in the in-process reference runtime */ },
-    async dispose(): Promise<void> { sessions.clear(); }
+    terminate(): void { store.clear(); },
+    async dispose(): Promise<void> { store.clear(); }
   };
 }
 
@@ -47,23 +58,39 @@ interface SolidGeometry {
   readonly volumeCubicMeters: number;
 }
 
-async function evaluate(request: ExecuteKernelOperationRequest): Promise<OperationResultDraft> {
-  const operation = request.operation;
-  const geometry = operation.kind === "primitive.box"
-    ? boxGeometry(operation.sizeMeters, operation.placement.origin, operation.placement.xDirection, operation.placement.normal)
-    : operation.kind === "primitive.cylinder"
-      ? cylinderGeometry(operation.radiusMeters, operation.heightMeters, operation.placement.origin, operation.placement.direction, operation.placement.xDirection)
-      : undefined;
-  if (geometry === undefined) throw new Error(`The reference B-rep runtime does not evaluate '${operation.kind}'.`);
+/** A solid retained in the session so later feature operations can consume its exact geometry. */
+interface StoredSolid {
+  readonly geometry: SolidGeometry;
+  readonly axisAlignedBox?: { readonly min: Vec3; readonly max: Vec3 };
+  readonly profileLoop?: { readonly points: readonly Vec3[]; readonly normal: Vec3 };
+}
 
-  const eulerCharacteristic = geometry.topology.vertices - geometry.topology.edges + geometry.topology.faces;
-  if (eulerCharacteristic !== 2) throw new Error(`Constructed topology violates the Euler characteristic (${eulerCharacteristic} != 2).`);
+async function evaluate(store: Map<string, Map<string, StoredSolid>>, request: ExecuteKernelOperationRequest): Promise<OperationResultDraft> {
+  const operation = request.operation;
+  const session = store.get(request.sessionId) ?? new Map<string, StoredSolid>();
+  if (!store.has(request.sessionId)) store.set(request.sessionId, session);
+
+  const solid = operation.kind === "primitive.box"
+    ? boxSolid(operation.sizeMeters, operation.placement.origin, operation.placement.xDirection, operation.placement.normal)
+    : operation.kind === "primitive.cylinder"
+      ? { geometry: cylinderGeometry(operation.radiusMeters, operation.heightMeters, operation.placement.origin, operation.placement.direction, operation.placement.xDirection) }
+      : operation.kind === "solid.extrude"
+        ? extrudeSolid(session, operation)
+        : operation.kind === "solid.boolean"
+          ? booleanSolid(session, operation)
+          : undefined;
+  if (solid === undefined) throw new Error(`The reference B-rep runtime does not evaluate '${operation.kind}'.`);
+
+  const geometry = solid.geometry;
+  const euler = geometry.topology.vertices - geometry.topology.edges + geometry.topology.faces;
+  if (euler !== 2) throw new Error(`Constructed topology violates the Euler characteristic (${euler} != 2).`);
 
   const tolerance = operation.linearToleranceMeters;
   const contentDigest = await kernelSha256({ kind: operation.kind, descriptor: geometry.descriptor, topology: geometry.topology, bounds: geometry.bounds });
   const shapeLocalName = operation.operationId.includes(":") ? operation.operationId.slice(operation.operationId.indexOf(":") + 1).replace(/[^a-z0-9._-]/giu, "-") : operation.operationId;
+  const shapeId = `shape:${shapeLocalName}`;
   const output: ExactShapeHandle = {
-    shapeId: `shape:${shapeLocalName}`,
+    shapeId,
     sessionId: request.sessionId,
     revision: request.documentRevision,
     kind: "solid",
@@ -73,17 +100,11 @@ async function evaluate(request: ExecuteKernelOperationRequest): Promise<Operati
     boundsMeters: geometry.bounds,
     topology: geometry.topology
   };
+  session.set(shapeId, { ...solid, geometry });
   const validation: ShapeValidationReport = {
-    valid: true,
-    exact: true,
-    checkedToleranceMeters: tolerance,
-    closed: geometry.topology.closed,
-    manifold: geometry.topology.manifold,
-    orientable: true,
-    finite: true,
-    selfIntersections: 0,
-    invalidEntityReferenceKeys: [],
-    diagnostics: []
+    valid: true, exact: true, checkedToleranceMeters: tolerance,
+    closed: geometry.topology.closed, manifold: geometry.topology.manifold,
+    orientable: true, finite: true, selfIntersections: 0, invalidEntityReferenceKeys: [], diagnostics: []
   };
   const tessellation: TessellationResult = {
     sourceShapeDigest: contentDigest,
@@ -95,29 +116,29 @@ async function evaluate(request: ExecuteKernelOperationRequest): Promise<Operati
     triangleFaceReferenceKeys: [],
     contentDigest: await kernelSha256({ positions: Array.from(geometry.tessellation.positions), indices: Array.from(geometry.tessellation.indices) })
   };
+  const inputDigests = inputShapeDigests(session, operation);
   const provenanceBase = {
-    operationId: operation.operationId,
-    operationKind: operation.kind,
-    inputShapeDigests: [] as readonly string[],
-    outputShapeDigests: [contentDigest],
-    topologyEntities: [] as ShapeProvenance["topologyEntities"]
+    operationId: operation.operationId, operationKind: operation.kind,
+    inputShapeDigests: inputDigests, outputShapeDigests: [contentDigest], topologyEntities: [] as ShapeProvenance["topologyEntities"]
   };
   const provenance: ShapeProvenance = { ...provenanceBase, provenanceDigest: await kernelSha256(provenanceBase) };
   return {
-    operationId: operation.operationId,
-    operationKind: operation.kind,
-    outputs: [output],
-    validation: [validation],
-    provenance,
-    diagnostics: [],
-    exchangeArtifacts: [],
-    tessellations: [tessellation],
-    topologyEntities: []
+    operationId: operation.operationId, operationKind: operation.kind,
+    outputs: [output], validation: [validation], provenance,
+    diagnostics: [], exchangeArtifacts: [], tessellations: [tessellation], topologyEntities: []
   };
 }
 
+function inputShapeDigests(session: Map<string, StoredSolid>, operation: ExecuteKernelOperationRequest["operation"]): readonly string[] {
+  const ids: string[] = [];
+  if (operation.kind === "solid.boolean") for (const reference of [...operation.targets, ...operation.tools]) ids.push(reference.shape.contentDigest);
+  if (operation.kind === "solid.extrude") for (const reference of operation.profiles) ids.push(reference.shape.contentDigest);
+  void session;
+  return ids;
+}
+
 /** Exact box boundary: 8 vertices, 12 edges, 6 planar faces, one closed manifold solid. */
-function boxGeometry(size: Vector3, origin: Vector3, xDirection: Vector3, normal: Vector3): SolidGeometry {
+function boxSolid(size: Vector3, origin: Vector3, xDirection: Vector3, normal: Vector3): StoredSolid {
   const frame = orthonormalFrame(xDirection, normal);
   const [sx, sy, sz] = size;
   const corners: Vec3[] = [];
@@ -139,13 +160,110 @@ function boxGeometry(size: Vector3, origin: Vector3, xDirection: Vector3, normal
   ];
   const builder = new TessellationBuilder();
   for (const face of faces) builder.addQuad(corners[face.quad[0]]!, corners[face.quad[1]]!, corners[face.quad[2]]!, corners[face.quad[3]]!, face.normal);
-  return {
+  const bounds = boundsOf(corners);
+  const geometry: SolidGeometry = {
     topology: { vertices: 8, edges: 12, wires: 6, faces: 6, shells: 1, solids: 1, components: 1, closed: true, manifold: true },
-    bounds: boundsOf(corners),
+    bounds,
     descriptor: { size: [sx, sy, sz], origin, xDirection: frame.x, normal: frame.z },
     tessellation: builder.finish(),
     volumeCubicMeters: sx * sy * sz
   };
+  const baseLoop = [index(0, 0, 0), index(1, 0, 0), index(1, 1, 0), index(0, 1, 0)].map((corner) => corners[corner]!);
+  return {
+    geometry,
+    ...(isAxisAlignedFrame(frame) ? { axisAlignedBox: { min: bounds.min as Vec3, max: bounds.max as Vec3 } } : {}),
+    profileLoop: { points: baseLoop, normal: frame.z }
+  };
+}
+
+/** Extrude a stored planar profile loop into an exact prism: 2N vertices, 3N edges, N+2 faces. */
+function extrudeSolid(session: Map<string, StoredSolid>, operation: Extract<ExecuteKernelOperationRequest["operation"], { kind: "solid.extrude" }>): StoredSolid {
+  const profileReference = operation.profiles[0];
+  if (profileReference === undefined) throw new Error("Extrude requires a profile.");
+  const source = session.get(profileReference.shape.shapeId);
+  if (source?.profileLoop === undefined) throw new Error("Extrude profile has no stored planar loop in this session.");
+  if (operation.extent.kind !== "distance") throw new Error(`Extrude extent '${operation.extent.kind}' is not supported by the reference runtime.`);
+  const height = operation.extent.distanceMeters;
+  if (!(height > 0)) throw new Error("Extrude distance must be positive.");
+  const loop = source.profileLoop;
+  const points = loop.points;
+  const count = points.length;
+  if (count < 3) throw new Error("Extrude profile loop needs at least three points.");
+  const normal = loop.normal;
+  const top = points.map((point) => [point[0] + normal[0] * height, point[1] + normal[1] * height, point[2] + normal[2] * height] as Vec3);
+  const builder = new TessellationBuilder();
+  const bottomCentroid = centroid(points);
+  const topCentroid = centroid(top);
+  for (let step = 0; step < count; step += 1) {
+    const next = (step + 1) % count;
+    builder.addTriangle(bottomCentroid, points[next]!, points[step]!, negate(normal));
+    builder.addTriangle(topCentroid, top[step]!, top[next]!, normal);
+    builder.addQuad(points[step]!, points[next]!, top[next]!, top[step]!, sideNormal(points[step]!, points[next]!, normal));
+  }
+  const area = planarPolygonArea(points, normal);
+  const geometry: SolidGeometry = {
+    topology: { vertices: 2 * count, edges: 3 * count, wires: count + 2, faces: count + 2, shells: 1, solids: 1, components: 1, closed: true, manifold: true },
+    bounds: boundsOf([...points, ...top]),
+    descriptor: { profile: points.map((point) => [...point]), normal, height },
+    tessellation: builder.finish(),
+    volumeCubicMeters: area * height
+  };
+  return { geometry };
+}
+
+/** Exact Boolean on two stored axis-aligned boxes; general curved CSG is rejected explicitly. */
+function booleanSolid(session: Map<string, StoredSolid>, operation: Extract<ExecuteKernelOperationRequest["operation"], { kind: "solid.boolean" }>): StoredSolid {
+  const target = operation.targets[0];
+  const tool = operation.tools[0];
+  if (target === undefined || tool === undefined) throw new Error("Boolean requires one target and one tool.");
+  const a = session.get(target.shape.shapeId)?.axisAlignedBox;
+  const b = session.get(tool.shape.shapeId)?.axisAlignedBox;
+  if (a === undefined || b === undefined) throw new Error("The reference Boolean evaluates axis-aligned boxes only; one operand is not a stored axis-aligned box.");
+  const result = operation.mode === "intersect" ? intersectBoxes(a, b)
+    : operation.mode === "join" ? joinBoxes(a, b)
+      : subtractBoxes(a, b);
+  if (result === undefined) throw new Error(`The reference Boolean '${operation.mode}' on these boxes is not a single axis-aligned solid; general CSG needs the full B-rep kernel.`);
+  if (result === "empty") throw new Error(`The reference Boolean '${operation.mode}' produced an empty solid.`);
+  return boxSolid([result.max[0] - result.min[0], result.max[1] - result.min[1], result.max[2] - result.min[2]], result.min, [1, 0, 0], [0, 0, 1]);
+}
+
+type Box = { readonly min: Vec3; readonly max: Vec3 };
+type BoxResult = Box | "empty" | undefined;
+
+function intersectBoxes(a: Box, b: Box): BoxResult {
+  const min: [number, number, number] = [0, 0, 0];
+  const max: [number, number, number] = [0, 0, 0];
+  for (let axis = 0; axis < 3; axis += 1) {
+    min[axis] = Math.max(a.min[axis]!, b.min[axis]!);
+    max[axis] = Math.min(a.max[axis]!, b.max[axis]!);
+    if (max[axis]! - min[axis]! <= 1e-12) return "empty";
+  }
+  return { min, max };
+}
+
+function joinBoxes(a: Box, b: Box): BoxResult {
+  if (contains(a, b)) return a;
+  if (contains(b, a)) return b;
+  return undefined;
+}
+
+function subtractBoxes(a: Box, b: Box): BoxResult {
+  if (intersectBoxes(a, b) === "empty") return a;
+  if (contains(b, a)) return "empty";
+  const spanning = [0, 1, 2].filter((axis) => b.min[axis]! <= a.min[axis]! + 1e-12 && b.max[axis]! >= a.max[axis]! - 1e-12);
+  if (spanning.length !== 2) return undefined;
+  const cutAxis = [0, 1, 2].find((axis) => !spanning.includes(axis))!;
+  const min: [number, number, number] = [a.min[0], a.min[1], a.min[2]];
+  const max: [number, number, number] = [a.max[0], a.max[1], a.max[2]];
+  const removesLow = b.min[cutAxis]! <= a.min[cutAxis]! + 1e-12 && b.max[cutAxis]! < a.max[cutAxis]! - 1e-12;
+  const removesHigh = b.max[cutAxis]! >= a.max[cutAxis]! - 1e-12 && b.min[cutAxis]! > a.min[cutAxis]! + 1e-12;
+  if (removesLow) { min[cutAxis] = b.max[cutAxis]!; return { min, max }; }
+  if (removesHigh) { max[cutAxis] = b.min[cutAxis]!; return { min, max }; }
+  return undefined;
+}
+
+function contains(outer: Box, inner: Box): boolean {
+  return [0, 1, 2].every((axis) => outer.min[axis]! <= inner.min[axis]! + 1e-12 && outer.max[axis]! >= inner.max[axis]! - 1e-12);
 }
 
 /**
@@ -222,6 +340,32 @@ function orthonormalFrame(xDirection: Vector3, zDirection: Vector3): Frame {
   const x = unit(projectedX);
   const y = unit(cross(z, x));
   return { x, y, z };
+}
+
+function isAxisAlignedFrame(frame: Frame): boolean {
+  return [frame.x, frame.y, frame.z].every((axis) => axis.filter((component) => Math.abs(component) > 1e-9).length === 1);
+}
+
+function centroid(points: readonly Vec3[]): Vec3 {
+  const sum = points.reduce((total, point) => [total[0] + point[0], total[1] + point[1], total[2] + point[2]] as Vec3, [0, 0, 0] as Vec3);
+  return [sum[0] / points.length, sum[1] / points.length, sum[2] / points.length];
+}
+
+function sideNormal(from: Vec3, to: Vec3, extrudeNormal: Vec3): Vec3 {
+  return unit(cross(subtract(to, from), extrudeNormal));
+}
+
+function planarPolygonArea(points: readonly Vec3[], normal: Vec3): number {
+  let accumulator: Vec3 = [0, 0, 0];
+  for (let step = 0; step < points.length; step += 1) {
+    const next = (step + 1) % points.length;
+    accumulator = [
+      accumulator[0] + (points[step]![1] * points[next]![2] - points[step]![2] * points[next]![1]),
+      accumulator[1] + (points[step]![2] * points[next]![0] - points[step]![0] * points[next]![2]),
+      accumulator[2] + (points[step]![0] * points[next]![1] - points[step]![1] * points[next]![0])
+    ];
+  }
+  return Math.abs(dot(accumulator, unit(normal))) / 2;
 }
 
 function boundsOf(points: readonly Vec3[]): KernelBounds {

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   EXACT_KERNEL_PROTOCOL_VERSION,
   type ExactKernelCapabilities,
+  type ExactShapeHandle,
   type ExecuteKernelOperationRequest,
   type OperationResultDraft
 } from "../../exact-kernel-api/src/index.js";
@@ -798,4 +799,86 @@ test("the reference B-rep runtime builds a valid analytic cylinder", async () =>
   const exact = Math.PI * 0.05 * 0.05 * 0.2;
   const volume = meshVolume(result.tessellations[0]!.positions, result.tessellations[0]!.indices);
   assert.ok(volume > exact * 0.98 && volume <= exact + 1e-9, `cylinder volume ${volume} vs ${exact}`);
+});
+
+function customBoxRequest(requestId: string, operationId: string, size: readonly [number, number, number], origin: readonly [number, number, number]): ExecuteKernelOperationRequest {
+  return {
+    ...boxRequest(requestId),
+    operation: {
+      operationId, kind: "primitive.box", semanticOutputIds: ["body:box"],
+      linearToleranceMeters: 1e-6, angularToleranceRadians: 1e-6, expectedOutputCount: 1,
+      sizeMeters: size, placement: { origin, normal: [0, 0, 1], xDirection: [1, 0, 0] }
+    }
+  };
+}
+
+function extrudeRequest(profile: ExactShapeHandle, distanceMeters = 0.5): ExecuteKernelOperationRequest {
+  return {
+    ...boxRequest("request:ext-1"),
+    operation: {
+      operationId: "operation:ext-1", kind: "solid.extrude", semanticOutputIds: ["body:ext"],
+      linearToleranceMeters: 1e-6, angularToleranceRadians: 1e-6, expectedOutputCount: 1,
+      profiles: [{ shape: profile }], direction: [0, 0, 1],
+      extent: { kind: "distance", distanceMeters, symmetric: false },
+      taperAngleRadians: 0, outputMode: "new-body", targets: []
+    }
+  };
+}
+
+function booleanRequest(mode: "join" | "cut" | "intersect", target: ExactShapeHandle, tool: ExactShapeHandle): ExecuteKernelOperationRequest {
+  return {
+    ...boxRequest("request:bool-1"),
+    operation: {
+      operationId: "operation:bool-1", kind: "solid.boolean", semanticOutputIds: ["body:bool"],
+      linearToleranceMeters: 1e-6, angularToleranceRadians: 1e-6, expectedOutputCount: 1,
+      mode, targets: [{ shape: target }], tools: [{ shape: tool }], keepTools: false, fuzzyToleranceMeters: 1e-7
+    }
+  };
+}
+
+test("the reference B-rep runtime extrudes a stored profile loop into an exact prism", async () => {
+  const runtime = createReferenceBrepRuntime();
+  await runtime.openSession("session:test");
+  const box = await runtime.execute(boxRequest("request:box-a"));
+  const prism = await runtime.execute(extrudeRequest(box.outputs[0]!));
+  assert.deepEqual(prism.outputs[0]!.topology, { vertices: 8, edges: 12, wires: 6, faces: 6, shells: 1, solids: 1, components: 1, closed: true, manifold: true });
+  const volume = meshVolume(prism.tessellations[0]!.positions, prism.tessellations[0]!.indices);
+  assert.ok(Math.abs(volume - 0.1 * 0.2 * 0.5) < 1e-9, `prism volume ${volume}`);
+});
+
+test("the reference Boolean intersects two boxes into the exact overlap solid", async () => {
+  const runtime = createReferenceBrepRuntime();
+  await runtime.openSession("session:test");
+  const a = (await runtime.execute(customBoxRequest("request:a", "operation:a", [0.1, 0.2, 0.3], [0, 0, 0]))).outputs[0]!;
+  const b = (await runtime.execute(customBoxRequest("request:b", "operation:b", [0.1, 0.2, 0.3], [0.05, 0, 0]))).outputs[0]!;
+  const result = await runtime.execute(booleanRequest("intersect", a, b));
+  assert.deepEqual(result.outputs[0]!.boundsMeters, { min: [0.05, 0, 0], max: [0.1, 0.2, 0.3] });
+  const volume = meshVolume(result.tessellations[0]!.positions, result.tessellations[0]!.indices);
+  assert.ok(Math.abs(volume - 0.05 * 0.2 * 0.3) < 1e-9, `intersect volume ${volume}`);
+});
+
+test("the reference Boolean cut trims a box into a smaller exact box", async () => {
+  const runtime = createReferenceBrepRuntime();
+  await runtime.openSession("session:test");
+  const a = (await runtime.execute(customBoxRequest("request:a", "operation:a", [0.1, 0.2, 0.3], [0, 0, 0]))).outputs[0]!;
+  const b = (await runtime.execute(customBoxRequest("request:b", "operation:b", [0.3, 0.4, 0.2], [-0.1, -0.1, -0.1]))).outputs[0]!;
+  const result = await runtime.execute(booleanRequest("cut", a, b));
+  assert.deepEqual(result.outputs[0]!.boundsMeters, { min: [0, 0, 0.1], max: [0.1, 0.2, 0.3] });
+});
+
+test("the reference Boolean join of nested boxes returns the enclosing box", async () => {
+  const runtime = createReferenceBrepRuntime();
+  await runtime.openSession("session:test");
+  const outer = (await runtime.execute(customBoxRequest("request:a", "operation:a", [0.2, 0.2, 0.2], [0, 0, 0]))).outputs[0]!;
+  const inner = (await runtime.execute(customBoxRequest("request:b", "operation:b", [0.05, 0.05, 0.05], [0.05, 0.05, 0.05]))).outputs[0]!;
+  const result = await runtime.execute(booleanRequest("join", outer, inner));
+  assert.deepEqual(result.outputs[0]!.boundsMeters, { min: [0, 0, 0], max: [0.2, 0.2, 0.2] });
+});
+
+test("the reference Boolean rejects a general non-convex configuration explicitly", async () => {
+  const runtime = createReferenceBrepRuntime();
+  await runtime.openSession("session:test");
+  const a = (await runtime.execute(customBoxRequest("request:a", "operation:a", [0.1, 0.1, 0.1], [0, 0, 0]))).outputs[0]!;
+  const b = (await runtime.execute(customBoxRequest("request:b", "operation:b", [0.1, 0.1, 0.1], [0.05, 0.05, 0.05]))).outputs[0]!;
+  await assert.rejects(runtime.execute(booleanRequest("join", a, b)));
 });
