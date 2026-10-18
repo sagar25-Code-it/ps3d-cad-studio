@@ -5,6 +5,7 @@ import { exportBinaryStl } from "../packages/import-export/src/index.js";
 import { createBracketDocument } from "../packages/model-schema/src/index.js";
 import { BracketSolidKernel } from "../packages/solid-bracket-kernel/src/index.js";
 import { ManifoldSolidKernel } from "../packages/solid-manifold-adapter/src/adapter.js";
+import { extrudeProfileSolid, revolveProfileSolid } from "../packages/solid-manifold-adapter/src/general.js";
 import type { ModelMesh } from "../packages/solid-kernel-api/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
@@ -170,6 +171,33 @@ export const evidenceAndSolidTests: readonly TestCase[] = [
       });
       assert(result.ok, "candidate adapter should qualify the bounded bracket");
       near(result.value.measurements.boundsMeters.size[0], 0.123456789123, 1e-15, "candidate adapter must not promote f32 output as model precision");
+    }
+  },
+  {
+    name: "Stage 1 general evaluator extrudes and revolves arbitrary profiles into validated closed solids",
+    run: async () => {
+      const module = await Module();
+      module.setup();
+      // Extrude a 20 x 20 mm square to 10 mm -> volume 0.02*0.02*0.01 = 4e-6 m^3.
+      const square: readonly (readonly [number, number])[] = [[-0.01, -0.01], [0.01, -0.01], [0.01, 0.01], [-0.01, 0.01]];
+      const extruded = extrudeProfileSolid(module, { bodyId: "body:extrude-square", profileMeters: square, heightMeters: 0.01 });
+      assert(extruded.ok, "a valid square profile must extrude into a closed solid");
+      near(extruded.value.measurements.volumeCubicMeters, 4e-6, 1e-10, "extruded square volume must equal width*height*depth");
+      equal(extruded.value.topology.components, 1, "an extruded single profile must produce one closed body");
+      equal(extruded.value.topology.genus, 0, "an extruded square must be genus 0");
+
+      // Guards: degenerate inputs fail explicitly.
+      assert(!extrudeProfileSolid(module, { bodyId: "body:bad", profileMeters: [[0, 0], [0.01, 0]], heightMeters: 0.01 }).ok, "a profile with fewer than three points must be rejected");
+      assert(!extrudeProfileSolid(module, { bodyId: "body:bad", profileMeters: square, heightMeters: 0 }).ok, "a non-positive extrusion height must be rejected");
+
+      // Revolve an annular rectangle (radial 10..20 mm, axial 10 mm) by 360 deg -> a tube/ring solid.
+      const ring: readonly (readonly [number, number])[] = [[0.01, -0.005], [0.02, -0.005], [0.02, 0.005], [0.01, 0.005]];
+      const revolved = revolveProfileSolid(module, { bodyId: "body:revolve-ring", profileMeters: ring, degrees: 360, circularSegments: 128 });
+      assert(revolved.ok, "a valid radial profile must revolve into a closed solid");
+      equal(revolved.value.topology.components, 1, "a full revolve of a single profile must produce one closed body");
+      // pi*(R^2 - r^2)*h = pi*(0.0004 - 0.0001)*0.01 ~= 9.42e-6; faceted volume is slightly under.
+      assert(revolved.value.measurements.volumeCubicMeters > 9.0e-6 && revolved.value.measurements.volumeCubicMeters < 9.5e-6, "revolved ring volume must approximate the analytic annulus");
+      assert(!revolveProfileSolid(module, { bodyId: "body:bad", profileMeters: [[-0.01, 0], [0.01, 0], [0, 0.01]], degrees: 360 }).ok, "a profile crossing the revolve axis must be rejected");
     }
   }
 ];
