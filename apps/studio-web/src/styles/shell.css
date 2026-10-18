@@ -525,3 +525,19 @@ kbd {
 .command-results p { color: var(--muted); padding: 1rem; font-size: 0.68rem; }
 .command-palette > footer { display: flex; align-items: center; gap: 1rem; padding: 0.55rem 0.8rem; border-top: 1px solid var(--line); color: #60778a; font: 0.54rem var(--mono); }
 .command-palette > footer button { margin-left: auto; padding: 0.34rem 0.52rem; font-size: 0.56rem; }
+
+.status-shortcuts { padding: 0 0.4rem; border: 1px solid var(--line); border-radius: 4px; color: inherit; background: transparent; font: inherit; cursor: pointer; }
+.status-shortcuts:hover { border-color: var(--cyan); color: var(--cyan); }
+.shortcuts-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 1rem; background: #02070bc7; backdrop-filter: blur(7px); }
+.shortcuts-panel { width: min(760px, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; border: 1px solid #3d5a70; border-radius: 10px; background: #0a1522fa; box-shadow: 0 30px 100px #000c; }
+.shortcuts-panel > header { display: flex; align-items: center; justify-content: space-between; padding: 0.8rem 1rem; border-bottom: 1px solid var(--line); }
+.shortcuts-panel > header strong { font-size: 0.9rem; }
+.shortcuts-panel > header button { padding: 0.1rem 0.5rem; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; font-size: 1rem; cursor: pointer; }
+.shortcuts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.6rem 1.4rem; padding: 1rem; }
+.shortcuts-grid h4 { margin: 0 0 0.4rem; color: var(--cyan); font: 650 0.58rem var(--mono); text-transform: uppercase; letter-spacing: 0.1em; }
+.shortcuts-grid dl { display: grid; gap: 0.3rem; margin: 0; }
+.shortcuts-grid dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
+.shortcuts-grid dt { display: flex; gap: 0.18rem; flex: 0 0 auto; }
+.shortcuts-grid dd { margin: 0; color: var(--muted); font-size: 0.62rem; text-align: right; }
+.shortcuts-panel kbd { display: inline-block; min-width: 1.1rem; padding: 0.05rem 0.34rem; border: 1px solid #45617a; border-bottom-width: 2px; border-radius: 4px; background: #0e1d2c; color: #d6e6f2; font: 600 0.58rem var(--mono); text-align: center; }
+.shortcuts-panel > footer { padding: 0.6rem 1rem; border-top: 1px solid var(--line); color: #60778a; font: 0.56rem var(--mono); }
