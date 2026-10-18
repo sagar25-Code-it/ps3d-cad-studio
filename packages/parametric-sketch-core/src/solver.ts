@@ -150,9 +150,8 @@ function applyConstraint(
   tolerance: number
 ): ApplyResult {
   if (constraint.kind === "fix") return { document, changed: false, applied: true };
-  if (constraint.kind === "tangent" || constraint.kind === "symmetric") {
-    return unsupported(document, "UNSUPPORTED_CONSTRAINT", `The analytic backend does not solve ${constraint.kind} constraints.`, [constraint.id], "Use a nonlinear solver backend; the constraint remains preserved in the document.");
-  }
+  if (constraint.kind === "tangent") return applyTangent(document, constraint, fixed, tolerance);
+  if (constraint.kind === "symmetric") return applySymmetric(document, constraint, fixed, tolerance);
   if (constraint.kind === "horizontal" || constraint.kind === "vertical") {
     const line = findLine(document, constraint.line.entityId);
     if (line === undefined) return invalidReference(document, constraint.id, "The orientation constraint requires a line.");
@@ -273,6 +272,77 @@ function orientLineFromReference(
   if (isFixed(fixed, moving.id, "start") && isFixed(fixed, moving.id, "end")) return conflict(document, ownerId, "The moving line is fully fixed.");
   const changed = distance(start, moving.start) > tolerance || distance(end, moving.end) > tolerance;
   return { document: changed ? replaceLine(document, moving.id, start, end) : document, changed, applied: true };
+}
+
+type CircleOrArc = Extract<SketchGeometry, { kind: "circle" | "arc" }>;
+
+function applyTangent(
+  document: ParametricSketchDocument,
+  constraint: Extract<SketchConstraint, { kind: "tangent" }>,
+  fixed: ReadonlySet<string>,
+  tolerance: number
+): ApplyResult {
+  const first = findGeometry(document, constraint.first.entityId);
+  const second = findGeometry(document, constraint.second.entityId);
+  const line = first?.kind === "line" ? first : second?.kind === "line" ? second : undefined;
+  const circle = isRadialGeometry(first) ? first : isRadialGeometry(second) ? second : undefined;
+  if (line !== undefined && circle !== undefined) {
+    const foot = projectPointOnLine(circle.center, line.start, line.end);
+    const gap = distance(circle.center, foot);
+    if (!isFixed(fixed, circle.id, "radius")) {
+      if (gap <= tolerance) return conflict(document, constraint.id, "The circle center lies on the line, so no tangent radius exists; move the circle first.");
+      if (Math.abs(circle.radiusMm - gap) <= tolerance) return { document, changed: false, applied: true };
+      return { document: replaceRadius(document, circle.id, gap), changed: true, applied: true };
+    }
+    // Radius is fixed: translate the center perpendicular to the line to the tangent offset.
+    const direction = normalized(subtract(circle.center, foot)) ?? lineNormal(line);
+    const target: Vec2 = [foot[0] + direction[0] * circle.radiusMm, foot[1] + direction[1] * circle.radiusMm];
+    return moveReference(document, { entityId: circle.id, selector: "center" }, target, fixed, tolerance, constraint.id);
+  }
+  if (isRadialGeometry(first) && isRadialGeometry(second)) {
+    const centerGap = distance(first.center, second.center);
+    if (centerGap <= tolerance) return conflict(document, constraint.id, "Concentric circles cannot be tangent; separate the centers first.");
+    // |centerGap - keptRadius| yields the external tangent radius when centerGap > keptRadius and the internal one otherwise.
+    const resize = (kept: CircleOrArc, moved: CircleOrArc): ApplyResult => {
+      const targetRadius = Math.abs(centerGap - kept.radiusMm);
+      if (targetRadius <= tolerance) return conflict(document, constraint.id, "Tangency would collapse the circle to a zero radius.");
+      if (Math.abs(moved.radiusMm - targetRadius) <= tolerance) return { document, changed: false, applied: true };
+      return { document: replaceRadius(document, moved.id, targetRadius), changed: true, applied: true };
+    };
+    if (!isFixed(fixed, second.id, "radius")) return resize(first, second);
+    if (!isFixed(fixed, first.id, "radius")) return resize(second, first);
+    return conflict(document, constraint.id, "Both circle radii are fixed and are not tangent.");
+  }
+  return invalidReference(document, constraint.id, "Tangent requires a line and a circle, or two circles or arcs.");
+}
+
+function applySymmetric(
+  document: ParametricSketchDocument,
+  constraint: Extract<SketchConstraint, { kind: "symmetric" }>,
+  fixed: ReadonlySet<string>,
+  tolerance: number
+): ApplyResult {
+  const axis = findLine(document, constraint.axis.entityId);
+  if (axis === undefined) return invalidReference(document, constraint.id, "Symmetric requires an axis line.");
+  const firstPoint = getReferencedPoint(document, constraint.first);
+  const secondPoint = getReferencedPoint(document, constraint.second);
+  if (firstPoint === undefined || secondPoint === undefined) {
+    return unsupported(document, "UNSUPPORTED_CONSTRAINT", "The analytic backend mirrors point references about a line axis only.", [constraint.id], "Reference two writable points and a line axis, or use a nonlinear backend.");
+  }
+  if (distance(secondPoint, reflectAcrossLine(firstPoint, axis)) <= tolerance) return { document, changed: false, applied: true };
+  if (!isReferenceFixed(fixed, constraint.second)) return moveReference(document, constraint.second, reflectAcrossLine(firstPoint, axis), fixed, tolerance, constraint.id);
+  if (!isReferenceFixed(fixed, constraint.first)) return moveReference(document, constraint.first, reflectAcrossLine(secondPoint, axis), fixed, tolerance, constraint.id);
+  return conflict(document, constraint.id, "Both symmetric points are fixed and are not mirror images across the axis.");
+}
+
+function reflectAcrossLine(point: Vec2, axis: LineGeometry): Vec2 {
+  const foot = projectPointOnLine(point, axis.start, axis.end);
+  return [2 * foot[0] - point[0], 2 * foot[1] - point[1]];
+}
+
+function lineNormal(line: LineGeometry): Vec2 {
+  const direction = normalized(subtract(line.end, line.start)) ?? [1, 0];
+  return [-direction[1], direction[0]];
 }
 
 function applyDrivingDimension(
@@ -533,15 +603,36 @@ function supportedDrivingDimensionIds(document: ParametricSketchDocument): Reado
 }
 
 function analyticConstraintSupport(document: ParametricSketchDocument, constraint: SketchConstraint): SketchDiagnostic | undefined {
-  if (constraint.kind === "tangent" || constraint.kind === "symmetric") {
-    return diagnostic(
-      "UNSUPPORTED_CONSTRAINT",
-      "warning",
-      `The analytic backend does not solve ${constraint.kind} constraints.`,
-      [constraint.id],
-      "Use a nonlinear solver backend; the constraint remains preserved in the document.",
-      true
-    );
+  if (constraint.kind === "tangent") {
+    const first = findGeometry(document, constraint.first.entityId);
+    const second = findGeometry(document, constraint.second.entityId);
+    const lineCircle = (first?.kind === "line" && isRadialGeometry(second)) || (second?.kind === "line" && isRadialGeometry(first));
+    const twoRadial = isRadialGeometry(first) && isRadialGeometry(second);
+    if (!lineCircle && !twoRadial) {
+      return diagnostic(
+        "UNSUPPORTED_CONSTRAINT",
+        "warning",
+        "The analytic backend solves tangency between a line and a circle or arc, or between two circles or arcs.",
+        [constraint.id],
+        "Use a nonlinear solver backend for tangency that involves splines or other curves.",
+        true
+      );
+    }
+    return undefined;
+  }
+  if (constraint.kind === "symmetric") {
+    const axis = findLine(document, constraint.axis.entityId);
+    if (axis === undefined || getReferencedPoint(document, constraint.first) === undefined || getReferencedPoint(document, constraint.second) === undefined) {
+      return diagnostic(
+        "UNSUPPORTED_CONSTRAINT",
+        "warning",
+        "The analytic backend mirrors point references about a line axis only.",
+        [constraint.id],
+        "Reference two writable points and a line axis, or use a nonlinear backend.",
+        true
+      );
+    }
+    return undefined;
   }
   if (constraint.kind === "coincident" && (getReferencedPoint(document, constraint.first) === undefined || getReferencedPoint(document, constraint.second) === undefined)) {
     return diagnostic(

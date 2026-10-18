@@ -67,18 +67,49 @@ test("driving diameter changes a circle while driven diameter only measures", ()
   assert.deepEqual(drivenResult.appliedDimensionIds, []);
 });
 
-test("reports tangent as explicitly unsupported instead of silently applying it", () => {
+test("solves line-circle tangency by resizing the circle to the line distance", () => {
   const document = baseDocument({
     geometry: [line("line:1", [0, 0], [10, 0]), { id: "circle:1", kind: "circle", center: [5, 5], radiusMm: 2, construction: false, suppressed: false }],
     constraints: [{ id: "constraint:tangent", kind: "tangent", first: { entityId: "line:1", selector: "curve" }, second: { entityId: "circle:1", selector: "curve" }, suppressed: false }]
   });
   const result = solveAnalyticSketch({ document, mode: "regenerate" });
-  assert.equal(result.status, "partial");
-  assert.equal(result.diagnostics[0]?.code, "UNSUPPORTED_CONSTRAINT");
-  assert.equal(result.diagnostics[0]?.unsupported, true);
-  assert.deepEqual(result.appliedConstraintIds, []);
-  assert.deepEqual(result.document.geometry, document.geometry);
+  assert.equal(result.status, "solved");
+  assert.equal(result.document.geometry[1]?.kind, "circle");
+  if (result.document.geometry[1]?.kind === "circle") assert.equal(result.document.geometry[1].radiusMm, 5);
+  assert.deepEqual(result.appliedConstraintIds, ["constraint:tangent"]);
 });
+
+test("solves circle-circle external tangency by resizing the free circle", () => {
+  const document = baseDocument({
+    geometry: [
+      { id: "circle:1", kind: "circle", center: [0, 0], radiusMm: 3, construction: false, suppressed: false },
+      { id: "circle:2", kind: "circle", center: [10, 0], radiusMm: 1, construction: false, suppressed: false }
+    ],
+    constraints: [{ id: "constraint:tangent", kind: "tangent", first: { entityId: "circle:1", selector: "curve" }, second: { entityId: "circle:2", selector: "curve" }, suppressed: false }]
+  });
+  const result = solveAnalyticSketch({ document, mode: "regenerate" });
+  assert.equal(result.status, "solved");
+  // Centers are 10 mm apart; external tangency makes r2 = 10 - 3 = 7.
+  if (result.document.geometry[1]?.kind === "circle") assert.equal(result.document.geometry[1].radiusMm, 7);
+  assert.deepEqual(result.appliedConstraintIds, ["constraint:tangent"]);
+});
+
+test("solves symmetry by mirroring the free point across the axis line", () => {
+  const document = baseDocument({
+    geometry: [
+      { id: "point:1", kind: "point", point: [-4, 3], construction: false, suppressed: false },
+      { id: "point:2", kind: "point", point: [1, 9], construction: false, suppressed: false },
+      line("axis:1", [0, -5], [0, 5])
+    ],
+    constraints: [{ id: "constraint:symmetric", kind: "symmetric", first: { entityId: "point:1", selector: "point" }, second: { entityId: "point:2", selector: "point" }, axis: { entityId: "axis:1", selector: "curve" }, suppressed: false }]
+  });
+  const result = solveAnalyticSketch({ document, mode: "regenerate" });
+  assert.equal(result.status, "solved");
+  // Mirrored across the Y axis: point:1 (-4, 3) -> point:2 should become (4, 3).
+  if (result.document.geometry[1]?.kind === "point") assert.deepEqual(result.document.geometry[1].point, [4, 3]);
+  assert.deepEqual(result.appliedConstraintIds, ["constraint:symmetric"]);
+});
+
 
 test("rejects dangling geometry references", () => {
   const document = baseDocument({

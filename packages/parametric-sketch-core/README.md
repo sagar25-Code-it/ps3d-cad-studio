@@ -23,16 +23,19 @@ workbench preview model.
   conflict/DOF diagnostics, and exact independent line/circle offsets.
 - Schema and validation contracts for arcs, ellipses, splines, polygons, slots,
   tangent/symmetric constraints, trim, extend, and associative projection.
+- Analytic tangency between a line and a circle/arc and between two
+  circles/arcs (external or internal), and point symmetry mirrored about a
+  line axis.
 
 ## Truthful boundary
 
 The included analytic backend is a deterministic baseline, not a general
 nonlinear geometric constraint solver. Unsupported relations return structured
 `unsupported: true` diagnostics and remain preserved in the sketch document.
-This includes tangent, symmetric, point-on-curve coincidence, complex spline
-relations, associative offsets, and topology-dependent trim/extend/project
-operations. The package does not approximate these operations or report them
-as solved.
+This includes point-on-curve coincidence, tangency or symmetry that involves
+splines, ellipses, or other free-form curves, complex spline relations,
+associative offsets, and topology-dependent trim/extend/project operations. The
+package does not approximate these operations or report them as solved.
 The `ParametricSketchSolver` interface allows a future WASM or native solver to
 replace it without changing document persistence, feature references, MCP
 receipts, or UI orchestration.
