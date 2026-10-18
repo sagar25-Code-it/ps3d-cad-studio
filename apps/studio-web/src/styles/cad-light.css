@@ -566,6 +566,12 @@
 .studio-app .preview-body-list strong { overflow: hidden; color: #30363b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .studio-app .preview-body-list small { color: #727a81; font-size: 9px; text-transform: capitalize; }
 .studio-app .preview-body-list > button.active { border-color: #c62836; background: #fae9eb; box-shadow: inset 3px 0 0 #c62836; }
+.studio-app .named-face-list { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.studio-app .named-face-list > button { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 5px 7px; text-align: left; }
+.studio-app .named-face-role { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; color: #30363b; font: 600 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.studio-app .named-face-list small { color: #727a81; font: 600 9px var(--mono); }
+.studio-app .named-face-list > button.active { border-color: #b7791f; background: #fbf1dc; box-shadow: inset 3px 0 0 #e0a92e; }
+.studio-app .named-face-list > button.active .named-face-role { color: #7a4e07; }
 .studio-app .preview-body-editor { display: grid; gap: 0.62rem; padding: 0.7rem; border: 1px solid #c6cbd0; border-radius: 7px; background: #f7f8f9; }
 .studio-app .preview-body-editor-title { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 7px; }
 .studio-app .preview-body-editor-title > span { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid #c62836; border-radius: 5px; color: #a41c28; background: #fae9eb; }

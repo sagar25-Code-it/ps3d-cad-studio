@@ -1026,9 +1026,11 @@ function validGeneralSolidBodyPayload(value: unknown): value is GeneralSolidBody
   }
   if (Object.hasOwn(value, "brep")) {
     const brep = value.brep;
-    if (!isRecord(brep) || !isRecord(brep.topology) || !Array.isArray(brep.faces) || brep.faces.length > 4_096) return false;
+    if (!isRecord(brep) || !isRecord(brep.topology) || !Array.isArray(brep.faces) || brep.faces.length > 4_096 || !Array.isArray(brep.faceTriangles)) return false;
     if (["vertices", "edges", "faces"].some((key) => typeof (brep.topology as Record<string, unknown>)[key] !== "number")) return false;
-    if (brep.faces.some((face) => !isRecord(face) || typeof face.role !== "string" || typeof face.key !== "string")) return false;
+    if (brep.faces.some((face) => !isRecord(face) || typeof face.role !== "string" || typeof face.key !== "string" || typeof face.areaMm2 !== "number")) return false;
+    const faceCount = brep.faces.length;
+    if (brep.faceTriangles.length !== indices.length / 3 || brep.faceTriangles.some((face) => typeof face !== "number" || !Number.isInteger(face) || face < -1 || face >= faceCount)) return false;
   }
   return true;
 }

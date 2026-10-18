@@ -57,7 +57,7 @@ interface SolidGeometry {
   readonly topology: KernelTopologySummary;
   readonly bounds: KernelBounds;
   readonly descriptor: Record<string, unknown>;
-  readonly tessellation: { readonly positions: Float64Array; readonly normals: Float32Array; readonly indices: Uint32Array };
+  readonly tessellation: { readonly positions: Float64Array; readonly normals: Float32Array; readonly indices: Uint32Array; readonly faceOfTriangle: readonly number[] };
   readonly volumeCubicMeters: number;
   readonly faces: readonly FaceSpec[];
 }
@@ -236,7 +236,7 @@ function boxSolid(size: Vector3, origin: Vector3, xDirection: Vector3, normal: V
     { role: "face.z-max", quad: [index(0, 0, 1), index(1, 0, 1), index(1, 1, 1), index(0, 1, 1)], normal: frame.z }
   ];
   const builder = new TessellationBuilder();
-  for (const face of faceDefs) builder.addQuad(corners[face.quad[0]]!, corners[face.quad[1]]!, corners[face.quad[2]]!, corners[face.quad[3]]!, face.normal);
+  faceDefs.forEach((face, faceIndex) => builder.addQuad(corners[face.quad[0]]!, corners[face.quad[1]]!, corners[face.quad[2]]!, corners[face.quad[3]]!, face.normal, faceIndex));
   const bounds = boundsOf(corners);
   const faceSpecs = faceDefs.map((face, position) => quadFace(
     face.role,
@@ -283,9 +283,9 @@ function prismGeometry(points: readonly Vec3[], normal: Vec3, height: number): S
   const topCentroid = centroid(top);
   for (let step = 0; step < count; step += 1) {
     const next = (step + 1) % count;
-    builder.addTriangle(bottomCentroid, points[next]!, points[step]!, negate(normal));
-    builder.addTriangle(topCentroid, top[step]!, top[next]!, normal);
-    builder.addQuad(points[step]!, points[next]!, top[next]!, top[step]!, sideNormal(points[step]!, points[next]!, normal));
+    builder.addTriangle(bottomCentroid, points[next]!, points[step]!, negate(normal), 0);
+    builder.addTriangle(topCentroid, top[step]!, top[next]!, normal, 1);
+    builder.addQuad(points[step]!, points[next]!, top[next]!, top[step]!, sideNormal(points[step]!, points[next]!, normal), 2 + step);
   }
   const area = planarPolygonArea(points, normal);
   const sideRoles = Array.from({ length: count }, (_, step) => `face.side-${step}`);
@@ -348,9 +348,10 @@ function revolveGeometry(profile: readonly (readonly [number, number])[], degree
     const theta0 = (sweep * step) / segments;
     const theta1 = (sweep * (step + 1)) / segments;
     const midTheta = (theta0 + theta1) / 2;
+    const sweptBase = full ? 0 : 2;
     for (let j = 0; j < count; j += 1) {
       const nextJ = (j + 1) % count;
-      builder.addQuad(revolve(profile[j]!, theta0), revolve(profile[nextJ]!, theta0), revolve(profile[nextJ]!, theta1), revolve(profile[j]!, theta1), sweptOutward(j, midTheta));
+      builder.addQuad(revolve(profile[j]!, theta0), revolve(profile[nextJ]!, theta0), revolve(profile[nextJ]!, theta1), revolve(profile[j]!, theta1), sweptOutward(j, midTheta), sweptBase + j);
     }
   }
   if (!full) {
@@ -360,8 +361,8 @@ function revolveGeometry(profile: readonly (readonly [number, number])[], degree
     const endCentroid = centroid(endPoints);
     for (let j = 0; j < count; j += 1) {
       const nextJ = (j + 1) % count;
-      builder.addTriangle(startCentroid, startPoints[nextJ]!, startPoints[j]!, negate(tangent(0)));
-      builder.addTriangle(endCentroid, endPoints[j]!, endPoints[nextJ]!, tangent(sweep));
+      builder.addTriangle(startCentroid, startPoints[nextJ]!, startPoints[j]!, negate(tangent(0)), 0);
+      builder.addTriangle(endCentroid, endPoints[j]!, endPoints[nextJ]!, tangent(sweep), 1);
     }
   }
 
@@ -476,6 +477,8 @@ export interface ProfilePrismResult {
   readonly boundsMeters: KernelBounds;
   readonly volumeCubicMeters: number;
   readonly faces: readonly NamedFace[];
+  /** Face index (into `faces`) for each tessellation triangle, for per-face highlighting. */
+  readonly faceTriangles: readonly number[];
 }
 
 /**
@@ -504,7 +507,8 @@ export async function evaluateProfilePrism(request: ProfilePrismRequest): Promis
     topology: geometry.topology,
     boundsMeters: geometry.bounds,
     volumeCubicMeters: geometry.volumeCubicMeters,
-    faces
+    faces,
+    faceTriangles: geometry.tessellation.faceOfTriangle
   };
 }
 
@@ -542,7 +546,8 @@ export async function evaluateProfileRevolution(request: ProfileRevolutionReques
     topology: geometry.topology,
     boundsMeters: geometry.bounds,
     volumeCubicMeters: geometry.volumeCubicMeters,
-    faces
+    faces,
+    faceTriangles: geometry.tessellation.faceOfTriangle
   };
 }
 
@@ -627,9 +632,9 @@ function cylinderGeometry(radius: number, height: number, origin: Vector3, direc
   for (let step = 0; step < segments; step += 1) {
     const next = (step + 1) % segments;
     const radialNormal = unit(addScaled([0, 0, 0], frame.x, Math.cos((2 * Math.PI * step) / segments) + Math.cos((2 * Math.PI * next) / segments), frame.y, Math.sin((2 * Math.PI * step) / segments) + Math.sin((2 * Math.PI * next) / segments)));
-    builder.addQuad(bottom[step]!, bottom[next]!, top[next]!, top[step]!, radialNormal);
-    builder.addTriangle(bottomCenter, bottom[next]!, bottom[step]!, negate(frame.z));
-    builder.addTriangle(topCenter, top[step]!, top[next]!, frame.z);
+    builder.addQuad(bottom[step]!, bottom[next]!, top[next]!, top[step]!, radialNormal, 0);
+    builder.addTriangle(bottomCenter, bottom[next]!, bottom[step]!, negate(frame.z), 1);
+    builder.addTriangle(topCenter, top[step]!, top[next]!, frame.z, 2);
   }
   const bounds = boundsOf([...bottom, ...top]);
   const capArea = Math.PI * radius * radius;
@@ -653,8 +658,10 @@ class TessellationBuilder {
   readonly #positions: number[] = [];
   readonly #normals: number[] = [];
   readonly #indices: number[] = [];
+  /** Face index (into the solid's faces array) for each emitted triangle. */
+  readonly #faceOfTriangle: number[] = [];
 
-  addTriangle(a: Vec3, b: Vec3, c: Vec3, outward: Vec3): void {
+  addTriangle(a: Vec3, b: Vec3, c: Vec3, outward: Vec3, faceIndex = -1): void {
     const geometric = cross(subtract(b, a), subtract(c, a));
     const [p, q, r] = dot(geometric, outward) >= 0 ? [a, b, c] : [a, c, b];
     const base = this.#positions.length / 3;
@@ -663,15 +670,16 @@ class TessellationBuilder {
       this.#normals.push(outward[0], outward[1], outward[2]);
     }
     this.#indices.push(base, base + 1, base + 2);
+    this.#faceOfTriangle.push(faceIndex);
   }
 
-  addQuad(a: Vec3, b: Vec3, c: Vec3, d: Vec3, outward: Vec3): void {
-    this.addTriangle(a, b, c, outward);
-    this.addTriangle(a, c, d, outward);
+  addQuad(a: Vec3, b: Vec3, c: Vec3, d: Vec3, outward: Vec3, faceIndex = -1): void {
+    this.addTriangle(a, b, c, outward, faceIndex);
+    this.addTriangle(a, c, d, outward, faceIndex);
   }
 
-  finish(): { positions: Float64Array; normals: Float32Array; indices: Uint32Array } {
-    return { positions: Float64Array.from(this.#positions), normals: Float32Array.from(this.#normals), indices: Uint32Array.from(this.#indices) };
+  finish(): { positions: Float64Array; normals: Float32Array; indices: Uint32Array; faceOfTriangle: number[] } {
+    return { positions: Float64Array.from(this.#positions), normals: Float32Array.from(this.#normals), indices: Uint32Array.from(this.#indices), faceOfTriangle: [...this.#faceOfTriangle] };
   }
 }
 

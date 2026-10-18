@@ -111,7 +111,8 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
           indices: prism.indices,
           brep: {
             topology: { vertices: prism.topology.vertices, edges: prism.topology.edges, faces: prism.topology.faces },
-            faces: prism.faces.map((face) => ({ role: face.role, key: face.key }))
+            faces: prism.faces.map((face) => ({ role: face.role, key: face.key, areaMm2: face.areaSquareMeters * 1e6 })),
+            faceTriangles: prism.faceTriangles
           }
         }
       };
@@ -145,7 +146,8 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
             indices: revolution.indices,
             brep: {
               topology: { vertices: revolution.topology.vertices, edges: revolution.topology.edges, faces: revolution.topology.faces },
-              faces: revolution.faces.map((face) => ({ role: face.role, key: face.key }))
+              faces: revolution.faces.map((face) => ({ role: face.role, key: face.key, areaMm2: face.areaSquareMeters * 1e6 })),
+              faceTriangles: revolution.faceTriangles
             }
           }
         };

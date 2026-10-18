@@ -39,7 +39,8 @@ export function buildPartPreview(part: PartIntent): PreviewScene {
       positionsMm: body.positionsMm,
       indices: body.indices,
       wireframe: false,
-      doubleSided: true
+      doubleSided: true,
+      ...(body.brep !== undefined ? { faceTriangles: body.brep.faceTriangles } : {})
     });
     points.push(...generalBodyBounds(body.positionsMm));
   }

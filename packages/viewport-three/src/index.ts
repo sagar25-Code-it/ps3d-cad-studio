@@ -193,6 +193,7 @@ export class ThreeViewportAdapter {
   #backgroundTone: ViewportBackgroundTone = "dark-gray";
   #qualifiedBody: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
   #qualifiedEdges: THREE.LineSegments<THREE.EdgesGeometry, THREE.LineBasicMaterial> | undefined;
+  #faceHighlight: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
   #drag: { pointerId: number; x: number; y: number; startX: number; startY: number; moved: boolean; mode: NavigationMode } | undefined;
   readonly #touchPointers = new Map<number, ViewportTouchPoint>();
   #assemblyTouchGesture: { startCentroidY: number; startExplodeMm: number; latestExplodeMm: number } | undefined;
@@ -849,6 +850,52 @@ export class ThreeViewportAdapter {
     this.#selectedId = undefined;
     this.#qualifiedBody = undefined;
     this.#qualifiedEdges = undefined;
+    this.#clearFaceHighlight();
+  }
+
+  #clearFaceHighlight(): void {
+    if (this.#faceHighlight === undefined) return;
+    this.#bodyGroup.remove(this.#faceHighlight);
+    this.#faceHighlight.geometry.dispose();
+    this.#faceHighlight.material.dispose();
+    this.#faceHighlight = undefined;
+  }
+
+  /** Highlight one named face of a general mesh body, or clear the highlight when faceIndex is null. */
+  setHighlightedFace(bodyId: string | null, faceIndex: number | null): void {
+    this.#clearFaceHighlight();
+    if (bodyId === null || faceIndex === null || faceIndex < 0) return;
+    let source: THREE.Mesh | undefined;
+    for (const object of this.#objects) {
+      object.traverse((child) => {
+        if (source === undefined && child instanceof THREE.Mesh && child.userData["semanticId"] === bodyId && Array.isArray(child.userData["faceTriangles"])) source = child;
+      });
+      if (source !== undefined) break;
+    }
+    if (source === undefined) return;
+    const faceOfTriangle = source.userData["faceTriangles"] as number[];
+    const position = source.geometry.getAttribute("position");
+    const index = source.geometry.getIndex();
+    const highlightPositions: number[] = [];
+    for (let triangle = 0; triangle < faceOfTriangle.length; triangle += 1) {
+      if (faceOfTriangle[triangle] !== faceIndex) continue;
+      for (let corner = 0; corner < 3; corner += 1) {
+        const vertex = index !== null ? index.getX(triangle * 3 + corner) : triangle * 3 + corner;
+        highlightPositions.push(position.getX(vertex), position.getY(vertex), position.getZ(vertex));
+      }
+    }
+    if (highlightPositions.length === 0) return;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(Float32Array.from(highlightPositions), 3));
+    geometry.computeVertexNormals();
+    const material = new THREE.MeshStandardMaterial({ color: "#ffd24a", emissive: "#6a4a00", roughness: 0.35, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, depthWrite: false });
+    const highlight = new THREE.Mesh(geometry, material);
+    highlight.renderOrder = 3;
+    highlight.userData["ps3dExchangeHelper"] = true;
+    highlight.position.copy(source.position);
+    highlight.rotation.copy(source.rotation);
+    this.#bodyGroup.add(highlight);
+    this.#faceHighlight = highlight;
   }
 
   #clearMeasurements(): void {
@@ -991,6 +1038,7 @@ export class ThreeViewportAdapter {
     mesh.userData["semanticId"] = primitive.id;
     mesh.userData["selectionKind"] = primitive.id.startsWith("component:") ? "component" : "body";
     mesh.userData["baseColor"] = primitive.color;
+    if (primitive.kind === "mesh" && primitive.faceTriangles !== undefined) mesh.userData["faceTriangles"] = [...primitive.faceTriangles];
     if (primitive.kind !== "mesh") {
       mesh.position.set(primitive.positionMm[0] / 1000, primitive.positionMm[1] / 1000, primitive.positionMm[2] / 1000);
       const [x, y, z] = primitive.rotationDeg.map((value) => value * Math.PI / 180) as [number, number, number];

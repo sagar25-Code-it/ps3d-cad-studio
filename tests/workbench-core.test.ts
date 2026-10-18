@@ -110,6 +110,38 @@ export const workbenchCoreTests: readonly TestCase[] = [
     }
   },
   {
+    name: "general B-rep solids carry named faces and a valid per-triangle face map",
+    run: () => {
+      const project = createWorkbenchProject("project:test-brep-faces");
+      const body = {
+        id: "general-body:test-prism", name: "Prism", visible: true, color: "#b9c2c8",
+        positionsMm: [0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 10],
+        indices: [0, 1, 2, 0, 1, 3, 0, 2, 3, 1, 2, 3],
+        brep: {
+          topology: { vertices: 4, edges: 6, faces: 4 },
+          faces: [
+            { role: "face.a", key: "face:aaaa", areaMm2: 50 },
+            { role: "face.b", key: "face:bbbb", areaMm2: 50 },
+            { role: "face.c", key: "face:cccc", areaMm2: 50 },
+            { role: "face.d", key: "face:dddd", areaMm2: 86.6 }
+          ],
+          faceTriangles: [0, 1, 2, 3]
+        }
+      };
+      const added = applyWorkbenchOperation(project, { kind: "add-general-body", operationId: "operation:test-add-brep", expectedRevision: 0, body });
+      assert(added.ok, "a general body with a valid brep record should insert");
+      equal(added.value.project.part.generalBodies?.[0]?.brep?.faces.length, 4, "the body should retain its four named faces");
+
+      const mismatched = applyWorkbenchOperation(project, {
+        kind: "add-general-body",
+        operationId: "operation:test-bad-brep",
+        expectedRevision: 0,
+        body: { ...body, id: "general-body:bad", brep: { ...body.brep, faceTriangles: [0, 1, 2] } }
+      });
+      assert(!mismatched.ok, "a faceTriangles map whose length does not match the triangle count must be rejected");
+    }
+  },
+  {
     name: "general sketch tools build entities and snap deterministically",
     run: () => {
       const project = createWorkbenchProject("project:test-sketch-tools");

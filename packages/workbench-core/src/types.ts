@@ -272,7 +272,9 @@ export interface GeneralSolidBody {
    */
   readonly brep?: {
     readonly topology: { readonly vertices: number; readonly edges: number; readonly faces: number };
-    readonly faces: readonly { readonly role: string; readonly key: string }[];
+    readonly faces: readonly { readonly role: string; readonly key: string; readonly areaMm2: number }[];
+    /** Face index (into `faces`) for each render triangle, enabling per-face selection and highlight. */
+    readonly faceTriangles: readonly number[];
   };
 }
 

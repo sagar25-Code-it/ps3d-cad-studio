@@ -303,10 +303,14 @@ function validateGeneralSolidBody(value: unknown): value is GeneralSolidBody {
   }
   if (Object.hasOwn(value, "brep")) {
     const brep = value.brep;
-    if (!isRecord(brep) || !isRecord(brep.topology) || !Array.isArray(brep.faces) || brep.faces.length > 4_096) return false;
+    if (!isRecord(brep) || !isRecord(brep.topology) || !Array.isArray(brep.faces) || brep.faces.length > 4_096 || !Array.isArray(brep.faceTriangles)) return false;
     const topology = brep.topology;
     if (["vertices", "edges", "faces"].some((key) => typeof topology[key] !== "number" || !Number.isInteger(topology[key]) || (topology[key] as number) < 0)) return false;
-    if (brep.faces.some((face) => !isRecord(face) || typeof face.role !== "string" || typeof face.key !== "string" || !shortText(face.role, 1, 120) || !shortText(face.key, 1, 200))) return false;
+    if (brep.faces.some((face) => !isRecord(face) || typeof face.role !== "string" || typeof face.key !== "string" || !shortText(face.role, 1, 120) || !shortText(face.key, 1, 200)
+      || typeof face.areaMm2 !== "number" || !Number.isFinite(face.areaMm2) || face.areaMm2 < 0)) return false;
+    const faceCount = brep.faces.length;
+    if (brep.faceTriangles.length !== indices.length / 3) return false;
+    if (brep.faceTriangles.some((face) => typeof face !== "number" || !Number.isInteger(face) || face < -1 || face >= faceCount)) return false;
   }
   return true;
 }

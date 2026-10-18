@@ -25,6 +25,8 @@ interface PartInspectorProps {
   readonly bodyColor: string;
   readonly shadingMode: ViewportShadingMode;
   readonly selectedId: string | null;
+  readonly selectedFace: number | null;
+  readonly onSelectFace: (bodyId: string, faceIndex: number | null) => void;
   readonly onCommit: (parameter: PartParameter, value: number) => void;
   readonly onBodyColor: (color: string) => void;
   readonly onShadingMode: (mode: ViewportShadingMode) => void;
@@ -44,6 +46,7 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
   const measurements = props.model?.render.measurements;
   const previewBodies = props.part.previewBodies ?? [];
   const selectedPreviewBody = previewBodies.find((body) => body.id === props.selectedId);
+  const selectedGeneralBody = (props.part.generalBodies ?? []).find((body) => body.id === props.selectedId);
   return <aside className="inspector-panel" aria-label="Part inspector">
     <div className="inspector-title"><div><p>Part intent</p><h2>{props.part.name}</h2></div><CapabilityBadge level="qualified" /></div>
     <section className="parameter-stack">
@@ -72,6 +75,20 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
         onDelete={props.onPreviewBodyDelete}
       />}
     </section>
+    {selectedGeneralBody?.brep !== undefined && <section className="inspector-section named-faces-card">
+      <header><strong>Named faces</strong><span>{selectedGeneralBody.brep.faces.length} faces · B-rep</span></header>
+      <p>Stable, lineage-anchored faces from the B-rep kernel. Select one to highlight it in the viewport; the name survives dimensional rebuilds.</p>
+      <div className="named-face-list" role="listbox" aria-label="Named faces">
+        {selectedGeneralBody.brep.faces.map((face, index) => <button
+          key={face.key}
+          role="option"
+          aria-selected={props.selectedFace === index}
+          className={props.selectedFace === index ? "active" : ""}
+          onClick={() => props.onSelectFace(selectedGeneralBody.id, props.selectedFace === index ? null : index)}
+          title={face.key}
+        ><span className="named-face-role"><CommandIcon name="surface" />{face.role.replace("face.", "")}</span><small>{face.areaMm2.toFixed(1)} mm²</small></button>)}
+      </div>
+    </section>}
     <section className="inspector-section metrics-section"><header><strong>Validated body</strong><span>{props.model?.render.topology.triangles ?? "—"} triangles</span></header>
       <dl className="metric-grid">
         <div><dt>Topology</dt><dd>{props.model === undefined ? "pending" : `closed · genus ${props.model.render.topology.genus}`}</dd></div>

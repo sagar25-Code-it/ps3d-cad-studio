@@ -52,6 +52,8 @@ export type PreviewPrimitive =
       readonly indices: readonly number[];
       readonly wireframe: boolean;
       readonly doubleSided: boolean;
+      /** Optional face index per triangle for per-face selection/highlight (from the B-rep kernel). */
+      readonly faceTriangles?: readonly number[];
     }
   | PrimitiveBase & {
       readonly kind: "line";
