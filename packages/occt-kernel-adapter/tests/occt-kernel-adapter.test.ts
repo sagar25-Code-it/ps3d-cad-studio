@@ -9,6 +9,7 @@ import {
 import {
   OcctAttestationError,
   createAttestedOcctKernelAdapter,
+  createReferenceBrepRuntime,
   type OcctQualificationManifest,
   type OcctRuntimeAttestation,
   type OcctRuntimePort,
@@ -719,4 +720,82 @@ test("rejects a qualification manifest with any non-positive resource limit", as
   );
   assert.equal(runtime.terminated, true);
   assert.equal(runtime.disposed, true);
+});
+
+function cylinderRequest(requestId = "request:cyl-1"): ExecuteKernelOperationRequest {
+  return {
+    ...boxRequest(requestId),
+    operation: {
+      operationId: "operation:cyl-1",
+      kind: "primitive.cylinder",
+      semanticOutputIds: ["body:cyl"],
+      linearToleranceMeters: 1e-6,
+      angularToleranceRadians: 1e-6,
+      expectedOutputCount: 1,
+      radiusMeters: 0.05,
+      heightMeters: 0.2,
+      placement: { origin: [0, 0, 0], direction: [0, 0, 1], xDirection: [1, 0, 0] }
+    }
+  };
+}
+
+function meshVolume(positions: Float64Array, indices: Uint32Array): number {
+  let total = 0;
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i]! * 3;
+    const b = indices[i + 1]! * 3;
+    const c = indices[i + 2]! * 3;
+    total += positions[a]! * (positions[b + 1]! * positions[c + 2]! - positions[b + 2]! * positions[c + 1]!)
+      - positions[a + 1]! * (positions[b]! * positions[c + 2]! - positions[b + 2]! * positions[c]!)
+      + positions[a + 2]! * (positions[b]! * positions[c + 1]! - positions[b + 1]! * positions[c]!);
+  }
+  return total / 6;
+}
+
+test("the reference B-rep runtime evaluates a real box through the attested adapter", async () => {
+  const expected = manifest();
+  const { adapter } = await createAttestedOcctKernelAdapter(trustedLoader(createReferenceBrepRuntime(), attestation(expected)), expected);
+  await open(adapter);
+  const response = await adapter.handle(boxRequest());
+  assert.equal(response.status, "ok");
+  if (response.status === "ok" && response.kind === "executed") {
+    const shape = response.products.geometry.outputs[0]!;
+    assert.equal(shape.representation, "exact-brep");
+    assert.deepEqual(shape.topology, { vertices: 8, edges: 12, wires: 6, faces: 6, shells: 1, solids: 1, components: 1, closed: true, manifold: true });
+    assert.deepEqual(shape.boundsMeters, { min: [0, 0, 0], max: [0.1, 0.2, 0.3] });
+    assert.equal(response.products.tessellations[0]?.indices.length, 36);
+    assert.equal(response.products.geometry.validation[0]?.closed, true);
+  }
+});
+
+test("the reference B-rep runtime is content-addressed and size-sensitive", async () => {
+  const runtime = createReferenceBrepRuntime();
+  await runtime.openSession("session:test");
+  const first = await runtime.execute(boxRequest());
+  const second = await runtime.execute(boxRequest());
+  assert.equal(first.outputs[0]!.contentDigest, second.outputs[0]!.contentDigest);
+  const request = boxRequest();
+  assert.equal(request.operation.kind, "primitive.box");
+  if (request.operation.kind !== "primitive.box") return;
+  const bigger = await runtime.execute({ ...request, operation: { ...request.operation, sizeMeters: [0.2, 0.2, 0.3] } });
+  assert.notEqual(first.outputs[0]!.contentDigest, bigger.outputs[0]!.contentDigest);
+});
+
+test("the reference box tessellation is a watertight outward solid with exact volume", async () => {
+  const runtime = createReferenceBrepRuntime();
+  await runtime.openSession("session:test");
+  const result = await runtime.execute(boxRequest());
+  const tess = result.tessellations[0]!;
+  assert.equal(tess.indices.length, 36);
+  assert.ok(Math.abs(meshVolume(tess.positions, tess.indices) - 0.1 * 0.2 * 0.3) < 1e-9);
+});
+
+test("the reference B-rep runtime builds a valid analytic cylinder", async () => {
+  const runtime = createReferenceBrepRuntime();
+  await runtime.openSession("session:test");
+  const result = await runtime.execute(cylinderRequest());
+  assert.deepEqual(result.outputs[0]!.topology, { vertices: 2, edges: 3, wires: 3, faces: 3, shells: 1, solids: 1, components: 1, closed: true, manifold: true });
+  const exact = Math.PI * 0.05 * 0.05 * 0.2;
+  const volume = meshVolume(result.tessellations[0]!.positions, result.tessellations[0]!.indices);
+  assert.ok(volume > exact * 0.98 && volume <= exact + 1e-9, `cylinder volume ${volume} vs ${exact}`);
 });
