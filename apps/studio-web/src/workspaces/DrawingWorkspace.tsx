@@ -26,16 +26,33 @@ interface DrawingWorkspaceProps {
   readonly onGdtSpecification: (positionMm: number, flatnessMm: number, perpendicularityMm: number) => void;
   readonly onGeneralTolerance: (linearMm: number, angularDeg: number) => void;
   readonly onNotes: (notes: string) => void;
+  readonly onTitleBlock: (fields: { drawingNumber: string; revisionTag: string; drawnBy: string; checkedBy: string; approvedBy: string; organization: string }) => void;
 }
 
 export function DrawingWorkspace(props: DrawingWorkspaceProps): React.JSX.Element {
   const [notes, setNotes] = useState(props.settings.notes);
+  const [titleBlock, setTitleBlock] = useState({
+    drawingNumber: props.settings.drawingNumber ?? "PS3D-CBP-001",
+    revisionTag: props.settings.revisionTag ?? "A",
+    drawnBy: props.settings.drawnBy ?? "PS3D",
+    checkedBy: props.settings.checkedBy ?? "",
+    approvedBy: props.settings.approvedBy ?? "",
+    organization: props.settings.organization ?? ""
+  });
   const [linearTolerance, setLinearTolerance] = useState(String(props.artifact.generalTolerance.linearMm));
   const [angularTolerance, setAngularTolerance] = useState(String(props.artifact.generalTolerance.angularDeg));
   const [positionTolerance, setPositionTolerance] = useState(String(props.settings.gdtPositionToleranceMm ?? 0.2));
   const [flatnessTolerance, setFlatnessTolerance] = useState(String(props.settings.gdtFlatnessToleranceMm ?? 0.1));
   const [perpendicularityTolerance, setPerpendicularityTolerance] = useState(String(props.settings.gdtPerpendicularityToleranceMm ?? 0.1));
   useEffect(() => setNotes(props.settings.notes), [props.settings.notes]);
+  useEffect(() => setTitleBlock({
+    drawingNumber: props.settings.drawingNumber ?? "PS3D-CBP-001",
+    revisionTag: props.settings.revisionTag ?? "A",
+    drawnBy: props.settings.drawnBy ?? "PS3D",
+    checkedBy: props.settings.checkedBy ?? "",
+    approvedBy: props.settings.approvedBy ?? "",
+    organization: props.settings.organization ?? ""
+  }), [props.settings.drawingNumber, props.settings.revisionTag, props.settings.drawnBy, props.settings.checkedBy, props.settings.approvedBy, props.settings.organization]);
   useEffect(() => setLinearTolerance(String(props.artifact.generalTolerance.linearMm)), [props.artifact.generalTolerance.linearMm]);
   useEffect(() => setAngularTolerance(String(props.artifact.generalTolerance.angularDeg)), [props.artifact.generalTolerance.angularDeg]);
   useEffect(() => setPositionTolerance(String(props.settings.gdtPositionToleranceMm ?? 0.2)), [props.settings.gdtPositionToleranceMm]);
@@ -112,6 +129,15 @@ export function DrawingWorkspace(props: DrawingWorkspaceProps): React.JSX.Elemen
 
       <section className="view-list"><header><strong>Generated view chain</strong><span>{props.artifact.displayStyle.replaceAll("-", " ")}</span></header>{props.artifact.views.map((view) => <div key={view.id}><span className={`view-icon ${view.id}`} aria-hidden="true" /><strong>{view.label}</strong><small>{view.role}{view.parentId === undefined ? "" : ` from ${view.parentId}`} · {view.alignment} alignment</small></div>)}</section>
 
+      <section className="inspector-section title-block-controller"><header><strong>Title block</strong><span>IDENTITY &amp; SIGN-OFF</span></header>
+        <label className="field-row"><span>Drawing no.</span><input maxLength={40} value={titleBlock.drawingNumber} onChange={(event) => setTitleBlock((current) => ({ ...current, drawingNumber: event.target.value }))} /></label>
+        <label className="field-row"><span>Revision</span><input maxLength={12} value={titleBlock.revisionTag} onChange={(event) => setTitleBlock((current) => ({ ...current, revisionTag: event.target.value }))} /></label>
+        <label className="field-row"><span>Organization</span><input maxLength={60} value={titleBlock.organization} onChange={(event) => setTitleBlock((current) => ({ ...current, organization: event.target.value }))} /></label>
+        <label className="field-row"><span>Drawn by</span><input maxLength={40} value={titleBlock.drawnBy} onChange={(event) => setTitleBlock((current) => ({ ...current, drawnBy: event.target.value }))} /></label>
+        <label className="field-row"><span>Checked by</span><input maxLength={40} value={titleBlock.checkedBy} onChange={(event) => setTitleBlock((current) => ({ ...current, checkedBy: event.target.value }))} /></label>
+        <label className="field-row"><span>Approved by</span><input maxLength={40} value={titleBlock.approvedBy} onChange={(event) => setTitleBlock((current) => ({ ...current, approvedBy: event.target.value }))} /></label>
+        <button disabled={titleBlock.drawingNumber.trim().length === 0 || titleBlock.revisionTag.trim().length === 0} onClick={() => props.onTitleBlock({ drawingNumber: titleBlock.drawingNumber.trim(), revisionTag: titleBlock.revisionTag.trim(), drawnBy: titleBlock.drawnBy.trim(), checkedBy: titleBlock.checkedBy.trim(), approvedBy: titleBlock.approvedBy.trim(), organization: titleBlock.organization.trim() })}>Apply title block</button>
+      </section>
       <section className="inspector-section"><header><strong>Sheet note</strong><span>{notes.length}/240</span></header><textarea maxLength={240} value={notes} onChange={(event) => setNotes(event.target.value)} /><button onClick={() => props.onNotes(notes)}>Apply note</button></section>
       <div className="scope-note"><strong>Release boundary</strong><p>The sheet is a deterministic drafting preview. A responsible engineer must approve view sufficiency, datum strategy, tolerance values, material, process, inspection method, checker identity, and release status.</p></div>
     </aside>

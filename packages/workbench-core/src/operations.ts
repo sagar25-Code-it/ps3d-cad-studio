@@ -304,6 +304,12 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
     case "set-drawing-notes":
       if (!keys(input, [...common, "notes"]) || typeof input.notes !== "string" || input.notes.length > 240) return invalidOperation("The drawing notes are invalid.");
       break;
+    case "set-drawing-title-block":
+      if (!keys(input, [...common, "drawingNumber", "revisionTag", "drawnBy", "checkedBy", "approvedBy", "organization"])
+        || !shortText(input.drawingNumber, 1, 40) || !shortText(input.revisionTag, 1, 12)
+        || !shortText(input.drawnBy, 0, 40) || !shortText(input.checkedBy, 0, 40) || !shortText(input.approvedBy, 0, 40)
+        || !shortText(input.organization, 0, 60)) return invalidOperation("The drawing title-block fields are invalid.");
+      break;
     case "apply-electrical-template":
       if (!keys(input, [...common, "template"]) || !["bess-single-line", "dc-control", "motor-starter"].includes(String(input.template))) return invalidOperation("The electrical template is invalid.");
       break;
@@ -788,6 +794,8 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       return changed({ ...project, drawing: { ...project.drawing, generalToleranceLinearMm: operation.linearMm, generalToleranceAngularDeg: operation.angularDeg } }, [project.drawing.id], `Set the general tolerance to ±${formatNumber(operation.linearMm)} mm and ±${formatNumber(operation.angularDeg)}°.`);
     case "set-drawing-notes":
       return changed({ ...project, drawing: { ...project.drawing, notes: operation.notes } }, [project.drawing.id], "Updated drawing notes.");
+    case "set-drawing-title-block":
+      return changed({ ...project, drawing: { ...project.drawing, drawingNumber: operation.drawingNumber, revisionTag: operation.revisionTag, drawnBy: operation.drawnBy, checkedBy: operation.checkedBy, approvedBy: operation.approvedBy, organization: operation.organization } }, [project.drawing.id], `Updated title block ${operation.drawingNumber} rev ${operation.revisionTag}.`);
     case "apply-electrical-template": {
       const electrical = createElectricalTemplate(operation.template, project.electrical.standard);
       return changed(markElectromechanicalStale(project, electrical), [electrical.id, ...electrical.components.map((component) => component.id), ...electrical.nets.map((net) => net.id)], `Generated ${electrical.title} with connected nets and a fresh electrical rule check.`);

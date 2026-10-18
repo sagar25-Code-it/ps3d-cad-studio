@@ -755,6 +755,13 @@ export interface DrawingSettings {
   /** User-defined general tolerance applied only where no individual tolerance is shown. */
   readonly generalToleranceLinearMm?: number;
   readonly generalToleranceAngularDeg?: number;
+  /** Editable title-block identity and sign-off. Missing values fall back to generator defaults. */
+  readonly drawingNumber?: string;
+  readonly revisionTag?: string;
+  readonly drawnBy?: string;
+  readonly checkedBy?: string;
+  readonly approvedBy?: string;
+  readonly organization?: string;
 }
 
 export interface OperationAuditEntry {
@@ -863,6 +870,15 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "set-drawing-gdt-specification"; readonly positionMm: number; readonly flatnessMm: number; readonly perpendicularityMm: number }
   | { readonly kind: "set-drawing-general-tolerance"; readonly linearMm: number; readonly angularDeg: number }
   | { readonly kind: "set-drawing-notes"; readonly notes: string }
+  | {
+      readonly kind: "set-drawing-title-block";
+      readonly drawingNumber: string;
+      readonly revisionTag: string;
+      readonly drawnBy: string;
+      readonly checkedBy: string;
+      readonly approvedBy: string;
+      readonly organization: string;
+    }
   | { readonly kind: "apply-electrical-template"; readonly template: ElectricalTemplateId }
   | { readonly kind: "set-electrical-standard"; readonly standard: ElectricalStandard }
   | { readonly kind: "set-electrical-component-position"; readonly componentId: string; readonly position: Vec2 }
@@ -902,7 +918,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "toggle-component-visibility", "add-assembly-mate", "delete-assembly-mate", "set-surface-mode", "set-surface-parameter", "apply-surface-preset", "set-drawing-sheet", "set-drawing-projection",
   "set-drawing-scale", "set-drawing-dimensions", "set-drawing-view-preset", "set-drawing-display-style", "set-drawing-section-view",
   "set-drawing-drafting-standard", "set-drawing-gdt", "set-drawing-datum-scheme", "set-drawing-gdt-specification",
-  "set-drawing-general-tolerance", "set-drawing-notes", "apply-electrical-template", "set-electrical-standard",
+  "set-drawing-general-tolerance", "set-drawing-notes", "set-drawing-title-block", "apply-electrical-template", "set-electrical-standard",
   "set-electrical-component-position", "add-electrical-component", "delete-electrical-component", "add-electrical-net",
   "delete-electrical-net", "set-electrical-notes", "apply-vehicle-template", "set-vehicle-parameter",
   "set-vehicle-evidence-status", "set-vehicle-simulation-state", "toggle-vehicle-layer", "generate-electromechanical-realization"

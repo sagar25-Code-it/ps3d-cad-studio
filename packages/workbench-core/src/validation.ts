@@ -424,7 +424,7 @@ function validateSurface(value: unknown): WorkbenchResult<SurfaceIntent> {
 
 function validateDrawing(value: unknown): WorkbenchResult<DrawingSettings> {
   const required = ["id", "title", "sheet", "projection", "scale", "showDimensions", "notes"];
-  const optional = ["viewPreset", "displayStyle", "showSectionView", "draftingStandard", "showGdt", "datumScheme", "gdtPositionToleranceMm", "gdtFlatnessToleranceMm", "gdtPerpendicularityToleranceMm", "generalToleranceLinearMm", "generalToleranceAngularDeg"];
+  const optional = ["viewPreset", "displayStyle", "showSectionView", "draftingStandard", "showGdt", "datumScheme", "gdtPositionToleranceMm", "gdtFlatnessToleranceMm", "gdtPerpendicularityToleranceMm", "generalToleranceLinearMm", "generalToleranceAngularDeg", "drawingNumber", "revisionTag", "drawnBy", "checkedBy", "approvedBy", "organization"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key))
     || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || value.id !== "drawing:main-sheet" || !shortText(value.title, 1, 80) || !["A4", "A3"].includes(String(value.sheet))
@@ -440,7 +440,13 @@ function validateDrawing(value: unknown): WorkbenchResult<DrawingSettings> {
     || (Object.hasOwn(value, "gdtFlatnessToleranceMm") && !finiteRange(value.gdtFlatnessToleranceMm, 0.001, 10))
     || (Object.hasOwn(value, "gdtPerpendicularityToleranceMm") && !finiteRange(value.gdtPerpendicularityToleranceMm, 0.001, 10))
     || (Object.hasOwn(value, "generalToleranceLinearMm") && !finiteRange(value.generalToleranceLinearMm, 0.001, 10))
-    || (Object.hasOwn(value, "generalToleranceAngularDeg") && !finiteRange(value.generalToleranceAngularDeg, 0.01, 10))) return invalid("The drawing settings are invalid.");
+    || (Object.hasOwn(value, "generalToleranceAngularDeg") && !finiteRange(value.generalToleranceAngularDeg, 0.01, 10))
+    || (Object.hasOwn(value, "drawingNumber") && !shortText(value.drawingNumber, 1, 40))
+    || (Object.hasOwn(value, "revisionTag") && !shortText(value.revisionTag, 1, 12))
+    || (Object.hasOwn(value, "drawnBy") && !shortText(value.drawnBy, 0, 40))
+    || (Object.hasOwn(value, "checkedBy") && !shortText(value.checkedBy, 0, 40))
+    || (Object.hasOwn(value, "approvedBy") && !shortText(value.approvedBy, 0, 40))
+    || (Object.hasOwn(value, "organization") && !shortText(value.organization, 0, 60))) return invalid("The drawing settings are invalid.");
   return { ok: true, value: value as unknown as DrawingSettings };
 }
 

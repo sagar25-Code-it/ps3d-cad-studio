@@ -4,6 +4,19 @@ import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 export const workbenchDrawingTests: readonly TestCase[] = [
   {
+    name: "drawing title block renders editable identity and sign-off and validates its fields",
+    run: () => {
+      const project = createWorkbenchProject("project:test-drawing-title-block");
+      const defaults = createDrawingSvg(project.part, project.drawing).svg;
+      assert(defaults.includes("PS3D-CBP-001") && defaults.includes("REV A") && defaults.includes("DRAWN PS3D"), "unset title-block fields must preserve the original generator defaults");
+      const applied = applyWorkbenchOperation(project, { kind: "set-drawing-title-block", operationId: "operation:test-title-block", expectedRevision: 0, drawingNumber: "ACME-100-A", revisionTag: "C", drawnBy: "RJ", checkedBy: "KP", approvedBy: "MD", organization: "Acme Fabrication" });
+      assert(applied.ok, "a valid title-block edit should apply");
+      const svg = createDrawingSvg(applied.value.project.part, applied.value.project.drawing).svg;
+      assert(svg.includes("ACME-100-A") && svg.includes("REV C") && svg.includes("DRAWN RJ") && svg.includes("CHECKED KP") && svg.includes("APPROVED MD") && svg.includes("Acme Fabrication"), "edited title-block values must render on the sheet");
+      assert(!applyWorkbenchOperation(project, { kind: "set-drawing-title-block", operationId: "operation:test-title-block-bad", expectedRevision: 0, drawingNumber: "", revisionTag: "A", drawnBy: "", checkedBy: "", approvedBy: "", organization: "" }).ok, "an empty drawing number must be rejected");
+    }
+  },
+  {
     name: "drawing generator emits a base-project-section chain with engineering sheet evidence",
     run: () => {
       const project = createWorkbenchProject("project:test-drawing");
