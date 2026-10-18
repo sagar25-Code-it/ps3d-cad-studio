@@ -32,7 +32,7 @@ export function classifyWorkbenchSelection(selectionId: string | null): Workbenc
   if (namespace === "entity" || namespace === "sketch") return "sketch";
   if (namespace === "profile") return "profile";
   if (namespace === "feature") return "feature";
-  if (namespace === "body" || namespace === "part-preview" || namespace === "part-body") return "body";
+  if (namespace === "body" || namespace === "part-preview" || namespace === "part-body" || namespace === "general-body") return "body";
   if (namespace === "component" || namespace === "master-cart") return "component";
   if (namespace === "mate") return "mate";
   if (namespace === "datum") return "datum";
@@ -97,9 +97,12 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
 
   if (kind === "body") {
     const analyticBody = request.selectionId?.startsWith("part-body:") === true;
+    const generalBody = request.selectionId?.startsWith("general-body:") === true;
+    const directBody = analyticBody || generalBody;
+    const MESH_BODY_REASON = "General mesh solids support visibility and delete here; face, blend, and Boolean editing needs the qualified B-rep kernel.";
     commands.push(
-      command("selection.toggle-visibility", "Show / Hide Body", "show", "visibility", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
-      command("selection.isolate", "Isolate Body", "isolate", "visibility", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
+      command("selection.toggle-visibility", "Show / Hide Body", "show", "visibility", directBody, directBody ? undefined : ANALYTIC_BODY_REASON),
+      command("selection.isolate", "Isolate Body", "isolate", "visibility", analyticBody, analyticBody ? undefined : (generalBody ? MESH_BODY_REASON : ANALYTIC_BODY_REASON)),
       command("body.appearance", "Appearance", "appearance", "edit"),
       command("body.move", "Move / Copy", "move", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
       submenu("body.direct-features", "Direct & Detail Features", "edge", "edit", [
@@ -124,7 +127,7 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
       command("body.boolean-intersect", "Intersect", "boolean", "edit", false, TOPOLOGY_REASON),
       command("body.update-model", "Update Model", "update-model", "history", true),
       command("inspect.properties", "Physical Properties", "inspect", "inspect", false, PROPERTIES_REASON),
-      command("selection.delete", "Delete Body", "trash", "edit", analyticBody, analyticBody ? undefined : "The qualified base body is revision-controlled and cannot be deleted here.", true)
+      command("selection.delete", "Delete Body", "trash", "edit", directBody, directBody ? undefined : "The qualified base body is revision-controlled and cannot be deleted here.", true)
     );
   }
 

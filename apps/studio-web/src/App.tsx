@@ -2028,12 +2028,14 @@ export function App(): React.JSX.Element {
       if (selectionId.startsWith("entity:")) applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId: selectionId });
       else if (selectionId.startsWith("component:")) applyProjectOperation({ kind: "toggle-component-visibility", componentId: selectionId });
       else if (selectionId.startsWith("part-body:")) applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId: selectionId });
+      else if (selectionId.startsWith("general-body:")) applyProjectOperation({ kind: "toggle-general-body-visibility", bodyId: selectionId });
       return;
     }
     if (commandId === "selection.isolate" && selectionId?.startsWith("part-body:") === true) { applyProjectOperation({ kind: "isolate-part-preview-body", bodyId: selectionId }); return; }
     if (commandId === "selection.delete" && selectionId !== null) {
       if (selectionId.startsWith("entity:")) applyProjectOperation({ kind: "delete-sketch-entity", entityId: selectionId });
       else if (selectionId.startsWith("part-body:")) applyProjectOperation({ kind: "delete-part-preview-body", bodyId: selectionId });
+      else if (selectionId.startsWith("general-body:")) applyProjectOperation({ kind: "delete-general-body", bodyId: selectionId });
       else if (selectionId.startsWith("component:")) deleteAssemblyComponent(selectionId);
       else if (selectionId.startsWith("mate:")) applyProjectOperation({ kind: "delete-assembly-mate", mateId: selectionId });
       else if (selectionId.startsWith("electrical-component:")) applyProjectOperation({ kind: "delete-electrical-component", componentId: selectionId });

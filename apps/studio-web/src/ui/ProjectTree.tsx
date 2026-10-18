@@ -86,6 +86,7 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
     {showBodies && <TreeSection title="Bodies" badge={project.activeWorkspace === "part" ? "qualified" : "preview"}>
       <TreeItem kind="body" id="body:bracket" label="Mounting plate" meta="closed manifold mesh" selectedId={selectedId} onSelect={onSelect} />
       {(project.part.previewBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.shape} · ${body.visible ? "shown" : "hidden"} · preview`} selectedId={selectedId} onSelect={onSelect} indent />)}
+      {(project.part.generalBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.feature?.operation ?? "mesh"} solid · ${body.visible ? "shown" : "hidden"} · ${body.positionsMm.length / 3} verts`} selectedId={selectedId} onSelect={onSelect} indent />)}
       <TreeItem kind="surface" id={project.surface.id} label={project.surface.name} meta={`${project.surface.mode} · open surface preview`} selectedId={selectedId} onSelect={onSelect} />
     </TreeSection>}
     {project.activeWorkspace === "assembly" && <>
