@@ -135,7 +135,7 @@ async function evaluate(store: Map<string, Map<string, StoredSolid>>, request: E
     triangleFaceReferenceKeys: [],
     contentDigest: await kernelSha256({ positions: Array.from(geometry.tessellation.positions), indices: Array.from(geometry.tessellation.indices) })
   };
-  const topologyEntities = await buildFaceEntities(operation, geometry.faces);
+  const topologyEntities = await buildFaceEntities({ operationId: operation.operationId, operationKind: operation.kind, semanticId: operation.semanticOutputIds[0] ?? "body:unnamed", toleranceMeters: operation.linearToleranceMeters }, geometry.faces);
   const inputDigests = inputShapeDigests(session, operation);
   const provenanceBase = {
     operationId: operation.operationId, operationKind: operation.kind,
@@ -155,10 +155,17 @@ async function evaluate(store: Map<string, Map<string, StoredSolid>>, request: E
  * they are invariant under dimensional edits; the geometric signature carries
  * the current centroid, area, and normal for the resolver's secondary checks.
  */
-async function buildFaceEntities(operation: ExecuteKernelOperationRequest["operation"], faces: readonly FaceSpec[]): Promise<readonly ResolvedTopologyEntity[]> {
-  const operationId = operation.operationId;
-  const operationKind = operation.kind;
-  const semantic = operation.semanticOutputIds[0] ?? "body:unnamed";
+interface FaceNamingContext {
+  readonly operationId: string;
+  readonly operationKind: StableTopologyReference["producer"]["operationKind"];
+  readonly semanticId: string;
+  readonly toleranceMeters: number;
+}
+
+async function buildFaceEntities(context: FaceNamingContext, faces: readonly FaceSpec[]): Promise<readonly ResolvedTopologyEntity[]> {
+  const operationId = context.operationId;
+  const operationKind = context.operationKind;
+  const semantic = context.semanticId;
   const semanticLocal = sanitizeIdentifier(semantic.includes(":") ? semantic.slice(semantic.indexOf(":") + 1) : semantic);
   const keyByRole = new Map<string, string>();
   for (const face of faces) keyByRole.set(face.role, `face:${(await kernelSha256({ operationId, role: face.role })).slice(0, 40)}`);
@@ -179,7 +186,7 @@ async function buildFaceEntities(operation: ExecuteKernelOperationRequest["opera
     };
     entities.push({
       entityId: key, kind: "face", stableReference, orientation: "external",
-      toleranceMeters: operation.linearToleranceMeters,
+      toleranceMeters: context.toleranceMeters,
       adjacentReferenceKeys: face.adjacentRoles.map((role) => keyByRole.get(role)!).sort()
     });
   }
@@ -262,11 +269,14 @@ function extrudeSolid(session: Map<string, StoredSolid>, operation: Extract<Exec
   if (operation.extent.kind !== "distance") throw new Error(`Extrude extent '${operation.extent.kind}' is not supported by the reference runtime.`);
   const height = operation.extent.distanceMeters;
   if (!(height > 0)) throw new Error("Extrude distance must be positive.");
-  const loop = source.profileLoop;
-  const points = loop.points;
+  const geometry = prismGeometry(source.profileLoop.points, source.profileLoop.normal, height);
+  return { geometry };
+}
+
+/** Exact prism from a closed planar loop extruded along its normal: 2N vertices, 3N edges, N+2 faces. */
+function prismGeometry(points: readonly Vec3[], normal: Vec3, height: number): SolidGeometry {
   const count = points.length;
   if (count < 3) throw new Error("Extrude profile loop needs at least three points.");
-  const normal = loop.normal;
   const top = points.map((point) => [point[0] + normal[0] * height, point[1] + normal[1] * height, point[2] + normal[2] * height] as Vec3);
   const builder = new TessellationBuilder();
   const bottomCentroid = centroid(points);
@@ -292,7 +302,7 @@ function extrudeSolid(session: Map<string, StoredSolid>, operation: Extract<Exec
       );
     })
   ];
-  const geometry: SolidGeometry = {
+  return {
     topology: { vertices: 2 * count, edges: 3 * count, wires: count + 2, faces: count + 2, shells: 1, solids: 1, components: 1, closed: true, manifold: true },
     bounds: boundsOf([...points, ...top]),
     descriptor: { profile: points.map((point) => [...point]), normal, height },
@@ -300,7 +310,63 @@ function extrudeSolid(session: Map<string, StoredSolid>, operation: Extract<Exec
     volumeCubicMeters: area * height,
     faces
   };
-  return { geometry };
+}
+
+/** Request for the browser-facing prism facade: a closed planar loop (metres) extruded along its normal. */
+export interface ProfilePrismRequest {
+  /** Stable feature identity that anchors the persistent face names across rebuilds. */
+  readonly operationId: string;
+  readonly semanticId: string;
+  readonly profilePointsMeters: readonly (readonly [number, number, number])[];
+  readonly normal: readonly [number, number, number];
+  readonly heightMeters: number;
+  readonly toleranceMeters?: number;
+}
+
+export interface NamedFace {
+  readonly role: string;
+  readonly key: string;
+  readonly semanticId: string;
+  readonly areaSquareMeters: number;
+}
+
+export interface ProfilePrismResult {
+  readonly positionsMeters: readonly number[];
+  readonly indices: readonly number[];
+  readonly topology: KernelTopologySummary;
+  readonly boundsMeters: KernelBounds;
+  readonly volumeCubicMeters: number;
+  readonly faces: readonly NamedFace[];
+}
+
+/**
+ * Browser-facing kernel entry: builds an exact prism B-rep from an explicit
+ * planar profile loop and returns its tessellation, topology summary, and
+ * stable, lineage-anchored face names. The live viewport uses this in place of
+ * the analytic tessellator so general solids carry real topology and
+ * persistent face references.
+ */
+export async function evaluateProfilePrism(request: ProfilePrismRequest): Promise<ProfilePrismResult> {
+  if (!(request.heightMeters > 0)) throw new Error("Extrude distance must be positive.");
+  const points = request.profilePointsMeters.map((point) => [point[0], point[1], point[2]] as Vec3);
+  const normal = unit([request.normal[0], request.normal[1], request.normal[2]]);
+  const geometry = prismGeometry(points, normal, request.heightMeters);
+  const toleranceMeters = request.toleranceMeters ?? 1e-6;
+  const entities = await buildFaceEntities({ operationId: request.operationId, operationKind: "solid.extrude", semanticId: request.semanticId, toleranceMeters }, geometry.faces);
+  const faces: NamedFace[] = entities.map((entity, position) => ({
+    role: entity.stableReference.producer.role,
+    key: entity.stableReference.key,
+    semanticId: entity.stableReference.semanticId,
+    areaSquareMeters: geometry.faces[position]!.area
+  }));
+  return {
+    positionsMeters: Array.from(geometry.tessellation.positions),
+    indices: Array.from(geometry.tessellation.indices),
+    topology: geometry.topology,
+    boundsMeters: geometry.bounds,
+    volumeCubicMeters: geometry.volumeCubicMeters,
+    faces
+  };
 }
 
 /** Exact Boolean on two stored axis-aligned boxes; general curved CSG is rejected explicitly. */

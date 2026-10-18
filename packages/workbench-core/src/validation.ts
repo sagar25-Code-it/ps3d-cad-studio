@@ -285,7 +285,7 @@ function validatePart(value: unknown): WorkbenchResult<PartIntent> {
 
 function validateGeneralSolidBody(value: unknown): value is GeneralSolidBody {
   const required = ["id", "name", "visible", "color", "positionsMm", "indices"];
-  const optional = ["feature"];
+  const optional = ["feature", "brep"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || !stableId(value.id) || !shortText(value.name, 1, 120)
     || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)) return false;
@@ -300,6 +300,13 @@ function validateGeneralSolidBody(value: unknown): value is GeneralSolidBody {
     const feature = value.feature;
     if (!isRecord(feature) || !["extrude", "revolve"].includes(String(feature.operation)) || !["xy", "xz", "yz"].includes(String(feature.plane))
       || typeof feature.valueMm !== "number" || !Number.isFinite(feature.valueMm)) return false;
+  }
+  if (Object.hasOwn(value, "brep")) {
+    const brep = value.brep;
+    if (!isRecord(brep) || !isRecord(brep.topology) || !Array.isArray(brep.faces) || brep.faces.length > 4_096) return false;
+    const topology = brep.topology;
+    if (["vertices", "edges", "faces"].some((key) => typeof topology[key] !== "number" || !Number.isInteger(topology[key]) || (topology[key] as number) < 0)) return false;
+    if (brep.faces.some((face) => !isRecord(face) || typeof face.role !== "string" || typeof face.key !== "string" || !shortText(face.role, 1, 120) || !shortText(face.key, 1, 200))) return false;
   }
   return true;
 }

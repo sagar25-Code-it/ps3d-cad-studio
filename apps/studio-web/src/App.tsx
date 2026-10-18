@@ -1317,7 +1317,11 @@ export function App(): React.JSX.Element {
       switchWorkspace("part");
       setSelectedId(result.body.id);
       setStatus("ready");
-      setStatusText(`Created ${result.body.name} as a general mesh solid (${result.body.positionsMm.length / 3} vertices). Opened in the Part workspace.`);
+      const brep = result.body.brep;
+      const detail = brep !== undefined
+        ? `B-rep solid · ${brep.topology.vertices} vertices · ${brep.topology.edges} edges · ${brep.topology.faces} named faces`
+        : `general mesh solid (${result.body.positionsMm.length / 3} vertices)`;
+      setStatusText(`Created ${result.body.name} as a ${detail}. Opened in the Part workspace.`);
     }
   };
 

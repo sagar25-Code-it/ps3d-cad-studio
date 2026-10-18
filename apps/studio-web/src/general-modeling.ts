@@ -1,11 +1,13 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { tessellateExtrude, tessellateRevolve, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { tessellateRevolve, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { evaluateProfilePrism } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import type { SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 
 /** Sketch-plane identifier shared with the solid builder UI. */
 export type SketchPlane = TessellatePlane;
 
 type PolygonPoint = readonly [number, number];
+type WorldPoint = readonly [number, number, number];
 
 /** Convert a detected sketch profile boundary into a closed polygon (millimetres). */
 function profilePolygonMm(boundary: SketchProfile["boundary"]): readonly PolygonPoint[] {
@@ -30,6 +32,22 @@ function profilePolygonMm(boundary: SketchProfile["boundary"]): readonly Polygon
   return boundary.points.map((point) => [point[0], point[1]] as PolygonPoint);
 }
 
+/** Place a 2D sketch point (millimetres) onto its datum plane in world metres, matching the analytic tessellator's orientation. */
+function placeOnPlane(point: PolygonPoint, plane: SketchPlane): WorldPoint {
+  const u = point[0] / 1000;
+  const v = point[1] / 1000;
+  if (plane === "xz") return [u, 0, v];
+  if (plane === "yz") return [0, v, -u];
+  return [u, v, 0];
+}
+
+/** The outward extrusion normal for each datum plane (matches placeOnPlane). */
+function planeNormal(plane: SketchPlane): WorldPoint {
+  if (plane === "xz") return [0, -1, 0];
+  if (plane === "yz") return [1, 0, 0];
+  return [0, 0, 1];
+}
+
 export interface CreateGeneralSolidRequest {
   readonly profile: SketchProfile;
   readonly plane: SketchPlane;
@@ -46,33 +64,58 @@ export type CreateGeneralSolidResult =
   | { readonly ok: false; readonly message: string };
 
 /**
- * Build a general mesh-solid body from a sketch profile using the browser-safe
- * analytic tessellator. The Manifold kernel stays Node-only (forbidden in the
- * production browser graph), so the viewport tessellates extrude/revolve
- * directly; the kernel cross-checks these meshes by volume in the test suite.
+ * Build a general mesh-solid body from a sketch profile.
+ *
+ * Extrude runs through the reference B-rep kernel (browser-safe): the body
+ * carries the kernel's watertight tessellation plus its exact topology summary
+ * and stable, lineage-anchored face names. Revolve still uses the analytic
+ * tessellator because the reference kernel does not yet evaluate revolves.
  */
-export function createGeneralSolidBody(request: CreateGeneralSolidRequest): CreateGeneralSolidResult {
+export async function createGeneralSolidBody(request: CreateGeneralSolidRequest): Promise<CreateGeneralSolidResult> {
   const polygonMm = profilePolygonMm(request.profile.boundary);
   if (polygonMm.length < 3) return { ok: false, message: "The selected profile does not form a closed polygon." };
   if (!Number.isFinite(request.valueMm) || request.valueMm === 0) {
     return { ok: false, message: request.operation === "extrude" ? "Enter a non-zero extrusion height." : "Enter a non-zero revolve angle." };
   }
-  const mesh = request.operation === "extrude"
-    ? tessellateExtrude(polygonMm, request.valueMm, request.plane)
-    : tessellateRevolve(polygonMm, request.valueMm, request.plane);
+
+  const base = {
+    id: request.bodyId,
+    name: request.name,
+    visible: true as const,
+    color: request.color,
+    feature: { operation: request.operation, plane: request.plane, valueMm: request.valueMm }
+  };
+
+  if (request.operation === "extrude") {
+    try {
+      const prism = await evaluateProfilePrism({
+        operationId: request.bodyId,
+        semanticId: request.bodyId,
+        profilePointsMeters: polygonMm.map((point) => placeOnPlane(point, request.plane)),
+        normal: planeNormal(request.plane),
+        heightMeters: Math.abs(request.valueMm) / 1000
+      });
+      if (prism.indices.length < 3) return { ok: false, message: "The profile could not be converted into a solid." };
+      return {
+        ok: true,
+        body: {
+          ...base,
+          positionsMm: prism.positionsMeters.map((value) => value * 1000),
+          indices: prism.indices,
+          brep: {
+            topology: { vertices: prism.topology.vertices, edges: prism.topology.edges, faces: prism.topology.faces },
+            faces: prism.faces.map((face) => ({ role: face.role, key: face.key }))
+          }
+        }
+      };
+    } catch {
+      return { ok: false, message: "The solid kernel could not extrude this profile." };
+    }
+  }
+
+  const mesh = tessellateRevolve(polygonMm, request.valueMm, request.plane);
   if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) {
     return { ok: false, message: "The profile could not be converted into a solid." };
   }
-  return {
-    ok: true,
-    body: {
-      id: request.bodyId,
-      name: request.name,
-      visible: true,
-      color: request.color,
-      positionsMm: Array.from(mesh.positionsMm),
-      indices: Array.from(mesh.indices),
-      feature: { operation: request.operation, plane: request.plane, valueMm: request.valueMm }
-    }
-  };
+  return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
 }

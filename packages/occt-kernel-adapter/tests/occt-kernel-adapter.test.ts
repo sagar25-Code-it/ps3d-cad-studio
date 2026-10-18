@@ -902,3 +902,24 @@ test("box faces carry stable lineage-anchored references that survive a dimensio
   assert.notEqual(zTop1.stableReference.signature.signatureDigest, zTop2.stableReference.signature.signatureDigest);
   assert.ok(Math.abs(zTop1.stableReference.signature.measure - 0.1 * 0.2) < 1e-9, "the top face area is width*depth");
 });
+
+test("the browser prism facade returns exact topology, volume, and stable named faces", async () => {
+  const { evaluateProfilePrism } = await import("../src/index.js");
+  const result = await evaluateProfilePrism({
+    operationId: "operation:plate", semanticId: "body:plate",
+    profilePointsMeters: [[0, 0, 0], [0.02, 0, 0], [0.02, 0.01, 0], [0, 0.01, 0]],
+    normal: [0, 0, 1], heightMeters: 0.005
+  });
+  assert.deepEqual(result.topology, { vertices: 8, edges: 12, wires: 6, faces: 6, shells: 1, solids: 1, components: 1, closed: true, manifold: true });
+  assert.ok(Math.abs(result.volumeCubicMeters - 0.02 * 0.01 * 0.005) < 1e-12, `prism volume ${result.volumeCubicMeters}`);
+  assert.equal(result.faces.length, 6);
+  const roles = result.faces.map((face) => face.role).sort();
+  assert.deepEqual(roles, ["face.cap-bottom", "face.cap-top", "face.side-0", "face.side-1", "face.side-2", "face.side-3"]);
+  assert.ok(result.faces.every((face) => /^face:[a-f0-9]{40}$/u.test(face.key)), "each face carries a stable reference key");
+  const rebuilt = await evaluateProfilePrism({
+    operationId: "operation:plate", semanticId: "body:plate",
+    profilePointsMeters: [[0, 0, 0], [0.04, 0, 0], [0.04, 0.03, 0], [0, 0.03, 0]],
+    normal: [0, 0, 1], heightMeters: 0.01
+  });
+  assert.equal(result.faces.find((face) => face.role === "face.cap-top")!.key, rebuilt.faces.find((face) => face.role === "face.cap-top")!.key, "the cap-top key survives a dimensional rebuild");
+});

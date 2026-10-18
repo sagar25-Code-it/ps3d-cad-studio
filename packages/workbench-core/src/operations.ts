@@ -1007,7 +1007,7 @@ function validPartPreviewBodyPayload(value: unknown): value is PartPreviewBody {
 
 function validGeneralSolidBodyPayload(value: unknown): value is GeneralSolidBody {
   const required = ["id", "name", "visible", "color", "positionsMm", "indices"];
-  const optional = ["feature"];
+  const optional = ["feature", "brep"];
   if (!isRecord(value)
     || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || !stableId(value.id) || !shortText(value.name, 1, 120)
@@ -1023,6 +1023,12 @@ function validGeneralSolidBodyPayload(value: unknown): value is GeneralSolidBody
     const feature = value.feature;
     if (!isRecord(feature) || !["extrude", "revolve"].includes(String(feature.operation)) || !["xy", "xz", "yz"].includes(String(feature.plane))
       || typeof feature.valueMm !== "number" || !Number.isFinite(feature.valueMm)) return false;
+  }
+  if (Object.hasOwn(value, "brep")) {
+    const brep = value.brep;
+    if (!isRecord(brep) || !isRecord(brep.topology) || !Array.isArray(brep.faces) || brep.faces.length > 4_096) return false;
+    if (["vertices", "edges", "faces"].some((key) => typeof (brep.topology as Record<string, unknown>)[key] !== "number")) return false;
+    if (brep.faces.some((face) => !isRecord(face) || typeof face.role !== "string" || typeof face.key !== "string")) return false;
   }
   return true;
 }

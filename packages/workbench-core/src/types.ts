@@ -265,6 +265,15 @@ export interface GeneralSolidBody {
     /** Extrusion height in mm, or revolve angle in degrees. */
     readonly valueMm: number;
   };
+  /**
+   * Exact B-rep topology and stable, lineage-anchored face names supplied by the
+   * reference kernel when the body was built through it (extrude path). Absent
+   * for bodies produced by the analytic fallback.
+   */
+  readonly brep?: {
+    readonly topology: { readonly vertices: number; readonly edges: number; readonly faces: number };
+    readonly faces: readonly { readonly role: string; readonly key: string }[];
+  };
 }
 
 export type MasterCartTemplateId =
