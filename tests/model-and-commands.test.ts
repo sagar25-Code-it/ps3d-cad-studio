@@ -2,13 +2,35 @@ import {
   convertLength,
   createBracketDocument,
   formatMeters,
+  PARAMETER_IDS,
   validateCadDocument,
-  type CadDocument
+  type CadDocument,
+  type ParameterKey
 } from "../packages/model-schema/src/index.js";
-import { CommandSession, applyCommandAtomic, classifyHistoryRetry } from "../packages/commands/src/index.js";
+import { CommandSession, applyCommandAtomic, classifyHistoryRetry, isDocumentCommand, parameterCommandId } from "../packages/commands/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 export const modelAndCommandTests: readonly TestCase[] = [
+  {
+    name: "every editable parameter produces a command id the worker protocol accepts",
+    run: () => {
+      // Parameter keys are camelCase (holeDiameter) but command ids are lowercase-only; a raw key broke bore edits.
+      const keys = Object.keys(PARAMETER_IDS) as ParameterKey[];
+      assert(keys.includes("holeDiameter"), "the camelCase bore key must be covered by this check");
+      for (const key of keys) {
+        const command = {
+          protocolVersion: 1 as const,
+          kind: "set-parameter" as const,
+          commandId: parameterCommandId(key, "0b1c2d3e-0000-4000-8000-000000000000"),
+          expectedRevision: 0,
+          parameterKey: key,
+          expression: { decimal: "12", unit: "mm" as const }
+        };
+        assert(isDocumentCommand(command), `the command id for '${key}' must satisfy the protocol: ${command.commandId}`);
+      }
+      equal(parameterCommandId("holeDiameter", "abc"), "command:hole-diameter-abc", "camelCase keys become kebab-case ids");
+    }
+  },
   {
     name: "unit conversion keeps physical length across mm and inches",
     run: () => {

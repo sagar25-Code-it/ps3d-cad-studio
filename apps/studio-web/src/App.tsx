@@ -7,6 +7,7 @@ import {
   type DisplayUnit,
   type ParameterKey
 } from "../../../packages/model-schema/src/index.js";
+import { parameterCommandId } from "../../../packages/commands/src/index.js";
 import { parseNativeRevisionText, serializeNativeRevision } from "../../../packages/import-export/src/index.js";
 import {
   applyWorkbenchOperation,
@@ -1292,7 +1293,7 @@ export function App(): React.JSX.Element {
     const response = await client.commit(documentRef.current.revision, {
       protocolVersion: 1,
       kind: "set-parameter",
-      commandId: `command:${qualifiedKey}-${crypto.randomUUID()}`,
+      commandId: parameterCommandId(qualifiedKey, crypto.randomUUID()),
       expectedRevision: documentRef.current.revision,
       parameterKey: qualifiedKey,
       expression: { decimal: String(value), unit: "mm" }

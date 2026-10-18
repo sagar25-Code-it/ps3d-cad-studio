@@ -24,7 +24,8 @@ export interface WorkbenchContextRequest {
 
 const TOPOLOGY_REASON = "Requires persistent general B-rep face/body topology and an overlap preview; the bounded analytic kernel cannot execute this safely.";
 const ANALYTIC_BODY_REASON = "Select an independent analytic body. Qualified worker bodies remain immutable from this direct-modeling menu.";
-const PROPERTIES_REASON = "Property values for the current selection are shown in the inspector panel; there is no separate properties action in this preview.";
+const GENERAL_BODY_COMPONENT_REASON = "Assembly components are box, cylinder, or plate snapshots; a kernel-built body cannot be inserted yet, and inserting would add the wrong geometry.";
+const PROPERTIES_REASON ="Property values for the current selection are shown in the inspector panel; there is no separate properties action in this preview.";
 
 export function classifyWorkbenchSelection(selectionId: string | null): WorkbenchSelectionKind {
   if (selectionId === null) return "empty";
@@ -121,7 +122,7 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
         command("body.pattern-feature", "Pattern Feature", "pattern", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
         command("body.mirror-feature", "Mirror Feature", "mirror", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON)
       ]),
-      command("body.create-component", "Create Component from Body", "assembly", "assembly"),
+      command("body.create-component", "Create Component from Body", "assembly", "assembly", !generalBody, generalBody ? GENERAL_BODY_COMPONENT_REASON : undefined),
       command("body.boolean-join", "Unite", "unite", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
       command("body.boolean-cut", "Subtract", "subtract", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
       command("body.boolean-intersect", "Intersect", "boolean", "edit", false, TOPOLOGY_REASON),

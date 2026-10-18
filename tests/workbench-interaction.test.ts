@@ -329,6 +329,11 @@ export const workbenchInteractionTests: readonly TestCase[] = [
       assert(directFeatures?.children?.some((command) => command.id === "body.move-face" && command.enabled) === true, "an analytic body should expose direct face editing");
       assert(directFeatures?.children?.some((command) => command.id === "body.shell" && command.enabled) === true, "an analytic body should expose bounded Shell");
 
+      // A kernel-built body must not be silently replaced by the plate when sent to an assembly.
+      const generalCommands = resolveWorkbenchContextCommands({ workspace: "part", selectionId: "general-body:prism" });
+      assert(generalCommands.some((command) => command.id === "body.create-component" && !command.enabled && command.disabledReason?.includes("wrong geometry") === true), "a general body must not offer Create Component, with the reason shown");
+      assert(generalCommands.some((command) => command.id === "selection.delete" && command.enabled), "a general body should still be deletable");
+
       const sketchCanvasCommands = resolveWorkbenchContextCommands({ workspace: "sketch", selectionId: null });
       assert(sketchCanvasCommands.some((command) => command.id === "sketch.select-connected" && command.enabled), "empty sketch canvas should expose connected-curve intent");
       assert(sketchCanvasCommands.some((command) => command.id === "sketch.look-at" && command.enabled), "empty sketch canvas should expose Look At");

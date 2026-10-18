@@ -51,6 +51,17 @@ export function isDocumentCommand(value: unknown): value is DocumentCommand {
     && isDisplayUnit(value.displayUnit);
 }
 
+/**
+ * Builds a command id for a parameter edit. Command ids are lowercase-only, but
+ * parameter keys are camelCase (`holeDiameter`), so the key is converted to
+ * kebab-case (`hole-diameter`). Embedding the raw key produced ids that every
+ * validator rejected, which silently broke bore edits.
+ */
+export function parameterCommandId(parameterKey: ParameterKey, uniqueSuffix: string): string {
+  const kebab = parameterKey.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`);
+  return `command:${kebab}-${uniqueSuffix}`;
+}
+
 export function classifyCommandRetry(document: CadDocument, command: DocumentCommand): RetryDisposition {
   const existing = document.commandJournal.find((entry) => entry.commandId === command.commandId);
   if (existing === undefined) return "new";
