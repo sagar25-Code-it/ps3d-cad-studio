@@ -60,7 +60,7 @@ import {
   type ExchangeImportResult,
   type ExchangeUnit
 } from "../../../packages/exchange-3d/src/index.js";
-import { detectSketchProfiles, resolveQualifiedExtrusion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, resolveProfileRegion, resolveQualifiedExtrusion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 import {
   ThreeViewportAdapter,
@@ -1300,10 +1300,12 @@ export function App(): React.JSX.Element {
     if (response !== undefined) acceptResponse(response);
   };
 
-  const createGeneralSolid = async (profileId: string | undefined, plane: SketchPlane, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }): Promise<void> => {
+  const createGeneralSolid = async (selectedProfileIds: readonly string[], plane: SketchPlane, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }): Promise<void> => {
     const profiles = detectSketchProfiles(projectRef.current.sketch);
-    const profile = (profileId !== undefined ? profiles.find((candidate) => candidate.id === profileId) : undefined) ?? profiles[0];
-    if (profile === undefined) { setStatus("error"); setStatusText("Draw or select a closed profile before creating a solid."); return; }
+    // The largest selected profile is the outline and other selected profiles become holes; a lone extrude also takes the profiles drawn inside it.
+    const region = resolveProfileRegion(profiles, selectedProfileIds, { includeIslands: operation === "extrude" && edge === undefined });
+    if (!region.ok) { setStatus("error"); setStatusText(region.diagnostics[0]?.message ?? "Draw or select a closed profile before creating a solid."); return; }
+    const { outer: profile, holes } = region.value;
     if (!Number.isFinite(valueMm) || valueMm <= 0) { setStatus("error"); setStatusText(operation === "extrude" ? "Enter a positive extrusion distance." : "Enter a revolve angle between 1 and 360 degrees."); return; }
     setStatus("working");
     setStatusText(`Building ${operation === "extrude" ? "extruded" : "revolved"} solid…`);
@@ -1312,6 +1314,7 @@ export function App(): React.JSX.Element {
       plane,
       operation,
       valueMm,
+      ...(holes.length === 0 ? {} : { holes }),
       bodyId: `general-body:${crypto.randomUUID()}`,
       name: `${operation === "extrude" ? "Extrude" : "Revolve"} ${plane.toUpperCase()}${edge === undefined ? "" : ` · ${edge.kind} ${edge.sizeMm} mm`}`,
       color: "#b9c2c8",
@@ -1326,7 +1329,7 @@ export function App(): React.JSX.Element {
       const detail = brep !== undefined
         ? `B-rep solid · ${brep.topology.vertices} vertices · ${brep.topology.edges} edges · ${brep.topology.faces} named faces`
         : `general mesh solid (${result.body.positionsMm.length / 3} vertices)`;
-      setStatusText(`Created ${result.body.name} as a ${detail}. Opened in the Part workspace.`);
+      setStatusText(`Created ${result.body.name}${holes.length === 0 ? "" : ` with ${holes.length} hole${holes.length === 1 ? "" : "s"}`} as a ${detail}. Opened in the Part workspace.`);
     }
   };
 

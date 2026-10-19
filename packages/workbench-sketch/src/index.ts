@@ -40,7 +40,20 @@ export type SketchProfileBoundary =
   | {
       readonly kind: "line-loop";
       readonly points: readonly Vec2[];
+    }
+  | {
+      /** A closed loop that includes at least one arc. Arcs are sampled into `points`; `segments` maps edges back to entities. */
+      readonly kind: "curve-loop";
+      readonly points: readonly Vec2[];
+      readonly segments: readonly SketchProfileSegment[];
     };
+
+/** One sketch entity's contribution to a curve loop: a single line edge, or an arc sampled into several edges. */
+export interface SketchProfileSegment {
+  readonly entityId: string;
+  readonly kind: "line" | "arc";
+  readonly edgeCount: number;
+}
 
 export interface SketchProfile {
   readonly id: string;
@@ -276,8 +289,79 @@ export function detectSketchProfiles(sketch: WorkbenchSketch): readonly SketchPr
       });
     }
   }
-  profiles.push(...detectLineLoops(sketch.entities.filter((entity): entity is Extract<SketchEntity, { kind: "line" }> => entity.kind === "line" && !entity.construction)));
+  profiles.push(...detectCurveLoops(sketch.entities.filter((entity): entity is Extract<SketchEntity, { kind: "line" | "arc" }> => (entity.kind === "line" || entity.kind === "arc") && !entity.construction)));
   return profiles.sort((left, right) => right.areaMm2 - left.areaMm2 || left.id.localeCompare(right.id));
+}
+
+/** Closed polygon (millimetres) that outlines a profile: circles are sampled at 72 points, arcs at their sampled facets. */
+export function profileOutlineMm(boundary: SketchProfileBoundary): readonly Vec2[] {
+  if (boundary.kind === "circle") {
+    return Array.from({ length: 72 }, (_, index): Vec2 => {
+      const angle = (2 * Math.PI * index) / 72;
+      return [boundary.center[0] + boundary.radiusMm * Math.cos(angle), boundary.center[1] + boundary.radiusMm * Math.sin(angle)];
+    });
+  }
+  if (boundary.kind === "rectangle") {
+    const halfWidth = boundary.widthMm / 2;
+    const halfHeight = boundary.heightMm / 2;
+    const radians = (boundary.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const corners: readonly Vec2[] = [[-halfWidth, -halfHeight], [halfWidth, -halfHeight], [halfWidth, halfHeight], [-halfWidth, halfHeight]];
+    return corners.map(([x, y]): Vec2 => [boundary.center[0] + x * cos - y * sin, boundary.center[1] + x * sin + y * cos]);
+  }
+  return boundary.points;
+}
+
+/** Short stable token for a set of sketch entities, used to name kernel faces so names survive reordering and resizing. */
+export function stableEntityToken(entityIds: readonly string[]): string {
+  return fnv1a([...entityIds].sort().join("|"));
+}
+
+export interface ProfileRegion {
+  readonly outer: SketchProfile;
+  /** Profiles that become holes through the outer profile, largest first. */
+  readonly holes: readonly SketchProfile[];
+}
+
+/**
+ * Turns a profile selection into one outer profile plus the holes cut through it.
+ * The largest selected profile is the outer boundary and every other selected profile must lie inside it.
+ * With `includeIslands` a lone selection also takes the profiles that sit directly inside it, which is what
+ * a CAD region click does: a rectangle with a circle in it extrudes as a plate with a hole.
+ */
+export function resolveProfileRegion(
+  profiles: readonly SketchProfile[],
+  selectedIds: readonly string[],
+  options: { readonly includeIslands: boolean }
+): WorkbenchResult<ProfileRegion> {
+  const selected = profiles.filter((profile) => selectedIds.includes(profile.id)).sort((left, right) => right.areaMm2 - left.areaMm2);
+  const outer = selected[0] ?? profiles[0];
+  if (outer === undefined) return failure("INVALID_OPERATION", "Draw or select a closed profile first.", [], "Draw a closed profile in the sketch.");
+  const outerOutline = profileOutlineMm(outer.boundary);
+  const inside = (candidate: SketchProfile, ring: readonly Vec2[]): boolean => profileOutlineMm(candidate.boundary).every((point) => pointInPolygon(point, ring));
+  if (selected.length > 1) {
+    const holes = selected.slice(1);
+    const stray = holes.find((hole) => !inside(hole, outerOutline));
+    if (stray !== undefined) return failure("INVALID_OPERATION", "Every extra selected profile must lie inside the largest selected profile; it becomes a hole. One of the selected profiles is outside it.", stray.entityIds, "Select only the outer profile and the profiles inside it, or extrude them one at a time.");
+    const nested = holes.find((hole) => holes.some((other) => other !== hole && inside(hole, profileOutlineMm(other.boundary))));
+    if (nested !== undefined) return failure("INVALID_OPERATION", "A selected profile sits inside another hole, which would be a separate island. Extrude it on its own.", nested.entityIds, "Deselect the innermost profile.");
+    return { ok: true, value: { outer, holes } };
+  }
+  if (!options.includeIslands) return { ok: true, value: { outer, holes: [] } };
+  const contained = profiles.filter((candidate) => candidate !== outer && candidate.areaMm2 < outer.areaMm2 && inside(candidate, outerOutline));
+  const islands = contained.filter((candidate) => !contained.some((other) => other !== candidate && other.areaMm2 > candidate.areaMm2 && inside(candidate, profileOutlineMm(other.boundary))));
+  return { ok: true, value: { outer, holes: islands } };
+}
+
+function pointInPolygon(point: Vec2, ring: readonly Vec2[]): boolean {
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index, index += 1) {
+    const a = ring[index]!;
+    const b = ring[previous]!;
+    if ((a[1] > point[1]) !== (b[1] > point[1]) && point[0] < ((b[0] - a[0]) * (point[1] - a[1])) / (b[1] - a[1]) + a[0]) inside = !inside;
+  }
+  return inside;
 }
 
 /**
@@ -503,13 +587,46 @@ function circumcircle(a: Vec2, b: Vec2, c: Vec2): { readonly center: Vec2; reado
   return { center, radiusMm: distance(center, a) };
 }
 
-function detectLineLoops(lines: readonly Extract<SketchEntity, { kind: "line" }>[]): readonly SketchProfile[] {
-  if (lines.length < 3) return [];
+type LoopEdgeEntity = Extract<SketchEntity, { kind: "line" | "arc" }>;
+
+/** Facet angle used when an arc is sampled into polygon edges (about 5.6 degrees, ~0.1% radial error). */
+const ARC_FACET_RADIANS = Math.PI / 32;
+
+/**
+ * Points along a 3-point arc from `start` to `end` through `mid`, including both ends. Falls back to
+ * the chord when the three points are collinear.
+ */
+export function sampleArc(start: Vec2, mid: Vec2, end: Vec2): readonly Vec2[] {
+  const circle = circumcircle(start, mid, end);
+  if (circle === undefined) return [start, end];
+  const startAngle = Math.atan2(start[1] - circle.center[1], start[0] - circle.center[0]);
+  const endAngle = Math.atan2(end[1] - circle.center[1], end[0] - circle.center[0]);
+  const counterClockwise = cross(start, mid, end) > 0;
+  const full = Math.PI * 2;
+  let sweep = counterClockwise ? endAngle - startAngle : startAngle - endAngle;
+  sweep = ((sweep % full) + full) % full;
+  const steps = Math.min(128, Math.max(2, Math.ceil(sweep / ARC_FACET_RADIANS)));
+  const points: Vec2[] = [start];
+  for (let step = 1; step < steps; step += 1) {
+    const angle = startAngle + (counterClockwise ? 1 : -1) * (sweep * step) / steps;
+    points.push([circle.center[0] + circle.radiusMm * Math.cos(angle), circle.center[1] + circle.radiusMm * Math.sin(angle)]);
+  }
+  points.push(end);
+  return points;
+}
+
+/**
+ * Finds closed loops made of lines and 3-point arcs where every joint is shared by exactly two edges.
+ * A loop of lines only keeps the exact "line-loop" boundary; a loop with an arc becomes a "curve-loop"
+ * whose arcs are sampled into short edges that stay grouped under their owning entity.
+ */
+function detectCurveLoops(entities: readonly LoopEdgeEntity[]): readonly SketchProfile[] {
+  if (entities.length < 2) return [];
   const endpoints = new Map<string, { readonly point: Vec2; readonly edgeIds: string[] }>();
-  const edges = new Map(lines.map((line) => [line.id, { line, startKey: pointKey(line.start), endKey: pointKey(line.end) }]));
+  const edges = new Map(entities.map((entity) => [entity.id, { entity, startKey: pointKey(entity.start), endKey: pointKey(entity.end) }]));
   for (const edge of edges.values()) {
-    registerEndpoint(endpoints, edge.startKey, edge.line.start, edge.line.id);
-    registerEndpoint(endpoints, edge.endKey, edge.line.end, edge.line.id);
+    registerEndpoint(endpoints, edge.startKey, edge.entity.start, edge.entity.id);
+    registerEndpoint(endpoints, edge.endKey, edge.entity.end, edge.entity.id);
   }
   const unvisited = new Set(edges.keys());
   const profiles: SketchProfile[] = [];
@@ -526,24 +643,34 @@ function detectLineLoops(lines: readonly Extract<SketchEntity, { kind: "line" }>
         for (const adjacent of endpoints.get(key)?.edgeIds ?? []) if (unvisited.has(adjacent)) queue.push(adjacent);
       }
     }
+    const hasArc = componentIds.some((id) => edges.get(id)!.entity.kind === "arc");
     const componentKeys = new Set(componentIds.flatMap((id) => {
       const edge = edges.get(id)!;
       return [edge.startKey, edge.endKey];
     }));
-    if (componentIds.length < 3 || [...componentKeys].some((key) => endpoints.get(key)?.edgeIds.filter((id) => componentIds.includes(id)).length !== 2)) continue;
+    // Two edges close a loop only when one is an arc (a half-disc or lens); two lines would be degenerate.
+    if (componentIds.length < (hasArc ? 2 : 3) || [...componentKeys].some((key) => endpoints.get(key)?.edgeIds.filter((id) => componentIds.includes(id)).length !== 2)) continue;
     const startKey = [...componentKeys].sort()[0]!;
     const orderedPoints: Vec2[] = [];
+    const segments: SketchProfileSegment[] = [];
     let currentKey = startKey;
     let previousEdge: string | undefined;
     for (let index = 0; index < componentIds.length; index += 1) {
-      orderedPoints.push(endpoints.get(currentKey)!.point);
       const nextEdgeId = endpoints.get(currentKey)!.edgeIds.filter((id) => componentIds.includes(id) && id !== previousEdge).sort()[0];
       if (nextEdgeId === undefined) break;
       const edge = edges.get(nextEdgeId)!;
-      currentKey = edge.startKey === currentKey ? edge.endKey : edge.startKey;
+      const forward = edge.startKey === currentKey;
+      const entity = edge.entity;
+      let path: readonly Vec2[] = entity.kind === "arc" ? sampleArc(entity.start, entity.mid, entity.end) : [entity.start, entity.end];
+      if (!forward) path = [...path].reverse();
+      path = [endpoints.get(currentKey)!.point, ...path.slice(1)];
+      // The last point is the start of the next edge, so each edge contributes all but its end.
+      orderedPoints.push(...path.slice(0, -1));
+      segments.push({ entityId: entity.id, kind: entity.kind, edgeCount: path.length - 1 });
+      currentKey = forward ? edge.endKey : edge.startKey;
       previousEdge = nextEdgeId;
     }
-    if (currentKey !== startKey || orderedPoints.length !== componentIds.length) continue;
+    if (currentKey !== startKey || segments.length !== componentIds.length) continue;
     const signedArea = polygonSignedArea(orderedPoints);
     if (Math.abs(signedArea) < 1e-6) continue;
     const centroid = polygonCentroid(orderedPoints, signedArea);
@@ -551,7 +678,7 @@ function detectLineLoops(lines: readonly Extract<SketchEntity, { kind: "line" }>
     profiles.push({
       id: `profile:loop-${fnv1a(entityIds.join("|"))}`,
       entityIds,
-      boundary: { kind: "line-loop", points: orderedPoints },
+      boundary: hasArc ? { kind: "curve-loop", points: orderedPoints, segments } : { kind: "line-loop", points: orderedPoints },
       areaMm2: Math.abs(signedArea),
       centroid
     });

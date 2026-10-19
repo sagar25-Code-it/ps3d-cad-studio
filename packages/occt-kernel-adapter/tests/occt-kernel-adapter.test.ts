@@ -1043,3 +1043,145 @@ test("a circular profile extrudes into one cylindrical face with cylinder topolo
 
   await assert.rejects(evaluateProfilePrism({ ...base, smoothSides: true, cornerTreatment: { kind: "fillet", sizeMeters: 0.001 } }), /no corners/u);
 });
+
+type Point3 = readonly [number, number, number];
+
+function shoelace(points: readonly Point3[]): number {
+  let area = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index]!;
+    const next = points[(index + 1) % points.length]!;
+    area += current[0] * next[1] - next[0] * current[1];
+  }
+  return area / 2;
+}
+
+function circleLoop(centerX: number, centerY: number, radius: number, segments = 48): Point3[] {
+  return Array.from({ length: segments }, (_, step): Point3 => {
+    const angle = (2 * Math.PI * step) / segments;
+    return [centerX + radius * Math.cos(angle), centerY + radius * Math.sin(angle), 0];
+  });
+}
+
+test("concave C, U and L profiles extrude with the exact prism volume (no centroid-fan overshoot)", async () => {
+  const { evaluateProfilePrism } = await import("../src/index.js");
+  const height = 0.01;
+  const shapes: Record<string, readonly Point3[]> = {
+    c: [[0, 0, 0], [0.03, 0, 0], [0.03, 0.01, 0], [0.01, 0.01, 0], [0.01, 0.02, 0], [0.03, 0.02, 0], [0.03, 0.03, 0], [0, 0.03, 0]],
+    u: [[0, 0, 0], [0.04, 0, 0], [0.04, 0.03, 0], [0.03, 0.03, 0], [0.03, 0.01, 0], [0.01, 0.01, 0], [0.01, 0.03, 0], [0, 0.03, 0]],
+    l: [[0, 0, 0], [0.04, 0, 0], [0.04, 0.01, 0], [0.01, 0.01, 0], [0.01, 0.04, 0], [0, 0.04, 0]]
+  };
+  for (const [name, points] of Object.entries(shapes)) {
+    for (const loop of [points, [...points].reverse()]) {
+      const result = await evaluateProfilePrism({ operationId: `operation:${name}`, semanticId: `body:${name}`, profilePointsMeters: loop, normal: [0, 0, 1], heightMeters: height });
+      const exact = Math.abs(shoelace(points)) * height;
+      assert.ok(Math.abs(result.volumeCubicMeters - exact) < 1e-15, `${name} reported volume ${result.volumeCubicMeters} vs ${exact}`);
+      const meshed = meshVolume(Float64Array.from(result.positionsMeters), Uint32Array.from(result.indices));
+      assert.ok(Math.abs(meshed - exact) < exact * 1e-9, `${name} tessellated volume ${meshed} vs ${exact}`);
+      assert.equal(result.topology.faces, points.length + 2);
+    }
+  }
+});
+
+test("a plate with circular holes extrudes with area minus the holes and one wall per hole", async () => {
+  const { evaluateProfilePrism } = await import("../src/index.js");
+  const height = 0.005;
+  const plate: Point3[] = [[0, 0, 0], [0.06, 0, 0], [0.06, 0.04, 0], [0, 0.04, 0]];
+  const holeA = circleLoop(0.015, 0.02, 0.005);
+  const holeB = circleLoop(0.045, 0.02, 0.008);
+  const base = { operationId: "operation:plate", semanticId: "body:plate", profilePointsMeters: plate, normal: [0, 0, 1] as const, heightMeters: height };
+
+  const one = await evaluateProfilePrism({ ...base, holes: [{ id: "a", points: holeA, smoothSides: true }] });
+  const exactOne = (0.06 * 0.04 - Math.abs(shoelace(holeA))) * height;
+  assert.ok(Math.abs(one.volumeCubicMeters - exactOne) < 1e-15);
+  assert.ok(Math.abs(meshVolume(Float64Array.from(one.positionsMeters), Uint32Array.from(one.indices)) - exactOne) < exactOne * 1e-9, "caps are triangulated around the hole");
+  assert.deepEqual(one.faces.map((face) => face.role).sort(), ["face.cap-bottom", "face.cap-top", "face.hole-a", "face.side-0", "face.side-1", "face.side-2", "face.side-3"]);
+  assert.equal(one.topology.faces, 7);
+
+  // Hole orientation given to the kernel does not matter, and a second hole adds its own wall.
+  const two = await evaluateProfilePrism({ ...base, holes: [{ id: "a", points: [...holeA].reverse(), smoothSides: true }, { id: "b", points: holeB, smoothSides: true }] });
+  const exactTwo = (0.06 * 0.04 - Math.abs(shoelace(holeA)) - Math.abs(shoelace(holeB))) * height;
+  assert.ok(Math.abs(meshVolume(Float64Array.from(two.positionsMeters), Uint32Array.from(two.indices)) - exactTwo) < exactTwo * 1e-9);
+  assert.equal(two.faces.filter((face) => face.role.startsWith("face.hole-")).length, 2);
+  const capArea = two.faces.find((face) => face.role === "face.cap-bottom")!.areaSquareMeters;
+  assert.ok(Math.abs(capArea - exactTwo / height) < 1e-12, "cap area excludes the holes");
+
+  // Wall keys track the hole identity, so they survive moving the hole and reordering the holes list.
+  const moved = await evaluateProfilePrism({ ...base, holes: [{ id: "b", points: circleLoop(0.04, 0.02, 0.008), smoothSides: true }, { id: "a", points: circleLoop(0.012, 0.02, 0.005), smoothSides: true }] });
+  const key = (result: typeof two, role: string): string => result.faces.find((face) => face.role === role)!.key;
+  assert.equal(key(two, "face.hole-a"), key(moved, "face.hole-a"));
+  assert.equal(key(two, "face.hole-b"), key(moved, "face.hole-b"));
+  assert.notEqual(key(two, "face.hole-a"), key(two, "face.hole-b"));
+});
+
+test("holes that leave, cross or overlap are rejected instead of producing a broken solid", async () => {
+  const { evaluateProfilePrism } = await import("../src/index.js");
+  const base = { operationId: "operation:bad", semanticId: "body:bad", profilePointsMeters: [[0, 0, 0], [0.06, 0, 0], [0.06, 0.04, 0], [0, 0.04, 0]] as readonly Point3[], normal: [0, 0, 1] as const, heightMeters: 0.005 };
+  await assert.rejects(evaluateProfilePrism({ ...base, holes: [{ id: "out", points: circleLoop(0.09, 0.02, 0.005), smoothSides: true }] }), /./u);
+  await assert.rejects(evaluateProfilePrism({ ...base, holes: [{ id: "edge", points: circleLoop(0.003, 0.02, 0.005), smoothSides: true }] }), /./u);
+  await assert.rejects(evaluateProfilePrism({ ...base, holes: [{ id: "a", points: circleLoop(0.02, 0.02, 0.008), smoothSides: true }, { id: "b", points: circleLoop(0.026, 0.02, 0.008), smoothSides: true }] }), /./u);
+  await assert.rejects(evaluateProfilePrism({ ...base, holes: [{ id: "a", points: circleLoop(0.02, 0.02, 0.005), smoothSides: true }], cornerTreatment: { kind: "chamfer", sizeMeters: 0.001 } }), /holes/u);
+});
+
+test("arc edge groups give a rounded rectangle one cylindrical wall per corner with stable keys", async () => {
+  const { evaluateProfilePrism } = await import("../src/index.js");
+  const depth = 0.03;
+  const radius = 0.005;
+  const arcSteps = 6;
+  const build = (w: number): { points: Point3[]; groups: { role: string; edgeCount: number; curved: boolean }[] } => {
+    const corners: readonly (readonly [number, number, number])[] = [[w - radius, radius, -90], [w - radius, depth - radius, 0], [radius, depth - radius, 90], [radius, radius, 180]];
+    const points: Point3[] = [];
+    const groups: { role: string; edgeCount: number; curved: boolean }[] = [];
+    corners.forEach(([cx, cy, startDegrees], corner) => {
+      for (let step = 0; step <= arcSteps; step += 1) {
+        const angle = ((startDegrees + (90 * step) / arcSteps) * Math.PI) / 180;
+        points.push([cx + radius * Math.cos(angle), cy + radius * Math.sin(angle), 0]);
+      }
+      groups.push({ role: `face.arc-${corner}`, edgeCount: arcSteps, curved: true }, { role: `face.line-${corner}`, edgeCount: 1, curved: false });
+    });
+    return { points, groups };
+  };
+  const first = build(0.04);
+  const request = { operationId: "operation:round", semanticId: "body:round", normal: [0, 0, 1] as const, heightMeters: 0.01 };
+  const result = await evaluateProfilePrism({ ...request, profilePointsMeters: first.points, edgeGroups: first.groups });
+  assert.equal(result.topology.faces, 8 + 2);
+  assert.equal(result.faces.filter((face) => face.role.startsWith("face.arc-")).length, 4);
+  const exact = Math.abs(shoelace(first.points)) * 0.01;
+  assert.ok(Math.abs(meshVolume(Float64Array.from(result.positionsMeters), Uint32Array.from(result.indices)) - exact) < exact * 1e-9);
+
+  // A clockwise outline is normalised without changing the topology.
+  const reversed = await evaluateProfilePrism({ ...request, profilePointsMeters: [...first.points].reverse(), edgeGroups: first.groups.map((group) => ({ ...group })) });
+  assert.equal(reversed.topology.faces, 10);
+
+  // Resizing the rectangle keeps the wall keys.
+  const wider = build(0.06);
+  const resized = await evaluateProfilePrism({ ...request, profilePointsMeters: wider.points, edgeGroups: wider.groups });
+  for (const group of first.groups) assert.equal(result.faces.find((face) => face.role === group.role)!.key, resized.faces.find((face) => face.role === group.role)!.key, group.role);
+
+  await assert.rejects(evaluateProfilePrism({ ...request, profilePointsMeters: first.points, edgeGroups: first.groups.slice(1) }), /cover/u);
+  await assert.rejects(evaluateProfilePrism({ ...request, profilePointsMeters: first.points, edgeGroups: first.groups, smoothSides: true }), /cannot be combined/u);
+});
+
+test("a concave profile revolves with ear-clipped caps and Pappus volume", async () => {
+  const { evaluateProfileRevolution } = await import("../src/index.js");
+  // An L section in (radius, axial).
+  const profile: readonly (readonly [number, number])[] = [[0.02, 0], [0.06, 0], [0.06, 0.01], [0.03, 0.01], [0.03, 0.04], [0.02, 0.04]];
+  const result = await evaluateProfileRevolution({ operationId: "operation:lathe", semanticId: "body:lathe", profilePoints: profile, degrees: 90, segments: 128 });
+  const area = Math.abs(shoelace(profile.map(([radius, axial]): Point3 => [radius, axial, 0])));
+  assert.ok(Math.abs(result.volumeCubicMeters - area * (Math.PI / 2) * centroidRadius(profile)) < 1e-12);
+  const meshed = meshVolume(Float64Array.from(result.positionsMeters), Uint32Array.from(result.indices));
+  assert.ok(Math.abs(meshed - result.volumeCubicMeters) < result.volumeCubicMeters * 0.01, `swept mesh ${meshed} vs ${result.volumeCubicMeters}`);
+});
+
+function centroidRadius(profile: readonly (readonly [number, number])[]): number {
+  let weighted = 0;
+  let signed = 0;
+  for (let index = 0; index < profile.length; index += 1) {
+    const current = profile[index]!;
+    const next = profile[(index + 1) % profile.length]!;
+    const cross = current[0] * next[1] - next[0] * current[1];
+    weighted += (current[0] + next[0]) * cross;
+    signed += cross;
+  }
+  return Math.abs(weighted / (3 * signed));
+}

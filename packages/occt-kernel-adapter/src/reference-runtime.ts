@@ -1,4 +1,5 @@
 import { kernelSha256 } from "../../exact-kernel-api/src/canonical.js";
+import { triangulateLoops, type Point2 } from "./polygon.js";
 import type {
   ExecuteKernelOperationRequest,
   ExactShapeHandle,
@@ -283,6 +284,22 @@ interface EdgeGroup {
   readonly edgeCount: number;
 }
 
+/** One closed loop of a prism cross-section, with its edges grouped into side faces. */
+interface PrismLoop {
+  readonly points: readonly Vec3[];
+  readonly groups: readonly EdgeGroup[];
+}
+
+function defaultGroups(count: number, prefix: string): EdgeGroup[] {
+  return Array.from({ length: count }, (_, step) => ({ role: `${prefix}-${step}`, geometryClass: "plane" as const, edgeCount: 1 }));
+}
+
+function planarBasis(normal: Vec3): { readonly u: Vec3; readonly v: Vec3 } {
+  const helper: Vec3 = Math.abs(normal[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const u = unit(cross(helper, normal));
+  return { u, v: cross(normal, u) };
+}
+
 /**
  * Exact prism from a closed planar loop extruded along its normal. With G
  * boundary side faces it has 2G vertices, 3G edges and G+2 faces (Euler 2).
@@ -290,64 +307,138 @@ interface EdgeGroup {
  * consecutive edges merge into one face (used for fillet arcs).
  */
 function prismGeometry(points: readonly Vec3[], normal: Vec3, height: number, groups?: readonly EdgeGroup[]): SolidGeometry {
-  const count = points.length;
-  if (count < 3) throw new Error("Extrude profile loop needs at least three points.");
-  const edgeGroups: readonly EdgeGroup[] = groups ?? points.map((_, step) => ({ role: `face.side-${step}`, geometryClass: "plane" as const, edgeCount: 1 }));
-  if (edgeGroups.reduce((total, group) => total + group.edgeCount, 0) !== count) throw new Error("Prism edge groups must cover every profile edge exactly once.");
-  const groupOfEdge: number[] = [];
-  edgeGroups.forEach((group, groupIndex) => { for (let edge = 0; edge < group.edgeCount; edge += 1) groupOfEdge.push(groupIndex); });
+  return prismFromLoops({ points, groups: groups ?? defaultGroups(points.length, "face.side") }, [], normal, height);
+}
 
-  const top = points.map((point) => [point[0] + normal[0] * height, point[1] + normal[1] * height, point[2] + normal[2] * height] as Vec3);
-  const builder = new TessellationBuilder();
-  const bottomCentroid = centroid(points);
-  const topCentroid = centroid(top);
-  for (let step = 0; step < count; step += 1) {
-    const next = (step + 1) % count;
-    builder.addTriangle(bottomCentroid, points[next]!, points[step]!, negate(normal), 0);
-    builder.addTriangle(topCentroid, top[step]!, top[next]!, normal, 1);
-    builder.addQuad(points[step]!, points[next]!, top[next]!, top[step]!, sideNormal(points[step]!, points[next]!, normal), 2 + groupOfEdge[step]!);
-  }
-  const area = planarPolygonArea(points, normal);
-  const sideRoles = edgeGroups.map((group) => group.role);
-  const groupCount = edgeGroups.length;
-  let firstEdge = 0;
-  const sideFaces = edgeGroups.map((group, groupIndex): FaceSpec => {
-    const edgeIndices = Array.from({ length: group.edgeCount }, (_, offset) => firstEdge + offset);
-    firstEdge += group.edgeCount;
-    const corners: Vec3[] = [];
-    let groupArea = 0;
-    const midpoints: Vec3[] = [];
-    for (const edge of edgeIndices) {
-      const next = (edge + 1) % count;
-      corners.push(points[edge]!, points[next]!, top[edge]!, top[next]!);
-      groupArea += Math.hypot(...subtract(points[next]!, points[edge]!)) * height;
-      midpoints.push([(points[edge]![0] + points[next]![0]) / 2 + normal[0] * height / 2, (points[edge]![1] + points[next]![1]) / 2 + normal[1] * height / 2, (points[edge]![2] + points[next]![2]) / 2 + normal[2] * height / 2]);
-    }
-    const middleEdge = edgeIndices[Math.floor(edgeIndices.length / 2)]!;
-    return {
-      role: group.role,
-      geometryClass: group.geometryClass,
-      centroid: centroid(midpoints),
-      area: groupArea,
-      bounds: boundsOf(corners),
-      normal: sideNormal(points[middleEdge]!, points[(middleEdge + 1) % count]!, normal),
-      // A smooth single-face loop has no side neighbours, and a two-face loop would list the same neighbour twice.
-      adjacentRoles: [...new Set(["face.cap-bottom", "face.cap-top", sideRoles[(groupIndex + groupCount - 1) % groupCount]!, sideRoles[(groupIndex + 1) % groupCount]!])].filter((role) => role !== group.role)
-    };
+/**
+ * Prism from an outer loop (counter-clockwise about `normal`) and any number of
+ * holes (clockwise). Caps are ear-clipped, so concave outlines and holes are exact.
+ * Each group of edges becomes one side face; with G side faces in total the counts are
+ * 2G vertices, 3G edges and G+2 faces, where each cap is one face even when it has holes.
+ */
+function prismFromLoops(outer: PrismLoop, holes: readonly PrismLoop[], normal: Vec3, height: number): SolidGeometry {
+  const loops = [outer, ...holes];
+  loops.forEach((loop, index) => {
+    if (loop.points.length < 3) throw new Error(index === 0 ? "Extrude profile loop needs at least three points." : `Hole ${index} needs at least three points.`);
+    if (loop.groups.reduce((total, group) => total + group.edgeCount, 0) !== loop.points.length) throw new Error("Prism edge groups must cover every profile edge exactly once.");
   });
+  const basis = planarBasis(normal);
+  const flatten = (point: Vec3): Point2 => [dot(point, basis.u), dot(point, basis.v)];
+  const lift = (point: Vec3): Vec3 => [point[0] + normal[0] * height, point[1] + normal[1] * height, point[2] + normal[2] * height];
+
+  // Triangulating the caps also validates the loops (no crossing, holes inside), so a bad profile fails closed here.
+  const capTriangles = triangulateLoops(outer.points.map(flatten), holes.map((hole) => hole.points.map(flatten)));
+  const bottomPoints = loops.flatMap((loop) => loop.points);
+  const topPoints = bottomPoints.map(lift);
+  const builder = new TessellationBuilder();
+  for (let index = 0; index < capTriangles.length; index += 3) {
+    const [a, b, c] = [capTriangles[index]!, capTriangles[index + 1]!, capTriangles[index + 2]!];
+    builder.addTriangle(bottomPoints[a]!, bottomPoints[b]!, bottomPoints[c]!, negate(normal), 0);
+    builder.addTriangle(topPoints[a]!, topPoints[b]!, topPoints[c]!, normal, 1);
+  }
+
+  const sideRoles = loops.flatMap((loop) => loop.groups.map((group) => group.role));
+  const sideFaces: FaceSpec[] = [];
+  let nextFace = 2;
+  for (const loop of loops) {
+    const points = loop.points;
+    const top = points.map(lift);
+    const count = points.length;
+    const groupOfEdge: number[] = [];
+    loop.groups.forEach((group, groupIndex) => { for (let edge = 0; edge < group.edgeCount; edge += 1) groupOfEdge.push(nextFace + groupIndex); });
+    for (let step = 0; step < count; step += 1) {
+      const next = (step + 1) % count;
+      builder.addQuad(points[step]!, points[next]!, top[next]!, top[step]!, sideNormal(points[step]!, points[next]!, normal), groupOfEdge[step]!);
+    }
+    const loopRoles = loop.groups.map((group) => group.role);
+    let firstEdge = 0;
+    loop.groups.forEach((group, groupIndex) => {
+      const edgeIndices = Array.from({ length: group.edgeCount }, (_, offset) => firstEdge + offset);
+      firstEdge += group.edgeCount;
+      const corners: Vec3[] = [];
+      const midpoints: Vec3[] = [];
+      let groupArea = 0;
+      for (const edge of edgeIndices) {
+        const next = (edge + 1) % count;
+        corners.push(points[edge]!, points[next]!, top[edge]!, top[next]!);
+        groupArea += Math.hypot(...subtract(points[next]!, points[edge]!)) * height;
+        midpoints.push([
+          (points[edge]![0] + points[next]![0]) / 2 + normal[0] * height / 2,
+          (points[edge]![1] + points[next]![1]) / 2 + normal[1] * height / 2,
+          (points[edge]![2] + points[next]![2]) / 2 + normal[2] * height / 2
+        ]);
+      }
+      const middleEdge = edgeIndices[Math.floor(edgeIndices.length / 2)]!;
+      sideFaces.push({
+        role: group.role,
+        geometryClass: group.geometryClass,
+        centroid: centroid(midpoints),
+        area: groupArea,
+        bounds: boundsOf(corners),
+        normal: sideNormal(points[middleEdge]!, points[(middleEdge + 1) % count]!, normal),
+        // A smooth single-face loop has no side neighbours, and a two-face loop would list the same neighbour twice.
+        adjacentRoles: [...new Set(["face.cap-bottom", "face.cap-top", loopRoles[(groupIndex + loopRoles.length - 1) % loopRoles.length]!, loopRoles[(groupIndex + 1) % loopRoles.length]!])].filter((role) => role !== group.role)
+      });
+    });
+    nextFace += loop.groups.length;
+  }
+
+  const outerArea = planarPolygonArea(outer.points, normal);
+  const holeArea = holes.reduce((total, hole) => total + planarPolygonArea(hole.points, normal), 0);
+  const area = outerArea - holeArea;
+  const groupCount = sideRoles.length;
+  const outerTop = outer.points.map(lift);
   const faces: FaceSpec[] = [
-    { role: "face.cap-bottom", geometryClass: "plane", centroid: bottomCentroid, area, bounds: boundsOf(points), normal: negate(normal), adjacentRoles: sideRoles },
-    { role: "face.cap-top", geometryClass: "plane", centroid: topCentroid, area, bounds: boundsOf(top), normal, adjacentRoles: sideRoles },
+    { role: "face.cap-bottom", geometryClass: "plane", centroid: centroid(outer.points), area, bounds: boundsOf(outer.points), normal: negate(normal), adjacentRoles: sideRoles },
+    { role: "face.cap-top", geometryClass: "plane", centroid: centroid(outerTop), area, bounds: boundsOf(outerTop), normal, adjacentRoles: sideRoles },
     ...sideFaces
   ];
   return {
-    topology: { vertices: 2 * groupCount, edges: 3 * groupCount, wires: groupCount + 2, faces: groupCount + 2, shells: 1, solids: 1, components: 1, closed: true, manifold: true },
-    bounds: boundsOf([...points, ...top]),
-    descriptor: { profile: points.map((point) => [...point]), normal, height, groups: edgeGroups.map((group) => [group.role, group.edgeCount]) },
+    topology: { vertices: 2 * groupCount, edges: 3 * groupCount, wires: groupCount + 2 * (1 + holes.length), faces: groupCount + 2, shells: 1, solids: 1, components: 1, closed: true, manifold: true },
+    bounds: boundsOf([...outer.points, ...outerTop]),
+    descriptor: {
+      profile: outer.points.map((point) => [...point]), normal, height,
+      groups: outer.groups.map((group) => [group.role, group.edgeCount]),
+      holes: holes.map((hole) => ({ profile: hole.points.map((point) => [...point]), groups: hole.groups.map((group) => [group.role, group.edgeCount]) }))
+    },
     tessellation: builder.finish(),
     volumeCubicMeters: area * height,
     faces
   };
+}
+
+/** Validates explicit edge groups against the loop's edge count and converts them to kernel groups. */
+function groupsFor(groups: readonly ProfileEdgeGroup[], edgeCount: number, label: string): EdgeGroup[] {
+  let covered = 0;
+  for (const group of groups) {
+    if (!Number.isInteger(group.edgeCount) || group.edgeCount < 1) throw new Error(`The ${label} has an edge group with an invalid edge count.`);
+    covered += group.edgeCount;
+  }
+  if (covered !== edgeCount) throw new Error(`The ${label} edge groups cover ${covered} edges but the loop has ${edgeCount}.`);
+  return groups.map((group) => ({ role: group.role, geometryClass: group.curved === true ? "cylinder" as const : "plane" as const, edgeCount: group.edgeCount }));
+}
+
+/**
+ * Reverses a loop's winding while keeping each edge attached to its group: point i becomes
+ * point (n - i) mod n, so new edge i is old edge n - 1 - i, and the group order flips.
+ */
+function reverseLoop(loop: PrismLoop): PrismLoop {
+  const count = loop.points.length;
+  return { points: loop.points.map((_, index) => loop.points[(count - index) % count]!), groups: [...loop.groups].reverse() };
+}
+
+/** A hole is wound clockwise about the extrude normal, opposite to the outer loop. */
+function holeLoop(hole: ProfileHole, normal: Vec3): PrismLoop {
+  const points = hole.points.map((point) => [point[0], point[1], point[2]] as Vec3);
+  if (points.length < 3) throw new Error(`Hole '${hole.id}' needs at least three points.`);
+  if (hole.smoothSides === true && hole.edgeGroups !== undefined) throw new Error(`Hole '${hole.id}' cannot be both smooth and grouped.`);
+  const groups = hole.smoothSides === true
+    ? [{ role: `face.hole-${hole.id}`, geometryClass: "cylinder" as const, edgeCount: points.length }]
+    : hole.edgeGroups !== undefined
+      ? groupsFor(hole.edgeGroups, points.length, `hole '${hole.id}'`)
+      : defaultGroups(points.length, `face.hole-${hole.id}-side`);
+  const loop: PrismLoop = { points, groups };
+  return planarSignedArea(points, normal) > 0 ? reverseLoop(loop) : loop;
 }
 
 /** Corner treatment applied to a prism's vertical edges, expressed on the planar profile. */
@@ -436,17 +527,15 @@ function revolveGeometry(profile: readonly (readonly [number, number])[], degree
   const sweep = (sweepDegrees * Math.PI) / 180;
   const tangent = (theta: number): Vec3 => [-Math.sin(theta), 0, Math.cos(theta)];
   const revolve = (point: readonly [number, number], theta: number): Vec3 => [point[0] * Math.cos(theta), point[1], point[0] * Math.sin(theta)];
-  const centroid2D = polygonCentroid2D(profile);
+  const profileCounterClockwise = shoelaceArea(profile) > 0;
   // Outward surface normal of the swept face for profile edge j at angle theta:
-  // the in-plane edge normal oriented away from the profile interior, then revolved.
+  // the in-plane edge normal on the exterior side given the profile winding (valid for concave profiles), then revolved.
   const sweptOutward = (j: number, theta: number): Vec3 => {
     const pj = profile[j]!;
     const pn = profile[(j + 1) % count]!;
     let nr = pn[1] - pj[1];
     let na = -(pn[0] - pj[0]);
-    const towardOutX = (pj[0] + pn[0]) / 2 - centroid2D[0];
-    const towardOutY = (pj[1] + pn[1]) / 2 - centroid2D[1];
-    if (nr * towardOutX + na * towardOutY < 0) { nr = -nr; na = -na; }
+    if (!profileCounterClockwise) { nr = -nr; na = -na; }
     const length = Math.hypot(nr, na) || 1;
     return [(nr / length) * Math.cos(theta), na / length, (nr / length) * Math.sin(theta)];
   };
@@ -465,12 +554,12 @@ function revolveGeometry(profile: readonly (readonly [number, number])[], degree
   if (!full) {
     const startPoints = profile.map((point) => revolve(point, 0));
     const endPoints = profile.map((point) => revolve(point, sweep));
-    const startCentroid = centroid(startPoints);
-    const endCentroid = centroid(endPoints);
-    for (let j = 0; j < count; j += 1) {
-      const nextJ = (j + 1) % count;
-      builder.addTriangle(startCentroid, startPoints[nextJ]!, startPoints[j]!, negate(tangent(0)), 0);
-      builder.addTriangle(endCentroid, endPoints[j]!, endPoints[nextJ]!, tangent(sweep), 1);
+    // Ear-clipped caps stay inside concave profiles, unlike a centroid fan.
+    const capTriangles = triangulateLoops(profile.map((point): Point2 => [point[0], point[1]]));
+    for (let index = 0; index < capTriangles.length; index += 3) {
+      const [a, b, c] = [capTriangles[index]!, capTriangles[index + 1]!, capTriangles[index + 2]!];
+      builder.addTriangle(startPoints[a]!, startPoints[b]!, startPoints[c]!, negate(tangent(0)), 0);
+      builder.addTriangle(endPoints[a]!, endPoints[b]!, endPoints[c]!, tangent(sweep), 1);
     }
   }
 
@@ -577,6 +666,31 @@ export interface ProfilePrismRequest {
    * of a single cylinder. Cannot be combined with a corner treatment.
    */
   readonly smoothSides?: boolean;
+  /**
+   * Groups consecutive profile edges into named side faces (for example an arc sampled into many
+   * facets is one cylindrical face). Must cover every edge of `profilePointsMeters` exactly once,
+   * in the order the points are given. Cannot be combined with `smoothSides` or `cornerTreatment`.
+   */
+  readonly edgeGroups?: readonly ProfileEdgeGroup[];
+  /** Inner loops that cut through the prism. Each must lie strictly inside the outer loop and not overlap another hole. */
+  readonly holes?: readonly ProfileHole[];
+}
+
+/** Consecutive profile edges that form one side face. `role` must be unique within the request. */
+export interface ProfileEdgeGroup {
+  readonly role: string;
+  readonly edgeCount: number;
+  /** True for a sampled arc or other curved wall (reported as a cylinder face). */
+  readonly curved?: boolean;
+}
+
+export interface ProfileHole {
+  /** Stable identity (for example a short hash of the sketch entity) used in the face role names. */
+  readonly id: string;
+  readonly points: readonly (readonly [number, number, number])[];
+  /** The whole hole is one cylindrical wall (a circle) rather than one planar wall per segment. */
+  readonly smoothSides?: boolean;
+  readonly edgeGroups?: readonly ProfileEdgeGroup[];
 }
 
 export interface NamedFace {
@@ -609,13 +723,28 @@ export async function evaluateProfilePrism(request: ProfilePrismRequest): Promis
   let points = request.profilePointsMeters.map((point) => [point[0], point[1], point[2]] as Vec3);
   const normal = unit([request.normal[0], request.normal[1], request.normal[2]]);
   // Side normals are derived from loop winding, so a clockwise loop would face inward: normalise to counter-clockwise about the normal.
-  if (planarSignedArea(points, normal) < 0) points = [...points].reverse();
+  const givenPoints = points;
+  const reversedToCounterClockwise = planarSignedArea(points, normal) < 0;
+  if (reversedToCounterClockwise) points = [...points].reverse();
   if (request.smoothSides === true && request.cornerTreatment !== undefined) throw new Error("A smooth (circular) profile has no corners to chamfer or fillet.");
-  const geometry = request.smoothSides === true
-    ? prismGeometry(points, normal, request.heightMeters, [{ role: "face.lateral", geometryClass: "cylinder", edgeCount: points.length }])
-    : request.cornerTreatment === undefined
-      ? prismGeometry(points, normal, request.heightMeters)
-      : (() => { const treated = treatProfileCorners(points, request.cornerTreatment); return prismGeometry(treated.points, normal, request.heightMeters, treated.groups); })();
+  if (request.edgeGroups !== undefined && (request.smoothSides === true || request.cornerTreatment !== undefined)) throw new Error("Explicit edge groups cannot be combined with smooth sides or a corner treatment.");
+  if (request.cornerTreatment !== undefined && (request.holes?.length ?? 0) > 0) throw new Error("Chamfer and fillet of a profile with holes is not supported.");
+  const holeLoops = (request.holes ?? []).map((hole): PrismLoop => holeLoop(hole, normal));
+  let outer: PrismLoop;
+  if (request.smoothSides === true) {
+    outer = { points, groups: [{ role: "face.lateral", geometryClass: "cylinder", edgeCount: points.length }] };
+  } else if (request.edgeGroups !== undefined) {
+    const given: PrismLoop = { points: givenPoints, groups: groupsFor(request.edgeGroups, givenPoints.length, "outer profile") };
+    outer = reversedToCounterClockwise ? reverseLoop(given) : given;
+  } else if (request.cornerTreatment === undefined) {
+    outer = { points, groups: defaultGroups(points.length, "face.side") };
+  } else {
+    const treated = treatProfileCorners(points, request.cornerTreatment);
+    outer = { points: treated.points, groups: treated.groups };
+  }
+  const roles = [outer, ...holeLoops].flatMap((loop) => loop.groups.map((group) => group.role));
+  if (new Set(roles).size !== roles.length) throw new Error("Profile face roles must be unique; check the edge group and hole identities.");
+  const geometry = prismFromLoops(outer, holeLoops, normal, request.heightMeters);
   const toleranceMeters = request.toleranceMeters ?? 1e-6;
   const entities = await buildFaceEntities({ operationId: request.operationId, operationKind: "solid.extrude", semanticId: request.semanticId, toleranceMeters }, geometry.faces);
   const faces: NamedFace[] = entities.map((entity, position) => ({

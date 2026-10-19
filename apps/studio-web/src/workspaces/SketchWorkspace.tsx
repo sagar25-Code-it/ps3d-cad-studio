@@ -77,7 +77,7 @@ interface SketchWorkspaceProps {
   readonly working: boolean;
   readonly onMessage: (message: string) => void;
   readonly optionsRevealRequest: number;
-  readonly onCreateSolid: (profileId: string | undefined, plane: "xy" | "xz" | "yz", operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }) => void;
+  readonly onCreateSolid: (profileIds: readonly string[], plane: "xy" | "xz" | "yz", operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }) => void;
   readonly activePlane: "xy" | "xz" | "yz";
 }
 
@@ -394,7 +394,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <small>mm</small>
             </>}
           </div>}
-          <button className="palette-action primary" disabled={profiles.length === 0} onClick={() => props.onCreateSolid(selectedProfileIds[0], solidPlane, solidOp, Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined)}><CommandIcon name="box" />Create solid</button>
+          <button className="palette-action primary" disabled={profiles.length === 0} onClick={() => props.onCreateSolid(selectedProfileIds, solidPlane, solidOp, Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined)}><CommandIcon name="box" />Create solid</button>
+          {solidOp === "extrude" && <small className="make-solid-hint">Profiles drawn inside the outline become holes. Shift-select profiles to choose exactly which.</small>}
         </div>
       </div>
 
@@ -642,7 +643,7 @@ function eventPoint(event: React.PointerEvent<SVGSVGElement>, view: { x: number;
 }
 
 function profileLabel(profile: SketchProfile): string {
-  return profile.boundary.kind === "rectangle" ? "Rectangle region" : profile.boundary.kind === "circle" ? "Circle region" : "Closed line loop";
+  return profile.boundary.kind === "rectangle" ? "Rectangle region" : profile.boundary.kind === "circle" ? "Circle region" : profile.boundary.kind === "curve-loop" ? "Closed curve loop" : "Closed line loop";
 }
 
 function shortId(id: string): string {

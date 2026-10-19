@@ -1,7 +1,8 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
 import { revolveAxisRelation, tessellateRevolve, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism, evaluateProfileRevolution } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
-import type { SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
+import { profileOutlineMm, stableEntityToken, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
+import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 
 /** Sketch-plane identifier shared with the solid builder UI. */
 export type SketchPlane = TessellatePlane;
@@ -11,25 +12,13 @@ type WorldPoint = readonly [number, number, number];
 
 /** Convert a detected sketch profile boundary into a closed polygon (millimetres). */
 function profilePolygonMm(boundary: SketchProfile["boundary"]): readonly PolygonPoint[] {
-  if (boundary.kind === "circle") {
-    const segments = 72;
-    const points: PolygonPoint[] = [];
-    for (let index = 0; index < segments; index += 1) {
-      const angle = (2 * Math.PI * index) / segments;
-      points.push([boundary.center[0] + boundary.radiusMm * Math.cos(angle), boundary.center[1] + boundary.radiusMm * Math.sin(angle)]);
-    }
-    return points;
-  }
-  if (boundary.kind === "rectangle") {
-    const halfWidth = boundary.widthMm / 2;
-    const halfHeight = boundary.heightMm / 2;
-    const radians = (boundary.rotationDeg * Math.PI) / 180;
-    const cos = Math.cos(radians);
-    const sin = Math.sin(radians);
-    const corners: PolygonPoint[] = [[-halfWidth, -halfHeight], [halfWidth, -halfHeight], [halfWidth, halfHeight], [-halfWidth, halfHeight]];
-    return corners.map(([x, y]) => [boundary.center[0] + x * cos - y * sin, boundary.center[1] + x * sin + y * cos]);
-  }
-  return boundary.points.map((point) => [point[0], point[1]] as PolygonPoint);
+  return profileOutlineMm(boundary).map((point) => [point[0], point[1]] as PolygonPoint);
+}
+
+/** One kernel side face per sketch entity of a curve loop, so arcs stay single cylindrical walls with stable names. */
+function curveEdgeGroups(boundary: SketchProfile["boundary"], rolePrefix: string): readonly ProfileEdgeGroup[] | undefined {
+  if (boundary.kind !== "curve-loop") return undefined;
+  return boundary.segments.map((segment) => ({ role: `${rolePrefix}-${stableEntityToken([segment.entityId])}`, edgeCount: segment.edgeCount, curved: segment.kind === "arc" }));
 }
 
 /** Place a 2D sketch point (millimetres) onto its datum plane in world metres, matching the analytic tessellator's orientation. */
@@ -66,6 +55,21 @@ export interface CreateGeneralSolidRequest {
   readonly color: string;
   /** Optional chamfer or fillet of the extruded prism's vertical edges (extrude only). */
   readonly edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number };
+  /** Profiles that lie inside `profile` and are cut through it (extrude only). */
+  readonly holes?: readonly SketchProfile[];
+}
+
+/** Maps a hole profile to the kernel's hole loop; the id comes from its sketch entities so wall names survive edits. */
+function kernelHole(profile: SketchProfile, plane: SketchPlane): ProfileHole {
+  const points = profilePolygonMm(profile.boundary).map((point) => placeOnPlane(point, plane));
+  const id = stableEntityToken(profile.entityIds);
+  const groups = curveEdgeGroups(profile.boundary, `face.hole-${id}-seg`);
+  return {
+    id,
+    points,
+    ...(profile.boundary.kind === "circle" ? { smoothSides: true } : {}),
+    ...(groups === undefined ? {} : { edgeGroups: groups })
+  };
 }
 
 export type CreateGeneralSolidResult =
@@ -98,8 +102,12 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
   if (request.operation === "extrude") {
     if (request.edge !== undefined) {
       if (request.profile.boundary.kind === "circle") return { ok: false, message: "Chamfer and fillet apply to polygon and rectangle profiles; a circle has no corners to treat." };
+      if (request.profile.boundary.kind === "curve-loop") return { ok: false, message: "Chamfer and fillet are not available for profiles that contain arcs yet." };
       if (!Number.isFinite(request.edge.sizeMm) || request.edge.sizeMm <= 0) return { ok: false, message: `Enter a positive ${request.edge.kind === "chamfer" ? "chamfer distance" : "fillet radius"}.` };
     }
+    const holes = request.holes ?? [];
+    if (holes.length > 0 && request.edge !== undefined) return { ok: false, message: "Chamfer and fillet are not available for a profile with holes yet. Extrude without an edge treatment, or select the outer profile alone." };
+    const outerGroups = curveEdgeGroups(request.profile.boundary, "face.seg");
     try {
       const prism = await evaluateProfilePrism({
         operationId: request.bodyId,
@@ -109,6 +117,8 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
         heightMeters: Math.abs(request.valueMm) / 1000,
         // A circle is one cylindrical face, not 72 planar ones: the faceted loop is only its tessellation.
         ...(request.profile.boundary.kind === "circle" ? { smoothSides: true } : {}),
+        ...(outerGroups === undefined ? {} : { edgeGroups: outerGroups }),
+        ...(holes.length === 0 ? {} : { holes: holes.map((hole) => kernelHole(hole, request.plane)) }),
         ...(request.edge === undefined ? {} : { cornerTreatment: { kind: request.edge.kind, sizeMeters: request.edge.sizeMm / 1000 } })
       });
       if (prism.indices.length < 3) return { ok: false, message: "The profile could not be converted into a solid." };
@@ -127,10 +137,11 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
       };
     } catch (error) {
       const detail = error instanceof Error ? error.message : "";
-      // Treatment errors name the corner and the limit, which the user can act on directly.
-      return { ok: false, message: request.edge !== undefined && /too large|degenerate|straight/u.test(detail) ? detail : "The solid kernel could not extrude this profile." };
+      // The kernel's profile and treatment checks name what to fix (crossing outline, hole outside, corner too large), so show them.
+      return { ok: false, message: detail !== "" ? `The solid kernel could not extrude this profile: ${detail}` : "The solid kernel could not extrude this profile." };
     }
   }
+  if ((request.holes?.length ?? 0) > 0) return { ok: false, message: "Revolve does not support profiles with holes. Select the outer profile alone." };
 
   // A profile with points on both sides of the axis would sweep over itself. Reject it clearly
   // instead of producing an overlapping, unvalidated mesh (CAD tools do the same).

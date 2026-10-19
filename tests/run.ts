@@ -3,6 +3,7 @@ import { exchange3dTests } from "./exchange-3d.test.js";
 import { modelAndCommandTests } from "./model-and-commands.test.js";
 import { revisionBoundaryTests } from "./revision-boundaries.test.js";
 import { sketchTests } from "./sketch.test.js";
+import { sketchRegionTests } from "./sketch-regions.test.js";
 import { workbenchCoreTests } from "./workbench-core.test.js";
 import { workbenchDrawingTests } from "./workbench-drawing.test.js";
 import { workbenchGeometryTests } from "./workbench-geometry.test.js";
@@ -25,6 +26,7 @@ import type { TestCase } from "./test-kit.js";
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
   ...sketchTests,
+  ...sketchRegionTests,
   ...evidenceAndSolidTests,
   ...exchange3dTests,
   ...revisionBoundaryTests,
