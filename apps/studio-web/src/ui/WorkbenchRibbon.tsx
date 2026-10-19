@@ -18,6 +18,7 @@ interface WorkbenchRibbonProps {
   readonly assemblyExplodeMaxMm: number;
   readonly selectedId: string | null;
   readonly onSketchTool: (tool: SketchTool) => void;
+  readonly onCombine: () => void;
   readonly onSketchDimension: () => void;
   readonly sketchEditTool: SketchEditToolId | null;
   readonly sketchShowMovable: boolean;
@@ -93,6 +94,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
   const selectedComponent = props.project.assembly.components.find((component) => component.id === props.selectedId);
   const selectedSketchEntity = props.project.sketch.entities.find((entity) => entity.id === props.selectedId);
   const analyticBodySelected = props.selectedId?.startsWith("part-body:") === true;
+  const generalBodySelected = props.selectedId?.startsWith("general-body:") === true;
   return <section className="command-ribbon" role="toolbar" aria-label={`${props.project.activeWorkspace} command ribbon`}>
     <div className="ribbon-context">
       <small>Active workspace</small>
@@ -178,8 +180,9 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="delete-face" label="Delete Face" hint="recognize + heal" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("delete-face", "Delete Face")} />
       </RibbonGroup>
       <RibbonGroup label="Boolean & trim">
-        <RibbonButton icon="unite" label="Unite" hint="target + tool" disabled={!analyticBodySelected || (props.project.part.previewBodies?.length ?? 0) < 2} onClick={() => props.onPartFeatureAction("unite", "Unite")} />
-        <RibbonButton icon="subtract" label="Subtract" hint="through cylinder" disabled={!analyticBodySelected || (props.project.part.previewBodies?.length ?? 0) < 2} onClick={() => props.onPartFeatureAction("subtract", "Subtract")} />
+        <RibbonButton icon="boolean" label="Combine" hint="join · cut · intersect" disabled={(props.project.part.generalBodies?.length ?? 0) < 2} onClick={props.onCombine} />
+        <RibbonButton icon="unite" label="Unite" hint="target + tool" disabled={!(analyticBodySelected && (props.project.part.previewBodies?.length ?? 0) >= 2) && !(generalBodySelected && (props.project.part.generalBodies?.length ?? 0) >= 2)} onClick={() => props.onPartFeatureAction("unite", "Unite")} />
+        <RibbonButton icon="subtract" label="Subtract" hint="through cylinder" disabled={!(analyticBodySelected && (props.project.part.previewBodies?.length ?? 0) >= 2) && !(generalBodySelected && (props.project.part.generalBodies?.length ?? 0) >= 2)} onClick={() => props.onPartFeatureAction("subtract", "Subtract")} />
         <RibbonButton icon="trim" label="Trim Body" hint="keep 70%" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("trim-body", "Trim Body")} />
       </RibbonGroup>
       <RibbonGroup label="Detail features">

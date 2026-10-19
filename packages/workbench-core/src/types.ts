@@ -292,6 +292,8 @@ export interface GeneralSolidBody {
     readonly faces: readonly { readonly role: string; readonly key: string; readonly areaMm2: number }[];
     /** Face index (into `faces`) for each render triangle, enabling per-face selection and highlight. */
     readonly faceTriangles: readonly number[];
+    /** "kernel" for exact reference-kernel faces; "mesh-boolean" for labelled regions of a tessellated Boolean result. */
+    readonly origin?: "kernel" | "mesh-boolean";
   };
 }
 
@@ -882,6 +884,15 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "delete-part-preview-body"; readonly bodyId: string }
   | { readonly kind: "add-general-body"; readonly body: GeneralSolidBody }
   | { readonly kind: "delete-general-body"; readonly bodyId: string }
+  | {
+      /** Replaces the target (and the tool unless kept) with the Boolean result computed by the caller. */
+      readonly kind: "boolean-general-bodies";
+      readonly targetBodyId: string;
+      readonly toolBodyId: string;
+      readonly mode: "join" | "cut" | "intersect";
+      readonly keepTool: boolean;
+      readonly body: GeneralSolidBody;
+    }
   | { readonly kind: "toggle-general-body-visibility"; readonly bodyId: string }
   | { readonly kind: "set-part-preview-body-transform"; readonly bodyId: string; readonly translationMm: Vec3; readonly rotationDeg: Vec3 }
   | { readonly kind: "set-part-preview-body-size"; readonly bodyId: string; readonly sizeMm: Vec3 }
@@ -980,7 +991,7 @@ export type WorkbenchOperation = OperationEnvelope & (
 export const WORKBENCH_OPERATION_KINDS = [
   "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
   "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
-  "add-general-body", "delete-general-body", "toggle-general-body-visibility",
+  "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility",
   "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
   "isolate-part-preview-body", "set-part-preview-bodies-visibility", "create-part-revolve", "pattern-part-feature", "mirror-part-feature",
   "boolean-part-bodies", "trim-part-body", "set-part-body-edge-treatment", "set-part-body-draft", "set-part-body-shell",

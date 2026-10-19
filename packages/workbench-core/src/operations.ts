@@ -202,6 +202,11 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
     case "add-general-body":
       if (!keys(input, [...common, "body"]) || !validGeneralSolidBodyPayload(input.body)) return invalidOperation("The general body insertion is invalid.");
       break;
+    case "boolean-general-bodies":
+      if (!keys(input, [...common, "targetBodyId", "toolBodyId", "mode", "keepTool", "body"]) || !stableId(input.targetBodyId) || !stableId(input.toolBodyId)
+        || input.targetBodyId === input.toolBodyId || !["join", "cut", "intersect"].includes(String(input.mode)) || typeof input.keepTool !== "boolean"
+        || !validGeneralSolidBodyPayload(input.body)) return invalidOperation("The general-body Boolean payload is invalid.");
+      break;
     case "delete-general-body":
     case "toggle-general-body-visibility":
       if (!keys(input, [...common, "bodyId"]) || !stableId(input.bodyId)) return invalidOperation("The general body ID is invalid.");
@@ -564,6 +569,19 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       if (current.length >= 64) return failure("RESOURCE_LIMIT", "The part reached its general mesh-body limit.", [project.part.id], "Delete a general body before adding another.");
       if (current.some((body) => body.id === operation.body.id)) return invalidOperation("The general body ID already exists.");
       return changed({ ...project, part: { ...project.part, generalBodies: [...current, operation.body] } }, [operation.body.id], `Created ${operation.body.name}.`);
+    }
+    case "boolean-general-bodies": {
+      const current = project.part.generalBodies ?? [];
+      const target = current.find((body) => body.id === operation.targetBodyId);
+      const tool = current.find((body) => body.id === operation.toolBodyId);
+      if (target === undefined || tool === undefined) return broken(target === undefined ? operation.targetBodyId : operation.toolBodyId, "A general body for the Boolean does not exist.");
+      const survivors = current.filter((body) => body.id !== target.id && (operation.keepTool || body.id !== tool.id));
+      if (survivors.some((body) => body.id === operation.body.id)) return invalidOperation("The Boolean result body ID already exists.");
+      return changed(
+        { ...project, part: { ...project.part, generalBodies: [...survivors, operation.body] } },
+        [target.id, tool.id, operation.body.id],
+        `${operation.mode === "join" ? "Joined" : operation.mode === "cut" ? "Cut" : "Intersected"} ${target.name} ${operation.mode === "cut" ? "with" : "and"} ${tool.name} into ${operation.body.name}.`
+      );
     }
     case "delete-general-body": {
       const current = project.part.generalBodies ?? [];

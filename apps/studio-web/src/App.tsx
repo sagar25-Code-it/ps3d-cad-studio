@@ -61,7 +61,9 @@ import {
   type ExchangeUnit
 } from "../../../packages/exchange-3d/src/index.js";
 import { detectSketchProfiles, resolveProfileRegion, resolveQualifiedExtrusion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
-import { createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
+import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
+import { CombineDialog, type CombineChoice } from "./ui/CombineDialog.js";
+import type { BooleanMode } from "../../../packages/workbench-geometry/src/index.js";
 import {
   ThreeViewportAdapter,
   viewAnglesForOrientation,
@@ -272,6 +274,7 @@ export function App(): React.JSX.Element {
   const activeImportRef = useRef<ExchangeImportResult | undefined>(undefined);
   const [sketchTool, setSketchTool] = useState<SketchTool>("select");
   const [sketchCancelVersion, setSketchCancelVersion] = useState(0);
+  const [combineRequest, setCombineRequest] = useState<{ readonly targetId: string | undefined; readonly mode: BooleanMode } | null>(null);
   const [sketchEditTool, setSketchEditTool] = useState<SketchEditToolId | null>(null);
   const [sketchShowMovable, setSketchShowMovable] = useState(false);
   const [sketchCheckOpen, setSketchCheckOpen] = useState(false);
@@ -812,9 +815,29 @@ export function App(): React.JSX.Element {
     if (copies.length > 0 && applyProjectOperation({ kind: "add-part-preview-bodies", bodies: copies })) setSelectedId(copies.at(-1)!.id);
   };
 
+  const applyCombine = async (choice: CombineChoice): Promise<string | undefined> => {
+    const bodies = projectRef.current.part.generalBodies ?? [];
+    const target = bodies.find((body) => body.id === choice.targetId);
+    const tool = bodies.find((body) => body.id === choice.toolId);
+    if (target === undefined || tool === undefined) return "Choose two existing bodies.";
+    const label = choice.mode === "join" ? "Join" : choice.mode === "cut" ? "Cut" : "Intersect";
+    const result = await combineGeneralBodies({ target, tool, mode: choice.mode, bodyId: `general-body:${crypto.randomUUID()}`, name: `${label} ${target.name}${choice.mode === "cut" ? " − " : " + "}${tool.name}`.slice(0, 120) });
+    if (!result.ok) return result.message;
+    if (!applyProjectOperation({ kind: "boolean-general-bodies", targetBodyId: target.id, toolBodyId: tool.id, mode: choice.mode, keepTool: choice.keepTool, body: result.body })) return "The project rejected the Boolean result.";
+    setSelectedId(result.body.id);
+    setCombineRequest(null);
+    return undefined;
+  };
+
   const runPartFeatureAction = (operation: Extract<CadCommandRecord["action"], { kind: "part-feature-action" }>["operation"], commandName: string, bodyIdOverride: string | null = selectedId): void => {
     const current = projectRef.current;
     const bodies = current.part.previewBodies ?? [];
+    if ((operation === "unite" || operation === "subtract") && (current.part.generalBodies ?? []).some((body) => body.id === bodyIdOverride)) {
+      // Solids from Extrude and Revolve combine through the mesh Boolean dialog, where the tool is chosen explicitly.
+      if ((current.part.generalBodies ?? []).length < 2) { setStatus("ready"); setStatusText(`${commandName} needs a second solid body. Create another with Make solid first.`); return; }
+      setCombineRequest({ targetId: bodyIdOverride ?? undefined, mode: operation === "unite" ? "join" : "cut" });
+      return;
+    }
     if (operation === "update-model") {
       applyProjectOperation({ kind: "update-part-model" });
       return;
@@ -1348,7 +1371,7 @@ export function App(): React.JSX.Element {
   const extrudeSketchProfiles = async (profileIds: readonly string[], distanceMm: number, operation: SketchExtrudeOperation): Promise<void> => {
     if (operation !== "new-body" && operation !== "new-component") {
       setStatus("error");
-      setStatusText("Join, Cut and Intersect require persistent B-rep topology and an overlap preview; no Boolean was attempted.");
+      setStatusText("Create the solid with Make solid, then join, cut or intersect it with Combine in the Part workspace; no Boolean was attempted here.");
       return;
     }
     const selectedCircleProfiles = detectSketchProfiles(projectRef.current.sketch).filter((profile) => profileIds.includes(profile.id));
@@ -2294,6 +2317,7 @@ export function App(): React.JSX.Element {
       assemblyExplodeMaxMm={assemblyExplodeMaxMm}
       selectedId={selectedId}
       onSketchTool={(tool) => activateSketchTool(tool, "in the top ribbon")}
+      onCombine={() => { const bodies = projectRef.current.part.generalBodies ?? []; if (bodies.length < 2) { setStatusText("Combine needs two solid bodies. Create them with Make solid in the Sketch workspace."); return; } setCombineRequest({ targetId: bodies.some((body) => body.id === selectedId) ? selectedId ?? undefined : undefined, mode: "join" }); }}
       onSketchDimension={() => activateSketchDimension("in the top ribbon")}
       sketchEditTool={sketchEditTool}
       sketchShowMovable={sketchShowMovable}
@@ -2435,6 +2459,7 @@ export function App(): React.JSX.Element {
           : <p>The current assembly has {project.assembly.electricalLinks?.length ?? 0} ECAD-linked packages and {project.assembly.electricalRoutes?.length ?? 0} conductor paths. Replacing it with <strong>{pendingAssemblyTemplate.replaceAll("-", " ")}</strong> removes that physical trace from Assembly, while preserving the source schematic. The replacement is one undoable revision.</p>}</div><footer><button data-dialog-initial-focus onClick={() => setPendingAssemblyTemplate(undefined)}>Cancel</button><button className="danger" onClick={() => { const template = pendingAssemblyTemplate; setPendingAssemblyTemplate(undefined); applyProjectOperation({ kind: "apply-assembly-template", template }); }}>{project.assembly.electromechanicalSource === undefined ? "Replace assembly" : "Break link and replace"}</button></footer></section></div>}
     {pendingElectricalTemplate !== undefined && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog compact" role="dialog" aria-modal="true" aria-labelledby="electrical-template-replacement-title" aria-describedby="electrical-template-replacement-description"><header><div><span>SCHEMATIC REPLACEMENT REVIEW</span><h2 id="electrical-template-replacement-title">Replace current devices and nets?</h2></div><button onClick={cancelElectricalTemplateReview} aria-label="Close schematic replacement review">×</button></header><div className="engineering-review-copy" id="electrical-template-replacement-description"><p>Generating <strong>{pendingElectricalTemplate.replaceAll("-", " ")}</strong> replaces all {project.electrical.components.length} current devices and {project.electrical.nets.length} current nets, including local edits. The replacement is one undoable project revision.</p></div><footer><button data-dialog-initial-focus onClick={cancelElectricalTemplateReview}>Cancel</button><button className="danger" onClick={() => { const template = pendingElectricalTemplate; setPendingElectricalTemplate(undefined); if (applyProjectOperation({ kind: "apply-electrical-template", template })) setSelectedId(null); }}>Replace and generate</button></footer></section></div>}
     {pendingVehicleTemplate !== undefined && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog compact" role="dialog" aria-modal="true" aria-labelledby="vehicle-template-replacement-title" aria-describedby="vehicle-template-replacement-description"><header><div><span>VEHICLE TOPOLOGY REPLACEMENT REVIEW</span><h2 id="vehicle-template-replacement-title">Replace the current engineering study?</h2></div><button onClick={() => { setPendingVehicleTemplate(undefined); setStatusText("Vehicle replacement cancelled; the current topology and inputs were preserved."); }} aria-label="Close vehicle topology replacement review">×</button></header><div className="engineering-review-copy" id="vehicle-template-replacement-description"><p>Replacing <strong>{project.vehicle.template.replaceAll("-", " ")}</strong> with <strong>{pendingVehicleTemplate.replaceAll("-", " ")}</strong> resets all {Object.keys(project.vehicle.parameters).length} vehicle inputs, the suspension state, evidence-status fields, and layer visibility to the target generic template. The current {vehiclePreview.geometry.hardpoints.length}-hardpoint graph is removed. The replacement is one undoable project revision.</p><p>The new package remains illustrative and carries the same do-not-fabricate, roadworthiness, and homologation boundaries.</p></div><footer><button data-dialog-initial-focus onClick={() => { setPendingVehicleTemplate(undefined); setStatusText("Vehicle replacement cancelled; the current topology and inputs were preserved."); }}>Cancel</button><button className="danger" onClick={() => { const template = pendingVehicleTemplate; setPendingVehicleTemplate(undefined); if (applyProjectOperation({ kind: "apply-vehicle-template", template })) setSelectedId(null); }}>Replace topology and inputs</button></footer></section></div>}
+    {combineRequest !== null && <CombineDialog bodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name, visible: body.visible }))} initialTargetId={combineRequest.targetId} initialMode={combineRequest.mode} onApply={applyCombine} onCancel={() => setCombineRequest(null)} />}
     <CommandPalette open={paletteOpen} workspace={project.activeWorkspace} onClose={() => setPaletteOpen(false)} onCommand={executeCadCommand} />
     {shortcutsOpen && <div className="shortcuts-overlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={() => setShortcutsOpen(false)}>
       <div className="shortcuts-panel" onClick={(event) => event.stopPropagation()}>

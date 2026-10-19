@@ -76,8 +76,8 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
       />}
     </section>
     {selectedGeneralBody?.brep !== undefined && <section className="inspector-section named-faces-card">
-      <header><strong>Named faces</strong><span>{selectedGeneralBody.brep.faces.length} faces · B-rep</span></header>
-      <p>Stable, lineage-anchored faces from the B-rep kernel. Select one to highlight it in the viewport; the name survives dimensional rebuilds.</p>
+      <header><strong>Named faces</strong><span>{selectedGeneralBody.brep.faces.length} faces · {selectedGeneralBody.brep.origin === "mesh-boolean" ? "mesh Boolean regions" : "B-rep"}</span></header>
+      <p>{selectedGeneralBody.brep.origin === "mesh-boolean" ? "Labelled regions of a tessellated Boolean result, named target.<face> or tool.<face> after the source faces. This is not an exact B-rep. Select one to highlight it." : "Stable, lineage-anchored faces from the B-rep kernel. Select one to highlight it in the viewport; the name survives dimensional rebuilds."}</p>
       <div className="named-face-list" role="listbox" aria-label="Named faces">
         {selectedGeneralBody.brep.faces.map((face, index) => <button
           key={face.key}

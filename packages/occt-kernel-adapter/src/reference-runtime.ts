@@ -194,6 +194,11 @@ async function buildFaceEntities(context: FaceNamingContext, faces: readonly Fac
   return entities;
 }
 
+/** The stable key the kernel derives for a face role of an operation, so callers outside the kernel name faces the same way. */
+export async function stableFaceKey(operationId: string, role: string): Promise<string> {
+  return `face:${(await kernelSha256({ operationId, role })).slice(0, 40)}`;
+}
+
 /** Lowercases and reduces a string to the stable-identifier alphabet [a-z0-9._-], starting on an alphanumeric. */
 function sanitizeIdentifier(value: string): string {
   const reduced = value.toLowerCase().replace(/[^a-z0-9._-]/gu, "-").replace(/^[^a-z0-9]+/u, "");

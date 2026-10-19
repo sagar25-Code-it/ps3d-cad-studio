@@ -1,6 +1,6 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { revolveAxisRelation, tessellateRevolve, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
-import { evaluateProfilePrism, evaluateProfileRevolution } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
+import { booleanMeshes, revolveAxisRelation, tessellateRevolve, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { evaluateProfilePrism, evaluateProfileRevolution, stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { profileOutlineMm, stableEntityToken, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 
@@ -190,4 +190,68 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     return { ok: false, message: "The profile could not be converted into a solid." };
   }
   return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
+}
+
+export interface CombineGeneralBodiesRequest {
+  readonly target: GeneralSolidBody;
+  readonly tool: GeneralSolidBody;
+  readonly mode: BooleanMode;
+  readonly bodyId: string;
+  readonly name: string;
+}
+
+/**
+ * Join, cut or intersect two general bodies with the pure-TypeScript mesh Boolean.
+ *
+ * The result is a tessellated solid, not an exact B-rep: its faces are labelled regions named
+ * `target.<role>` and `tool.<role>` after the source faces they came from, so a face keeps its name as long as
+ * the operands keep theirs. A result that is not a clean closed solid is refused and nothing changes.
+ */
+export async function combineGeneralBodies(request: CombineGeneralBodiesRequest): Promise<CreateGeneralSolidResult> {
+  const input = (body: GeneralSolidBody): { positionsMm: readonly number[]; indices: readonly number[]; faceTriangles?: readonly number[] } => ({
+    positionsMm: body.positionsMm,
+    indices: body.indices,
+    ...(body.brep === undefined ? {} : { faceTriangles: body.brep.faceTriangles })
+  });
+  const combined = booleanMeshes(input(request.target), input(request.tool), request.mode);
+  if (!combined.ok) return { ok: false, message: combined.message };
+  const { positionsMm, indices, origins } = combined.value;
+  if (positionsMm.length > 300_000 || indices.length > 300_000) return { ok: false, message: "The result has too many triangles to store. Simplify one of the bodies and try again." };
+
+  const sourceRole = (source: "target" | "tool", face: number): string => {
+    const body = source === "target" ? request.target : request.tool;
+    return `${source}.${face < 0 ? "mesh" : body.brep?.faces[face]?.role ?? `face-${face}`}`;
+  };
+  const roles = [...new Set(origins.map((origin) => sourceRole(origin.source, origin.face)))].sort();
+  const faceIndex = new Map(roles.map((role, index) => [role, index]));
+  const faceTriangles = origins.map((origin) => faceIndex.get(sourceRole(origin.source, origin.face))!);
+  const areas = new Array<number>(roles.length).fill(0);
+  for (let triangle = 0; triangle < indices.length / 3; triangle += 1) {
+    const [a, b, c] = [indices[triangle * 3]! * 3, indices[triangle * 3 + 1]! * 3, indices[triangle * 3 + 2]! * 3];
+    const ux = positionsMm[b]! - positionsMm[a]!; const uy = positionsMm[b + 1]! - positionsMm[a + 1]!; const uz = positionsMm[b + 2]! - positionsMm[a + 2]!;
+    const vx = positionsMm[c]! - positionsMm[a]!; const vy = positionsMm[c + 1]! - positionsMm[a + 1]!; const vz = positionsMm[c + 2]! - positionsMm[a + 2]!;
+    areas[faceTriangles[triangle]!]! += 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+  }
+  const edges = new Set<string>();
+  for (let triangle = 0; triangle < indices.length; triangle += 3) {
+    for (const [from, to] of [[indices[triangle]!, indices[triangle + 1]!], [indices[triangle + 1]!, indices[triangle + 2]!], [indices[triangle + 2]!, indices[triangle]!]] as const) edges.add(from < to ? `${from},${to}` : `${to},${from}`);
+  }
+  const faces = await Promise.all(roles.map(async (role, index) => ({ role, key: await stableFaceKey(request.bodyId, role), areaMm2: areas[index]! })));
+  return {
+    ok: true,
+    body: {
+      id: request.bodyId,
+      name: request.name,
+      visible: true,
+      color: request.target.color,
+      positionsMm: [...positionsMm],
+      indices: [...indices],
+      brep: {
+        topology: { vertices: positionsMm.length / 3, edges: edges.size, faces: roles.length },
+        faces,
+        faceTriangles,
+        origin: "mesh-boolean"
+      }
+    }
+  };
 }
