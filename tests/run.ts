@@ -4,6 +4,7 @@ import { modelAndCommandTests } from "./model-and-commands.test.js";
 import { revisionBoundaryTests } from "./revision-boundaries.test.js";
 import { sketchTests } from "./sketch.test.js";
 import { sketchRegionTests } from "./sketch-regions.test.js";
+import { sketchSolverTests } from "./sketch-solver.test.js";
 import { workbenchCoreTests } from "./workbench-core.test.js";
 import { workbenchDrawingTests } from "./workbench-drawing.test.js";
 import { workbenchGeometryTests } from "./workbench-geometry.test.js";
@@ -27,6 +28,7 @@ const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
   ...sketchTests,
   ...sketchRegionTests,
+  ...sketchSolverTests,
   ...evidenceAndSolidTests,
   ...exchange3dTests,
   ...revisionBoundaryTests,

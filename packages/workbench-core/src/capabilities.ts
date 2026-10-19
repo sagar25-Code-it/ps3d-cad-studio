@@ -2,7 +2,7 @@ import type { CapabilityRecord } from "./types.js";
 
 export const WORKBENCH_CAPABILITIES: readonly CapabilityRecord[] = [
   { id: "capability:sketch-entities", workspace: "sketch", name: "Line, rectangle, circle, arc", level: "preview", summary: "Bounded XY entities with snapping and stable IDs." },
-  { id: "capability:sketch-constraints", workspace: "sketch", name: "Constraint diagnostics", level: "preview", summary: "Supported constraint records and explainable DOF estimate." },
+  { id: "capability:sketch-constraints", workspace: "sketch", name: "Constraint solving", level: "preview", summary: "A small analytic solver enforces horizontal, vertical, parallel, perpendicular, collinear, tangent, concentric, equal, symmetric and fixed relations plus radius and length dimensions on lines, circles and arcs (rectangles are rigid); other relations are recorded with a reason. DOF is an explainable estimate." },
   { id: "capability:sketch-dimensions", workspace: "sketch", name: "Driving sketch dimensions", level: "preview", summary: "Atomic bounded line-length, rectangle-width/height, and circle-radius edits with visible dimension records." },
   { id: "capability:bracket-solid", workspace: "part", name: "Centered-bore solid", level: "qualified", summary: "Worker-validated closed manifold mesh-solid in the published envelope." },
   { id: "capability:part-depth", workspace: "part", name: "Bounded analytic features", level: "preview", summary: "Closed-mesh revolve, pattern, mirror, aligned unite, through-cylinder subtract, trim, blend, chamfer, draft, shell, and planar face edits with revisioned precondition diagnostics." },

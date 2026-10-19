@@ -238,7 +238,7 @@ function validateEntity(value: unknown): value is SketchEntity {
 }
 
 function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): value is WorkbenchSketchConstraint {
-  if (!isRecord(value) || !stableId(value.id) || !Array.isArray(value.entityIds) || value.entityIds.length < 1 || value.entityIds.length > 2
+  if (!isRecord(value) || !stableId(value.id) || !Array.isArray(value.entityIds) || value.entityIds.length < 1 || value.entityIds.length > (value.kind === "symmetry" ? 3 : 2)
     || value.entityIds.some((id) => typeof id !== "string" || !entityIds.has(id))) return false;
   const kinds = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed"];
   if (!kinds.includes(String(value.kind))) return false;

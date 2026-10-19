@@ -264,16 +264,22 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const constrain = (kind: SketchConstraintKind): void => {
     if (selectedEntities.length === 0) return;
     const pairKinds: readonly SketchConstraintKind[] = ["parallel", "perpendicular", "tangent", "collinear", "coincident", "concentric", "equal", "midpoint", "symmetry"];
-    const entityIds = pairKinds.includes(kind) ? selectionIds.slice(-2) : [selectedEntities.at(-1)!.id];
-    if (pairKinds.includes(kind) && entityIds.length !== 2) {
-      props.onMessage(`${kind} needs two entities. Shift-click the second entity.`);
+    // Symmetric takes two entities and the axis line last; every other pair relation takes the last two selected.
+    const needed = kind === "symmetry" ? 3 : 2;
+    const entityIds = pairKinds.includes(kind) ? selectionIds.slice(-needed) : [selectedEntities.at(-1)!.id];
+    if (pairKinds.includes(kind) && entityIds.length !== needed) {
+      props.onMessage(kind === "symmetry" ? "Symmetric needs three entities: the two to mirror, then the axis line last. Shift-click to add them." : `${kind} needs two entities. Shift-click the second entity.`);
       return;
     }
     props.onAddConstraint({ id: `constraint:user-${crypto.randomUUID()}`, kind, entityIds });
   };
 
   const twoLines = selectedEntities.length === 2 && selectedEntities.every((entity) => entity.kind === "line");
-  const twoCircles = selectedEntities.length === 2 && selectedEntities.every((entity) => entity.kind === "circle");
+  const isRadial = (entity: SketchEntity): boolean => entity.kind === "circle" || entity.kind === "arc";
+  const twoCircles = selectedEntities.length === 2 && selectedEntities.every(isRadial);
+  // The solver handles a line against a circle or arc, or two circles or arcs; anything else would only be recorded.
+  const tangentPair = selectedEntities.length === 2 && ((selectedEntities.some((entity) => entity.kind === "line") && selectedEntities.some(isRadial)) || selectedEntities.every(isRadial));
+  const symmetricTriple = selectedEntities.length === 3 && selectedEntities[2]!.kind === "line" && ((selectedEntities[0]!.kind === "line" && selectedEntities[1]!.kind === "line") || (selectedEntities[0]!.kind === "circle" && selectedEntities[1]!.kind === "circle"));
   const twoCompatible = selectedEntities.length === 2 && selectedEntities[0]!.kind === selectedEntities[1]!.kind;
 
   const handleCanvasPointerDown = (event: React.PointerEvent<SVGSVGElement>): void => {
@@ -422,7 +428,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             <button disabled={!twoLines} onClick={() => constrain("collinear")}><CommandIcon name="collinear" />Collinear</button>
             <button disabled={!twoCircles} onClick={() => constrain("concentric")}><CommandIcon name="concentric" />Concentric</button>
             <button disabled={!twoCompatible} onClick={() => constrain("equal")}><CommandIcon name="equal" />Equal</button>
-            <button disabled={selectedEntities.length !== 2} onClick={() => constrain("tangent")}><CommandIcon name="tangent" />Tangent</button>
+            <button disabled={!tangentPair} title="Line and circle/arc, or two circles/arcs. The second selection is adjusted." onClick={() => constrain("tangent")}><CommandIcon name="tangent" />Tangent</button>
+            <button disabled={!symmetricTriple} title="Select two lines or two circles, then the axis line last. The second is mirrored onto the first." onClick={() => constrain("symmetry")}><CommandIcon name="mirror" />Symmetric</button>
             <button onClick={() => constrain("fixed")}><CommandIcon name="fixed" />Fix primary</button>
             <button onClick={() => props.onToggleConstruction(selectedEntity.id)}><CommandIcon name={selectedEntity.construction ? "rectangle" : "construction"} />{selectedEntity.construction ? "Profile" : "Construction"}</button>
             <button onClick={() => props.onToggleVisibility(selectedEntity.id)}><CommandIcon name={selectedEntity.visible === false ? "eye" : "eye-off"} />{selectedEntity.visible === false ? "Show entity" : "Hide entity"}</button>

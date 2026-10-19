@@ -109,7 +109,7 @@ review order, repair queue, scoring rules, and release boundary are in
 
 Only the centered-bore part path is marked `qualified`. All other functional
 workbench capabilities are marked `preview`. Exact general B-rep/NURBS,
-freeform Boolean and constraint solvers, persistent arbitrary-face naming, trimming/sewing,
+freeform Boolean and a general nonlinear constraint solver, persistent arbitrary-face naming, trimming/sewing,
 STEP/IGES/DWG/DXF exact conversion, native proprietary CAD, production drawing
 PDF certification, shared cloud CAD-document collaboration, automatic electrical sizing,
 protection coordination, arc-flash/compliance analysis,

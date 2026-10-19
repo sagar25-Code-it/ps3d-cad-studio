@@ -22,6 +22,7 @@ import { createBessContainerAssembly, createCargoContainerAssembly, createElectr
 import { createElectromechanicalAssembly, electricalSignature } from "./electromechanical.js";
 import { createVehicleTemplate, vehicleHardPoints, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
+import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
 import {
   booleanPartBodies,
   createRevolvedPartBody,
@@ -435,9 +436,18 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
         }
       }, [operation.entityId, ...removedConstraints.map((constraint) => constraint.id)], `Deleted ${operation.entityId} and ${removedConstraints.length} dependent constraint(s).`);
     }
-    case "add-sketch-constraint":
+    case "add-sketch-constraint": {
       if (project.sketch.constraints.some((constraint) => constraint.id === operation.constraint.id)) return invalidOperation("The sketch constraint ID already exists.");
-      return changed({ ...project, sketch: { ...project.sketch, constraints: [...project.sketch.constraints, operation.constraint] } }, [operation.constraint.id], `Added ${operation.constraint.kind} constraint.`);
+      const withConstraint = { ...project.sketch, constraints: [...project.sketch.constraints, operation.constraint] };
+      // Enforce the relation on the geometry it touches; a conflict rejects the whole operation.
+      const solved = solveLiveSketch(withConstraint, operation.constraint.entityIds);
+      if (!solved.ok) return solveFailure(solved);
+      return changed(
+        { ...project, sketch: { ...withConstraint, entities: solved.entities } },
+        [operation.constraint.id, ...solved.movedIds],
+        `Added ${operation.constraint.kind} constraint.${solveSummary(solved)}`
+      );
+    }
     case "delete-sketch-constraint":
       if (!project.sketch.constraints.some((constraint) => constraint.id === operation.constraintId)) return broken(operation.constraintId, "The sketch constraint does not exist.");
       return changed({ ...project, sketch: { ...project.sketch, constraints: project.sketch.constraints.filter((constraint) => constraint.id !== operation.constraintId) } }, [operation.constraintId], `Deleted constraint ${operation.constraintId}.`);
@@ -466,10 +476,15 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const constraints = existing === undefined
         ? [...project.sketch.constraints, dimensionConstraint]
         : project.sketch.constraints.map((constraint) => constraint.id === existing.id ? dimensionConstraint : constraint);
-      return changed({
-        ...project,
-        sketch: { ...project.sketch, entities: project.sketch.entities.map((entity) => entity.id === target.id ? resized : entity), constraints }
-      }, [target.id, dimensionId], `Set ${operation.dimension} of ${target.id} to ${formatNumber(operation.valueMm)} mm.`);
+      const resizedSketch = { ...project.sketch, entities: project.sketch.entities.map((entity) => entity.id === target.id ? resized : entity), constraints };
+      // Relations that touch the resized entity are re-enforced (for example a tangent circle follows its line).
+      const solvedDimension = solveLiveSketch(resizedSketch, [target.id]);
+      if (!solvedDimension.ok) return solveFailure(solvedDimension);
+      return changed(
+        { ...project, sketch: { ...resizedSketch, entities: solvedDimension.entities } },
+        [target.id, dimensionId, ...solvedDimension.movedIds.filter((id) => id !== target.id)],
+        `Set ${operation.dimension} of ${target.id} to ${formatNumber(operation.valueMm)} mm.${solveSummary(solvedDimension)}`
+      );
     }
     case "toggle-sketch-construction": {
       const target = project.sketch.entities.find((entity) => entity.id === operation.entityId);
@@ -940,6 +955,19 @@ function resizeSketchEntity(entity: SketchEntity, dimension: "length" | "width" 
   if (entity.kind === "rectangle" && dimension === "width") return { ...entity, widthMm: valueMm };
   if (entity.kind === "rectangle" && dimension === "height") return { ...entity, heightMm: valueMm };
   return undefined;
+}
+
+/** Rejects an operation whose sketch constraints cannot all hold, leaving the sketch untouched. */
+function solveFailure(report: Extract<LiveSketchSolveReport, { readonly ok: false }>): WorkbenchResult<never> {
+  return failure("CONSTRAINT_CONFLICT", report.message, report.relatedIds, report.recovery);
+}
+
+/** Status suffix describing what a constraint solve changed and what it only recorded. */
+function solveSummary(report: Extract<LiveSketchSolveReport, { readonly ok: true }>): string {
+  const parts: string[] = [];
+  if (report.notes.length > 0) parts.push(report.notes.join("; "));
+  if (report.unsolved.length > 0) parts.push(`Recorded, not solved: ${report.unsolved.map((entry) => entry.reason).join(" ")}`);
+  return parts.length === 0 ? "" : ` ${parts.join(". ")}.`;
 }
 
 function changed(project: WorkbenchProject, changedIds: readonly string[], summary: string): WorkbenchResult<{ readonly project: WorkbenchProject; readonly changedIds: readonly string[]; readonly summary: string }> {
