@@ -1,0 +1,7 @@
+# Store and check out text files with LF on every platform.
+#
+# The repository's release gates hash raw file bytes (scripts/verify-generated-source-set.mjs and
+# scripts/generate-sbom.mjs --check), and CI runs on Linux. Without this, a Windows checkout with
+# core.autocrlf=true writes CRLF, so `pnpm build` and `pnpm test` fail locally even though the
+# committed content is correct. Binary files are detected automatically and left untouched.
+* text=auto eol=lf
