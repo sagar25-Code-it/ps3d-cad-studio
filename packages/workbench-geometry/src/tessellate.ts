@@ -28,6 +28,28 @@ const PLANE_ROTATION_DEG: Record<TessellatePlane, Vec3> = {
 
 const REVOLVE_SEGMENTS = 64;
 
+/** How a profile sits relative to the revolve axis (the sketch Y axis, x = 0). */
+export type RevolveAxisRelation = "one-side" | "touches" | "crosses";
+
+/**
+ * Classifies a profile against the revolve axis. A profile entirely on one side revolves into a
+ * solid; one that only touches the axis (an edge lying on it) is also valid and yields a solid
+ * with no hole; one that has points strictly on both sides would sweep over itself, so it is
+ * not a valid revolve profile.
+ */
+export function revolveAxisRelation(polygonMm: readonly Point2[], toleranceMm = 1e-6): RevolveAxisRelation {
+  let hasPositive = false;
+  let hasNegative = false;
+  let hasOnAxis = false;
+  for (const [x] of polygonMm) {
+    if (x > toleranceMm) hasPositive = true;
+    else if (x < -toleranceMm) hasNegative = true;
+    else hasOnAxis = true;
+  }
+  if (hasPositive && hasNegative) return "crosses";
+  return hasOnAxis ? "touches" : "one-side";
+}
+
 /** Extrude a closed profile polygon (millimetres) by `heightMm` along the plane normal. */
 export function tessellateExtrude(polygonMm: readonly Point2[], heightMm: number, plane: TessellatePlane): TessellatedMesh {
   const polygon = sanitizePolygon(polygonMm);

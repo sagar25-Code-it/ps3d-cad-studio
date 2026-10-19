@@ -1010,3 +1010,36 @@ test("corner treatment can target a subset, rejects oversized settings, and norm
   const volume = meshVolume(Float64Array.from(reversed.positionsMeters), Uint32Array.from(reversed.indices));
   assert.ok(Math.abs(volume - 200e-6 * 0.005) < 1e-12, `clockwise loop volume ${volume}`);
 });
+
+test("a circular profile extrudes into one cylindrical face with cylinder topology", async () => {
+  const { evaluateProfilePrism } = await import("../src/index.js");
+  const radius = 0.005;
+  const height = 0.01;
+  const circle = Array.from({ length: 72 }, (_, step): readonly [number, number, number] => {
+    const angle = (2 * Math.PI * step) / 72;
+    return [radius * Math.cos(angle), radius * Math.sin(angle), 0];
+  });
+  const base = { operationId: "operation:pin", semanticId: "body:pin", profilePointsMeters: circle, normal: [0, 0, 1] as const, heightMeters: height };
+
+  const smooth = await evaluateProfilePrism({ ...base, smoothSides: true });
+  assert.deepEqual(smooth.topology, { vertices: 2, edges: 3, wires: 3, faces: 3, shells: 1, solids: 1, components: 1, closed: true, manifold: true });
+  assert.deepEqual(smooth.faces.map((face) => face.role).sort(), ["face.cap-bottom", "face.cap-top", "face.lateral"]);
+  assert.equal(smooth.faceTriangles.length * 3, smooth.indices.length);
+  assert.ok(smooth.faceTriangles.every((face) => face >= 0 && face < 3), "every triangle maps to one of the three faces");
+
+  const exactVolume = Math.PI * radius * radius * height;
+  const volume = meshVolume(Float64Array.from(smooth.positionsMeters), Uint32Array.from(smooth.indices));
+  assert.ok(volume < exactVolume && volume > exactVolume * 0.995, `cylinder volume ${volume} vs ${exactVolume}`);
+  const lateral = smooth.faces.find((face) => face.role === "face.lateral")!.areaSquareMeters;
+  assert.ok(lateral < 2 * Math.PI * radius * height && lateral > 2 * Math.PI * radius * height * 0.995, `lateral area ${lateral}`);
+
+  // The default (non-smooth) path is unchanged: one planar face per segment.
+  const faceted = await evaluateProfilePrism(base);
+  assert.equal(faceted.topology.faces, 74);
+
+  // The lateral face is stable across a size change, and the caps keep their names.
+  const bigger = await evaluateProfilePrism({ ...base, profilePointsMeters: circle.map(([x, y]) => [x * 2, y * 2, 0] as const), smoothSides: true });
+  assert.equal(smooth.faces.find((face) => face.role === "face.lateral")!.key, bigger.faces.find((face) => face.role === "face.lateral")!.key, "the lateral key survives a resize");
+
+  await assert.rejects(evaluateProfilePrism({ ...base, smoothSides: true, cornerTreatment: { kind: "fillet", sizeMeters: 0.001 } }), /no corners/u);
+});

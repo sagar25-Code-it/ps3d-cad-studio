@@ -1,5 +1,5 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { tessellateRevolve, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { revolveAxisRelation, tessellateRevolve, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism, evaluateProfileRevolution } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import type { SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 
@@ -107,6 +107,8 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
         profilePointsMeters: polygonMm.map((point) => placeOnPlane(point, request.plane)),
         normal: planeNormal(request.plane),
         heightMeters: Math.abs(request.valueMm) / 1000,
+        // A circle is one cylindrical face, not 72 planar ones: the faceted loop is only its tessellation.
+        ...(request.profile.boundary.kind === "circle" ? { smoothSides: true } : {}),
         ...(request.edge === undefined ? {} : { cornerTreatment: { kind: request.edge.kind, sizeMeters: request.edge.sizeMm / 1000 } })
       });
       if (prism.indices.length < 3) return { ok: false, message: "The profile could not be converted into a solid." };
@@ -130,8 +132,14 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     }
   }
 
-  // Revolve through the B-rep kernel when the profile stays on one side of the axis;
-  // otherwise fall back to the analytic tessellator (which tolerates axis-crossing profiles).
+  // A profile with points on both sides of the axis would sweep over itself. Reject it clearly
+  // instead of producing an overlapping, unvalidated mesh (CAD tools do the same).
+  if (revolveAxisRelation(polygonMm) === "crosses") {
+    return { ok: false, message: "The profile crosses the revolve axis (the sketch Y axis), so it would overlap itself. Draw the profile entirely on one side of the Y axis, or move it so it only touches the axis." };
+  }
+
+  // Revolve through the B-rep kernel when the profile stays strictly on one side of the axis;
+  // a profile that only touches the axis (or sits on the negative side) uses the analytic tessellator.
   const profilePoints = polygonMm.map((point) => [point[0] / 1000, point[1] / 1000] as const);
   if (profilePoints.every((point) => point[0] > 1e-9)) {
     try {

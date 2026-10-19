@@ -331,7 +331,8 @@ function prismGeometry(points: readonly Vec3[], normal: Vec3, height: number, gr
       area: groupArea,
       bounds: boundsOf(corners),
       normal: sideNormal(points[middleEdge]!, points[(middleEdge + 1) % count]!, normal),
-      adjacentRoles: ["face.cap-bottom", "face.cap-top", sideRoles[(groupIndex + groupCount - 1) % groupCount]!, sideRoles[(groupIndex + 1) % groupCount]!]
+      // A smooth single-face loop has no side neighbours, and a two-face loop would list the same neighbour twice.
+      adjacentRoles: [...new Set(["face.cap-bottom", "face.cap-top", sideRoles[(groupIndex + groupCount - 1) % groupCount]!, sideRoles[(groupIndex + 1) % groupCount]!])].filter((role) => role !== group.role)
     };
   });
   const faces: FaceSpec[] = [
@@ -570,6 +571,12 @@ export interface ProfilePrismRequest {
   readonly toleranceMeters?: number;
   /** Optional chamfer or fillet of the prism's vertical edges (applied to the counter-clockwise-normalised loop). */
   readonly cornerTreatment?: CornerTreatment;
+  /**
+   * Treat the whole loop as one smooth side face (`face.lateral`, cylindrical) instead of one
+   * planar face per segment. Use for circular profiles, whose faceted loop is only a tessellation
+   * of a single cylinder. Cannot be combined with a corner treatment.
+   */
+  readonly smoothSides?: boolean;
 }
 
 export interface NamedFace {
@@ -603,9 +610,12 @@ export async function evaluateProfilePrism(request: ProfilePrismRequest): Promis
   const normal = unit([request.normal[0], request.normal[1], request.normal[2]]);
   // Side normals are derived from loop winding, so a clockwise loop would face inward: normalise to counter-clockwise about the normal.
   if (planarSignedArea(points, normal) < 0) points = [...points].reverse();
-  const geometry = request.cornerTreatment === undefined
-    ? prismGeometry(points, normal, request.heightMeters)
-    : (() => { const treated = treatProfileCorners(points, request.cornerTreatment); return prismGeometry(treated.points, normal, request.heightMeters, treated.groups); })();
+  if (request.smoothSides === true && request.cornerTreatment !== undefined) throw new Error("A smooth (circular) profile has no corners to chamfer or fillet.");
+  const geometry = request.smoothSides === true
+    ? prismGeometry(points, normal, request.heightMeters, [{ role: "face.lateral", geometryClass: "cylinder", edgeCount: points.length }])
+    : request.cornerTreatment === undefined
+      ? prismGeometry(points, normal, request.heightMeters)
+      : (() => { const treated = treatProfileCorners(points, request.cornerTreatment); return prismGeometry(treated.points, normal, request.heightMeters, treated.groups); })();
   const toleranceMeters = request.toleranceMeters ?? 1e-6;
   const entities = await buildFaceEntities({ operationId: request.operationId, operationKind: "solid.extrude", semanticId: request.semanticId, toleranceMeters }, geometry.faces);
   const faces: NamedFace[] = entities.map((entity, position) => ({

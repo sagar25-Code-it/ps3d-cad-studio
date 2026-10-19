@@ -5,11 +5,22 @@ import {
   buildAssemblyPreview,
   buildControlNet,
   buildSurfacePreview,
-  findAssemblyInterference
+  findAssemblyInterference,
+  revolveAxisRelation
 } from "../packages/workbench-geometry/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 export const workbenchGeometryTests: readonly TestCase[] = [
+  {
+    name: "revolve profiles are classified against the axis: one side, touching, or crossing",
+    run: () => {
+      equal(revolveAxisRelation([[5, 0], [15, 0], [15, 10], [5, 10]]), "one-side", "a profile clear of the axis is valid");
+      equal(revolveAxisRelation([[-15, 0], [-5, 0], [-5, 10], [-15, 10]]), "one-side", "a profile wholly on the negative side is also on one side");
+      equal(revolveAxisRelation([[0, 0], [10, 0], [10, 20], [0, 20]]), "touches", "an edge lying on the axis is valid and revolves into a solid");
+      equal(revolveAxisRelation([[-10, 0], [10, 0], [10, 20], [-10, 20]]), "crosses", "a profile centred on the axis would overlap itself");
+      equal(revolveAxisRelation([[-0.0000001, 0], [10, 0], [10, 5]]), "touches", "floating-point noise at the axis must not count as crossing");
+    }
+  },
   {
     name: "assembly preview produces one selectable primitive per visible component",
     run: () => {
