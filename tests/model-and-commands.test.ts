@@ -7,7 +7,8 @@ import {
   type CadDocument,
   type ParameterKey
 } from "../packages/model-schema/src/index.js";
-import { CommandSession, applyCommandAtomic, classifyHistoryRetry, isDocumentCommand, parameterCommandId } from "../packages/commands/src/index.js";
+import { CommandSession, applyCommandAtomic, classifyHistoryRetry, isDocumentCommand } from "../packages/commands/src/index.js";
+import { parameterCommandId } from "../packages/commands/src/command-ids.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 export const modelAndCommandTests: readonly TestCase[] = [

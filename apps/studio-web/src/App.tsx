@@ -7,7 +7,7 @@ import {
   type DisplayUnit,
   type ParameterKey
 } from "../../../packages/model-schema/src/index.js";
-import { parameterCommandId } from "../../../packages/commands/src/index.js";
+import { parameterCommandId } from "../../../packages/commands/src/command-ids.js";
 import { parseNativeRevisionText, serializeNativeRevision } from "../../../packages/import-export/src/index.js";
 import {
   applyWorkbenchOperation,
