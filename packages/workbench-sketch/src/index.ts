@@ -22,7 +22,9 @@ export type SketchTool =
   | "circle"
   | "circle-two-point"
   | "circle-three-point"
-  | "arc";
+  | "arc"
+  | "point"
+  | "spline";
 
 export type SketchProfileBoundary =
   | {
@@ -51,7 +53,7 @@ export type SketchProfileBoundary =
 /** One sketch entity's contribution to a curve loop: a single line edge, or an arc sampled into several edges. */
 export interface SketchProfileSegment {
   readonly entityId: string;
-  readonly kind: "line" | "arc";
+  readonly kind: "line" | "arc" | "spline";
   readonly edgeCount: number;
 }
 
@@ -96,6 +98,8 @@ export function analyzeWorkbenchSketch(sketch: WorkbenchSketch): SketchAnalysis 
   let applied = 0;
 
   for (const constraint of sketch.constraints) {
+    // A relaxed relation stays recorded but takes no freedom away.
+    if (constraint.suppressed === true) continue;
     if (constraint.kind === "fixed") {
       for (const id of constraint.entityIds) freedom.set(id, 0);
       applied += 1;
@@ -239,11 +243,21 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
     if (area2 < 1e-4) return degenerate("The three arc points must not be collinear.");
     return { ok: true, value: { id, kind: "arc", start: points[0]!, mid: points[1]!, end: points[2]!, construction: false } };
   }
+  if (tool === "point" && points.length === 1) {
+    // A sketch point is reference geometry: it snaps and anchors patterns but never bounds a profile.
+    return { ok: true, value: { id, kind: "point", point: points[0]!, construction: true } };
+  }
+  if (tool === "spline" && points.length >= 3) {
+    if (points.length > 24) return degenerate("A spline takes at most 24 fit points.");
+    if (points.some((point, index) => index > 0 && distance(points[index - 1]!, point) < 0.01)) return degenerate("Consecutive spline fit points must be at least 0.01 mm apart.");
+    return { ok: true, value: { id, kind: "spline", fitPoints: points, construction: false } };
+  }
   return failure("INVALID_OPERATION", `${sketchToolLabel(tool)} requires ${requiredSketchPoints(tool)} points.`, [], "Complete the required points or cancel the sketch tool.");
 }
 
 export function requiredSketchPoints(tool: SketchTool): number {
-  return tool === "select" ? 0 : tool === "arc" || tool === "rectangle-three-point" || tool === "circle-three-point" ? 3 : 2;
+  // A spline needs three fit points at least; the workspace lets the user keep adding points until they finish it.
+  return tool === "select" ? 0 : tool === "point" ? 1 : tool === "arc" || tool === "spline" || tool === "rectangle-three-point" || tool === "circle-three-point" ? 3 : 2;
 }
 
 export function sketchToolLabel(tool: SketchTool): string {
@@ -256,7 +270,9 @@ export function sketchToolLabel(tool: SketchTool): string {
     circle: "Center-radius circle",
     "circle-two-point": "2-point circle",
     "circle-three-point": "3-point circle",
-    arc: "3-point arc"
+    arc: "3-point arc",
+    point: "Point",
+    spline: "Fit-point spline"
   };
   return labels[tool];
 }
@@ -289,7 +305,7 @@ export function detectSketchProfiles(sketch: WorkbenchSketch): readonly SketchPr
       });
     }
   }
-  profiles.push(...detectCurveLoops(sketch.entities.filter((entity): entity is Extract<SketchEntity, { kind: "line" | "arc" }> => (entity.kind === "line" || entity.kind === "arc") && !entity.construction)));
+  profiles.push(...detectCurveLoops(sketch.entities.filter((entity): entity is Extract<SketchEntity, { kind: "line" | "arc" | "spline" }> => (entity.kind === "line" || entity.kind === "arc" || entity.kind === "spline") && !entity.construction)));
   return profiles.sort((left, right) => right.areaMm2 - left.areaMm2 || left.id.localeCompare(right.id));
 }
 
@@ -451,7 +467,36 @@ export function entityPoints(entity: SketchEntity): readonly Vec2[] {
     ];
   }
   if (entity.kind === "circle") return [entity.center, [entity.center[0] + entity.radiusMm, entity.center[1]]];
+  if (entity.kind === "point") return [entity.point];
+  if (entity.kind === "spline") return entity.fitPoints;
   return [entity.start, entity.mid, entity.end];
+}
+
+/**
+ * Smooth uniform Catmull-Rom curve through the fit points, sampled into short straight edges.
+ * The first and last samples are exactly the first and last fit points.
+ */
+export function sampleSpline(fitPoints: readonly Vec2[], samplesPerSpan = 8): readonly Vec2[] {
+  if (fitPoints.length < 3) return fitPoints;
+  const points: Vec2[] = [fitPoints[0]!];
+  for (let span = 0; span < fitPoints.length - 1; span += 1) {
+    const p0 = fitPoints[Math.max(0, span - 1)]!;
+    const p1 = fitPoints[span]!;
+    const p2 = fitPoints[span + 1]!;
+    const p3 = fitPoints[Math.min(fitPoints.length - 1, span + 2)]!;
+    for (let step = 1; step <= samplesPerSpan; step += 1) {
+      if (span === fitPoints.length - 2 && step === samplesPerSpan) {
+        points.push(p2);
+        break;
+      }
+      const t = step / samplesPerSpan;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const blend = (a: number, b: number, c: number, d: number): number => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+      points.push([blend(p0[0], p1[0], p2[0], p3[0]), blend(p0[1], p1[1], p2[1], p3[1])]);
+    }
+  }
+  return points;
 }
 
 /** Returns the complete topological curve component that contains the seed. */
@@ -513,11 +558,14 @@ function baseFreedom(entity: SketchEntity): number {
   if (entity.kind === "line") return 4;
   if (entity.kind === "rectangle") return 5;
   if (entity.kind === "circle") return 3;
+  if (entity.kind === "point") return 2;
+  if (entity.kind === "spline") return entity.fitPoints.length * 2;
   return 6;
 }
 
 function curveEndpoints(entity: SketchEntity): readonly Vec2[] {
   if (entity.kind === "line" || entity.kind === "arc") return [entity.start, entity.end];
+  if (entity.kind === "spline") return [entity.fitPoints[0]!, entity.fitPoints[entity.fitPoints.length - 1]!];
   return [];
 }
 
@@ -541,6 +589,14 @@ function curveEndTangents(entity: SketchEntity): readonly { readonly point: Vec2
     return [
       { point: entity.start, tangent: normalize2([entity.mid[0] - entity.start[0], entity.mid[1] - entity.start[1]]) },
       { point: entity.end, tangent: normalize2([entity.end[0] - entity.mid[0], entity.end[1] - entity.mid[1]]) }
+    ];
+  }
+  if (entity.kind === "spline") {
+    const fit = entity.fitPoints;
+    const last = fit.length - 1;
+    return [
+      { point: fit[0]!, tangent: normalize2([fit[1]![0] - fit[0]![0], fit[1]![1] - fit[0]![1]]) },
+      { point: fit[last]!, tangent: normalize2([fit[last]![0] - fit[last - 1]![0], fit[last]![1] - fit[last - 1]![1]]) }
     ];
   }
   return [];
@@ -587,7 +643,22 @@ function circumcircle(a: Vec2, b: Vec2, c: Vec2): { readonly center: Vec2; reado
   return { center, radiusMm: distance(center, a) };
 }
 
-type LoopEdgeEntity = Extract<SketchEntity, { kind: "line" | "arc" }>;
+type LoopEdgeEntity = Extract<SketchEntity, { kind: "line" | "arc" | "spline" }>;
+
+function loopStart(entity: LoopEdgeEntity): Vec2 {
+  return entity.kind === "spline" ? entity.fitPoints[0]! : entity.start;
+}
+
+function loopEnd(entity: LoopEdgeEntity): Vec2 {
+  return entity.kind === "spline" ? entity.fitPoints[entity.fitPoints.length - 1]! : entity.end;
+}
+
+/** The entity's outline from its start to its end, with curves sampled into short straight edges. */
+function loopPath(entity: LoopEdgeEntity): readonly Vec2[] {
+  if (entity.kind === "arc") return sampleArc(entity.start, entity.mid, entity.end);
+  if (entity.kind === "spline") return sampleSpline(entity.fitPoints);
+  return [entity.start, entity.end];
+}
 
 /** Facet angle used when an arc is sampled into polygon edges (about 5.6 degrees, ~0.1% radial error). */
 const ARC_FACET_RADIANS = Math.PI / 32;
@@ -623,10 +694,10 @@ export function sampleArc(start: Vec2, mid: Vec2, end: Vec2): readonly Vec2[] {
 function detectCurveLoops(entities: readonly LoopEdgeEntity[]): readonly SketchProfile[] {
   if (entities.length < 2) return [];
   const endpoints = new Map<string, { readonly point: Vec2; readonly edgeIds: string[] }>();
-  const edges = new Map(entities.map((entity) => [entity.id, { entity, startKey: pointKey(entity.start), endKey: pointKey(entity.end) }]));
+  const edges = new Map(entities.map((entity) => [entity.id, { entity, startKey: pointKey(loopStart(entity)), endKey: pointKey(loopEnd(entity)) }]));
   for (const edge of edges.values()) {
-    registerEndpoint(endpoints, edge.startKey, edge.entity.start, edge.entity.id);
-    registerEndpoint(endpoints, edge.endKey, edge.entity.end, edge.entity.id);
+    registerEndpoint(endpoints, edge.startKey, loopStart(edge.entity), edge.entity.id);
+    registerEndpoint(endpoints, edge.endKey, loopEnd(edge.entity), edge.entity.id);
   }
   const unvisited = new Set(edges.keys());
   const profiles: SketchProfile[] = [];
@@ -643,7 +714,7 @@ function detectCurveLoops(entities: readonly LoopEdgeEntity[]): readonly SketchP
         for (const adjacent of endpoints.get(key)?.edgeIds ?? []) if (unvisited.has(adjacent)) queue.push(adjacent);
       }
     }
-    const hasArc = componentIds.some((id) => edges.get(id)!.entity.kind === "arc");
+    const hasArc = componentIds.some((id) => edges.get(id)!.entity.kind !== "line");
     const componentKeys = new Set(componentIds.flatMap((id) => {
       const edge = edges.get(id)!;
       return [edge.startKey, edge.endKey];
@@ -661,7 +732,7 @@ function detectCurveLoops(entities: readonly LoopEdgeEntity[]): readonly SketchP
       const edge = edges.get(nextEdgeId)!;
       const forward = edge.startKey === currentKey;
       const entity = edge.entity;
-      let path: readonly Vec2[] = entity.kind === "arc" ? sampleArc(entity.start, entity.mid, entity.end) : [entity.start, entity.end];
+      let path: readonly Vec2[] = loopPath(entity);
       if (!forward) path = [...path].reverse();
       path = [endpoints.get(currentKey)!.point, ...path.slice(1)];
       // The last point is the start of the next edge, so each edge contributes all but its end.

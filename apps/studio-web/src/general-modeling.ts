@@ -18,7 +18,7 @@ function profilePolygonMm(boundary: SketchProfile["boundary"]): readonly Polygon
 /** One kernel side face per sketch entity of a curve loop, so arcs stay single cylindrical walls with stable names. */
 function curveEdgeGroups(boundary: SketchProfile["boundary"], rolePrefix: string): readonly ProfileEdgeGroup[] | undefined {
   if (boundary.kind !== "curve-loop") return undefined;
-  return boundary.segments.map((segment) => ({ role: `${rolePrefix}-${stableEntityToken([segment.entityId])}`, edgeCount: segment.edgeCount, curved: segment.kind === "arc" }));
+  return boundary.segments.map((segment) => ({ role: `${rolePrefix}-${stableEntityToken([segment.entityId])}`, edgeCount: segment.edgeCount, curved: segment.kind !== "line" }));
 }
 
 /** Place a 2D sketch point (millimetres) onto its datum plane in world metres, matching the analytic tessellator's orientation. */

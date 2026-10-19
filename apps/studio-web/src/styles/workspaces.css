@@ -928,3 +928,16 @@
 .textarea-label { display: block; margin-bottom: 0.35rem; color: #91a5b1; font-size: 0.66rem; }
 .priority-boundary { margin-top: 0.8rem; }
 .electromechanical-source-card p { margin: 0; color: #e0ae72; font-size: 0.68rem; line-height: 1.45; }
+
+/* Sketch edit tools, Show Movable, Sketch Checking and relaxed relations. */
+.sketch-entity.movable { stroke: #ffb347; stroke-width: 1.8; }
+.sketch-entity.sketch-point { fill: #7a8ca0; stroke: #d8f8fa; stroke-width: 0.6; stroke-dasharray: none; }
+.sketch-edit-panel label { display: grid; grid-template-columns: 7.5rem 1fr; align-items: center; gap: 0.5rem; margin: 0.25rem 0; }
+.sketch-edit-panel input, .sketch-edit-panel select { min-width: 0; }
+.sketch-check-list { list-style: none; margin: 0 0 0.5rem; padding: 0; display: grid; gap: 0.3rem; max-height: 18rem; overflow: auto; }
+.sketch-check-list li { display: grid; grid-template-columns: 4.2rem 1fr; gap: 0.5rem; font-size: 0.78rem; line-height: 1.35; padding: 0.3rem 0.4rem; border-left: 3px solid #5b7388; background: rgba(120, 150, 180, 0.08); }
+.sketch-check-list li.check-error { border-left-color: #e5484d; }
+.sketch-check-list li.check-warning { border-left-color: #ffb347; }
+.sketch-check-list li b { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.85; }
+.sketch-relation-list .record-list button.relaxed span { text-decoration: line-through; opacity: 0.75; }
+.movable-note { border-left-color: #ffb347; }

@@ -234,6 +234,14 @@ function validateEntity(value: unknown): value is SketchEntity {
       && vec2(value.start) && vec2(value.mid) && vec2(value.end)
       && Math.abs(cross2(value.start, value.mid, value.end)) >= 1e-4;
   }
+  if (value.kind === "point") {
+    return exactKeys(value, ["id", "kind", "point", "construction", ...optionalVisibility]) && vec2(value.point);
+  }
+  if (value.kind === "spline") {
+    return exactKeys(value, ["id", "kind", "fitPoints", "construction", ...optionalVisibility])
+      && Array.isArray(value.fitPoints) && value.fitPoints.length >= 3 && value.fitPoints.length <= 24
+      && value.fitPoints.every((point, index, all) => vec2(point) && (index === 0 || distance(all[index - 1] as readonly [number, number], point) >= WORKBENCH_LIMITS.minGeometryMm));
+  }
   return false;
 }
 
@@ -244,8 +252,9 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   if (!kinds.includes(String(value.kind))) return false;
   const hasValue = Object.hasOwn(value, "valueMm");
   const hasDimension = Object.hasOwn(value, "dimension");
-  const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : [])];
-  if (!exactKeys(value, expectedKeys) || (hasDimension && !hasValue)) return false;
+  const hasSuppressed = Object.hasOwn(value, "suppressed");
+  const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : [])];
+  if (!exactKeys(value, expectedKeys) || (hasDimension && !hasValue) || (hasSuppressed && typeof value.suppressed !== "boolean")) return false;
   if (hasDimension && !["length", "width", "height", "radius"].includes(String(value.dimension))) return false;
   return !hasValue || finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, 20_000);
 }

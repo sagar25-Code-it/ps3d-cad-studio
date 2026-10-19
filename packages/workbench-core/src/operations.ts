@@ -174,6 +174,16 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
     case "toggle-sketch-entity-visibility":
       if (!keys(input, [...common, "entityId"]) || !stableId(input.entityId)) return invalidOperation("The sketch entity ID is invalid.");
       break;
+    case "apply-sketch-edit":
+      if (!keys(input, [...common, "removeEntityIds", "updateEntities", "addEntities", "addConstraints", "label"])
+        || !boundedList(input.removeEntityIds, 200, stableId) || !boundedList(input.updateEntities, 200, isRecord)
+        || !boundedList(input.addEntities, 200, isRecord) || !boundedList(input.addConstraints, 400, isRecord)
+        || typeof input.label !== "string" || input.label.length < 1 || input.label.length > 80) return invalidOperation("The sketch edit payload is invalid.");
+      break;
+    case "set-sketch-constraints-suppressed":
+      if (!keys(input, [...common, "constraintIds", "suppressed"]) || !boundedList(input.constraintIds, 500, stableId) || input.constraintIds.length < 1
+        || typeof input.suppressed !== "boolean") return invalidOperation("The constraint relax payload is invalid.");
+      break;
     case "set-part-parameter":
       if (!keys(input, [...common, "parameter", "value"]) || !PART_PARAMETERS.includes(input.parameter as never) || !finite(input.value)) return invalidOperation("The part parameter edit is invalid.");
       break;
@@ -484,6 +494,29 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
         { ...project, sketch: { ...resizedSketch, entities: solvedDimension.entities } },
         [target.id, dimensionId, ...solvedDimension.movedIds.filter((id) => id !== target.id)],
         `Set ${operation.dimension} of ${target.id} to ${formatNumber(operation.valueMm)} mm.${solveSummary(solvedDimension)}`
+      );
+    }
+    case "apply-sketch-edit":
+      return applySketchEdit(project, operation);
+    case "set-sketch-constraints-suppressed": {
+      const wanted = new Set(operation.constraintIds);
+      const targets = project.sketch.constraints.filter((constraint) => wanted.has(constraint.id));
+      if (targets.length !== wanted.size) return broken([...wanted].find((id) => !targets.some((constraint) => constraint.id === id)) ?? project.sketch.id, "A sketch constraint to relax or restore does not exist.");
+      const withFlags = {
+        ...project.sketch,
+        constraints: project.sketch.constraints.map((constraint) => {
+          if (!wanted.has(constraint.id)) return constraint;
+          const { suppressed: _previous, ...rest } = constraint;
+          return operation.suppressed ? { ...rest, suppressed: true } : rest;
+        })
+      };
+      // Restoring a relation re-enforces it; a restore that conflicts with the geometry is refused.
+      const solved = operation.suppressed ? undefined : solveLiveSketch(withFlags, targets.flatMap((constraint) => constraint.entityIds));
+      if (solved !== undefined && !solved.ok) return solveFailure(solved);
+      return changed(
+        { ...project, sketch: { ...withFlags, entities: solved === undefined ? withFlags.entities : solved.entities } },
+        [...wanted],
+        `${operation.suppressed ? "Relaxed" : "Restored"} ${wanted.size} sketch relation${wanted.size === 1 ? "" : "s"}.${solved === undefined ? "" : solveSummary(solved)}`
       );
     }
     case "toggle-sketch-construction": {
@@ -957,6 +990,54 @@ function resizeSketchEntity(entity: SketchEntity, dimension: "length" | "width" 
   return undefined;
 }
 
+/**
+ * Applies a sketch edit atomically. Edits are exact geometry, so afterwards the touched
+ * constraints must already hold: a solve that would have to move geometry means the edit
+ * fights an existing relation, and the whole edit is refused instead of silently undone.
+ */
+function applySketchEdit(project: WorkbenchProject, operation: Extract<WorkbenchOperation, { readonly kind: "apply-sketch-edit" }>): WorkbenchResult<{
+  readonly project: WorkbenchProject;
+  readonly changedIds: readonly string[];
+  readonly summary: string;
+}> {
+  const sketch = project.sketch;
+  const existing = new Set(sketch.entities.map((entity) => entity.id));
+  const removed = new Set(operation.removeEntityIds);
+  for (const id of removed) if (!existing.has(id)) return broken(id, "A sketch entity to remove does not exist.");
+  const updates = new Map(operation.updateEntities.map((entity) => [entity.id, entity] as const));
+  if (updates.size !== operation.updateEntities.length) return invalidOperation("The sketch edit updates the same entity twice.");
+  for (const id of updates.keys()) {
+    if (!existing.has(id) || removed.has(id)) return invalidOperation("A sketch entity to update does not exist or is also removed.");
+  }
+  const addedIds = operation.addEntities.map((entity) => entity.id);
+  if (new Set(addedIds).size !== addedIds.length || addedIds.some((id) => existing.has(id))) return invalidOperation("A new sketch entity reuses an existing ID.");
+  const entities = [...sketch.entities.filter((entity) => !removed.has(entity.id)).map((entity) => updates.get(entity.id) ?? entity), ...operation.addEntities];
+  if (entities.length > WORKBENCH_LIMITS.maxEntities) return failure("RESOURCE_LIMIT", "The sketch would exceed its entity limit.", [sketch.id], "Delete entities or use a smaller pattern count.");
+  const dropped = sketch.constraints.filter((constraint) => constraint.entityIds.some((id) => removed.has(id)));
+  const constraints = [...sketch.constraints.filter((constraint) => !constraint.entityIds.some((id) => removed.has(id))), ...operation.addConstraints];
+  if (constraints.length > WORKBENCH_LIMITS.maxConstraints) return failure("RESOURCE_LIMIT", "The sketch reached its constraint record limit.", [sketch.id], "Delete a constraint before applying this edit.");
+  if (new Set(constraints.map((constraint) => constraint.id)).size !== constraints.length) return invalidOperation("A new constraint reuses an existing ID.");
+  const next = { ...sketch, entities, constraints };
+  const focus = [...updates.keys(), ...addedIds, ...operation.addConstraints.flatMap((constraint) => constraint.entityIds)];
+  const solved = solveLiveSketch(next, focus);
+  if (!solved.ok) return solveFailure(solved);
+  if (solved.movedIds.length > 0) {
+    return failure(
+      "CONSTRAINT_CONFLICT",
+      `This edit conflicts with a sketch relation on ${solved.movedIds.map((id) => id.replace(/^entity:/u, "")).join(", ")}. ${solved.notes.join("; ")}.`,
+      solved.movedIds,
+      "Use Relax Relations on the affected geometry, then repeat the edit."
+    );
+  }
+  const droppedNote = dropped.length === 0 ? "" : ` Removed ${dropped.length} dependent constraint${dropped.length === 1 ? "" : "s"}.`;
+  const unsolvedNote = solved.unsolved.length === 0 ? "" : ` Recorded, not solved: ${solved.unsolved.map((entry) => entry.reason).join(" ")}`;
+  return changed(
+    { ...project, sketch: next },
+    [...removed, ...updates.keys(), ...addedIds, ...operation.addConstraints.map((constraint) => constraint.id)],
+    `${operation.label}.${droppedNote}${unsolvedNote}`
+  );
+}
+
 /** Rejects an operation whose sketch constraints cannot all hold, leaving the sketch untouched. */
 function solveFailure(report: Extract<LiveSketchSolveReport, { readonly ok: false }>): WorkbenchResult<never> {
   return failure("CONSTRAINT_CONFLICT", report.message, report.relatedIds, report.recovery);
@@ -1002,6 +1083,10 @@ function replacePartBody(project: WorkbenchProject, replacement: PartPreviewBody
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function boundedList<T>(value: unknown, max: number, guard: (item: unknown) => item is T): value is readonly T[] {
+  return Array.isArray(value) && value.length <= max && value.every(guard);
 }
 
 function keys(value: Record<string, unknown>, expected: readonly string[]): boolean {

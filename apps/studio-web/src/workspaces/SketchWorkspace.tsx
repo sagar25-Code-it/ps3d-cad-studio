@@ -8,12 +8,15 @@ import {
   resolveQualifiedExtrusion,
   selectConnectedSketchEntities,
   selectTangentSketchEntities,
+  sampleSpline,
   sketchChainBranchCount,
   sketchToolLabel,
   snapSketchPoint,
   type SketchProfile,
   type SketchTool
 } from "../../../../packages/workbench-sketch/src/index.js";
+import { constraintsOnEntities, extendAt, nearestEntityId, trimAt, type SketchEditPlan } from "../../../../packages/workbench-sketch/src/edit-tools.js";
+import { SketchCheckPanel, SketchEditPanel, SketchRelationList, type SketchEditToolId } from "./SketchEditPanel.js";
 import {
   orbitViewAngles,
   type NavigationMode,
@@ -79,6 +82,15 @@ interface SketchWorkspaceProps {
   readonly optionsRevealRequest: number;
   readonly onCreateSolid: (profileIds: readonly string[], plane: "xy" | "xz" | "yz", operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }) => void;
   readonly activePlane: "xy" | "xz" | "yz";
+  readonly editTool: SketchEditToolId | null;
+  readonly showMovable: boolean;
+  readonly checkOpen: boolean;
+  /** A one-shot ribbon command (Fix Curve, Relax Relations or Relax Dimensions); a new serial triggers it once. */
+  readonly request: { readonly command: "fix-curve" | "relax-relations" | "relax-dimensions"; readonly serial: number } | null;
+  readonly onApplyEdit: (plan: SketchEditPlan) => boolean | void;
+  readonly onSetSuppressed: (constraintIds: readonly string[], suppressed: boolean) => boolean | void;
+  readonly onCloseEditTool: () => void;
+  readonly onCloseCheck: () => void;
 }
 
 export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element {
@@ -134,6 +146,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const directDimension = useMemo(() => resolveDirectSketchDimension(dimensionPoints), [dimensionPoints]);
   const dimensionModeWasActive = useRef(false);
   const previewEntity = useMemo(() => {
+    if (props.tool === "spline") {
+      return pending.length >= 1 ? { id: "entity:tool-preview", kind: "spline" as const, fitPoints: [...pending, cursor], construction: false } satisfies SketchEntity : undefined;
+    }
     if (props.tool === "select" || pending.length !== requiredSketchPoints(props.tool) - 1) return undefined;
     const preview = buildSketchEntity(props.tool, [...pending, cursor], "entity:tool-preview");
     return preview.ok ? preview.value : undefined;
@@ -176,6 +191,27 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const snapped = snapEnabled ? snapSketchPoint(point, props.sketch) : { point, snapped: false, kind: "none" as const };
     setCursor(snapped.point);
     if (!commit) return;
+    if ((props.editTool === "trim" || props.editTool === "extend") && props.tool === "select") {
+      const target = nearestEntityId(props.sketch, point, Math.max(props.sketch.snapToleranceMm, view.width * 0.02));
+      if (target === undefined) { props.onMessage(`${props.editTool === "trim" ? "Trim" : "Extend"}: click directly on a curve.`); return; }
+      const context = { sketch: props.sketch, newId: (prefix: "entity" | "constraint"): string => `${prefix}:user-${crypto.randomUUID()}` };
+      const result = props.editTool === "trim" ? trimAt(context, target, point) : extendAt(context, target, point);
+      if (!result.ok) { props.onMessage(result.diagnostics[0]?.message ?? "The sketch edit was rejected."); return; }
+      props.onApplyEdit(result.value);
+      setSelectionIds([]);
+      return;
+    }
+    if (props.tool === "spline") {
+      const last = pending.at(-1);
+      const gap = last === undefined ? Infinity : Math.hypot(snapped.point[0] - last[0], snapped.point[1] - last[1]);
+      if (pending.length >= 3 && gap <= Math.max(props.sketch.snapToleranceMm, 0.5)) { finishSpline(pending); return; }
+      if (gap < 0.01) return;
+      if (pending.length >= 24) { props.onMessage("A spline takes at most 24 fit points. Click the last point again or press Enter to finish."); return; }
+      const next = [...pending, snapped.point];
+      setPending(next);
+      props.onMessage(`Fit-point spline: point ${next.length} accepted.${next.length >= 3 ? " Click the last point again or press Enter to finish." : ""}`);
+      return;
+    }
     if (props.tool === "select") {
       setSelectionIds([]);
       setSelectedProfileIds([]);
@@ -199,6 +235,25 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setPending([]);
     props.onMessage(`Added ${sketchToolLabel(props.tool)} with stable ID ${built.value.id}.`);
   };
+
+  const finishSpline = (points: readonly Vec2[]): void => {
+    const built = buildSketchEntity("spline", points, `entity:user-${crypto.randomUUID()}`);
+    if (!built.ok) { props.onMessage(built.diagnostics[0]?.message ?? "The spline was rejected."); setPending([]); return; }
+    props.onAddEntity(built.value);
+    setPending([]);
+    props.onMessage(`Added fit-point spline with ${points.length} points and stable ID ${built.value.id}.`);
+  };
+
+  useEffect(() => {
+    if (props.tool !== "spline") return undefined;
+    const onKey = (event: KeyboardEvent): void => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+      if (event.key === "Enter" && pending.length >= 3) { event.preventDefault(); finishSpline(pending); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   const selectEntity = (id: string, additive: boolean): void => {
     if (props.viewportState.selectionFilter === "profile") {
@@ -232,8 +287,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       }
       return;
     }
-    setSelectionIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current.slice(-1), id]);
-    props.onMessage("Multi-selection updated. Pair constraints accept up to two entities.");
+    // Keep a generous selection for Offset, Mirror and Pattern; pair and triple relations use the last two or three picked.
+    setSelectionIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id].slice(-60));
+    props.onMessage("Multi-selection updated. Pair relations use the last two entities picked; Symmetric uses the last three, axis last.");
   };
 
   const selectDimensionPoint = (point: SketchDimensionPoint): void => {
@@ -274,13 +330,43 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     props.onAddConstraint({ id: `constraint:user-${crypto.randomUUID()}`, kind, entityIds });
   };
 
-  const twoLines = selectedEntities.length === 2 && selectedEntities.every((entity) => entity.kind === "line");
+  // Pair relations act on the last two entities picked and Symmetric on the last three, so a larger selection (for Offset or Pattern) does not disable them.
+  const lastTwo = selectedEntities.length >= 2 ? selectedEntities.slice(-2) : [];
+  const lastThree = selectedEntities.length >= 3 ? selectedEntities.slice(-3) : [];
+  const twoLines = lastTwo.length === 2 && lastTwo.every((entity) => entity.kind === "line");
   const isRadial = (entity: SketchEntity): boolean => entity.kind === "circle" || entity.kind === "arc";
-  const twoCircles = selectedEntities.length === 2 && selectedEntities.every(isRadial);
+  const twoCircles = lastTwo.length === 2 && lastTwo.every(isRadial);
   // The solver handles a line against a circle or arc, or two circles or arcs; anything else would only be recorded.
-  const tangentPair = selectedEntities.length === 2 && ((selectedEntities.some((entity) => entity.kind === "line") && selectedEntities.some(isRadial)) || selectedEntities.every(isRadial));
-  const symmetricTriple = selectedEntities.length === 3 && selectedEntities[2]!.kind === "line" && ((selectedEntities[0]!.kind === "line" && selectedEntities[1]!.kind === "line") || (selectedEntities[0]!.kind === "circle" && selectedEntities[1]!.kind === "circle"));
-  const twoCompatible = selectedEntities.length === 2 && selectedEntities[0]!.kind === selectedEntities[1]!.kind;
+  const tangentPair = lastTwo.length === 2 && ((lastTwo.some((entity) => entity.kind === "line") && lastTwo.some(isRadial)) || lastTwo.every(isRadial));
+  const symmetricTriple = lastThree.length === 3 && lastThree[2]!.kind === "line" && ((lastThree[0]!.kind === "line" && lastThree[1]!.kind === "line") || (lastThree[0]!.kind === "circle" && lastThree[1]!.kind === "circle"));
+  const twoCompatible = lastTwo.length === 2 && lastTwo[0]!.kind === lastTwo[1]!.kind;
+  const movableIds = useMemo(() => new Set(Object.entries(analysis.entityFreedom).filter(([, freedom]) => freedom > 0).map(([id]) => id)), [analysis.entityFreedom]);
+
+  // Ribbon one-shot commands act on the current selection. A fresh mount only records the serial, so a workspace switch never replays one.
+  const handledRequestRef = useRef(props.request?.serial ?? 0);
+  useEffect(() => {
+    const request = props.request;
+    if (request === null || request.serial === handledRequestRef.current) return;
+    handledRequestRef.current = request.serial;
+    if (selectionIds.length === 0) { props.onMessage("Select one or more curves first."); return; }
+    if (request.command === "fix-curve") {
+      const already = new Set(props.sketch.constraints.filter((constraint) => constraint.kind === "fixed" && constraint.suppressed !== true).flatMap((constraint) => constraint.entityIds));
+      const targets = selectedEntities.filter((entity) => !already.has(entity.id));
+      if (targets.length === 0) { props.onMessage("The selected curves are already fixed."); return; }
+      props.onApplyEdit({
+        label: `Fixed ${targets.length} curve${targets.length === 1 ? "" : "s"}`,
+        removeEntityIds: [], updateEntities: [], addEntities: [],
+        addConstraints: targets.map((entity) => ({ id: `constraint:user-${crypto.randomUUID()}`, kind: "fixed" as const, entityIds: [entity.id] }))
+      });
+      return;
+    }
+    const family = request.command === "relax-relations" ? "relations" : "dimensions";
+    const active = constraintsOnEntities(props.sketch, selectionIds, family, false);
+    const relaxed = constraintsOnEntities(props.sketch, selectionIds, family, true);
+    if (active.length > 0) props.onSetSuppressed(active, true);
+    else if (relaxed.length > 0) props.onSetSuppressed(relaxed, false);
+    else props.onMessage(`The selection has no ${family === "relations" ? "geometric relations" : "driving dimensions"} to relax or restore.`);
+  }, [props.request]);
 
   const handleCanvasPointerDown = (event: React.PointerEvent<SVGSVGElement>): void => {
     const mode: NavigationMode = event.button === 1
@@ -348,7 +434,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {showProfiles && profiles.map((profile) => <SketchProfileShape key={profile.id} profile={profile} selected={selectedProfileIds.includes(profile.id)} {...(props.tool === "select" && props.viewportState.navigationMode === "select" ? { onSelect: (additive: boolean) => selectProfile(profile, additive) } : {})} />)}
         <line x1={view.x} y1="0" x2={view.x + view.width} y2="0" className="sketch-axis x" />
         <line x1="0" y1={view.y} x2="0" y2={view.y + view.height} className="sketch-axis y" />
-        {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} selected={selectionIds.includes(entity.id)} {...(props.tool === "select" && props.viewportState.navigationMode === "select" ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive) } : {})} />)}
+        {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} selected={selectionIds.includes(entity.id)} movable={props.showMovable && movableIds.has(entity.id)} {...(props.tool === "select" && props.viewportState.navigationMode === "select" && props.editTool !== "trim" && props.editTool !== "extend" ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive) } : {})} />)}
         {previewEntity !== undefined && <SketchEntityShape entity={previewEntity} selected={false} preview />}
         {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r="1.1" className="pending-point" />)}
         {props.tool !== "select" && <circle cx={cursor[0]} cy={-cursor[1]} r="0.8" className="cursor-point" />}
@@ -416,6 +502,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       </section>
       {analysis.conflicts.length > 0 && <div className="inline-warning">{analysis.conflicts[0]}</div>}
 
+      {props.editTool !== null && <SketchEditPanel tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
+      {props.checkOpen && <SketchCheckPanel sketch={props.sketch} onClose={props.onCloseCheck} />}
+      {props.showMovable && <div className="inline-warning movable-note">{movableIds.size === 0 ? "Show Movable: every entity is fully constrained." : `Show Movable: ${movableIds.size} entit${movableIds.size === 1 ? "y has" : "ies have"} estimated degrees of freedom (amber).`}</div>}
       <section className="inspector-section"><header><strong>Selection controller</strong><span>{selectionIds.length} selected</span></header>
         {selectedEntity === undefined ? <p className="empty-copy">Select an entity. Shift-click adds a second entity for pair constraints.</p> : <>
           <dl className="compact-facts"><div><dt>Primary</dt><dd>{selectedEntity.kind}</dd></div><div><dt>Freedom</dt><dd>{analysis.entityFreedom[selectedEntity.id] ?? 0}</dd></div><div><dt>Stable ID</dt><dd>{shortId(selectedEntity.id)}</dd></div><div><dt>Constraints</dt><dd>{selectedConstraints.length}</dd></div></dl>
@@ -449,6 +538,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         </>}
       </section>}
 
+      <SketchRelationList constraints={selectedConstraints} entities={props.sketch.entities} onSetSuppressed={(ids, suppressed) => { props.onSetSuppressed(ids, suppressed); }} />
       {!props.dimensionMode && selectedEntity !== undefined && <section className="inspector-section dimension-controller"><header><strong>Driving dimensions</strong><span>mm</span></header><EntityDimensions entity={selectedEntity} onApply={(dimension, value) => props.onSetDimension(selectedEntity.id, dimension, value)} onMessage={props.onMessage} /></section>}
 
       <section className="inspector-section profile-controller"><header><strong>Closed profiles</strong><span>{profiles.length} found</span></header>
@@ -468,9 +558,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       </section>
 
       <section className="inspector-section"><header><strong>Constraint records</strong><span>{props.sketch.constraints.length}</span></header>
-        <div className="record-list">{props.sketch.constraints.slice(-10).reverse().map((constraint) => <button key={constraint.id} onClick={() => props.onDeleteConstraint(constraint.id)} title="Delete this constraint"><CommandIcon name={constraint.dimension === undefined ? constraint.kind : "dimension"} /><span>{constraint.kind}{constraint.dimension === undefined ? "" : ` · ${constraint.dimension}`}</span><small>{constraint.valueMm === undefined ? shortId(constraint.id) : `${format(constraint.valueMm)} mm`}</small></button>)}</div>
+        <div className="record-list">{props.sketch.constraints.slice(-10).reverse().map((constraint) => <button key={constraint.id} onClick={() => props.onDeleteConstraint(constraint.id)} title="Delete this constraint"><CommandIcon name={constraint.dimension === undefined ? constraint.kind : "dimension"} /><span>{constraint.kind}{constraint.dimension === undefined ? "" : ` · ${constraint.dimension}`}{constraint.suppressed === true ? " · relaxed" : ""}</span><small>{constraint.valueMm === undefined ? shortId(constraint.id) : `${format(constraint.valueMm)} mm`}</small></button>)}</div>
       </section>
-      <div className="scope-note"><strong>Preview solver boundary</strong><p>Dimension edits update bounded geometry and constraint records atomically. Horizontal, vertical and pair constraints currently provide validated intent and freedom accounting, not a general nonlinear solve; they record design intent without reorienting existing geometry.</p></div>
+      <div className="scope-note"><strong>Preview solver boundary</strong><p>A small analytic solver enforces horizontal, vertical, parallel, perpendicular, collinear, tangent, concentric, equal, symmetric and fixed relations plus radius and length dimensions on lines, circles and arcs; a conflict is refused with the reason. Rectangles are rigid, point-on-curve and endpoint relations are recorded but not solved, and there is no general nonlinear solver. Degrees of freedom are an estimate.</p></div>
     </aside>
   </>;
 }
@@ -483,7 +573,7 @@ function EntityDimensions({ entity, onApply, onMessage }: { readonly entity: Ske
   if (entity.kind === "line") return <DimensionField label="Length" dimension="length" value={Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1])} onApply={onApply} onMessage={onMessage} />;
   if (entity.kind === "rectangle") return <div className="dimension-stack"><DimensionField label="Width" dimension="width" value={entity.widthMm} onApply={onApply} onMessage={onMessage} /><DimensionField label="Height" dimension="height" value={entity.heightMm} onApply={onApply} onMessage={onMessage} /></div>;
   if (entity.kind === "circle") return <><DimensionField label="Radius" dimension="radius" value={entity.radiusMm} onApply={onApply} onMessage={onMessage} /><div className="derived-dimension"><span>Diameter</span><strong>{format(entity.radiusMm * 2)} mm</strong></div></>;
-  return <div className="derived-dimension"><span>Three-point arc</span><strong>reference only</strong></div>;
+  return <div className="derived-dimension"><span>{entity.kind === "arc" ? "Three-point arc" : entity.kind === "spline" ? "Fit-point spline" : "Sketch point"}</span><strong>reference only</strong></div>;
 }
 
 function DimensionField({ label, dimension, value, onApply, onMessage }: { readonly label: string; readonly dimension: DrivingDimension; readonly value: number; readonly onApply: (dimension: DrivingDimension, value: number) => void; readonly onMessage: (message: string) => void }): React.JSX.Element {
@@ -510,6 +600,8 @@ function dimensionHandles(entity: SketchEntity): readonly SketchDimensionPoint[]
     ];
   }
   if (entity.kind === "circle") return [point("center", entity.center, "Circle center"), point("radius", [entity.center[0] + entity.radiusMm, entity.center[1]], "Circle radius point")];
+  if (entity.kind === "point") return [point("center", entity.point, "Sketch point")];
+  if (entity.kind === "spline") return [point("start", entity.fitPoints[0]!, "Spline start"), point("end", entity.fitPoints[entity.fitPoints.length - 1]!, "Spline end")];
   return [point("start", entity.start, "Arc start"), point("mid", entity.mid, "Arc middle"), point("end", entity.end, "Arc end")];
 }
 
@@ -546,8 +638,8 @@ function DirectDimensionPreview({ dimension }: { readonly dimension: DirectSketc
   </g>;
 }
 
-function SketchEntityShape({ entity, selected, onSelect, preview = false }: { readonly entity: SketchEntity; readonly selected: boolean; readonly onSelect?: (additive: boolean) => void; readonly preview?: boolean }): React.JSX.Element {
-  const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""} ${preview ? "tool-preview" : ""}`;
+function SketchEntityShape({ entity, selected, onSelect, preview = false, movable = false }: { readonly entity: SketchEntity; readonly selected: boolean; readonly onSelect?: (additive: boolean) => void; readonly preview?: boolean; readonly movable?: boolean }): React.JSX.Element {
+  const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""} ${preview ? "tool-preview" : ""} ${movable ? "movable" : ""}`;
   const common = {
     className,
     "data-selection-id": entity.id,
@@ -557,6 +649,8 @@ function SketchEntityShape({ entity, selected, onSelect, preview = false }: { re
   if (entity.kind === "line") return <line {...common} x1={entity.start[0]} y1={-entity.start[1]} x2={entity.end[0]} y2={-entity.end[1]} />;
   if (entity.kind === "rectangle") return <rect {...common} x={entity.center[0] - entity.widthMm / 2} y={-entity.center[1] - entity.heightMm / 2} width={entity.widthMm} height={entity.heightMm} transform={`rotate(${-entity.rotationDeg} ${entity.center[0]} ${-entity.center[1]})`} />;
   if (entity.kind === "circle") return <circle {...common} cx={entity.center[0]} cy={-entity.center[1]} r={entity.radiusMm} />;
+  if (entity.kind === "point") return <circle {...common} className={`${className} sketch-point`} cx={entity.point[0]} cy={-entity.point[1]} r="0.9" />;
+  if (entity.kind === "spline") return <path {...common} d={sampleSpline(entity.fitPoints).map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${-point[1]}`).join(" ")} />;
   return <path {...common} d={arcPathData(entity.start, entity.mid, entity.end)} />;
 }
 
@@ -629,6 +723,8 @@ function ConstraintGlyph({ constraint, entities }: { readonly constraint: Workbe
 function entityAnchor(entity: SketchEntity): Vec2 {
   if (entity.kind === "line") return [(entity.start[0] + entity.end[0]) / 2, (entity.start[1] + entity.end[1]) / 2];
   if (entity.kind === "rectangle" || entity.kind === "circle") return entity.center;
+  if (entity.kind === "point") return entity.point;
+  if (entity.kind === "spline") return entity.fitPoints[Math.floor(entity.fitPoints.length / 2)]!;
   return entity.mid;
 }
 

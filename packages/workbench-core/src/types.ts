@@ -124,6 +124,21 @@ export type SketchEntity =
       readonly end: Vec2;
       readonly construction: boolean;
       readonly visible?: boolean;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "point";
+      readonly point: Vec2;
+      readonly construction: boolean;
+      readonly visible?: boolean;
+    }
+  | {
+      readonly id: string;
+      readonly kind: "spline";
+      /** Fit points the smooth curve passes through (3 to 24). */
+      readonly fitPoints: readonly Vec2[];
+      readonly construction: boolean;
+      readonly visible?: boolean;
     };
 
 export type SketchConstraintKind =
@@ -148,6 +163,8 @@ export interface WorkbenchSketchConstraint {
   readonly entityIds: readonly string[];
   readonly valueMm?: number;
   readonly dimension?: "length" | "width" | "height" | "radius";
+  /** A relaxed constraint stays recorded but is ignored by the solver and the degree-of-freedom estimate. */
+  readonly suppressed?: boolean;
 }
 
 export interface WorkbenchSketch {
@@ -847,6 +864,16 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "toggle-sketch-construction"; readonly entityId: string }
   | { readonly kind: "toggle-sketch-entity-visibility"; readonly entityId: string }
   | {
+      /** Atomic sketch edit: remove entities (and their relations), replace others by ID, add entities and relations. */
+      readonly kind: "apply-sketch-edit";
+      readonly removeEntityIds: readonly string[];
+      readonly updateEntities: readonly SketchEntity[];
+      readonly addEntities: readonly SketchEntity[];
+      readonly addConstraints: readonly WorkbenchSketchConstraint[];
+      readonly label: string;
+    }
+  | { readonly kind: "set-sketch-constraints-suppressed"; readonly constraintIds: readonly string[]; readonly suppressed: boolean }
+  | {
       readonly kind: "set-part-parameter";
       readonly parameter: "widthMm" | "heightMm" | "thicknessMm" | "holeDiameterMm" | "edgeTreatmentMm" | "patternCount" | "revolveAngleDeg";
       readonly value: number;
@@ -952,7 +979,7 @@ export type WorkbenchOperation = OperationEnvelope & (
  */
 export const WORKBENCH_OPERATION_KINDS = [
   "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
-  "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
+  "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
   "add-general-body", "delete-general-body", "toggle-general-body-visibility",
   "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
   "isolate-part-preview-body", "set-part-preview-bodies-visibility", "create-part-revolve", "pattern-part-feature", "mirror-part-feature",

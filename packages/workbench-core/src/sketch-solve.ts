@@ -46,7 +46,8 @@ const RADIAL_KINDS: readonly SketchEntity["kind"][] = ["circle", "arc"];
 export function solveLiveSketch(sketch: WorkbenchSketch, focusEntityIds?: readonly string[]): LiveSketchSolveReport {
   const component = constraintComponent(sketch, focusEntityIds);
   const entities = sketch.entities.filter((entity) => component.has(entity.id));
-  const constraints = sketch.constraints.filter((constraint) => constraint.entityIds.some((id) => component.has(id)));
+  // A relaxed (suppressed) relation stays recorded but is not enforced.
+  const constraints = sketch.constraints.filter((constraint) => constraint.suppressed !== true && constraint.entityIds.some((id) => component.has(id)));
   const entityById = new Map(entities.map((entity) => [entity.id, entity]));
 
   const arcFrames = new Map<string, ArcFrame>();

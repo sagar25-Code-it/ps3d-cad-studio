@@ -1,7 +1,11 @@
 import type { AssemblyTemplateId, CapabilityLevel, ComponentShape, ElectricalComponentKind, ElectricalTemplateId, PartPreviewBodyShape, VehicleLayerId, VehicleSimulationState, VehicleTemplateId, WorkspaceId } from "./types.js";
 
 export type CadCommandCategory = "create" | "modify" | "construct" | "assemble" | "inspect" | "document" | "automate";
-export type CadSketchTool = "select" | "line" | "rectangle" | "rectangle-center" | "rectangle-three-point" | "circle" | "circle-two-point" | "circle-three-point" | "arc";
+export type CadSketchTool = "select" | "line" | "rectangle" | "rectangle-center" | "rectangle-three-point" | "circle" | "circle-two-point" | "circle-three-point" | "arc" | "point" | "spline";
+/** Selection-driven or click-driven sketch edit tools (each applies one atomic `apply-sketch-edit`). */
+export type CadSketchEditTool = "offset" | "mirror" | "pattern" | "corner" | "fillet" | "chamfer" | "trim" | "extend";
+/** One-shot sketch commands that act on the current selection or toggle a display mode. */
+export type CadSketchCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check";
 
 export type CadCommandAction =
   | { readonly kind: "open-workspace" }
@@ -15,6 +19,8 @@ export type CadCommandAction =
   | { readonly kind: "finish-sketch" }
   | { readonly kind: "activate-sketch-tool"; readonly tool: CadSketchTool }
   | { readonly kind: "activate-sketch-dimension" }
+  | { readonly kind: "activate-sketch-edit"; readonly tool: CadSketchEditTool }
+  | { readonly kind: "sketch-command"; readonly command: CadSketchCommand }
   | { readonly kind: "select-record"; readonly selectionId: string }
   | { readonly kind: "insert-current-part-into-assembly" }
   | { readonly kind: "create-part-preview-body"; readonly shape: PartPreviewBodyShape }
@@ -86,7 +92,7 @@ export interface CadCommandAuditReport {
 
 export const CAD_EXECUTABLE_ACTION_KINDS = [
   "open-workspace", "file-new", "file-open", "file-save", "file-save-as", "file-save-copy", "file-workspace",
-  "open-render-studio", "finish-sketch", "activate-sketch-tool", "activate-sketch-dimension", "select-record", "insert-current-part-into-assembly",
+  "open-render-studio", "finish-sketch", "activate-sketch-tool", "activate-sketch-dimension", "activate-sketch-edit", "sketch-command", "select-record", "insert-current-part-into-assembly",
   "create-part-preview-body", "selected-part-preview-body-action", "part-feature-action", "set-part-preview-bodies-visibility", "insert-component",
   "apply-assembly-template", "selected-component-action", "set-surface-mode", "fit-view", "set-view-orientation",
   "set-view-projection", "set-shading-mode", "set-background-tone", "set-navigation-mode", "set-selection-filter",
@@ -104,11 +110,11 @@ export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   command("command:sketch-two-point-circle", "sketch", "create", "2-point circle", "Create a circle from the two endpoints of its diameter.", "preview", { kind: "activate-sketch-tool", tool: "circle-two-point" }, ["diameter", "round", "two point"]),
   command("command:sketch-three-point-circle", "sketch", "create", "3-point circle", "Create the unique circle passing through three non-collinear points.", "preview", { kind: "activate-sketch-tool", tool: "circle-three-point" }, ["circumcircle", "round", "three point"]),
   command("command:sketch-arc", "sketch", "create", "Three-point arc", "Create a non-collinear three-point arc.", "preview", { kind: "activate-sketch-tool", tool: "arc" }, ["curve", "radius"]),
-  unavailable("command:sketch-spline", "sketch", "create", "Fit-point spline", "Requires a qualified spline representation and solver.", ["bezier", "curve"]),
+  command("command:sketch-spline", "sketch", "create", "Fit-point spline", "Click three or more fit points; the smooth curve through them is sampled into short edges, so it bounds extrudable profiles. Click the last point again or press Enter to finish.", "preview", { kind: "activate-sketch-tool", tool: "spline" }, ["bezier", "curve"]),
   unavailable("command:sketch-slot", "sketch", "create", "Slot", "Requires tangent-chain constraints and profile trimming.", ["obround", "profile"]),
   unavailable("command:sketch-polygon", "sketch", "create", "Polygon", "Requires parametric edge-count and construction constraints.", ["hexagon", "profile"]),
-  unavailable("command:sketch-trim", "sketch", "modify", "Trim", "Requires robust curve intersection and reference repair.", ["extend", "split"]),
-  unavailable("command:sketch-offset", "sketch", "modify", "Offset", "Requires robust curve offsetting and corner resolution.", ["parallel", "distance"]),
+  command("command:sketch-trim", "sketch", "modify", "Trim", "Click a line, arc or circle to remove the part between its neighbouring crossings with other curves.", "preview", { kind: "activate-sketch-edit", tool: "trim" }, ["extend", "split"]),
+  command("command:sketch-offset", "sketch", "modify", "Offset", "Offset selected lines, arcs, circles or rectangles by a distance; connected lines are re-joined with mitred corners.", "preview", { kind: "activate-sketch-edit", tool: "offset" }, ["parallel", "distance"]),
   unavailable("command:sketch-project", "sketch", "construct", "Project geometry", "Requires persistent topology references from a qualified solid kernel.", ["include", "reference"]),
   command("command:sketch-dimension", "sketch", "construct", "Driving dimension", "Activate Dimension mode, then select a line, rectangle, or circle to edit its driving value.", "preview", { kind: "activate-sketch-dimension" }, ["constraint", "measure"]),
   command("command:sketch-pair-constraints", "sketch", "construct", "Pair constraints", "Shift-select two entities for parallel, perpendicular, collinear, concentric, equal, or tangent intent.", "preview", { kind: "open-workspace" }, ["horizontal", "vertical", "parallel", "perpendicular", "concentric"]),
@@ -116,18 +122,18 @@ export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   command("command:sketch-create", "sketch", "construct", "Create Sketch", "Open the sketch workspace on the current bounded XY datum plane.", "preview", { kind: "open-workspace" }, ["sketch", "construction", "plane"]),
   command("command:sketch-profile", "sketch", "inspect", "Profile", "Detect and list closed rectangle and circular sketch regions that can feed the qualified extrusion workflow.", "preview", { kind: "open-workspace" }, ["closed loop", "region", "construction"]),
   unavailable("command:sketch-datum-plane", "sketch", "construct", "Datum Plane", "The origin XY/YZ/XZ planes are available, but editable offset, angle, tangent, and three-point datum planes require a persistent construction-reference graph.", ["construction", "reference plane", "datum dropdown"]),
-  unavailable("command:sketch-point", "sketch", "create", "Point", "Requires a persistent point entity, coordinate dimensions, construction-state handling, and solver participation.", ["curve", "reference", "vertex"]),
-  unavailable("command:sketch-fillet", "sketch", "modify", "Sketch Fillet", "Requires two intersecting curves, trim/extend rules, a tangent arc, driving radius, and constraint repair.", ["round", "corner", "radius"]),
-  unavailable("command:sketch-chamfer", "sketch", "modify", "Sketch Chamfer", "Requires two intersecting curves, distance/angle modes, trimming, and persistent constraints.", ["bevel", "corner"]),
-  unavailable("command:sketch-extend", "sketch", "modify", "Extend", "Requires a target boundary, bounded curve extension, intersection ordering, and constraint repair.", ["trim", "edit", "curve"]),
-  unavailable("command:sketch-corner", "sketch", "modify", "Corner", "Requires two curve selections, intersection construction, extend/trim behavior, and stable endpoint relations.", ["trim", "extend", "join"]),
-  unavailable("command:sketch-pattern", "sketch", "modify", "Sketch Pattern", "Requires associative linear or circular instances, quantity and spacing controls, and solver-managed dependencies.", ["array", "repeat", "circular"]),
-  unavailable("command:sketch-mirror", "sketch", "modify", "Sketch Mirror", "Requires an entity set, construction mirror line, symmetric constraints, and regeneration-safe references.", ["symmetry", "copy", "axis"]),
-  command("command:sketch-fix", "sketch", "construct", "Fix Curve", "Select a sketch curve, then use Fix primary in the sketch palette to pin it with a fixed constraint.", "preview", { kind: "open-workspace" }, ["lock", "ground", "constraint"]),
-  unavailable("command:sketch-show-movable", "sketch", "inspect", "Show Movable Geometry", "Requires solver degree-of-freedom analysis and per-entity visual diagnostics.", ["under constrained", "degrees of freedom", "solve"]),
-  unavailable("command:sketch-relax-dimensions", "sketch", "construct", "Relax Dimensions", "Requires controlled conversion between driving and reference dimensions plus conflict diagnostics.", ["driven", "reference", "over constrained"]),
-  unavailable("command:sketch-relax-relations", "sketch", "construct", "Relax Relations", "Requires constraint suppression, solve diagnostics, and a reversible relation state model.", ["constraint", "suppress", "solve"]),
-  unavailable("command:sketch-check", "sketch", "inspect", "Sketch Checking", "Requires open-loop, overlap, duplicate, self-intersection, small-entity, and solver-status diagnostics.", ["validate", "profile", "diagnostic"]),
+  command("command:sketch-point", "sketch", "create", "Point", "Place a sketch point. Points are reference geometry: they snap, anchor patterns and never bound a profile.", "preview", { kind: "activate-sketch-tool", tool: "point" }, ["curve", "reference", "vertex"]),
+  command("command:sketch-fillet", "sketch", "modify", "Sketch Fillet", "Round the corner between two lines, or all four corners of a rectangle, with a tangent arc of a given radius.", "preview", { kind: "activate-sketch-edit", tool: "fillet" }, ["round", "corner", "radius"]),
+  command("command:sketch-chamfer", "sketch", "modify", "Sketch Chamfer", "Cut the corner between two lines, or all four corners of a rectangle, with a straight chamfer of a given distance.", "preview", { kind: "activate-sketch-edit", tool: "chamfer" }, ["bevel", "corner"]),
+  command("command:sketch-extend", "sketch", "modify", "Extend", "Click near the end of a line to extend it to the first curve it reaches.", "preview", { kind: "activate-sketch-edit", tool: "extend" }, ["trim", "edit", "curve"]),
+  command("command:sketch-corner", "sketch", "modify", "Corner", "Extend or trim two selected lines so they meet exactly at their intersection.", "preview", { kind: "activate-sketch-edit", tool: "corner" }, ["trim", "extend", "join"]),
+  command("command:sketch-pattern", "sketch", "modify", "Sketch Pattern", "Copy selected entities in a rectangular grid or around a centre. The copies are independent, not associative.", "preview", { kind: "activate-sketch-edit", tool: "pattern" }, ["array", "repeat", "circular"]),
+  command("command:sketch-mirror", "sketch", "modify", "Sketch Mirror", "Mirror selected entities across a selected line; mirrored lines and circles get symmetric relations.", "preview", { kind: "activate-sketch-edit", tool: "mirror" }, ["symmetry", "copy", "axis"]),
+  command("command:sketch-fix", "sketch", "construct", "Fix Curve", "Pin the selected curves in place with a fixed relation.", "preview", { kind: "sketch-command", command: "fix-curve" }, ["lock", "ground", "constraint"]),
+  command("command:sketch-show-movable", "sketch", "inspect", "Show Movable Geometry", "Highlight sketch entities that still have estimated degrees of freedom.", "preview", { kind: "sketch-command", command: "show-movable" }, ["under constrained", "degrees of freedom", "solve"]),
+  command("command:sketch-relax-dimensions", "sketch", "construct", "Relax Dimensions", "Suppress the driving dimensions on the selected geometry, or restore them. Relaxed dimensions stay recorded but are ignored.", "preview", { kind: "sketch-command", command: "relax-dimensions" }, ["driven", "reference", "over constrained"]),
+  command("command:sketch-relax-relations", "sketch", "construct", "Relax Relations", "Suppress the geometric relations on the selected geometry, or restore them. Relaxed relations stay recorded but are ignored by the solver.", "preview", { kind: "sketch-command", command: "relax-relations" }, ["constraint", "suppress", "solve"]),
+  command("command:sketch-check", "sketch", "inspect", "Sketch Checking", "List open ends, tiny or duplicate curves, conflicting or unsolved relations and the degree-of-freedom state.", "preview", { kind: "sketch-command", command: "sketch-check" }, ["validate", "profile", "diagnostic"]),
   unavailable("command:sketch-reattach", "sketch", "construct", "Reattach Sketch", "Requires persistent plane or face references, orientation mapping, origin control, and broken-reference repair.", ["plane", "face", "support"]),
   command("command:part-update-model", "part", "inspect", "Update Model", "Revalidate and regenerate every supported analytic Part body in one auditable revision.", "preview", { kind: "part-feature-action", operation: "update-model" }, ["regenerate", "rebuild", "history"]),
   command("command:sketch-finish", "sketch", "construct", "Finish Sketch", "Close the active sketch session and return to the Part workspace while preserving the revisioned sketch geometry.", "preview", { kind: "finish-sketch" }, ["finish", "exit sketch", "update model"]),
