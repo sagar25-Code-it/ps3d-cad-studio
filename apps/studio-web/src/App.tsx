@@ -1193,6 +1193,21 @@ export function App(): React.JSX.Element {
       else setStatusText("No direct mates yet — add one from the Assembly inspector to create a fixed relationship.");
       return true;
     }
+    if (selectionId === "electrical-action:nets" || selectionId === "electrical-action:erc") {
+      // These ribbon and tree entries used to do nothing visible. Bring the matching panel into view and say what it shows.
+      if (projectRef.current.activeWorkspace !== "electrical") switchWorkspace("electrical");
+      const nets = selectionId === "electrical-action:nets";
+      window.setTimeout(() => {
+        const panel = globalThis.document.querySelector<HTMLElement>(nets ? ".electrical-wire-card" : ".electrical-erc-card");
+        if (panel === null) { setStatusText(nets ? "The net editor is the Create net card in the Electrical panel." : "The electrical rule check card is in the Electrical panel."); return; }
+        panel.scrollIntoView({ behavior: "smooth", block: "center" });
+        panel.classList.add("palette-reveal");
+        window.setTimeout(() => panel.classList.remove("palette-reveal"), 1400);
+        const erc = projectRef.current.electrical;
+        setStatusText(nets ? `Net editor: ${erc.nets.length} net${erc.nets.length === 1 ? "" : "s"}. Create a net between two terminals in the highlighted card; delete one from the Netlist.` : "Electrical rule check: the highlighted card lists every error and warning for the current devices and nets.");
+      }, 60);
+      return true;
+    }
     if (selectionId === "electrical-action:bom") {
       setStatusText("The concept device index is drawn on the schematic sheet. Review the grouped device list on the Electrical workspace sheet (Download SVG to export).");
       return true;
