@@ -336,7 +336,8 @@ export type ComponentShape =
   | "hex-prism"
   | "ring"
   | "torus"
-  | "gear";
+  | "gear"
+  | "mesh";
 
 export interface MasterCartComponentTrace {
   readonly instanceId: string;
@@ -347,6 +348,13 @@ export interface MasterCartComponentTrace {
   readonly finishLabel: string;
   readonly parameterSummary: string;
   readonly provenance: "original-ps3d-parametric-preview";
+}
+
+export interface ComponentMesh {
+  readonly positionsMm: readonly number[];
+  readonly indices: readonly number[];
+  /** Optional face index per triangle, kept so face highlighting still works on the snapshot. */
+  readonly faceTriangles?: readonly number[];
 }
 
 export interface ComponentInstance {
@@ -362,6 +370,11 @@ export interface ComponentInstance {
   readonly explosionDirection: Vec3;
   /** Optional radial detail used by original PS3D gear and sprocket preview meshes. */
   readonly featureCount?: number;
+  /**
+   * Triangle mesh for shape "mesh" (a snapshot of a Part solid, not associative), in millimetres and local
+   * to the component origin (the body bounds centre). Required exactly when the shape is "mesh".
+   */
+  readonly mesh?: ComponentMesh;
   /** Trace for one grouped, independently generated Master Cart preview item. */
   readonly masterCart?: MasterCartComponentTrace;
   /** Present only on deterministic schematic-to-assembly package instances. */

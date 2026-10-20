@@ -43,7 +43,7 @@ import { failure, validateWorkbenchProject, WORKBENCH_LIMITS } from "./validatio
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/iu;
 const WORKSPACES: readonly WorkspaceId[] = ["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"];
-const COMPONENT_SHAPES: readonly ComponentInstance["shape"][] = ["plate", "spacer", "pin", "cap", "box", "cylinder", "cone", "sphere", "hex-prism", "ring", "torus", "gear"];
+const COMPONENT_SHAPES: readonly ComponentInstance["shape"][] = ["plate", "spacer", "pin", "cap", "box", "cylinder", "cone", "sphere", "hex-prism", "ring", "torus", "gear", "mesh"];
 const PART_PARAMETERS: readonly (keyof Pick<PartIntent, "widthMm" | "heightMm" | "thicknessMm" | "holeDiameterMm" | "edgeTreatmentMm" | "patternCount" | "revolveAngleDeg">)[] = [
   "widthMm", "heightMm", "thicknessMm", "holeDiameterMm", "edgeTreatmentMm", "patternCount", "revolveAngleDeg"
 ];
@@ -1217,7 +1217,7 @@ function validPartFeatureTrace(value: unknown): boolean {
 
 function validComponentPayload(value: unknown): value is ComponentInstance {
   const required = ["id", "name", "shape", "grounded", "visible", "color", "translationMm", "rotationDeg", "sizeMm", "explosionDirection"];
-  const optional = ["featureCount", "masterCart", "sourceElectricalComponentId", "catalogPartId"];
+  const optional = ["featureCount", "masterCart", "sourceElectricalComponentId", "catalogPartId", "mesh"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || !stableId(value.id) || !shortText(value.name, 1, 120) || !COMPONENT_SHAPES.includes(value.shape as ComponentInstance["shape"])
     || typeof value.grounded !== "boolean" || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)
@@ -1232,6 +1232,21 @@ function validComponentPayload(value: unknown): value is ComponentInstance {
   if (value.shape === "torus" && (second! >= first! || Math.abs(second! - third!) > 1e-9)) return false;
   if (Object.hasOwn(value, "featureCount") && (!Number.isSafeInteger(value.featureCount) || (value.featureCount as number) < 3 || (value.featureCount as number) > 240 || value.shape !== "gear")) return false;
   if (Object.hasOwn(value, "masterCart") && !validMasterCartTrace(value.masterCart)) return false;
+  if ((value.shape === "mesh") !== Object.hasOwn(value, "mesh") || (value.shape === "mesh" && !validComponentMeshPayload(value.mesh))) return false;
+  return true;
+}
+
+function validComponentMeshPayload(value: unknown): boolean {
+  if (!isRecord(value) || !Object.keys(value).every((key) => ["positionsMm", "indices", "faceTriangles"].includes(key)) || !Array.isArray(value.positionsMm) || !Array.isArray(value.indices)) return false;
+  const positions = value.positionsMm;
+  const indices = value.indices;
+  if (positions.length < 12 || positions.length % 3 !== 0 || positions.length > 300_000 || indices.length < 3 || indices.length % 3 !== 0 || indices.length > 300_000) return false;
+  if (positions.some((entry) => typeof entry !== "number" || !Number.isFinite(entry) || Math.abs(entry) > 20_000)) return false;
+  if (indices.some((entry) => typeof entry !== "number" || !Number.isInteger(entry) || entry < 0 || entry >= positions.length / 3)) return false;
+  if (Object.hasOwn(value, "faceTriangles")) {
+    const faces = value.faceTriangles;
+    if (!Array.isArray(faces) || faces.length !== indices.length / 3 || faces.some((entry) => typeof entry !== "number" || !Number.isInteger(entry) || entry < -1 || entry > 4_096)) return false;
+  }
   return true;
 }
 

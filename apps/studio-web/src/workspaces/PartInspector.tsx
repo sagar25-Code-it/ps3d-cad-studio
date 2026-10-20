@@ -31,6 +31,7 @@ interface PartInspectorProps {
   readonly onBodyColor: (color: string) => void;
   readonly onShadingMode: (mode: ViewportShadingMode) => void;
   readonly onInsertIntoAssembly: () => void;
+  readonly onGeneralBodyToAssembly: (bodyId: string) => void;
   readonly onSelect: (id: string | null) => void;
   readonly onCreatePreviewBody: (shape: PartPreviewBodyShape) => void;
   readonly onPreviewBodyTransform: (bodyId: string, translationMm: Vec3, rotationDeg: Vec3) => void;
@@ -75,6 +76,11 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
         onDelete={props.onPreviewBodyDelete}
       />}
     </section>
+    {selectedGeneralBody !== undefined && <section className="inspector-section general-body-assembly">
+      <header><strong>Use in assembly</strong><span>snapshot</span></header>
+      <p>Adds this solid to the Assembly as a mesh component with its real shape. It is a snapshot: later edits to the solid are not carried over.</p>
+      <button className="palette-action primary" onClick={() => props.onGeneralBodyToAssembly(selectedGeneralBody.id)}><CommandIcon name="assembly" />Create component from solid</button>
+    </section>}
     {selectedGeneralBody?.brep !== undefined && <section className="inspector-section named-faces-card">
       <header><strong>Named faces</strong><span>{selectedGeneralBody.brep.faces.length} faces · {selectedGeneralBody.brep.origin === "mesh-boolean" ? "mesh Boolean regions" : "B-rep"}</span></header>
       <p>{selectedGeneralBody.brep.origin === "mesh-boolean" ? "Labelled regions of a tessellated Boolean result, named target.<face> or tool.<face> after the source faces. This is not an exact B-rep. Select one to highlight it." : "Stable, lineage-anchored faces from the B-rep kernel. Select one to highlight it in the viewport; the name survives dimensional rebuilds."}</p>

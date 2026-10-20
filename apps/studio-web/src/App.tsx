@@ -1030,6 +1030,41 @@ export function App(): React.JSX.Element {
     setStatusText(`Created an assembly component from ${body.name}. Later part edits are not associative yet.`);
   };
 
+  /** Snapshots a Part solid into the assembly as a mesh component, centred on its bounds so it moves and rotates about its middle. */
+  const createComponentFromGeneralBody = (bodyId: string): void => {
+    const body = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === bodyId);
+    if (body === undefined) { setStatusText("Select a solid body first."); return; }
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    for (let index = 0; index < body.positionsMm.length; index += 3) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        const value = body.positionsMm[index + axis]!;
+        if (value < min[axis]!) min[axis] = value;
+        if (value > max[axis]!) max[axis] = value;
+      }
+    }
+    const center = [0, 1, 2].map((axis) => (min[axis]! + max[axis]!) / 2) as unknown as Vec3;
+    const positionsMm = body.positionsMm.map((value, index) => value - center[index % 3]!);
+    const component: ComponentInstance = {
+      id: `component:solid-${crypto.randomUUID()}`,
+      name: `${body.name} · component`.slice(0, 120),
+      shape: "mesh",
+      grounded: false,
+      visible: true,
+      color: body.color,
+      translationMm: center,
+      rotationDeg: [0, 0, 0],
+      sizeMm: [0, 1, 2].map((axis) => Math.max(0.01, max[axis]! - min[axis]!)) as unknown as Vec3,
+      explosionDirection: [0.2, -0.14, 0.62],
+      mesh: { positionsMm, indices: body.indices, ...(body.brep === undefined ? {} : { faceTriangles: body.brep.faceTriangles }) }
+    };
+    if (!applyProjectOperation({ kind: "add-assembly-component", component })) return;
+    switchWorkspace("assembly");
+    setSelectedId(component.id);
+    setStatus("ready");
+    setStatusText(`Created an assembly component with the real geometry of ${body.name}. It is a snapshot: later Part edits are not associative.`);
+  };
+
   const deleteAssemblyComponent = (componentId: string): void => {
     if (applyProjectOperation({ kind: "delete-assembly-component", componentId })) setSelectedId(null);
   };
@@ -2116,7 +2151,9 @@ export function App(): React.JSX.Element {
     if (commandId === "body.update-model") { runPartFeatureAction("update-model", "Update Model"); return; }
     if (commandId === "feature.edit" || commandId === "body.appearance" || commandId === "body.move") { switchWorkspace("part"); if (selectionId !== null) setSelectedId(selectionId); return; }
     if (commandId === "feature.reveal-inputs") { switchWorkspace("sketch"); setSelectedId(projectRef.current.sketch.id); setTreeRevealRequest((request) => request + 1); return; }
+    if (commandId === "body.boolean-intersect" && selectionId?.startsWith("general-body:") === true) { if ((projectRef.current.part.generalBodies ?? []).length < 2) { setStatusText("Intersect needs a second solid body. Create another with Make solid first."); return; } setCombineRequest({ targetId: selectionId, mode: "intersect" }); return; }
     if (commandId === "body.create-component") {
+      if (selectionId?.startsWith("general-body:") === true) { createComponentFromGeneralBody(selectionId); return; }
       if (selectionId?.startsWith("part-body:") === true) {
         const body = (projectRef.current.part.previewBodies ?? []).find((candidate) => candidate.id === selectionId);
         if (body !== undefined) { createComponentFromPartBody(body); return; }
@@ -2427,7 +2464,7 @@ export function App(): React.JSX.Element {
         <ViewportMetrics workspace={project.activeWorkspace} model={model} imported={activeImport} project={project} interferenceCount={interferences.length} surfaceTriangles={surfacePreview.metrics.triangles} vehicleAnalysis={vehiclePreview.analysis} vehiclePrimitiveCount={vehiclePreview.scene.primitives.length} />
       </section>}
       {!masterCartOpen && <>
-      {project.activeWorkspace === "part" && activeImport === undefined && <PartInspector part={project.part} model={model} working={status === "working"} bodyColor={viewportState.bodyColor} shadingMode={viewportState.shadingMode} selectedId={selectedId} selectedFace={selectedFace !== null && selectedFace.bodyId === selectedId ? selectedFace.faceIndex : null} onSelectFace={(bodyId, faceIndex) => setSelectedFace(faceIndex === null ? null : { bodyId, faceIndex })} onSelect={setSelectedId} onBodyColor={(color) => viewportRef.current?.setBodyColor(color)} onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)} onCommit={(parameter, value) => void commitPartParameter(parameter, value)} onInsertIntoAssembly={insertCurrentPartIntoAssembly} onCreatePreviewBody={createPartPreviewBody} onPreviewBodyTransform={(bodyId, translationMm, rotationDeg) => applyProjectOperation({ kind: "set-part-preview-body-transform", bodyId, translationMm, rotationDeg })} onPreviewBodySize={(bodyId, sizeMm) => applyProjectOperation({ kind: "set-part-preview-body-size", bodyId, sizeMm })} onPreviewBodyColor={(bodyId, color) => applyProjectOperation({ kind: "set-part-preview-body-color", bodyId, color })} onPreviewBodyVisibility={(bodyId) => applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId })} onPreviewBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId })) setSelectedId(null); }} />}
+      {project.activeWorkspace === "part" && activeImport === undefined && <PartInspector onGeneralBodyToAssembly={createComponentFromGeneralBody} part={project.part} model={model} working={status === "working"} bodyColor={viewportState.bodyColor} shadingMode={viewportState.shadingMode} selectedId={selectedId} selectedFace={selectedFace !== null && selectedFace.bodyId === selectedId ? selectedFace.faceIndex : null} onSelectFace={(bodyId, faceIndex) => setSelectedFace(faceIndex === null ? null : { bodyId, faceIndex })} onSelect={setSelectedId} onBodyColor={(color) => viewportRef.current?.setBodyColor(color)} onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)} onCommit={(parameter, value) => void commitPartParameter(parameter, value)} onInsertIntoAssembly={insertCurrentPartIntoAssembly} onCreatePreviewBody={createPartPreviewBody} onPreviewBodyTransform={(bodyId, translationMm, rotationDeg) => applyProjectOperation({ kind: "set-part-preview-body-transform", bodyId, translationMm, rotationDeg })} onPreviewBodySize={(bodyId, sizeMm) => applyProjectOperation({ kind: "set-part-preview-body-size", bodyId, sizeMm })} onPreviewBodyColor={(bodyId, color) => applyProjectOperation({ kind: "set-part-preview-body-color", bodyId, color })} onPreviewBodyVisibility={(bodyId) => applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId })} onPreviewBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId })) setSelectedId(null); }} />}
       {project.activeWorkspace === "part" && activeImport !== undefined && <ImportedModelInspector result={activeImport} onExchange={() => setExchangeOpen(true)} onClear={clearActiveImport} />}
       {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={displayedAssembly} maxExplodeMm={assemblyExplodeMaxMm} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplodePreview={previewAssemblyExplode} onExplodeCommit={commitAssemblyExplode} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onAddMate={(mate) => applyProjectOperation({ kind: "add-assembly-mate", mate })} onDeleteMate={(mateId) => { if (applyProjectOperation({ kind: "delete-assembly-mate", mateId }) && selectedId === mateId) setSelectedId(null); }} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
       {project.activeWorkspace === "surface" && <SurfaceInspector surface={project.surface} metrics={surfacePreview.metrics} onParameter={(parameter, value) => applyProjectOperation({ kind: "set-surface-parameter", parameter, value })} />}

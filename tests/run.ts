@@ -7,6 +7,7 @@ import { sketchRegionTests } from "./sketch-regions.test.js";
 import { sketchSolverTests } from "./sketch-solver.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
+import { assemblyMeshTests } from "./assembly-mesh.test.js";
 import { workbenchCoreTests } from "./workbench-core.test.js";
 import { workbenchDrawingTests } from "./workbench-drawing.test.js";
 import { workbenchGeometryTests } from "./workbench-geometry.test.js";
@@ -33,6 +34,7 @@ const tests: readonly TestCase[] = [
   ...sketchSolverTests,
   ...sketchEditToolTests,
   ...meshBooleanTests,
+  ...assemblyMeshTests,
   ...evidenceAndSolidTests,
   ...exchange3dTests,
   ...revisionBoundaryTests,

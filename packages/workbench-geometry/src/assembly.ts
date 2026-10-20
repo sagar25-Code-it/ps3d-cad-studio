@@ -262,6 +262,14 @@ export function explodedPosition(component: ComponentInstance, explodeMm: number
 function componentPrimitive(component: ComponentInstance, explodeMm: number): PreviewPrimitive {
   const base = { id: component.id, name: component.name, color: component.color, opacity: 1, selectable: true } as const;
   const positionMm = explodedPosition(component, explodeMm);
+  if (component.shape === "mesh" && component.mesh !== undefined) {
+    // A snapshot of a Part solid: its local triangles are placed by the component transform like any other part.
+    const positions: number[] = [];
+    for (let index = 0; index + 2 < component.mesh.positionsMm.length; index += 3) {
+      positions.push(...transformPoint([component.mesh.positionsMm[index]!, component.mesh.positionsMm[index + 1]!, component.mesh.positionsMm[index + 2]!], component.rotationDeg, positionMm));
+    }
+    return { ...base, kind: "mesh", positionsMm: positions, indices: component.mesh.indices, wireframe: false, doubleSided: false, ...(component.mesh.faceTriangles === undefined ? {} : { faceTriangles: component.mesh.faceTriangles }) };
+  }
   if (component.shape === "plate" || component.shape === "box") return { ...base, kind: "box", positionMm, rotationDeg: component.rotationDeg, sizeMm: component.sizeMm };
   if (component.shape === "cone") return { ...base, kind: "cone", positionMm, rotationDeg: component.rotationDeg, baseRadiusMm: component.sizeMm[0] / 2, topRadiusMm: component.sizeMm[1] / 2, heightMm: component.sizeMm[2], radialSegments: 48 };
   if (component.shape === "sphere") return { ...base, kind: "sphere", positionMm, rotationDeg: component.rotationDeg, radiusMm: component.sizeMm[0] / 2, widthSegments: 32, heightSegments: 20 };
@@ -396,6 +404,15 @@ function primitiveBounds(primitive: PreviewPrimitive): readonly Vec3[] {
 }
 
 function componentHalfExtents(component: ComponentInstance): Vec3 {
+  if (component.shape === "mesh" && component.mesh !== undefined) {
+    // Interference uses the rotated bounds of the real triangles, not a stand-in cylinder.
+    const half: [number, number, number] = [0, 0, 0];
+    for (let index = 0; index + 2 < component.mesh.positionsMm.length; index += 3) {
+      const point = transformPoint([component.mesh.positionsMm[index]!, component.mesh.positionsMm[index + 1]!, component.mesh.positionsMm[index + 2]!], component.rotationDeg, [0, 0, 0]);
+      for (let axis = 0; axis < 3; axis += 1) half[axis] = Math.max(half[axis]!, Math.abs(point[axis]!));
+    }
+    return half;
+  }
   if (component.shape === "plate" || component.shape === "box") {
     return rotatedHalfExtents([component.sizeMm[0] / 2, component.sizeMm[1] / 2, component.sizeMm[2] / 2], component.rotationDeg);
   }

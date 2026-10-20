@@ -329,9 +329,10 @@ export const workbenchInteractionTests: readonly TestCase[] = [
       assert(directFeatures?.children?.some((command) => command.id === "body.move-face" && command.enabled) === true, "an analytic body should expose direct face editing");
       assert(directFeatures?.children?.some((command) => command.id === "body.shell" && command.enabled) === true, "an analytic body should expose bounded Shell");
 
-      // A kernel-built body must not be silently replaced by the plate when sent to an assembly.
+      // A kernel-built body goes to the assembly as a mesh component, never as a stand-in plate.
       const generalCommands = resolveWorkbenchContextCommands({ workspace: "part", selectionId: "general-body:prism" });
-      assert(generalCommands.some((command) => command.id === "body.create-component" && !command.enabled && command.disabledReason?.includes("wrong geometry") === true), "a general body must not offer Create Component, with the reason shown");
+      assert(generalCommands.some((command) => command.id === "body.create-component" && command.enabled), "a general body can become an assembly component with its real mesh");
+      assert(generalCommands.some((command) => command.id === "body.boolean-intersect" && command.enabled), "a general body exposes the mesh Intersect");
       assert(generalCommands.some((command) => command.id === "selection.delete" && command.enabled), "a general body should still be deletable");
 
       const sketchCanvasCommands = resolveWorkbenchContextCommands({ workspace: "sketch", selectionId: null });
