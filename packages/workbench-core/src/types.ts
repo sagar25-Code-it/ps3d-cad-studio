@@ -944,6 +944,7 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "toggle-component-visibility"; readonly componentId: string }
   | { readonly kind: "add-assembly-mate"; readonly mate: AssemblyMate }
   | { readonly kind: "delete-assembly-mate"; readonly mateId: string }
+  | { readonly kind: "solve-assembly-mates" }
   | { readonly kind: "set-surface-mode"; readonly mode: "bezier" | "loft" }
   | {
       readonly kind: "set-surface-parameter";
@@ -1010,7 +1011,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "boolean-part-bodies", "trim-part-body", "set-part-body-edge-treatment", "set-part-body-draft", "set-part-body-shell",
   "move-part-body-face", "replace-part-body-face", "delete-part-body-face", "update-part-model", "set-assembly-explode", "apply-assembly-template",
   "add-assembly-component", "add-assembly-components", "delete-assembly-component", "set-component-translation", "toggle-component-grounded",
-  "toggle-component-visibility", "add-assembly-mate", "delete-assembly-mate", "set-surface-mode", "set-surface-parameter", "apply-surface-preset", "set-drawing-sheet", "set-drawing-projection",
+  "toggle-component-visibility", "add-assembly-mate", "delete-assembly-mate", "solve-assembly-mates", "set-surface-mode", "set-surface-parameter", "apply-surface-preset", "set-drawing-sheet", "set-drawing-projection",
   "set-drawing-scale", "set-drawing-dimensions", "set-drawing-view-preset", "set-drawing-display-style", "set-drawing-section-view",
   "set-drawing-drafting-standard", "set-drawing-gdt", "set-drawing-datum-scheme", "set-drawing-gdt-specification",
   "set-drawing-general-tolerance", "set-drawing-notes", "set-drawing-title-block", "apply-electrical-template", "set-electrical-standard",

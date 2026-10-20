@@ -23,6 +23,7 @@ import { createElectromechanicalAssembly, electricalSignature } from "./electrom
 import { createVehicleTemplate, vehicleHardPoints, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
+import { solveAssemblyMates } from "./assembly-solve.js";
 import {
   booleanPartBodies,
   createRevolvedPartBody,
@@ -97,7 +98,7 @@ export function applyWorkbenchOperation(
   if (!changed.ok) return changed;
   const nextRevision = current.value.revision + 1;
   const next: WorkbenchProject = {
-    ...changed.value.project,
+    ...refreshMateStatuses(changed.value.project, operation.kind),
     revision: nextRevision,
     audit: [...current.value.audit, {
       revision: nextRevision,
@@ -111,6 +112,18 @@ export function applyWorkbenchOperation(
   const validated = validateWorkbenchProject(next);
   if (!validated.ok) return validated;
   return { ok: true, value: { project: validated.value, changedIds: changed.value.changedIds, summary: changed.value.summary, exactRetry: false } };
+}
+
+const MATE_STATUS_REFRESH_KINDS: readonly WorkbenchOperation["kind"][] = [
+  "set-component-translation", "toggle-component-grounded", "delete-assembly-mate", "delete-assembly-component", "add-assembly-component",
+  "add-assembly-components", "apply-assembly-template", "generate-electromechanical-realization"
+];
+
+/** Mate statuses are derived from the current positions, so they are refreshed after anything that can change them. */
+function refreshMateStatuses(project: WorkbenchProject, kind: WorkbenchOperation["kind"]): WorkbenchProject {
+  if (!MATE_STATUS_REFRESH_KINDS.includes(kind) || project.assembly.mates.length === 0) return project;
+  const derived = solveAssemblyMates(project.assembly, { move: false });
+  return derived.mates.every((mate, index) => mate === project.assembly.mates[index]) ? project : { ...project, assembly: { ...project.assembly, mates: derived.mates } };
 }
 
 /** Audit entries cap the intent key at 8,192 characters (see validateAudit). */
@@ -302,6 +315,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "add-assembly-mate":
       if (!keys(input, [...common, "mate"]) || !validAssemblyMatePayload(input.mate)) return invalidOperation("The assembly mate payload is invalid.");
+      break;
+    case "solve-assembly-mates":
+      if (!keys(input, common)) return invalidOperation("The mate solve takes no parameters.");
       break;
     case "delete-assembly-mate":
       if (!keys(input, [...common, "mateId"]) || !stableId(input.mateId)) return invalidOperation("The mate ID is invalid.");
@@ -856,14 +872,30 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       if (operation.mate.componentIds.some((componentId) => !componentIds.has(componentId))) return invalidOperation("The assembly mate references a missing component.");
       if (new Set(operation.mate.componentIds).size !== operation.mate.componentIds.length) return invalidOperation("A mate cannot reference the same component twice.");
       const addMateSource = project.assembly.electromechanicalSource;
+      // The mate is enforced when it is created: the second component moves onto the first (grounded parts never move).
+      const solved = solveAssemblyMates({ ...project.assembly, mates: [...project.assembly.mates, operation.mate] }, { move: true });
       return changed({
         ...project,
         assembly: {
           ...project.assembly,
-          mates: [...project.assembly.mates, operation.mate],
-          ...(addMateSource === undefined ? {} : { electromechanicalSource: { ...addMateSource, status: "stale" as const } })
+          components: solved.components,
+          mates: solved.mates,
+          ...(addMateSource === undefined || solved.movedIds.length === 0 ? {} : { electromechanicalSource: { ...addMateSource, status: "stale" as const } })
         }
-      }, [operation.mate.id, ...operation.mate.componentIds], `Created ${operation.mate.name} as a validated direct-mate record.`);
+      }, [operation.mate.id, ...operation.mate.componentIds, ...solved.movedIds], `Created ${operation.mate.name}.${solved.notes.length === 0 ? "" : ` ${solved.notes.join("; ")}.`}${solved.mates.find((mate) => mate.id === operation.mate.id)?.status === "conflict" ? " It conflicts with another mate or a grounded part, so nothing was moved." : ""}`);
+    }
+    case "solve-assembly-mates": {
+      const solveSource = project.assembly.electromechanicalSource;
+      const solved = solveAssemblyMates(project.assembly, { move: true });
+      return changed({
+        ...project,
+        assembly: {
+          ...project.assembly,
+          components: solved.components,
+          mates: solved.mates,
+          ...(solveSource === undefined || solved.movedIds.length === 0 ? {} : { electromechanicalSource: { ...solveSource, status: "stale" as const } })
+        }
+      }, solved.movedIds.length === 0 ? [project.assembly.id] : solved.movedIds, solved.notes.length === 0 ? "Solved mates: every satisfiable mate was already in place." : `Solved mates. ${solved.notes.join("; ")}.`);
     }
     case "delete-assembly-mate": {
       const target = project.assembly.mates.find((mate) => mate.id === operation.mateId);

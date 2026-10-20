@@ -71,7 +71,7 @@ export function createWorkbenchProject(projectId: string): WorkbenchProject {
         { id: "mate:base-fixed", name: "Base grounded", kind: "fixed", componentIds: ["component:base"], status: "satisfied" },
         { id: "mate:pin-axis", name: "Pin aligned to base Z", kind: "aligned-axis", componentIds: ["component:base", "component:pin"], axis: "z", status: "satisfied" },
         { id: "mate:cap-axis", name: "Cap aligned to pin", kind: "aligned-axis", componentIds: ["component:pin", "component:cap"], axis: "z", status: "satisfied" },
-        { id: "mate:spacers-plane", name: "Spacers seated", kind: "coincident-origin", componentIds: ["component:spacer-left", "component:spacer-right"], status: "satisfied" }
+        { id: "mate:spacers-plane", name: "Spacers aligned along X", kind: "aligned-axis", componentIds: ["component:spacer-left", "component:spacer-right"], axis: "x", status: "satisfied" }
       ]
     },
     surface: {

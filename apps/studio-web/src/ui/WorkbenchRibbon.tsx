@@ -19,6 +19,7 @@ interface WorkbenchRibbonProps {
   readonly selectedId: string | null;
   readonly onSketchTool: (tool: SketchTool) => void;
   readonly onCombine: () => void;
+  readonly onSolveMates: () => void;
   readonly onSketchDimension: () => void;
   readonly sketchEditTool: SketchEditToolId | null;
   readonly sketchShowMovable: boolean;
@@ -231,6 +232,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
       <RibbonGroup label="Inspect & relationships">
         <RibbonButton icon="mate" label="Mates" hint={`${props.project.assembly.mates.length}`} onClick={() => { const firstMate = props.project.assembly.mates[0]; if (firstMate !== undefined) props.onSelect(firstMate.id); }} />
+        <RibbonButton icon="mate" label="Solve mates" hint="move into place" disabled={props.project.assembly.mates.length === 0} onClick={props.onSolveMates} />
         <RibbonButton icon="interference" label="Interference" hint="AABB" onClick={() => props.onSelect("analysis:interference")} />
         <RibbonButton icon="exchange" label="3D Exchange" hint="scene out" onClick={props.onExchange} />
       </RibbonGroup>
