@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { EngineeringIntentPlan, WorkbenchOperation, WorkbenchProject, WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
 import { WORKBENCH_MCP_TOOLS, handleWorkbenchMcpTool, type Ps3dExperienceLevel, type WorkbenchMcpResult } from "../../../../packages/workbench-mcp/src/index.js";
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
+import { buildHostRecipes, readRemoteProbe, remoteMcpUrl, type RemoteProbeReading } from "../mcp-recipes.js";
 
 interface AutomateWorkspaceProps {
   readonly project: WorkbenchProject;
   readonly selectedId: string | null;
+  /** Bumped by the ribbon's Remote MCP button: switch to the guided view and bring the remote-host recipes into view. */
+  readonly remoteRevealRequest: number;
   readonly onSelect: (id: string | null) => void;
   readonly onApplyProject: (project: WorkbenchProject, message: string) => void;
   readonly onReviewElectromechanical: () => void;
@@ -118,6 +121,34 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
   const [experienceLevel, setExperienceLevel] = useState<Ps3dExperienceLevel>("engineer");
   const [demoIntent, setDemoIntent] = useState<DemoIntent>("surface-crown");
   const [guideAcknowledgement, setGuideAcknowledgement] = useState<Readonly<Record<string, unknown>>>();
+  const [remoteProbe, setRemoteProbe] = useState<RemoteProbeReading>();
+  const [remoteProbing, setRemoteProbing] = useState(false);
+  const remoteSectionRef = useRef<HTMLElement | null>(null);
+  const hostRecipes = useMemo(() => buildHostRecipes(location.origin), []);
+  const testRemoteEndpoint = async (): Promise<void> => {
+    setRemoteProbing(true);
+    try {
+      const asJson = async (path: string): Promise<Record<string, unknown> | undefined> => {
+        try {
+          const response = await fetch(path, { headers: { accept: "application/json" } });
+          if (!response.ok) return undefined;
+          const parsed: unknown = await response.json();
+          return typeof parsed === "object" && parsed !== null ? parsed as Record<string, unknown> : undefined;
+        } catch { return undefined; }
+      };
+      const health = await asJson("/api/health");
+      const metadata = await asJson("/.well-known/oauth-protected-resource");
+      setRemoteProbe(readRemoteProbe(health, metadata));
+    } finally { setRemoteProbing(false); }
+  };
+
+  // The ribbon's Remote MCP button lands here: guided view, remote recipes in view.
+  useEffect(() => {
+    if (props.remoteRevealRequest === 0) return;
+    setView("guided");
+    const frame = window.requestAnimationFrame(() => remoteSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [props.remoteRevealRequest]);
   const demoOperation = useMemo(() => createDemoOperation(props.project, demoIntent), [demoIntent, props.project]);
   const agentIntent = result?.structuredContent["intent"] !== null && typeof result?.structuredContent["intent"] === "object" ? result.structuredContent["intent"] as Readonly<Record<string, unknown>> : undefined;
   const matches = Array.isArray(result?.structuredContent["matches"])
@@ -298,6 +329,23 @@ export function AutomateWorkspace(props: AutomateWorkspaceProps): React.JSX.Elem
             <article><h4>Generic stdio contract</h4><pre>{GENERIC_STDIO_CONFIG}</pre><button onClick={() => void copyText(GENERIC_STDIO_CONFIG, "generic")}>{copiedLabel === "generic" ? "Copied" : "Copy generic setup"}</button></article>
             <article><h4>Starter instruction</h4><pre>{STARTER_PROMPT}</pre><button onClick={() => void copyText(STARTER_PROMPT, "prompt")}>{copiedLabel === "prompt" ? "Copied" : "Copy starter prompt"}</button></article>
           </div>
+        </section>
+
+        <section className="ai-connection-center remote-host-center" aria-label="Remote AI host connection" ref={remoteSectionRef}>
+          <header>
+            <div><span>CONNECT A REMOTE HOST</span><h3>One URL for Claude, Cursor and VS Code.</h3><p>The deployed endpoint speaks MCP over HTTPS with OAuth 2.1 sign-in or a personal token from MCP Access. Connecting a host never hands it the open browser project; you choose what to share per call.</p></div>
+            <button className="remote-test" onClick={() => void testRemoteEndpoint()} disabled={remoteProbing}>{remoteProbing ? "Testing…" : "Test connection"}</button>
+          </header>
+          {remoteProbe !== undefined && <div className={`remote-probe ${remoteProbe.state}`} role="status"><strong>{remoteProbe.headline}</strong><span>{remoteProbe.detail}</span></div>}
+          <div className="connection-config-grid remote-recipe-grid">
+            {hostRecipes.map((recipe) => <article key={recipe.id}>
+              <h4>{recipe.label}</h4>
+              <pre className={recipe.kind === "steps" ? "recipe-steps" : ""}>{recipe.body}</pre>
+              <small>{recipe.note}</small>
+              <button onClick={() => void copyText(recipe.kind === "steps" ? remoteMcpUrl(location.origin) : recipe.body, recipe.id)}>{copiedLabel === recipe.id ? "Copied" : recipe.kind === "command" ? "Copy command" : recipe.kind === "json" ? "Copy config" : "Copy the URL"}</button>
+            </article>)}
+          </div>
+          <small className="remote-recipe-note">Endpoint <code>{remoteMcpUrl(location.origin)}</code> · sign-in and personal tokens live in <a href="/access">MCP Access</a> · config shapes follow each host's current MCP documentation.</small>
         </section>
       </> : <>
         <div className="tool-grid">{WORKBENCH_MCP_TOOLS.map((tool) => <button key={tool.name} className={!pythonSelected && selected.name === tool.name ? "selected" : ""} onClick={() => props.onSelect(`mcp-tool:${tool.name}`)}><header><span className="access-label">{tool.annotations.readOnlyHint ? "Read-only" : "Approval required"}</span><CapabilityBadge level="preview" /></header><strong>{FRIENDLY_TOOL_LABELS[tool.name] ?? tool.title}</strong><small>{tool.name}</small><p>{tool.description}</p></button>)}<button className={pythonSelected ? "selected" : ""} onClick={() => props.onSelect("automation:python-sdk")}><header><span className="access-label">Adapter</span><CapabilityBadge level="preview" /></header><strong>Connect from Python</strong><small>sdk/python/ps3d_client/client.py</small><p>Dependency-free dual-era client with guide, command discovery, inspection, analysis, preview, and confirmed apply helpers.</p></button></div>

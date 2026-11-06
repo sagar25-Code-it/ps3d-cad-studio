@@ -21,7 +21,11 @@ const NEW_PROJECT_TYPES: readonly NewProjectType[] = [
 
 interface NewProjectDialogProps {
   readonly open: boolean;
+  /** The current design has unsaved changes that creating a new one would discard. */
+  readonly dirty: boolean;
   readonly onConfirm: (name: string, workspace: WorkspaceId) => void;
+  /** Saves the current design first, then creates the new one if the save went through. */
+  readonly onSaveAndCreate: (name: string, workspace: WorkspaceId) => void;
   readonly onClose: () => void;
 }
 
@@ -53,9 +57,15 @@ export function NewProjectDialog(props: NewProjectDialogProps): React.JSX.Elemen
         <div className="new-project-types" role="radiogroup" aria-label="Starting environment">
           {NEW_PROJECT_TYPES.map((type) => <button key={type.workspace} type="button" role="radio" aria-checked={workspace === type.workspace} className={workspace === type.workspace ? "active" : ""} onClick={() => setWorkspace(type.workspace)}><CommandIcon name={type.icon} /><strong>{type.label}</strong><small>{type.hint}</small></button>)}
         </div>
-        <div className="save-project-note"><CommandIcon name="shield" /><span>Creates a fresh validated project and opens the {selected?.label} environment. The current design is replaced in this tab.</span></div>
+        {props.dirty
+          ? <div className="save-project-note new-project-dirty" role="alert"><CommandIcon name="shield" /><span>The current design has unsaved changes. Creating a new design replaces it in this tab; save it first to keep them in a file.</span></div>
+          : <div className="save-project-note"><CommandIcon name="shield" /><span>Creates a fresh validated project and opens the {selected?.label} environment. The current design is replaced in this tab.</span></div>}
       </div>
-      <footer><button onClick={props.onClose}>Cancel</button><button className="primary" onClick={() => props.onConfirm(trimmed, workspace)}><CommandIcon name="file" />Create design</button></footer>
+      <footer>
+        <button onClick={props.onClose}>Cancel</button>
+        {props.dirty && <button onClick={() => props.onSaveAndCreate(trimmed, workspace)}><CommandIcon name="save" />Save current, then create</button>}
+        <button className="primary" onClick={() => props.onConfirm(trimmed, workspace)}><CommandIcon name="file" />{props.dirty ? "Create without saving" : "Create design"}</button>
+      </footer>
     </section>
   </div>;
 }

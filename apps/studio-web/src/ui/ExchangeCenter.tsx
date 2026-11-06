@@ -16,6 +16,8 @@ interface ExchangeCenterProps {
   readonly open: boolean;
   readonly busy: boolean;
   readonly hasScene: boolean;
+  /** What a visible-scene export contains right now, by name; empty when the workspace decides (assembly, surface, …). */
+  readonly exportContents: readonly string[];
   readonly activeImport: ExchangeImportResult | undefined;
   readonly feedback: string;
   readonly onClose: () => void;
@@ -130,6 +132,7 @@ export function ExchangeCenter(props: ExchangeCenterProps): React.JSX.Element | 
               <p>The active viewport scene is exported. Hidden objects stay out. GLB/glTF use meters; unitless mesh formats use your coordinate-unit choice.</p>
               <label><span>Mesh coordinate unit</span><select value={exportUnit} onChange={(event) => setExportUnit(event.target.value as Exclude<ExchangeUnit, "auto">)}><option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option><option value="in">in</option></select></label>
             </div>
+            {props.exportContents.length > 0 && <p className="exchange-export-contents"><strong>This export holds:</strong> {props.exportContents.join(" · ")}. <span>Hide a body in the model browser to leave it out.</span></p>}
             <div className="exchange-export-grid">
               {EXPORT_FORMATS.map((format) => <article key={format.id} data-format={format.id} className={format.id === "glb" ? "recommended" : ""}>
                 <header><span><CommandIcon name={format.icon} /></span><em>{format.tag}</em></header>

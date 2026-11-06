@@ -23,6 +23,8 @@ interface WorkbenchHeaderProps {
   readonly project: WorkbenchProject;
   /** The application menus, built by `buildWorkbenchMenus` from the live project state. */
   readonly menus: readonly WorkbenchMenu[];
+  /** The project has changes that are not in any saved file yet. */
+  readonly dirty: boolean;
   readonly masterCartOpen: boolean;
   readonly renderStudioOpen: boolean;
   readonly status: "starting" | "ready" | "working" | "error";
@@ -120,7 +122,7 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
       </a>
       <button className="project-button" onClick={props.onCommandPalette} aria-label="Open command launcher">
         <span className="project-command-icon"><CommandIcon name="command" /></span>
-        <span><strong>{props.project.name}</strong><small>Revision {props.project.revision} · local project</small></span>
+        <span><strong>{props.project.name}</strong><small>Revision {props.project.revision} · {props.dirty ? "unsaved changes" : "saved"}</small></span>
         <kbd>Ctrl K</kbd>
       </button>
       <div className="header-actions" aria-label="Project actions">

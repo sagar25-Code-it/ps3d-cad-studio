@@ -30,6 +30,7 @@ interface WorkbenchRibbonProps {
   readonly onToggleSketchEntityVisibility: (entityId: string) => void;
   readonly onFinishSketch: () => void;
   readonly onNewSketch: () => void;
+  readonly onRemoteMcp: () => void;
   readonly onCancelSketchPoints: () => void;
   readonly onSelect: (id: string | null) => void;
   readonly onFit: () => void;
@@ -337,7 +338,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
       <RibbonGroup label="Language linking">
         <RibbonButton icon="python" label="Python SDK" hint="stdlib" active={props.selectedId === "automation:python-sdk"} onClick={() => props.onSelect("automation:python-sdk")} />
-        <RibbonButton icon="mcp" label="Remote MCP" hint="security req." disabled />
+        <RibbonButton icon="mcp" label="Remote MCP" hint="connect a host" onClick={props.onRemoteMcp} />
       </RibbonGroup>
     </>}
     <div className="ribbon-spacer" />

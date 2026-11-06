@@ -112,6 +112,7 @@ import { SaveProjectDialog } from "./ui/SaveProjectDialog.js";
 import { NewProjectDialog } from "./ui/NewProjectDialog.js";
 import { SketchPlaneDialog, type SketchFaceOption } from "./ui/SketchPlaneDialog.js";
 import { buildWorkbenchMenus } from "./ui/menu-model.js";
+import { exportFileName, safeFileStem } from "./file-names.js";
 import { ProjectTree } from "./ui/ProjectTree.js";
 import { CommandPalette } from "./ui/CommandPalette.js";
 import { ExchangeCenter } from "./ui/ExchangeCenter.js";
@@ -260,6 +261,11 @@ export function App(): React.JSX.Element {
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [automateRemoteReveal, setAutomateRemoteReveal] = useState(0);
+  // The project revision last written to (or read from) a file; the project is dirty while the live revision differs.
+  const savedRevisionRef = useRef(initialProject.revision);
+  const [savedRevision, setSavedRevision] = useState(initialProject.revision);
+  const markProjectSaved = (revision: number): void => { savedRevisionRef.current = revision; setSavedRevision(revision); };
   const [exchangeOpen, setExchangeOpen] = useState(false);
   const [designHealthOpen, setDesignHealthOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -398,6 +404,8 @@ export function App(): React.JSX.Element {
     syncTimelineState();
     projectRef.current = next;
     setProject(next);
+    // A freshly created, opened or recovered project starts clean: dirtiness counts from here.
+    markProjectSaved(next.revision);
   }, [syncTimelineState]);
 
   const queueProjectTransition = useCallback((transition: () => Promise<void>): Promise<void> => {
@@ -1683,6 +1691,8 @@ export function App(): React.JSX.Element {
       revision: current.revision
     });
     await refreshFileWorkspace();
+    // A copy leaves the working file unsaved; Save and Save-as make this revision the saved one.
+    if (mode !== "copy") markProjectSaved(current.revision);
     setStatus("ready");
     setStatusText(`${outcome.fileName} saved to ${outcome.destination === "workspace" ? `${outcome.workspaceName ?? "PS CAD Studio"} / Projects` : outcome.destination === "file-picker" ? "the approved file location" : "Downloads"}.`);
   };
@@ -1939,7 +1949,7 @@ export function App(): React.JSX.Element {
     if (modelRef.current === undefined) return;
     const serialized = await serializeNativeRevision({ document: documentRef.current, evidence: modelRef.current.evidence });
     if (!serialized.ok) return;
-    downloadBlob(new Blob([serialized.value], { type: "application/json" }), "ps3d-qualified-solid.ps3d.json");
+    downloadBlob(new Blob([serialized.value], { type: "application/json" }), exportFileName(projectRef.current.name, "plate", "ps3d.json"));
     // This file is the qualified plate alone; say so when the design holds more, so nothing is lost by surprise.
     const solids = (projectRef.current.part.generalBodies ?? []).length;
     setStatusText(solids === 0
@@ -1954,7 +1964,7 @@ export function App(): React.JSX.Element {
     if (otherShown && activeImportRef.current === undefined) { await exportExchangeFormat("stl", documentRef.current.displayUnit); return; }
     const response = await clientRef.current?.exportStl(documentRef.current.revision, documentRef.current.displayUnit);
     if (response === undefined || !acceptResponse(response) || response.kind !== "export-stl") return;
-    downloadBlob(new Blob([response.bytes], { type: "model/stl" }), `ps3d-mounting-plate-${response.unit}.stl`);
+    downloadBlob(new Blob([response.bytes], { type: "model/stl" }), exportFileName(projectRef.current.name, `plate-${response.unit}`, "stl"));
     setStatusText(`Exported ${response.triangleCount} validated STL triangles in ${response.unit}.`);
   };
 
@@ -2321,8 +2331,8 @@ export function App(): React.JSX.Element {
     return () => window.removeEventListener("keydown", listener);
   }, [isThreeDimensional, masterCartOpen]);
 
-  const downloadProject = (): void => downloadBlob(new Blob([JSON.stringify(projectRef.current, null, 2)], { type: "application/json" }), "ps3d-fixture-study.workbench.json");
-  const downloadDrawing = (): void => downloadBlob(new Blob([drawing.svg], { type: "image/svg+xml" }), "ps3d-centered-bore-plate.svg");
+  const downloadProject = (): void => downloadBlob(new Blob([JSON.stringify(projectRef.current, null, 2)], { type: "application/json" }), exportFileName(projectRef.current.name, "", "workbench.json"));
+  const downloadDrawing = (): void => downloadBlob(new Blob([drawing.svg], { type: "image/svg+xml" }), exportFileName(projectRef.current.name, "drawing", "svg"));
   useEffect(() => {
     const listener = (event: KeyboardEvent): void => {
       if (event.key === "Escape" && renderStudioOpen && globalThis.document.querySelector('[role="dialog"]') === null) {
@@ -2365,8 +2375,22 @@ export function App(): React.JSX.Element {
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
   }, [shortcutsOpen]);
+
+  // Leaving the tab with unsaved changes asks first. The autosave recovery copy still exists either way.
+  const projectDirtyRef = useRef(false);
+  projectDirtyRef.current = projectRef.current.revision !== savedRevisionRef.current;
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent): void => {
+      if (!projectDirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
   const canUndo = laneTimelineIndex > 0;
   const canRedo = laneTimelineIndex < laneTimelineLength;
+  const projectDirty = project.revision !== savedRevision;
   historyActionRef.current = {
     undo: () => {
       const prev = laneTimelineIndexRef.current;
@@ -2404,6 +2428,13 @@ export function App(): React.JSX.Element {
     }
   };
   const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo });
+
+  /** The ribbon's Remote MCP entry and the Tools menu land here: the Automate workspace, remote recipes in view. */
+  const revealRemoteMcp = (): void => {
+    if (projectRef.current.activeWorkspace !== "automate") switchWorkspace("automate");
+    setAutomateRemoteReveal((count) => count + 1);
+    setStatusText("Remote MCP: copy your host's recipe, test the connection, and manage tokens in MCP Access.");
+  };
 
   // What the current selection means to the menus: the timeline feature it resolves to, and whether it can be deleted.
   const selectedTimelineFeature = ((): DesignFeature | undefined => {
@@ -2464,17 +2495,30 @@ export function App(): React.JSX.Element {
     onMeasure: () => setViewportNavigation("measure"),
     onExchange: () => setExchangeOpen(true),
     onAccess: () => window.location.assign("/access"),
+    onConnectAi: revealRemoteMcp,
     onExportStl: () => void exportStl(),
     onPlateJson: () => void downloadNative(),
     onLearning: () => window.location.assign("/learn"),
     onShortcuts: () => setShortcutsOpen(true)
   });
 
+  // What a visible-scene export would hold right now, named honestly in the Exchange Center.
+  const exchangeExportContents = ((): readonly string[] => {
+    if (masterCartOpen || renderStudioOpen || project.activeWorkspace !== "part") return [];
+    if (activeImport !== undefined) return [`${activeImport.primaryFileName} (imported reference)`];
+    return [
+      "Centered-bore plate (template)",
+      ...(project.part.generalBodies ?? []).filter((body) => body.visible).map((body) => body.name),
+      ...(project.part.previewBodies ?? []).filter((body) => body.visible !== false).map((body) => body.name)
+    ];
+  })();
+
   const showTimeline = !renderStudioOpen && !masterCartOpen && (project.activeWorkspace === "sketch" || project.activeWorkspace === "part");
   return <main className="studio-app" data-timeline={showTimeline ? "on" : "off"} data-workspace={renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace} aria-busy={status === "working"}>
     <WorkbenchHeader
       project={project}
       menus={workbenchMenus}
+      dirty={projectDirty}
       masterCartOpen={masterCartOpen}
       renderStudioOpen={renderStudioOpen}
       status={status}
@@ -2533,6 +2577,7 @@ export function App(): React.JSX.Element {
       onToggleSketchEntityVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })}
       onFinishSketch={() => void finishSketch()}
       onNewSketch={() => { setSketchPlaneDialogMode("new"); setSketchPlaneDialogOpen(true); }}
+      onRemoteMcp={revealRemoteMcp}
       onCancelSketchPoints={() => { setSketchCancelVersion((version) => version + 1); setStatusText("Pending sketch points cleared from the top ribbon."); }}
       onSelect={routeSelection}
       onCreatePartPreviewBody={createPartPreviewBody}
@@ -2570,7 +2615,7 @@ export function App(): React.JSX.Element {
       onElectricalStandard={(standard) => applyProjectOperation({ kind: "set-electrical-standard", standard })}
       onElectricalInsert={insertElectricalComponent}
       onElectricalPhysicalize={requestElectromechanicalAssembly}
-      onElectricalDownload={() => downloadBlob(new Blob([electrical.svg], { type: "image/svg+xml" }), "ps3d-electrical-concept.svg")}
+      onElectricalDownload={() => downloadBlob(new Blob([electrical.svg], { type: "image/svg+xml" }), exportFileName(projectRef.current.name, "electrical", "svg"))}
       onVehicleTemplate={requestVehicleTemplate}
       onVehicleState={(state) => applyProjectOperation({ kind: "set-vehicle-simulation-state", state })}
       onVehicleLayer={(layer) => applyProjectOperation({ kind: "toggle-vehicle-layer", layer })}
@@ -2638,9 +2683,9 @@ export function App(): React.JSX.Element {
       {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={displayedAssembly} maxExplodeMm={assemblyExplodeMaxMm} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplodePreview={previewAssemblyExplode} onExplodeCommit={commitAssemblyExplode} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onAddMate={(mate) => applyProjectOperation({ kind: "add-assembly-mate", mate })} onSolveMates={() => applyProjectOperation({ kind: "solve-assembly-mates" })} onDeleteMate={(mateId) => { if (applyProjectOperation({ kind: "delete-assembly-mate", mateId }) && selectedId === mateId) setSelectedId(null); }} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
       {project.activeWorkspace === "surface" && <SurfaceInspector surface={project.surface} metrics={surfacePreview.metrics} onParameter={(parameter, value) => applyProjectOperation({ kind: "set-surface-parameter", parameter, value })} />}
       {project.activeWorkspace === "drawing" && <DrawingWorkspace settings={project.drawing} artifact={drawing} onSheet={(sheet) => applyProjectOperation({ kind: "set-drawing-sheet", sheet })} onProjection={(projection) => applyProjectOperation({ kind: "set-drawing-projection", projection })} onScale={(scale) => applyProjectOperation({ kind: "set-drawing-scale", scale })} onDimensions={(show) => applyProjectOperation({ kind: "set-drawing-dimensions", show })} onViewPreset={(preset) => applyProjectOperation({ kind: "set-drawing-view-preset", preset })} onDisplayStyle={(style) => applyProjectOperation({ kind: "set-drawing-display-style", style })} onSectionView={(show) => applyProjectOperation({ kind: "set-drawing-section-view", show })} onDraftingStandard={(standard) => applyProjectOperation({ kind: "set-drawing-drafting-standard", standard })} onGdt={(show) => applyProjectOperation({ kind: "set-drawing-gdt", show })} onDatumScheme={(scheme) => applyProjectOperation({ kind: "set-drawing-datum-scheme", scheme })} onGdtSpecification={(positionMm, flatnessMm, perpendicularityMm) => applyProjectOperation({ kind: "set-drawing-gdt-specification", positionMm, flatnessMm, perpendicularityMm })} onGeneralTolerance={(linearMm, angularDeg) => applyProjectOperation({ kind: "set-drawing-general-tolerance", linearMm, angularDeg })} onNotes={(notes) => applyProjectOperation({ kind: "set-drawing-notes", notes })} onTitleBlock={(fields) => applyProjectOperation({ kind: "set-drawing-title-block", ...fields })} />}
-      {project.activeWorkspace === "electrical" && <ElectricalWorkspace intent={project.electrical} artifact={electrical} selectedId={selectedId} onSelect={setSelectedId} onTemplate={requestElectricalTemplate} onStandard={(standard) => { if (standard !== project.electrical.standard) applyProjectOperation({ kind: "set-electrical-standard", standard }); else setStatusText(`Electrical symbol basis is already ${standard}.`); }} onInsertComponent={insertElectricalComponent} onMoveComponent={(componentId, position) => { const current = project.electrical.components.find((component) => component.id === componentId)?.position; if (current === undefined || current[0] !== position[0] || current[1] !== position[1]) applyProjectOperation({ kind: "set-electrical-component-position", componentId, position }); }} onDeleteComponent={(componentId) => { if (applyProjectOperation({ kind: "delete-electrical-component", componentId })) setSelectedId(null); }} onAddNet={addElectricalNet} onDeleteNet={(netId) => { if (applyProjectOperation({ kind: "delete-electrical-net", netId })) setSelectedId(null); }} onNotes={(notes) => { if (notes !== project.electrical.notes) applyProjectOperation({ kind: "set-electrical-notes", notes }); }} onPhysicalize={requestElectromechanicalAssembly} onDownload={() => downloadBlob(new Blob([electrical.svg], { type: "image/svg+xml" }), "ps3d-electrical-concept.svg")} />}
+      {project.activeWorkspace === "electrical" && <ElectricalWorkspace intent={project.electrical} artifact={electrical} selectedId={selectedId} onSelect={setSelectedId} onTemplate={requestElectricalTemplate} onStandard={(standard) => { if (standard !== project.electrical.standard) applyProjectOperation({ kind: "set-electrical-standard", standard }); else setStatusText(`Electrical symbol basis is already ${standard}.`); }} onInsertComponent={insertElectricalComponent} onMoveComponent={(componentId, position) => { const current = project.electrical.components.find((component) => component.id === componentId)?.position; if (current === undefined || current[0] !== position[0] || current[1] !== position[1]) applyProjectOperation({ kind: "set-electrical-component-position", componentId, position }); }} onDeleteComponent={(componentId) => { if (applyProjectOperation({ kind: "delete-electrical-component", componentId })) setSelectedId(null); }} onAddNet={addElectricalNet} onDeleteNet={(netId) => { if (applyProjectOperation({ kind: "delete-electrical-net", netId })) setSelectedId(null); }} onNotes={(notes) => { if (notes !== project.electrical.notes) applyProjectOperation({ kind: "set-electrical-notes", notes }); }} onPhysicalize={requestElectromechanicalAssembly} onDownload={() => downloadBlob(new Blob([electrical.svg], { type: "image/svg+xml" }), exportFileName(projectRef.current.name, "electrical", "svg"))} />}
       {project.activeWorkspace === "vehicle" && <VehicleWorkspace intent={project.vehicle} analysis={vehiclePreview.analysis} geometry={vehiclePreview.geometry} primitiveCountByLayer={vehiclePreview.primitiveCountByLayer} selectedId={selectedId} onSelect={setSelectedId} onTemplate={requestVehicleTemplate} onParameter={(parameter, value) => applyProjectOperation({ kind: "set-vehicle-parameter", parameter, value })} onState={(state) => applyProjectOperation({ kind: "set-vehicle-simulation-state", state })} onLayer={(layer) => applyProjectOperation({ kind: "toggle-vehicle-layer", layer })} onFit={fitViewport} onMessage={setStatusText} onEvidenceStatus={(field, reviewed) => applyProjectOperation({ kind: "set-vehicle-evidence-status", field, reviewed })} />}
-      {project.activeWorkspace === "automate" && <AutomateWorkspace project={project} selectedId={selectedId} onSelect={setSelectedId} onApplyProject={(next, message) => { const valid = validateWorkbenchProject(next); if (valid.ok) { pushProject(valid.value); setStatusText(message); return; } const first = valid.diagnostics[0]; setDiagnostic(first === undefined ? undefined : { code: first.code, message: first.message, recovery: first.recovery }); setStatus("error"); setStatusText(first?.message ?? "The confirmed preview failed project validation and was not applied."); }} onReviewElectromechanical={requestElectromechanicalAssembly} onMessage={setStatusText} />}
+      {project.activeWorkspace === "automate" && <AutomateWorkspace project={project} selectedId={selectedId} remoteRevealRequest={automateRemoteReveal} onSelect={setSelectedId} onApplyProject={(next, message) => { const valid = validateWorkbenchProject(next); if (valid.ok) { pushProject(valid.value); setStatusText(message); return; } const first = valid.diagnostics[0]; setDiagnostic(first === undefined ? undefined : { code: first.code, message: first.message, recovery: first.recovery }); setStatus("error"); setStatusText(first?.message ?? "The confirmed preview failed project validation and was not applied."); }} onReviewElectromechanical={requestElectromechanicalAssembly} onMessage={setStatusText} />}
       </>}
     </section>}
     {contextMenu !== undefined && <WorkbenchContextMenu x={contextMenu.x} y={contextMenu.y} selectionLabel={contextMenu.selectionId ?? `${project.activeWorkspace} canvas`} commands={contextCommands} onRun={runContextCommand} onClose={() => setContextMenu(undefined)} />}
@@ -2687,10 +2732,23 @@ export function App(): React.JSX.Element {
         <footer>Press <kbd>?</kbd> anytime to open this list · <kbd>Esc</kbd> to close</footer>
       </div>
     </div>}
-    <ExchangeCenter open={exchangeOpen} busy={exchangeBusy} hasScene={!masterCartOpen && isThreeDimensional} activeImport={activeImport} feedback={exchangeFeedback} onClose={() => setExchangeOpen(false)} onImport={(files, unit) => void importExchangeFiles(files, unit)} onExport={(format, unit) => void exportExchangeFormat(format, unit)} onPdfPackage={() => void exportPdfPackage()} onInteractivePdf={(file) => void exportInteractivePdf(file)} onClearImport={clearActiveImport} />
+    <ExchangeCenter open={exchangeOpen} busy={exchangeBusy} hasScene={!masterCartOpen && isThreeDimensional} exportContents={exchangeExportContents} activeImport={activeImport} feedback={exchangeFeedback} onClose={() => setExchangeOpen(false)} onImport={(files, unit) => void importExchangeFiles(files, unit)} onExport={(format, unit) => void exportExchangeFormat(format, unit)} onPdfPackage={() => void exportPdfPackage()} onInteractivePdf={(file) => void exportInteractivePdf(file)} onClearImport={clearActiveImport} />
     {designHealthOpen && <DesignHealthCenter report={designHealth} onClose={() => setDesignHealthOpen(false)} onWorkspace={switchWorkspace} />}
     <SaveProjectDialog open={saveDialogMode !== undefined} mode={saveDialogMode ?? "save-as"} projectName={project.name} workspaceStatus={fileWorkspaceStatus} onConfirm={(fileName) => void confirmSaveDialog(fileName)} onClose={() => setSaveDialogMode(undefined)} />
-    <NewProjectDialog open={newDialogOpen} onConfirm={(name, workspace) => { setNewDialogOpen(false); void createNewProject(name, workspace); }} onClose={() => setNewDialogOpen(false)} />
+    <NewProjectDialog
+      open={newDialogOpen}
+      dirty={projectDirty}
+      onConfirm={(name, workspace) => { setNewDialogOpen(false); void createNewProject(name, workspace); }}
+      onSaveAndCreate={(name, workspace) => {
+        setNewDialogOpen(false);
+        void (async () => {
+          await saveAll();
+          if (projectRef.current.revision === savedRevisionRef.current) await createNewProject(name, workspace);
+          else setStatusText("The project was not saved, so the new design was not created. Save it, then use File > New again.");
+        })();
+      }}
+      onClose={() => setNewDialogOpen(false)}
+    />
     <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} faces={sketchFaceOptions} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
     <FeatureEditDialog feature={featureEdit} busy={status === "working"} onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />
   </main>;
@@ -2779,11 +2837,6 @@ function fileErrorText(error: unknown, fallback: string): string {
   const raw = error instanceof Error ? error.message : "";
   if (/user gesture|user activation/iu.test(raw)) return "The browser blocked its file dialog because it was not opened by a direct click. Click the button again.";
   return raw !== "" ? raw : fallback;
-}
-
-function safeFileStem(value: string): string {
-  const stem = value.trim().replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "");
-  return stem.length === 0 ? "ps3d-model" : stem.slice(0, 80);
 }
 
 function electricalReferencePrefix(kind: ElectricalComponentKind): string {

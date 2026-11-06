@@ -77,3 +77,25 @@
 /* Command palette: the gated-commands toggle in the footer. */
 .palette-unavailable-toggle { display: inline-flex; align-items: center; gap: 0.35rem; color: inherit; font-size: inherit; cursor: pointer; }
 .palette-unavailable-toggle input { margin: 0; accent-color: #1f6fb6; }
+
+/* Unsaved-changes warning in the New-design dialog. */
+.save-project-dialog .new-project-dirty { border: 1px solid #c77b2b; background: #fdf3e7; color: #7a4a10; }
+.save-project-dialog .new-project-dirty .command-icon { color: #c77b2b; }
+
+/* Exchange Center: what a visible-scene export holds right now. */
+.exchange-export-contents { margin: 0.45rem 0 0.2rem; padding: 0.45rem 0.6rem; border: 1px solid #c5ccd2; border-radius: 6px; background: #f7f9fa; color: #2c3237; font-size: 12.5px; line-height: 1.5; }
+.exchange-export-contents span { color: #5d6a73; }
+
+/* Remote MCP host recipes in the Automate workspace. */
+.remote-host-center header .remote-test { flex: none; align-self: flex-start; padding: 0.5rem 0.9rem; border: 1px solid #1f6fb6; border-radius: 6px; color: #fff; background: #1f6fb6; font: inherit; font-size: 12.5px; cursor: pointer; }
+.remote-host-center header .remote-test:disabled { opacity: 0.6; cursor: default; }
+.remote-probe { display: grid; gap: 0.15rem; margin: 0.6rem 0; padding: 0.55rem 0.7rem; border-radius: 6px; border: 1px solid #c5ccd2; font-size: 12.5px; }
+.remote-probe strong { font-size: 13px; }
+.remote-probe span { color: #4a545c; line-height: 1.45; }
+.remote-probe.ready { border-color: #2e7d4f; background: #ecf7f0; }
+.remote-probe.setup-required { border-color: #c77b2b; background: #fdf3e7; }
+.remote-probe.unreachable { border-color: #c0392b; background: #fdeceb; }
+.remote-recipe-grid article small { display: block; margin: 0.35rem 0; color: #5d6a73; font-size: 12px; line-height: 1.45; }
+.remote-recipe-grid pre.recipe-steps { white-space: pre-wrap; }
+.remote-recipe-note { display: block; margin-top: 0.5rem; color: #5d6a73; font-size: 12px; }
+.remote-recipe-note code { font-size: 11.5px; }

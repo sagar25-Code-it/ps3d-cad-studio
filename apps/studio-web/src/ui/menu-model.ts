@@ -68,6 +68,7 @@ export interface WorkbenchMenuActions {
   readonly onMeasure: () => void;
   readonly onExchange: () => void;
   readonly onAccess: () => void;
+  readonly onConnectAi: () => void;
   readonly onExportStl: () => void;
   readonly onPlateJson: () => void;
   readonly onLearning: () => void;
@@ -132,7 +133,8 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
   ] };
 
   const tools: WorkbenchMenu = { id: "tools", label: "Tools", icon: "automate", items: [
-    { id: "tools.exchange", label: "3D Exchange Center…", icon: "exchange", hint: "Import and export mesh formats", action: actions.onExchange },
+    { id: "tools.connect-ai", label: "Connect an AI host…", icon: "mcp", hint: "Recipes for Claude, Cursor and VS Code, with a connection test", action: actions.onConnectAi },
+    { id: "tools.exchange", label: "3D Exchange Center…", icon: "exchange", divider: true, hint: "Import and export mesh formats", action: actions.onExchange },
     { id: "tools.export-stl", label: "Export STL (all shown)", icon: "export", action: actions.onExportStl },
     { id: "tools.plate-json", label: "Plate JSON (plate only)", icon: "json", action: actions.onPlateJson },
     { id: "tools.mcp-workspace", label: "MCP workspace", icon: "mcp", divider: true, action: () => actions.onWorkspace("automate") },

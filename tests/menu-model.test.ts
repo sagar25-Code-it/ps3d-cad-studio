@@ -15,7 +15,7 @@ function recordingActions(): { readonly actions: WorkbenchMenuActions; readonly 
     onFit: record("fit"), onHome: record("home"), onToggleGrid: record("grid"),
     onWorkspace: (workspace) => { calls.push(`workspace:${workspace}`); },
     onDesignHealth: record("health"), onMeasure: record("measure"), onExchange: record("exchange"),
-    onAccess: record("access"), onExportStl: record("stl"), onPlateJson: record("plate-json"),
+    onAccess: record("access"), onConnectAi: record("connect-ai"), onExportStl: record("stl"), onPlateJson: record("plate-json"),
     onLearning: record("learning"), onShortcuts: record("shortcuts")
   };
   return { actions, calls };
