@@ -204,6 +204,7 @@ function geometry(name: string): React.ReactNode {
     case "move": return <><path d="M12 3v18M3 12h18" /><path d="m9 6 3-3 3 3m0 12-3 3-3-3M6 9l-3 3 3 3m12 0 3-3-3-3" /></>;
     case "ground": return <><path d="M12 4v8M8 8l4 4 4-4M5 15h14M7 18h10M10 21h4" /></>;
     case "eye": return <><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6" /><circle cx="12" cy="12" r="2.5" /></>;
+    case "edit": return <><path d="M4 20l1-4L16 5l3 3L8 19z" /><path d="M14 7l3 3" /></>;
     case "eye-off": return <><path d="M4 4l16 16M3 12s3.5-6 9-6c2 0 3.7.8 5.1 1.8M21 12s-3.5 6-9 6c-2 0-3.7-.8-5.1-1.8" /></>;
     case "trash": return <><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7m4-7v7" /></>;
     case "interference": return <><rect x="4" y="6" width="10" height="10" rx="1" /><rect x="10" y="9" width="10" height="10" rx="1" /><path d="M10 9h4v7h-4z" /></>;

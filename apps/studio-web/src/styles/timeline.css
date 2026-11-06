@@ -34,3 +34,17 @@
 .timeline-menu button { padding: 0.45rem 0.7rem; border: 0; border-radius: 4px; color: #2c3237; background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .timeline-menu button:hover { background: #e4eef7; }
 .timeline-menu button.danger { color: #b02a1c; }
+
+/* The selected-solid card and the collapsible template-plate parameters in the Part inspector. */
+.studio-app .plate-parameters { margin: 0 0 0.6rem; border: 1px solid #c5ccd2; border-radius: 6px; background: #fff; }
+.studio-app .plate-parameters > summary { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; padding: 0.5rem 0.65rem; color: #2c3237; font-size: 12.5px; list-style: none; cursor: pointer; }
+.studio-app .plate-parameters > summary::-webkit-details-marker { display: none; }
+.studio-app .plate-parameters > summary span { color: #5d6a73; font-size: 12px; }
+.studio-app .plate-parameters[open] > summary { border-bottom: 1px solid #e0e4e8; }
+.studio-app .solid-card .solid-source { margin: 0.1rem 0 0.55rem; color: #4a545c; font-size: 12.5px; line-height: 1.45; }
+.studio-app .solid-card .solid-warning { margin: 0 0 0.55rem; padding: 0.4rem 0.55rem; border: 1px solid #c0392b; border-radius: 5px; color: #8f2a1f; background: #fdeceb; font-size: 12.5px; }
+.studio-app .solid-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.65rem; }
+.studio-app .solid-actions button { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.65rem; font-size: 12.5px; }
+.studio-app .solid-actions button.primary { border-color: #1f6fb6; color: #fff; background: #1f6fb6; }
+.studio-app .solid-actions button.danger { color: #b02a1c; }
+.studio-app .solid-actions .command-icon { width: 15px; height: 15px; }

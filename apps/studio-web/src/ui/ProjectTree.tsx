@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/index.js";
-import { vehicleHardPoints, type WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
+import { dependentsOf, describeFeature, designOf, featureOfBody, featureStatus, featureStatusText, vehicleHardPoints, type DesignFeature, type WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { DesignHealthReport } from "../../../../packages/workbench-health/src/index.js";
 import { detectSketchProfiles } from "../../../../packages/workbench-sketch/src/index.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
@@ -49,6 +49,7 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
   const linkedOutline = project.sketch.entities.find((entity) => entity.kind === "rectangle" && !entity.construction && Math.abs(entity.widthMm - project.part.widthMm) < 1e-6 && Math.abs(entity.heightMm - project.part.heightMm) < 1e-6);
   const linkedBore = project.sketch.entities.find((entity) => entity.kind === "circle" && !entity.construction && Math.hypot(entity.center[0] - (linkedOutline?.kind === "rectangle" ? linkedOutline.center[0] : 0), entity.center[1] - (linkedOutline?.kind === "rectangle" ? linkedOutline.center[1] : 0)) < 0.01 && Math.abs(entity.radiusMm * 2 - project.part.holeDiameterMm) < 1e-6);
   const relationships = selectionRelationships(project, selectedId);
+  const history = designOf(project);
   return <aside ref={treeRef} className="project-tree" aria-label="Model browser and feature history" onContextMenu={(event) => {
     event.preventDefault();
     const id = (event.target as Element).closest<HTMLElement>("[data-tree-id]")?.dataset["treeId"] ?? null;
@@ -76,7 +77,22 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
       {project.sketch.entities.map((entity) => <TreeItem key={entity.id} kind="sketch" id={entity.id} label={entityLabel(entity.kind)} meta={`${shortId(entity.id)} · ${entity.visible === false ? "hidden" : "shown"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
       {sketchProfiles.map((profile, index) => <TreeItem key={profile.id} kind="sketch" id={profile.id} label={`Profile P${index + 1}`} meta={`${profile.boundary.kind.replaceAll("-", " ")} · ${formatArea(profile.areaMm2)} mm²`} selectedId={selectedId} onSelect={onSelect} indent />)}
     </TreeSection>}
-    {showPartHistory && <TreeSection title="Feature history" badge="preview">
+    {history.features.length > 0 && <TreeSection title={`Timeline · ${history.features.length} step${history.features.length === 1 ? "" : "s"}`} badge="preview">
+      {history.features.map((feature) => {
+        const status = featureStatusText(featureStatus(history, feature));
+        return <TreeItem
+          key={feature.id}
+          kind={feature.kind === "sketch" ? "sketch" : "feature"}
+          icon={feature.kind}
+          id={timelineSelectionId(feature)}
+          label={feature.name}
+          meta={`${describeFeature(history, feature)}${status === "" ? "" : ` · ${status}`}${feature.health === undefined ? "" : ` · ${feature.health.message}`}`}
+          selectedId={selectedId}
+          onSelect={onSelect}
+        />;
+      })}
+    </TreeSection>}
+    {showPartHistory && <TreeSection title="Mounting plate features" badge="preview" initiallyOpen={history.features.length === 0}>
       <TreeItem kind="feature" id="feature:plate-extrusion" label="Base extrusion" meta={`${project.part.widthMm} × ${project.part.heightMm} × ${project.part.thicknessMm} mm · ${linkedOutline === undefined ? "parameter driven" : "sketch linked"}`} selectedId={selectedId} onSelect={onSelect} />
       <TreeItem kind="feature" id="feature:centered-through-hole" label="Centered bore" meta={`Ø${project.part.holeDiameterMm} mm · through all · ${linkedBore === undefined ? "parameter driven" : "sketch linked"}`} selectedId={selectedId} onSelect={onSelect} />
       <TreeItem kind="feature" id="feature:edge-treatment" label="Edge treatment" meta={`${project.part.edgeTreatmentMm} mm · preview`} selectedId={selectedId} onSelect={onSelect} />
@@ -179,9 +195,14 @@ function TreeSection({ title, badge, children, initiallyOpen = true }: { readonl
   return <details className="tree-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}><summary><span className="tree-chevron" aria-hidden="true">›</span><strong>{title}</strong><CapabilityBadge level={badge} /></summary><div>{children}</div></details>;
 }
 
-function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean }): React.JSX.Element {
+function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean; readonly icon?: string }): React.JSX.Element {
   const selected = props.selectedId === props.id;
-  return <button data-tree-id={props.id} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => props.onSelect(selected ? null : props.id)}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span></button>;
+  return <button data-tree-id={props.id} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => props.onSelect(selected ? null : props.id)}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={props.icon ?? treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span></button>;
+}
+
+/** A timeline solid is selected through its body (so the viewport highlights it); a sketch step is selected by its own ID. */
+function timelineSelectionId(feature: DesignFeature): string {
+  return feature.kind === "sketch" ? feature.id : feature.bodyId;
 }
 
 function treeIcon(kind: TreeKind, label: string, id: string): string {
@@ -227,6 +248,13 @@ function formatArea(value: number): string {
 
 function selectionRelationships(project: WorkbenchProject, selectedId: string | null): readonly { readonly role: string; readonly id: string; readonly label: string; readonly meta: string; readonly kind: TreeKind }[] {
   if (selectedId === null) return [];
+  const history = designOf(project);
+  const ownStep = history.features.find((feature) => feature.id === selectedId) ?? (selectedId.startsWith("general-body:") ? featureOfBody(history, selectedId) : undefined);
+  if (ownStep !== undefined) {
+    if (ownStep.kind === "sketch") return dependentsOf(history, ownStep.id).map((step) => ({ role: "Built on it", id: timelineSelectionId(step), label: step.name, meta: describeFeature(history, step), kind: "feature" as const }));
+    const source = history.features.find((feature) => feature.id === ownStep.sketchFeatureId);
+    return source === undefined ? [] : [{ role: "Made from", id: source.id, label: source.name, meta: describeFeature(history, source), kind: "sketch" as const }];
+  }
   if (selectedId.startsWith("entity:") || selectedId.startsWith("profile:")) return [
     { role: "Parent", id: project.sketch.id, label: project.sketch.name, meta: "XY sketch · associative input", kind: "sketch" },
     { role: "Child", id: "feature:plate-extrusion", label: "Base extrusion", meta: "qualified profile consumer", kind: "feature" }

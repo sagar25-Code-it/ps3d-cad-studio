@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ModelSuccessResponse } from "../../../../packages/worker-protocol/src/index.js";
 import type { ViewportShadingMode } from "../../../../packages/viewport-three/src/index.js";
-import type { PartIntent, PartPreviewBody, PartPreviewBodyShape, Vec3 } from "../../../../packages/workbench-core/src/index.js";
+import { describeFeature, featureOfBody, featureStatus, featureStatusText, solidMetrics, type DesignHistory, type DesignSolidFeature, type GeneralSolidBody, type PartIntent, type PartPreviewBody, type PartPreviewBodyShape, type Vec3 } from "../../../../packages/workbench-core/src/index.js";
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 import { PartAppearanceControls } from "../ui/PartAppearanceControls.js";
@@ -32,6 +32,11 @@ interface PartInspectorProps {
   readonly onShadingMode: (mode: ViewportShadingMode) => void;
   readonly onInsertIntoAssembly: () => void;
   readonly onGeneralBodyToAssembly: (bodyId: string) => void;
+  readonly onGeneralBodyVisibility: (bodyId: string) => void;
+  readonly onGeneralBodyDelete: (bodyId: string) => void;
+  /** The parametric timeline, so a selected solid can say which step made it and open that step for editing. */
+  readonly design: DesignHistory;
+  readonly onEditFeature: (feature: DesignSolidFeature) => void;
   readonly onSelect: (id: string | null) => void;
   readonly onCreatePreviewBody: (shape: PartPreviewBodyShape) => void;
   readonly onPreviewBodyTransform: (bodyId: string, translationMm: Vec3, rotationDeg: Vec3) => void;
@@ -49,13 +54,25 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
   const selectedPreviewBody = previewBodies.find((body) => body.id === props.selectedId);
   const selectedGeneralBody = (props.part.generalBodies ?? []).find((body) => body.id === props.selectedId);
   return <aside className="inspector-panel" aria-label="Part inspector">
-    <div className="inspector-title"><div><p>Part intent</p><h2>{props.part.name}</h2></div><CapabilityBadge level="qualified" /></div>
-    <section className="parameter-stack">
-      {PARAMETERS.map((parameter) => <div className="parameter-control" key={parameter.key}>
-        <label htmlFor={`part-${parameter.key}`}><span>{parameter.label}<small>{parameter.level}</small></span><CapabilityBadge level={parameter.level} /></label>
-        <div><input id={`part-${parameter.key}`} type="number" min={parameter.minimum} max={parameter.maximum} step={parameter.step} value={drafts[parameter.key]} onChange={(event) => setDrafts((current) => ({ ...current, [parameter.key]: event.target.value }))} /><span>{parameter.unit}</span><button disabled={props.working} onClick={() => props.onCommit(parameter.key, Number(drafts[parameter.key]))}>Apply</button></div>
-      </div>)}
-    </section>
+    {selectedGeneralBody === undefined
+      ? <div className="inspector-title"><div><p>Part intent</p><h2>{props.part.name}</h2></div><CapabilityBadge level="qualified" /></div>
+      : <div className="inspector-title"><div><p>Selected solid</p><h2>{selectedGeneralBody.name}</h2></div></div>}
+    {selectedGeneralBody !== undefined && <SolidCard
+      body={selectedGeneralBody}
+      history={props.design}
+      onEdit={props.onEditFeature}
+      onVisibility={props.onGeneralBodyVisibility}
+      onDelete={props.onGeneralBodyDelete}
+    />}
+    <details className="plate-parameters" key={selectedGeneralBody === undefined ? "plate-open" : "plate-closed"} open={selectedGeneralBody === undefined}>
+      <summary><strong>Mounting plate</strong><span>template part · qualified</span></summary>
+      <section className="parameter-stack">
+        {PARAMETERS.map((parameter) => <div className="parameter-control" key={parameter.key}>
+          <label htmlFor={`part-${parameter.key}`}><span>{parameter.label}<small>{parameter.level}</small></span><CapabilityBadge level={parameter.level} /></label>
+          <div><input id={`part-${parameter.key}`} type="number" min={parameter.minimum} max={parameter.maximum} step={parameter.step} value={drafts[parameter.key]} onChange={(event) => setDrafts((current) => ({ ...current, [parameter.key]: event.target.value }))} /><span>{parameter.unit}</span><button disabled={props.working} onClick={() => props.onCommit(parameter.key, Number(drafts[parameter.key]))}>Apply</button></div>
+        </div>)}
+      </section>
+    </details>
     <section className="inspector-section part-appearance-card"><header><strong>Body appearance</strong><span>display only</span></header>
       <PartAppearanceControls bodyColor={props.bodyColor} shadingMode={props.shadingMode} onBodyColor={props.onBodyColor} onShadingMode={props.onShadingMode} />
     </section>
@@ -109,6 +126,44 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
     </section>
     <div className="scope-note qualified"><strong>Qualified path</strong><p>Width, height, thickness, and bore regenerate in the isolated f64 worker and must pass independent closed-mesh and evidence checks.</p></div>
   </aside>;
+}
+
+const NUMBER = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+const formatNumber = (value: number): string => NUMBER.format(value);
+const formatPoint = (point: Vec3): string => `${formatNumber(point[0])}, ${formatNumber(point[1])}, ${formatNumber(point[2])} mm`;
+
+/** What the selected solid is, where it came from in the timeline, and what it measures; the actions that apply to a solid. */
+function SolidCard(props: {
+  readonly body: GeneralSolidBody;
+  readonly history: DesignHistory;
+  readonly onEdit: (feature: DesignSolidFeature) => void;
+  readonly onVisibility: (bodyId: string) => void;
+  readonly onDelete: (bodyId: string) => void;
+}): React.JSX.Element {
+  const { body, history } = props;
+  const metrics = useMemo(() => solidMetrics(body.positionsMm, body.indices), [body.positionsMm, body.indices]);
+  const feature = featureOfBody(history, body.id);
+  const status = feature === undefined ? "" : featureStatusText(featureStatus(history, feature));
+  return <section className="inspector-section solid-card" aria-label={`${body.name} properties`}>
+    <header><strong>{feature === undefined ? "Ordinary solid" : feature.name}</strong><span>{feature === undefined ? "not in the timeline" : "timeline step"}</span></header>
+    <p className="solid-source">{feature === undefined
+      ? "This body is not driven by the timeline (it came from Combine, or was saved before the timeline existed), so editing a sketch does not change it."
+      : `${describeFeature(history, feature)}${status === "" ? "" : ` · ${status}`}. Edit the step, or edit its sketch, and this solid rebuilds.`}</p>
+    {feature?.health !== undefined && <p className="solid-warning" role="alert">{feature.health.message}</p>}
+    <dl className="metric-grid">
+      <div><dt>Volume</dt><dd>{formatNumber(metrics.volumeMm3)} mm³{metrics.volumeMm3 >= 1000 ? ` (${formatNumber(metrics.volumeMm3 / 1000)} cm³)` : ""}</dd></div>
+      <div><dt>Surface area</dt><dd>{formatNumber(metrics.surfaceAreaMm2)} mm²</dd></div>
+      <div><dt>Size X × Y × Z</dt><dd>{metrics.sizeMm.map(formatNumber).join(" × ")} mm</dd></div>
+      <div><dt>Centre of volume</dt><dd>{formatPoint(metrics.centroidMm)}</dd></div>
+      <div><dt>Triangles</dt><dd>{metrics.triangleCount}{body.brep === undefined ? "" : ` · ${body.brep.topology.faces} faces`}</dd></div>
+      {!metrics.outward && <div><dt>Winding</dt><dd>inside-out mesh</dd></div>}
+    </dl>
+    <div className="solid-actions">
+      {feature !== undefined && <button className="primary" onClick={() => props.onEdit(feature)}><CommandIcon name="edit" />Edit feature</button>}
+      <button onClick={() => props.onVisibility(body.id)}><CommandIcon name={body.visible ? "eye-off" : "eye"} />{body.visible ? "Hide" : "Show"}</button>
+      <button className="danger" onClick={() => props.onDelete(body.id)}><CommandIcon name="trash" />Delete</button>
+    </div>
+  </section>;
 }
 
 function PreviewBodyEditor(props: {

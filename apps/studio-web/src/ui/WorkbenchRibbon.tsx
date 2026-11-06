@@ -200,9 +200,9 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
       <RibbonGroup label="Inspect & exchange">
         <RibbonButton icon="fit" label="Fit" hint="view" onClick={props.onFit} />
-        <RibbonButton icon="json" label="Native JSON" hint="save" onClick={props.onNativeDownload} />
-        <RibbonButton icon="open" label="Open native" hint="load" onClick={props.onNativeOpen} />
-        <RibbonButton icon="export" label="Export STL" hint="mesh" onClick={props.onExportStl} />
+        <RibbonButton icon="json" label="Plate JSON" hint="plate only" onClick={props.onNativeDownload} />
+        <RibbonButton icon="open" label="Open plate" hint="load" onClick={props.onNativeOpen} />
+        <RibbonButton icon="export" label="Export STL" hint="all shown" onClick={props.onExportStl} />
         <RibbonButton icon="exchange" label="3D Exchange" hint="14 in · 6 out" onClick={props.onExchange} />
       </RibbonGroup>
       <RibbonGroup label="Downstream">
