@@ -858,6 +858,48 @@ export interface OperationAuditEntry {
   readonly changedIds: readonly string[];
 }
 
+/** What a parametric history step is. Sketches keep a snapshot of the sketch; solids are rebuilt from a sketch feature. */
+interface DesignFeatureBase {
+  readonly id: string;
+  readonly name: string;
+  /** A suppressed feature is skipped (its solid is hidden) without being deleted. */
+  readonly suppressed: boolean;
+  /** Present only when the last rebuild of this feature failed; says why, so the timeline can flag it. */
+  readonly health?: { readonly message: string };
+}
+
+export interface DesignSketchFeature extends DesignFeatureBase {
+  readonly kind: "sketch";
+  /** The sketch as it was when it was finished, including its plane. Editing a sketch replaces this snapshot. */
+  readonly sketch: WorkbenchSketch;
+}
+
+export interface DesignSolidFeature extends DesignFeatureBase {
+  readonly kind: "extrude" | "revolve";
+  /** The sketch feature whose closed profiles this feature turns into a solid. */
+  readonly sketchFeatureId: string;
+  /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
+  readonly profileIds: readonly string[];
+  /** Extrusion distance in mm, or revolve angle in degrees. */
+  readonly valueMm: number;
+  /** Extrude only: which way from the sketch plane. */
+  readonly direction?: "one-side" | "symmetric" | "flipped";
+  /** The body this feature owns in `part.generalBodies`. */
+  readonly bodyId: string;
+  readonly edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number };
+}
+
+export type DesignFeature = DesignSketchFeature | DesignSolidFeature;
+
+/** The parametric history (timeline). Optional so projects saved before it existed still load unchanged. */
+export interface DesignHistory {
+  readonly features: readonly DesignFeature[];
+  /** How many features are active: the rollback marker sits after this many. `features.length` means no rollback. */
+  readonly rollbackIndex: number;
+  /** The sketch feature the working sketch was opened from, or null for a sketch that has not been finished yet. */
+  readonly editingSketchId: string | null;
+}
+
 export interface WorkbenchProject {
   readonly format: typeof WORKBENCH_FORMAT;
   readonly schemaVersion: typeof WORKBENCH_SCHEMA_VERSION;
@@ -874,6 +916,7 @@ export interface WorkbenchProject {
   readonly drawing: DrawingSettings;
   readonly electrical: ElectricalIntent;
   readonly vehicle: VehicleIntent;
+  readonly design?: DesignHistory;
   readonly audit: readonly OperationAuditEntry[];
 }
 
@@ -902,6 +945,22 @@ export type WorkbenchOperation = OperationEnvelope & (
     }
   | { readonly kind: "set-sketch-constraints-suppressed"; readonly constraintIds: readonly string[]; readonly suppressed: boolean }
   | { readonly kind: "set-sketch-plane"; readonly plane: SketchDatumPlane }
+  /** Finishes the working sketch into the timeline: a new sketch feature, or an update of the one being edited. */
+  | { readonly kind: "commit-design-sketch"; readonly featureId: string; readonly name: string }
+  /** Reopens a sketch feature as the working sketch. */
+  | { readonly kind: "edit-design-sketch"; readonly featureId: string }
+  /** Starts a new, empty working sketch on a plane (the previous one should be finished first). */
+  | { readonly kind: "new-design-sketch"; readonly plane: SketchDatumPlane }
+  /** Adds an extrude or revolve feature together with the solid the kernel built for it. */
+  | { readonly kind: "add-design-solid"; readonly feature: DesignSolidFeature; readonly body: GeneralSolidBody }
+  /** Changes a solid feature's parameters and replaces its solid. */
+  | { readonly kind: "update-design-solid"; readonly feature: DesignSolidFeature; readonly body: GeneralSolidBody }
+  /** Applies the result of rebuilding features after a sketch changed: new solids, or the reason a feature failed. */
+  | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly message?: string }[] }
+  | { readonly kind: "set-design-feature-suppressed"; readonly featureId: string; readonly suppressed: boolean }
+  | { readonly kind: "delete-design-feature"; readonly featureId: string }
+  | { readonly kind: "set-design-rollback"; readonly index: number }
+  | { readonly kind: "rename-design-feature"; readonly featureId: string; readonly name: string }
   | {
       readonly kind: "set-part-parameter";
       readonly parameter: "widthMm" | "heightMm" | "thicknessMm" | "holeDiameterMm" | "edgeTreatmentMm" | "patternCount" | "revolveAngleDeg";
@@ -1018,7 +1077,9 @@ export type WorkbenchOperation = OperationEnvelope & (
  */
 export const WORKBENCH_OPERATION_KINDS = [
   "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
-  "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-sketch-plane", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
+  "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-sketch-plane",
+  "commit-design-sketch", "edit-design-sketch", "new-design-sketch", "add-design-solid", "update-design-solid", "regenerate-design",
+  "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
   "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility",
   "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
   "isolate-part-preview-body", "set-part-preview-bodies-visibility", "create-part-revolve", "pattern-part-feature", "mirror-part-feature",

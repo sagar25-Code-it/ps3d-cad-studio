@@ -11,6 +11,11 @@ import { sketchInferenceTests } from "./sketch-inference.test.js";
 import { sketchDynamicInputTests } from "./sketch-dynamic-input.test.js";
 import { sketchPointConstraintTests } from "./sketch-point-constraints.test.js";
 import { sketchAutoConstraintTests } from "./sketch-auto-constraints.test.js";
+import { sketchDragTests } from "./sketch-drag.test.js";
+import { sketchDimensionLayoutTests } from "./sketch-dimension-layout.test.js";
+import { sketchShapeTests } from "./sketch-shapes.test.js";
+import { designTimelineTests } from "./design-timeline.test.js";
+import { designRegenerationTests } from "./design-regeneration.test.js";
 import { sketchSolverTests } from "./sketch-solver.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
@@ -46,6 +51,11 @@ const tests: readonly TestCase[] = [
   ...sketchDynamicInputTests,
   ...sketchPointConstraintTests,
   ...sketchAutoConstraintTests,
+  ...sketchDragTests,
+  ...sketchDimensionLayoutTests,
+  ...sketchShapeTests,
+  ...designTimelineTests,
+  ...designRegenerationTests,
   ...sketchSolverTests,
   ...sketchEditToolTests,
   ...meshBooleanTests,

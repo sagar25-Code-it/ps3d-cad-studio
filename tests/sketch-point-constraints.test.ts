@@ -121,5 +121,19 @@ export const sketchPointConstraintTests: readonly TestCase[] = [
       const after = analyzeWorkbenchSketch(joined.sketch).degreesOfFreedom;
       equal(before - after, 2, "joining two points takes two degrees of freedom away");
     }
+  },
+  {
+    name: "a joint takes one degree of freedom from each curve, and a Fixed partner passes its share on to the free one",
+    run: () => {
+      const entities = [line("entity:a", [0, 0], [10, 0]), line("entity:b", [10, 0], [20, 5])];
+      const joint: WorkbenchSketchConstraint = { id: "constraint:join", kind: "coincident", entityIds: ["entity:a", "entity:b"], points: ["end", "start"] };
+      const shared = analyzeWorkbenchSketch(projectWith(entities, [joint]).sketch);
+      equal(shared.entityFreedom["entity:a"], 3, "the first curve loses one");
+      equal(shared.entityFreedom["entity:b"], 3, "the second curve loses one");
+      const pinned = analyzeWorkbenchSketch(projectWith(entities, [{ id: "constraint:fix", kind: "fixed", entityIds: ["entity:a"] }, joint]).sketch);
+      equal(pinned.entityFreedom["entity:a"], 0, "a Fixed curve has nothing left");
+      equal(pinned.entityFreedom["entity:b"], 2, "its partner takes the whole joint, so the joined end is pinned");
+      equal(pinned.degreesOfFreedom, 2, "the total is the free end only");
+    }
   }
 ];

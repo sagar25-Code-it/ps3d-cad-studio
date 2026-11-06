@@ -16,6 +16,7 @@ export type SketchHotkeyAction =
   | { readonly kind: "select-tool" }
   | { readonly kind: "cancel-points" }
   | { readonly kind: "undo-point" }
+  | { readonly kind: "cancel-drag" }
   | { readonly kind: "exit-pick" }
   | { readonly kind: "exit-dimension" }
   | { readonly kind: "exit-edit-tool" }
@@ -47,6 +48,8 @@ export interface SketchHotkeyContext {
   readonly editToolActive: boolean;
   /** Picking the points of a Coincident or Midpoint relation on the canvas. */
   readonly pickingRelation: boolean;
+  /** A curve or point is being dragged. Escape abandons the drag and puts everything back. */
+  readonly dragging: boolean;
   /** How many typed-input fields (length, angle, width...) the canvas is showing next to the cursor. */
   readonly dynamicFieldCount: number;
 }
@@ -64,7 +67,8 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
   if (input.ctrl || input.meta) return key === "a" && !input.shift ? { kind: "select-all" } : undefined;
 
   if (key === "Escape") {
-    // Escape backs out one level at a time: points being placed, then a dimension or edit tool, then the drawing tool, then the selection.
+    // Escape backs out one level at a time: a drag in progress, points being placed, then a pick mode, a dimension or edit tool, then the drawing tool, then the selection.
+    if (context.dragging) return { kind: "cancel-drag" };
     if (context.pendingPoints > 0) return { kind: "cancel-points" };
     if (context.pickingRelation) return { kind: "exit-pick" };
     if (context.dimensionMode) return { kind: "exit-dimension" };

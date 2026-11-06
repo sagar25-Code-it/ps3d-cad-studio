@@ -25,7 +25,16 @@ export type SketchTool =
   | "circle-three-point"
   | "arc"
   | "point"
-  | "spline";
+  | "spline"
+  /** A regular polygon: centre, then one corner. Placed as several entities, see shapes.ts. */
+  | "polygon"
+  /** A center-to-center slot: two end centres, then a width point. Placed as several entities, see shapes.ts. */
+  | "slot";
+
+/** Tools whose result is a whole parametric shape (several entities and relations) rather than one entity. */
+export function isShapeTool(tool: SketchTool): tool is "polygon" | "slot" {
+  return tool === "polygon" || tool === "slot";
+}
 
 export type SketchProfileBoundary =
   | {
@@ -267,7 +276,7 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
 
 export function requiredSketchPoints(tool: SketchTool): number {
   // A spline needs three fit points at least; the workspace lets the user keep adding points until they finish it.
-  return tool === "select" ? 0 : tool === "point" ? 1 : tool === "arc" || tool === "spline" || tool === "rectangle-three-point" || tool === "circle-three-point" ? 3 : 2;
+  return tool === "select" ? 0 : tool === "point" ? 1 : tool === "arc" || tool === "spline" || tool === "rectangle-three-point" || tool === "circle-three-point" || tool === "slot" ? 3 : 2;
 }
 
 export function sketchToolLabel(tool: SketchTool): string {
@@ -282,7 +291,9 @@ export function sketchToolLabel(tool: SketchTool): string {
     "circle-three-point": "3-point circle",
     arc: "3-point arc",
     point: "Point",
-    spline: "Fit-point spline"
+    spline: "Fit-point spline",
+    polygon: "Polygon",
+    slot: "Center-to-center slot"
   };
   return labels[tool];
 }
@@ -645,14 +656,33 @@ function normalize2(value: Vec2): Vec2 {
   return length < 1e-12 ? [0, 0] : [value[0] / length, value[1] / length];
 }
 
+/**
+ * Takes `amount` degrees of freedom away across the curves a relation joins. The reduction is shared between them rather than
+ * charged to the first one: a joint costs each end a degree of freedom, and a Fixed curve, which has nothing left to give,
+ * passes its share on to its partner. The total is unchanged; only who is blamed for it is fairer, which is what
+ * "fully constrained" colouring and Show Movable read.
+ */
 function reduce(freedom: Map<string, number>, ids: readonly string[], amount: number): void {
+  const unique = [...new Set(ids)];
   let remaining = amount;
-  for (const id of ids) {
-    const current = freedom.get(id) ?? 0;
-    const reduction = Math.min(current, remaining);
-    freedom.set(id, current - reduction);
-    remaining -= reduction;
-    if (remaining === 0) break;
+  let progress = true;
+  while (remaining > 0 && progress) {
+    progress = false;
+    const active = unique.filter((id) => (freedom.get(id) ?? 0) > 0);
+    if (active.length === 0) return;
+    const base = Math.floor(remaining / active.length);
+    let extra = remaining % active.length;
+    for (const id of active) {
+      const want = base + (extra > 0 ? 1 : 0);
+      if (extra > 0) extra -= 1;
+      const current = freedom.get(id) ?? 0;
+      const take = Math.min(current, want);
+      if (take > 0) {
+        freedom.set(id, current - take);
+        remaining -= take;
+        progress = true;
+      }
+    }
   }
 }
 

@@ -40,12 +40,23 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
   const diagnostics: SketchDiagnostic[] = [...validation.diagnostics];
   const appliedConstraints = new Set<string>();
   const appliedDimensions = new Set<string>();
-  const fixed = collectFixedReferences(document.constraints, document.geometry);
+  const baseFixed = collectFixedReferences(document.constraints, document.geometry);
+  let fixed = baseFixed;
 
   if (request.mode === "drag" && request.dragTarget !== undefined) {
-    const drag = setReferencedPoint(document, request.dragTarget.reference, request.dragTarget.positionMm, fixed);
+    const drag = setReferencedPoint(document, request.dragTarget.reference, request.dragTarget.positionMm, baseFixed);
     document = drag.document;
     if (drag.diagnostic !== undefined) diagnostics.push(drag.diagnostic);
+    // The point under the pointer stays where the pointer put it while the other constraints relax around it: a joint
+    // follows the dragged end rather than pulling it back, and dragging a line's middle keeps both ends in place relative to each other.
+    const pinned = new Set(baseFixed);
+    const target = request.dragTarget.reference;
+    pinned.add(referenceKey(target));
+    if (target.selector === "midpoint") {
+      pinned.add(`${target.entityId}:start`);
+      pinned.add(`${target.entityId}:end`);
+    }
+    fixed = pinned;
   }
 
   if (request.mode === "validate") {

@@ -60,7 +60,7 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
             onDoubleClick={() => props.onConfirm(option.plane)}
           ><CommandIcon name={option.icon} /><strong>{option.label}</strong><small>{option.hint}</small></button>)}
         </div>
-        <div className="save-project-note"><CommandIcon name="shield" /><span>Opens the sketch oriented to the {selected.view} and sets the default plane for Create Solid. You can still orbit with the ViewCube.</span></div>
+        <div className="save-project-note"><CommandIcon name="shield" /><span>The sketch opens face-on, looking at the {selected.view}. The plane is saved with the sketch and Create solid builds from it.</span></div>
       </div>
       <footer><button onClick={props.onClose}>Cancel</button><button className="primary" onClick={() => props.onConfirm(plane)}><CommandIcon name="sketch" />Start sketch</button></footer>
     </section>

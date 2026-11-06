@@ -5,7 +5,7 @@ import { entitiesInSelectionBox, selectionBoxMode, selectionRect } from "../pack
 import { snapSketchPoint } from "../packages/workbench-sketch/src/index.js";
 import { assert, equal, type TestCase } from "./test-kit.js";
 
-const idle: SketchHotkeyContext = { tool: "select", pendingPoints: 0, selectionCount: 0, curveSelectionCount: 0, dimensionMode: false, editToolActive: false, pickingRelation: false, dynamicFieldCount: 0 };
+const idle: SketchHotkeyContext = { tool: "select", pendingPoints: 0, selectionCount: 0, curveSelectionCount: 0, dimensionMode: false, editToolActive: false, pickingRelation: false, dragging: false, dynamicFieldCount: 0 };
 const press = (key: string, extra: Partial<SketchHotkeyInput> = {}): SketchHotkeyInput => ({ key, ctrl: false, meta: false, alt: false, shift: false, ...extra });
 
 function sketchOf(entities: readonly SketchEntity[]): WorkbenchSketch {
@@ -56,6 +56,7 @@ export const sketchInteractionTests: readonly TestCase[] = [
       equal(resolveSketchHotkey(press("Escape"), idle), undefined, "Escape with nothing to cancel falls through");
       equal(resolveSketchHotkey(press("Escape"), { ...idle, dimensionMode: true })?.kind, "exit-dimension", "Escape ends Sketch Dimension");
       equal(resolveSketchHotkey(press("Escape"), { ...idle, pickingRelation: true })?.kind, "exit-pick", "Escape ends picking the points of a relation");
+      equal(resolveSketchHotkey(press("Escape"), { ...idle, dragging: true, pendingPoints: 1 })?.kind, "cancel-drag", "Escape abandons a drag before anything else");
       equal(resolveSketchHotkey(press("Escape"), { ...idle, pickingRelation: true, pendingPoints: 1 })?.kind, "cancel-points", "placed points are cancelled before a pick mode ends");
       equal(resolveSketchHotkey(press("Escape"), { ...idle, editToolActive: true })?.kind, "exit-edit-tool", "Escape closes an edit tool");
       equal(resolveSketchHotkey(press("Backspace"), drawing)?.kind, "undo-point", "Backspace removes the last placed point first");

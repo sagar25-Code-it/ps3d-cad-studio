@@ -78,3 +78,39 @@ export function autoConstraintsFor(input: AutoConstraintInput): readonly Workben
   }
   return found;
 }
+
+export interface DropConstraintInput {
+  /** The curve whose point was dragged. */
+  readonly entity: SketchEntity;
+  /** Which defining point of that curve was dragged. */
+  readonly ref: SketchPointRef;
+  /** What the pointer was snapped to where it was released. */
+  readonly primary: InferenceCandidate | undefined;
+  readonly sketch: WorkbenchSketch;
+  readonly newId: () => string;
+}
+
+/**
+ * The relation a dragged point earns when it is dropped on other geometry, the way Fusion joins an end you drag onto
+ * another end: Coincident on an endpoint or centre, Midpoint on a line's middle. A joint that already exists is not repeated.
+ */
+export function dropConstraintFor(input: DropConstraintInput): WorkbenchSketchConstraint | undefined {
+  const { entity, ref, primary, sketch } = input;
+  if (primary === undefined || primary.entityId === undefined || primary.entityId === entity.id) return undefined;
+  if (!SOLVABLE_POINT_REFS[entity.kind].includes(ref)) return undefined;
+  const other = sketch.entities.find((candidate) => candidate.id === primary.entityId);
+  if (other === undefined) return undefined;
+  if (primary.kind === "endpoint" || primary.kind === "center") {
+    const otherRef = pointRefOf(other, primary.selector);
+    if (otherRef === undefined) return undefined;
+    const alreadyJoined = sketch.constraints.some((constraint) => constraint.kind === "coincident" && constraint.suppressed !== true
+      && constraint.entityIds.length === 2 && constraint.points !== undefined
+      && ((constraint.entityIds[0] === other.id && constraint.points[0] === otherRef && constraint.entityIds[1] === entity.id && constraint.points[1] === ref)
+        || (constraint.entityIds[1] === other.id && constraint.points[1] === otherRef && constraint.entityIds[0] === entity.id && constraint.points[0] === ref)));
+    return alreadyJoined ? undefined : { id: input.newId(), kind: "coincident", entityIds: [other.id, entity.id], points: [otherRef, ref] };
+  }
+  if (primary.kind === "midpoint" && other.kind === "line" && entity.kind !== "line") {
+    return { id: input.newId(), kind: "midpoint", entityIds: [entity.id, other.id], points: [ref] };
+  }
+  return undefined;
+}

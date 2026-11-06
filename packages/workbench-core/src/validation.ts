@@ -29,6 +29,7 @@ import {
   type WorkspaceId
 } from "./types.js";
 import { createElectricalTemplate } from "./templates.js";
+import { validateDesignHistory } from "./design.js";
 import {
   ELECTROMECHANICAL_CATALOG,
   createElectromechanicalAssembly,
@@ -62,7 +63,7 @@ export function validateWorkbenchProject(input: unknown): WorkbenchResult<Workbe
     "sketch", "part", "assembly", "surface", "drawing", "audit"
   ];
   if (!isRecord(input) || !requiredRoot.every((key) => Object.hasOwn(input, key))
-    || Object.keys(input).some((key) => !requiredRoot.includes(key) && key !== "electrical" && key !== "vehicle")) {
+    || Object.keys(input).some((key) => !requiredRoot.includes(key) && key !== "electrical" && key !== "vehicle" && key !== "design")) {
     return invalid("The project root has missing or unsupported fields.");
   }
   if (input.format !== WORKBENCH_FORMAT || input.schemaVersion !== WORKBENCH_SCHEMA_VERSION) {
@@ -93,6 +94,10 @@ export function validateWorkbenchProject(input: unknown): WorkbenchResult<Workbe
   if (!electromechanical.ok) return electromechanical;
   const audit = validateAudit(input.audit, input.revision as number);
   if (!audit.ok) return audit;
+  // The timeline is optional: projects saved before it existed simply have none.
+  if (Object.hasOwn(input, "design") && !validateDesignHistory(input.design, (candidate) => validateSketch(candidate).ok)) {
+    return invalid("The design timeline is invalid: a feature, a sketch snapshot, a reference or the rollback marker is wrong.");
+  }
   return { ok: true, value: { ...(structuredClone(input) as unknown as WorkbenchProject), assembly: structuredClone(normalizedAssembly), electrical: structuredClone(electrical.value), vehicle: structuredClone(vehicle.value) } };
 }
 

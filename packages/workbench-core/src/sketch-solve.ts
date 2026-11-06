@@ -45,6 +45,27 @@ const RADIAL_KINDS: readonly SketchEntity["kind"][] = ["circle", "arc"];
  * backend cannot enforce is reported in `unsolved` and left recorded rather than approximated.
  */
 export function solveLiveSketch(sketch: WorkbenchSketch, focusEntityIds?: readonly string[]): LiveSketchSolveReport {
+  return runLiveSolve(sketch, focusEntityIds);
+}
+
+/** Where a drag put a defining point: the entity, which of its points, and the position in millimetres. */
+export interface LiveDragTarget {
+  readonly entityId: string;
+  readonly point: SketchPointRef;
+  readonly positionMm: Vec2;
+}
+
+/**
+ * Moves one defining point of a line, circle, arc or point entity to `positionMm` and lets every relation that touches
+ * it relax around the pinned point: a joint follows the dragged end, an equal-radius circle resizes, a Horizontal line
+ * keeps its direction. Nothing is committed; the caller decides what to do with the returned entities, which makes this
+ * safe to call on every pointer move. A fixed point, or relations that cannot all hold, are reported instead of forced.
+ */
+export function dragLiveSketch(sketch: WorkbenchSketch, target: LiveDragTarget): LiveSketchSolveReport {
+  return runLiveSolve(sketch, [target.entityId], target);
+}
+
+function runLiveSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[] | undefined, drag?: LiveDragTarget): LiveSketchSolveReport {
   const component = constraintComponent(sketch, focusEntityIds);
   const entities = sketch.entities.filter((entity) => component.has(entity.id));
   // A relaxed (suppressed) relation stays recorded but is not enforced.
@@ -67,8 +88,11 @@ export function solveLiveSketch(sketch: WorkbenchSketch, focusEntityIds?: readon
     solverConstraints.push(...translated.constraints);
     dimensions.push(...translated.dimensions);
   }
-  if (solverConstraints.length === 0 && dimensions.length === 0) {
+  if (drag === undefined && solverConstraints.length === 0 && dimensions.length === 0) {
     return { ok: true, entities: sketch.entities, movedIds: [], notes: [], unsolved };
+  }
+  if (drag !== undefined && !geometry.some((candidate) => candidate.id === drag.entityId)) {
+    return { ok: false, message: "This kind of curve cannot be dragged by that point.", relatedIds: [drag.entityId], recovery: "Drag a line, circle, arc or point." };
   }
 
   const document: ParametricSketchDocument = {
@@ -81,7 +105,9 @@ export function solveLiveSketch(sketch: WorkbenchSketch, focusEntityIds?: readon
     constraints: solverConstraints,
     dimensions
   };
-  const result = solveAnalyticSketch({ document, mode: "regenerate" });
+  const result = drag === undefined
+    ? solveAnalyticSketch({ document, mode: "regenerate" })
+    : solveAnalyticSketch({ document, mode: "drag", dragTarget: { reference: { entityId: drag.entityId, selector: solverSelector(drag.point) }, positionMm: drag.positionMm } });
   const errors = result.diagnostics.filter((diagnostic) => diagnostic.severity === "error" && !diagnostic.unsupported);
   if (result.status === "failed" || errors.length > 0) {
     const first = errors[0];

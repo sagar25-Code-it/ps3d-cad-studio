@@ -13,4 +13,6 @@ export * from "./part-features.js";
 export * from "./validation.js";
 export * from "./operations.js";
 export * from "./constraint-fit.js";
+export * from "./design.js";
+export { dragLiveSketch, solveLiveSketch, type LiveDragTarget, type LiveSketchSolveReport } from "./sketch-solve.js";
 export * from "./engineering-intent.js";

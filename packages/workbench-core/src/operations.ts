@@ -25,6 +25,20 @@ import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
 import { solveAssemblyMates } from "./assembly-solve.js";
 import {
+  addDesignSolid,
+  commitDesignSketch,
+  deleteDesignFeature,
+  editDesignSketch,
+  newDesignSketch,
+  regenerateDesign,
+  renameDesignFeature,
+  setDesignFeatureSuppressed,
+  setDesignRollback,
+  pruneOrphanedSolidFeatures,
+  updateDesignSolid,
+  validSolidFeaturePayload
+} from "./design.js";
+import {
   booleanPartBodies,
   createRevolvedPartBody,
   deletePartBodyFaceFeature,
@@ -199,6 +213,36 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "set-sketch-plane":
       if (!keys(input, [...common, "plane"]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)) return invalidOperation("The sketch plane must be datum:xy, datum:xz or datum:yz.");
+      break;
+    case "commit-design-sketch":
+      if (!keys(input, [...common, "featureId", "name"]) || !stableId(input.featureId) || !shortText(input.name, 1, 120)) return invalidOperation("The sketch feature payload is invalid.");
+      break;
+    case "edit-design-sketch":
+    case "delete-design-feature":
+      if (!keys(input, [...common, "featureId"]) || !stableId(input.featureId)) return invalidOperation("The timeline feature ID is invalid.");
+      break;
+    case "new-design-sketch":
+      if (!keys(input, [...common, "plane"]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)) return invalidOperation("The sketch plane must be datum:xy, datum:xz or datum:yz.");
+      break;
+    case "add-design-solid":
+    case "update-design-solid":
+      if (!keys(input, [...common, "feature", "body"]) || !validSolidFeaturePayload(input.feature) || !validGeneralSolidBodyPayload(input.body)) return invalidOperation("The solid feature or its body is invalid.");
+      break;
+    case "regenerate-design":
+      if (!keys(input, [...common, "results"]) || !boundedList(input.results, 64, isRecord)
+        || input.results.some((result) => !stableId(result.featureId) || Object.keys(result).some((key) => !["featureId", "body", "message"].includes(key))
+          || (Object.hasOwn(result, "body") && !validGeneralSolidBodyPayload(result.body))
+          || (Object.hasOwn(result, "message") && !shortText(result.message, 1, 400))
+          || (!Object.hasOwn(result, "body") && !Object.hasOwn(result, "message")))) return invalidOperation("The rebuild results are invalid.");
+      break;
+    case "set-design-feature-suppressed":
+      if (!keys(input, [...common, "featureId", "suppressed"]) || !stableId(input.featureId) || typeof input.suppressed !== "boolean") return invalidOperation("The suppress request is invalid.");
+      break;
+    case "set-design-rollback":
+      if (!keys(input, [...common, "index"]) || typeof input.index !== "number" || !Number.isInteger(input.index) || input.index < 0 || input.index > 1_000) return invalidOperation("The rollback position is invalid.");
+      break;
+    case "rename-design-feature":
+      if (!keys(input, [...common, "featureId", "name"]) || !stableId(input.featureId) || !shortText(input.name, 1, 120)) return invalidOperation("The rename request is invalid.");
       break;
     case "set-part-parameter":
       if (!keys(input, [...common, "parameter", "value"]) || !PART_PARAMETERS.includes(input.parameter as never) || !finite(input.value)) return invalidOperation("The part parameter edit is invalid.");
@@ -549,6 +593,16 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
         [project.sketch.id],
         `Placed the sketch on the ${operation.plane.replace("datum:", "").toUpperCase()} plane.`
       );
+    case "commit-design-sketch": return commitDesignSketch(project, operation.featureId, operation.name);
+    case "edit-design-sketch": return editDesignSketch(project, operation.featureId);
+    case "new-design-sketch": return newDesignSketch(project, operation.plane);
+    case "add-design-solid": return addDesignSolid(project, operation.feature, operation.body);
+    case "update-design-solid": return updateDesignSolid(project, operation.feature, operation.body);
+    case "regenerate-design": return regenerateDesign(project, operation.results);
+    case "set-design-feature-suppressed": return setDesignFeatureSuppressed(project, operation.featureId, operation.suppressed);
+    case "delete-design-feature": return deleteDesignFeature(project, operation.featureId);
+    case "set-design-rollback": return setDesignRollback(project, operation.index);
+    case "rename-design-feature": return renameDesignFeature(project, operation.featureId, operation.name);
     case "toggle-sketch-construction": {
       const target = project.sketch.entities.find((entity) => entity.id === operation.entityId);
       if (target === undefined) return broken(operation.entityId, "The sketch entity does not exist.");
@@ -602,17 +656,19 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       if (target === undefined || tool === undefined) return broken(target === undefined ? operation.targetBodyId : operation.toolBodyId, "A general body for the Boolean does not exist.");
       const survivors = current.filter((body) => body.id !== target.id && (operation.keepTool || body.id !== tool.id));
       if (survivors.some((body) => body.id === operation.body.id)) return invalidOperation("The Boolean result body ID already exists.");
+      const combined = pruneOrphanedSolidFeatures({ ...project, part: { ...project.part, generalBodies: [...survivors, operation.body] } });
       return changed(
-        { ...project, part: { ...project.part, generalBodies: [...survivors, operation.body] } },
+        combined.project,
         [target.id, tool.id, operation.body.id],
-        `${operation.mode === "join" ? "Joined" : operation.mode === "cut" ? "Cut" : "Intersected"} ${target.name} ${operation.mode === "cut" ? "with" : "and"} ${tool.name} into ${operation.body.name}.`
+        `${operation.mode === "join" ? "Joined" : operation.mode === "cut" ? "Cut" : "Intersected"} ${target.name} ${operation.mode === "cut" ? "with" : "and"} ${tool.name} into ${operation.body.name}.${combined.removed.length === 0 ? "" : ` The timeline steps of the combined solids (${combined.removed.join(", ")}) were removed; the result is an ordinary body.`}`
       );
     }
     case "delete-general-body": {
       const current = project.part.generalBodies ?? [];
       const target = current.find((body) => body.id === operation.bodyId);
       if (target === undefined) return broken(operation.bodyId, "The general body does not exist.");
-      return changed({ ...project, part: { ...project.part, generalBodies: current.filter((body) => body.id !== target.id) } }, [target.id], `Deleted ${target.name}.`);
+      const pruned = pruneOrphanedSolidFeatures({ ...project, part: { ...project.part, generalBodies: current.filter((body) => body.id !== target.id) } });
+      return changed(pruned.project, [target.id], `Deleted ${target.name}.${pruned.removed.length === 0 ? "" : ` Its timeline step (${pruned.removed.join(", ")}) was removed with it.`}`);
     }
     case "toggle-general-body-visibility": {
       const current = project.part.generalBodies ?? [];

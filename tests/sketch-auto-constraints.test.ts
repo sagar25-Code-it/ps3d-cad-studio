@@ -1,6 +1,6 @@
 import type { SketchEntity, Vec2, WorkbenchProject, WorkbenchSketch } from "../packages/workbench-core/src/index.js";
 import { applyWorkbenchOperation, createWorkbenchProject } from "../packages/workbench-core/src/index.js";
-import { autoConstraintsFor, type PlacedPointInference } from "../packages/workbench-sketch/src/auto-constraints.js";
+import { autoConstraintsFor, dropConstraintFor, type PlacedPointInference } from "../packages/workbench-sketch/src/auto-constraints.js";
 import { inferSketchPoint } from "../packages/workbench-sketch/src/inference.js";
 import { buildSketchEntity } from "../packages/workbench-sketch/src/index.js";
 import { assert, equal, type TestCase } from "./test-kit.js";
@@ -125,6 +125,27 @@ export const sketchAutoConstraintTests: readonly TestCase[] = [
       equal(applied.value.project.sketch.constraints.length, constraints.length, "the relations are recorded");
       const added = applied.value.project.sketch.entities.find((candidate) => candidate.id === "entity:new");
       assert(added?.kind === "line" && added.start[0] === 10 && added.start[1] === 0, "the new line starts exactly on A's end");
+    }
+  },
+  {
+    name: "dropping a dragged end on another end joins them, dropping a centre on a line middle makes a Midpoint, and nothing is repeated",
+    run: () => {
+      const sketch = sketchOf([line("entity:a", [0, 0], [10, 0]), line("entity:b", [30, 5], [40, 9]), circle("entity:c", [60, 60], 5)]);
+      const dragged = sketch.entities.find((entity) => entity.id === "entity:b")!;
+      const onEnd = inferSketchPoint([10.2, 0.1], sketch, { toleranceMm: 1, excludeEntityIds: ["entity:b"] });
+      const joined = dropConstraintFor({ entity: dragged, ref: "start", primary: onEnd.primary, sketch, newId });
+      equal(joined?.kind, "coincident", "an end dropped on an end is Coincident");
+      equal(joined?.entityIds.join(","), "entity:a,entity:b", "the target is listed first");
+      equal(joined?.points?.join(","), "end,start", "A's end and B's start");
+      const again = dropConstraintFor({ entity: dragged, ref: "start", primary: onEnd.primary, sketch: { ...sketch, constraints: [joined!] }, newId });
+      equal(again, undefined, "an existing joint is not repeated");
+      const circleEntity = sketch.entities.find((entity) => entity.id === "entity:c")!;
+      const onMiddle = inferSketchPoint([5.2, 0.2], sketch, { toleranceMm: 1, excludeEntityIds: ["entity:c"] });
+      const centred = dropConstraintFor({ entity: circleEntity, ref: "center", primary: onMiddle.primary, sketch, newId });
+      equal(centred?.kind, "midpoint", "a centre dropped on a line middle is a Midpoint");
+      const onCurve = inferSketchPoint([7.3, 0.2], sketch, { toleranceMm: 1, excludeEntityIds: ["entity:c"] });
+      equal(dropConstraintFor({ entity: circleEntity, ref: "center", primary: onCurve.primary, sketch, newId }), undefined, "a point on a curve is not a relation");
+      equal(dropConstraintFor({ entity: dragged, ref: "start", primary: undefined, sketch, newId }), undefined, "dropping on nothing adds nothing");
     }
   }
 ];

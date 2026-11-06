@@ -29,6 +29,7 @@ interface WorkbenchRibbonProps {
   readonly onOpenSketchOptions: () => void;
   readonly onToggleSketchEntityVisibility: (entityId: string) => void;
   readonly onFinishSketch: () => void;
+  readonly onNewSketch: () => void;
   readonly onCancelSketchPoints: () => void;
   readonly onSelect: (id: string | null) => void;
   readonly onFit: () => void;
@@ -121,13 +122,16 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
     {!props.masterCartOpen && props.project.activeWorkspace === "sketch" && <>
       <RibbonGroup label="Create geometry">
         {SKETCH_TOOLS.map((tool) => <RibbonButton key={tool.id} icon={tool.icon} label={tool.label} hint={tool.key} active={props.sketchTool === tool.id} onClick={() => props.onSketchTool(tool.id)} />)}
+        <RibbonButton icon="polygon" label="Polygon" hint="centre + corner" active={props.sketchTool === "polygon"} onClick={() => props.onSketchTool("polygon")} />
+        <RibbonButton icon="slot" label="Slot" hint="centres + width" active={props.sketchTool === "slot"} onClick={() => props.onSketchTool("slot")} />
         <RibbonButton icon="spline" label="Spline" hint="fit points" active={props.sketchTool === "spline"} onClick={() => props.onSketchTool("spline")} />
         <RibbonButton icon="insert" label="Point" hint="reference" active={props.sketchTool === "point"} onClick={() => props.onSketchTool("point")} />
       </RibbonGroup>
       <RibbonGroup label="Sketch session">
-        <RibbonButton icon="save" label="Finish Sketch" hint="to Part" onClick={props.onFinishSketch} />
+        <RibbonButton icon="save" label="Finish Sketch" hint="to timeline" onClick={props.onFinishSketch} />
+        <RibbonButton icon="sketch" label="New Sketch" hint="choose plane" onClick={props.onNewSketch} />
         <RibbonButton icon="cancel" label="Cancel points" hint="clear" onClick={props.onCancelSketchPoints} />
-        <RibbonButton icon="plane" label="XY plane" hint={`${props.project.sketch.gridMm} mm`} active info />
+        <RibbonButton icon="plane" label={`${props.project.sketch.plane.replace("datum:", "").toUpperCase()} plane`} hint={`${props.project.sketch.gridMm} mm`} active info />
       </RibbonGroup>
       <RibbonGroup label="Dimension & modify">
         <RibbonButton icon="dimension" label="Dimension" hint="points / curve" active={props.sketchDimensionMode} onClick={props.onSketchDimension} />

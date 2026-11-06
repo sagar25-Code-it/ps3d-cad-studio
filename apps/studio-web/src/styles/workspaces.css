@@ -957,6 +957,22 @@
 .inference-glyph .dot { fill: #58e08c; stroke: none; }
 .inference-guide { stroke: #58e08c; stroke-width: 1px; stroke-dasharray: 5 4; opacity: 0.85; vector-effect: non-scaling-stroke; }
 .inference-label { fill: #c6f9d8; font-family: var(--mono); font-weight: 700; paint-order: stroke; stroke: #07131f; }
+.driving-dimension line { stroke: #ffd36a; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.driving-dimension .arrow { fill: #ffd36a; stroke: none; }
+.driving-dimension.relaxed { opacity: 0.45; }
+.driving-dimension-text { fill: #fff3cb; font-family: var(--mono); font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: #07131f; pointer-events: none; }
+.driving-dimension-hit { fill: transparent; cursor: text; pointer-events: all; }
+.driving-dimension-hit:hover { fill: #ffd36a22; }
+.sketch-dimension-glyph { opacity: 0.7; }
+.sketch-entity.constrained { stroke: #e9f0f6; }
+.sketch-entity.constrained.construction { stroke: #7a8ca0; }
+.sketch-entity.constrained.hover { stroke: #f2d08d; }
+.sketch-entity.constrained.movable { stroke: #ffb347; }
+.sketch-entity.constrained.selected { stroke: var(--amber); }
+.sketch-canvas.dragging, .sketch-canvas.dragging * { cursor: grabbing; }
+.grab-handle { fill: #0b1c2b; stroke: #ffd36a; stroke-width: 1.6px; vector-effect: non-scaling-stroke; cursor: move; pointer-events: all; }
+.grab-handle:hover { fill: #ffd36a; }
+.grab-handle.radius { stroke: #7cc4ff; }
 .relation-point { fill: #1d6fb4aa; stroke: #7cc4ff; stroke-width: 1.5px; vector-effect: non-scaling-stroke; cursor: crosshair; }
 .relation-point:hover { fill: #3aa0f0; stroke: #fff; }
 .relation-point.selected { fill: #f4bd42; stroke: #7d5200; }

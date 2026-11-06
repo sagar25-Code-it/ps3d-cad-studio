@@ -1,0 +1,36 @@
+/*
+ * The parametric timeline strip (Sketch and Part workspaces). It is fixed just above the status bar rather than being another
+ * grid row, because the app grid has a different row template at every responsive breakpoint; the workbench gets matching
+ * bottom padding while the strip is shown so nothing is covered.
+ */
+.studio-app[data-timeline="on"] .workbench-grid { padding-bottom: 46px; box-sizing: border-box; }
+.timeline-bar { position: fixed; left: 0; right: 0; bottom: 34px; z-index: 30; display: flex; align-items: center; gap: 0.6rem; min-width: 0; height: 46px; padding: 0 0.7rem; border-top: 1px solid #aeb5bb; color: #2f353a; background: #eef0f2; box-shadow: 0 -4px 14px #15191d1f; font-size: 0.78rem; }
+.timeline-controls { display: flex; gap: 0.2rem; }
+.timeline-controls button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid #c5ccd2; border-radius: 4px; color: #2f353a; background: #fff; font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.timeline-controls button:disabled { opacity: 0.4; cursor: default; }
+.timeline-controls button:not(:disabled):hover { background: #e4eef7; }
+.timeline-controls .command-icon { width: 14px; height: 14px; }
+.timeline-track { display: flex; align-items: center; flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 0.25rem 0; scrollbar-width: thin; }
+.timeline-slot { display: inline-flex; align-items: center; }
+.timeline-empty { margin: 0; color: #5d6a73; font-size: 0.74rem; white-space: nowrap; }
+.timeline-chip { display: inline-flex; align-items: center; gap: 0.35rem; max-width: 12rem; height: 30px; padding: 0 0.55rem; border: 1px solid #b9c1c8; border-radius: 5px; color: #2c3237; background: #fff; font: inherit; cursor: pointer; }
+.timeline-chip .command-icon { flex: none; width: 15px; height: 15px; color: #1f6fb6; }
+.timeline-chip .timeline-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-chip:hover { border-color: #5a9fd4; background: #f0f7fd; }
+.timeline-chip.selected { border-color: #1f6fb6; background: #dcecfa; box-shadow: inset 0 0 0 1px #1f6fb6; }
+.timeline-chip.suppressed { color: #7b848b; text-decoration: line-through; background: #f1f2f3; }
+.timeline-chip.rolled-back { opacity: 0.45; }
+.timeline-chip.error { border-color: #c0392b; background: #fdeceb; }
+.timeline-chip.error .command-icon { color: #c0392b; }
+.timeline-chip.inactive { opacity: 0.7; }
+.timeline-badge { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; color: #fff; background: #c0392b; font-size: 0.7rem; }
+.timeline-marker { display: inline-block; flex: none; width: 9px; height: 30px; margin: 0 1px; border-radius: 3px; cursor: pointer; }
+.timeline-marker::before { content: ""; display: block; width: 1px; height: 100%; margin: 0 auto; background: transparent; }
+.timeline-marker:hover::before { background: #8fb7d8; }
+.timeline-marker.current { width: 11px; cursor: default; }
+.timeline-marker.current::before { width: 3px; background: #1f6fb6; box-shadow: 0 0 0 1px #fff; }
+.timeline-rename { height: 30px; min-width: 9rem; padding: 0 0.5rem; border: 2px solid #1f6fb6; border-radius: 5px; font: inherit; }
+.timeline-menu { position: fixed; z-index: 140; display: grid; min-width: 11.5rem; padding: 0.25rem; border: 1px solid #aeb5bb; border-radius: 6px; background: #fff; box-shadow: 0 10px 28px #15191d55; }
+.timeline-menu button { padding: 0.45rem 0.7rem; border: 0; border-radius: 4px; color: #2c3237; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.timeline-menu button:hover { background: #e4eef7; }
+.timeline-menu button.danger { color: #b02a1c; }

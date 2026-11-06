@@ -1,7 +1,7 @@
 import type { AssemblyTemplateId, CapabilityLevel, ComponentShape, ElectricalComponentKind, ElectricalTemplateId, PartPreviewBodyShape, VehicleLayerId, VehicleSimulationState, VehicleTemplateId, WorkspaceId } from "./types.js";
 
 export type CadCommandCategory = "create" | "modify" | "construct" | "assemble" | "inspect" | "document" | "automate";
-export type CadSketchTool = "select" | "line" | "rectangle" | "rectangle-center" | "rectangle-three-point" | "circle" | "circle-two-point" | "circle-three-point" | "arc" | "point" | "spline";
+export type CadSketchTool = "select" | "line" | "rectangle" | "rectangle-center" | "rectangle-three-point" | "circle" | "circle-two-point" | "circle-three-point" | "arc" | "point" | "spline" | "polygon" | "slot";
 /** Selection-driven or click-driven sketch edit tools (each applies one atomic `apply-sketch-edit`). */
 export type CadSketchEditTool = "offset" | "mirror" | "pattern" | "corner" | "fillet" | "chamfer" | "trim" | "extend";
 /** One-shot sketch commands that act on the current selection or toggle a display mode. */
@@ -111,8 +111,8 @@ export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   command("command:sketch-three-point-circle", "sketch", "create", "3-point circle", "Create the unique circle passing through three non-collinear points.", "preview", { kind: "activate-sketch-tool", tool: "circle-three-point" }, ["circumcircle", "round", "three point"]),
   command("command:sketch-arc", "sketch", "create", "Three-point arc", "Create a non-collinear three-point arc.", "preview", { kind: "activate-sketch-tool", tool: "arc" }, ["curve", "radius"]),
   command("command:sketch-spline", "sketch", "create", "Fit-point spline", "Click three or more fit points; the smooth curve through them is sampled into short edges, so it bounds extrudable profiles. Click the last point again or press Enter to finish.", "preview", { kind: "activate-sketch-tool", tool: "spline" }, ["bezier", "curve"]),
-  unavailable("command:sketch-slot", "sketch", "create", "Slot", "Requires tangent-chain constraints and profile trimming.", ["obround", "profile"]),
-  unavailable("command:sketch-polygon", "sketch", "create", "Polygon", "Requires parametric edge-count and construction constraints.", ["hexagon", "profile"]),
+  command("command:sketch-slot", "sketch", "create", "Slot", "Center-to-center slot: click the two end centres, then a point for the half-width. The two sides and two end arcs are added together with tangent and equal relations.", "preview", { kind: "activate-sketch-tool", tool: "slot" }, ["obround", "profile", "elongated hole"]),
+  command("command:sketch-polygon", "sketch", "create", "Polygon", "Regular polygon: click the centre, then a corner. The side count is set in the Sketch palette (3 to 64); the sides are joined end to end with equal-length relations.", "preview", { kind: "activate-sketch-tool", tool: "polygon" }, ["hexagon", "profile", "regular"]),
   command("command:sketch-trim", "sketch", "modify", "Trim", "Click a line, arc or circle to remove the part between its neighbouring crossings with other curves.", "preview", { kind: "activate-sketch-edit", tool: "trim" }, ["extend", "split"]),
   command("command:sketch-offset", "sketch", "modify", "Offset", "Offset selected lines, arcs, circles or rectangles by a distance; connected lines are re-joined with mitred corners.", "preview", { kind: "activate-sketch-edit", tool: "offset" }, ["parallel", "distance"]),
   unavailable("command:sketch-project", "sketch", "construct", "Project geometry", "Requires persistent topology references from a qualified solid kernel.", ["include", "reference"]),

@@ -4,6 +4,7 @@ import {
   analyzeWorkbenchSketch,
   buildSketchEntity,
   detectSketchProfiles,
+  isShapeTool,
   profileOutlineMm,
   requiredSketchPoints,
   selectConnectedSketchEntities,
@@ -20,7 +21,10 @@ import { dynamicFieldsFor, measureFromCursor, parseDynamicNumber, pointFromDynam
 import { constraintsOnEntities, extendAt, nearestEntityId, trimAt, type SketchEditPlan } from "../../../../packages/workbench-sketch/src/edit-tools.js";
 import { SKETCH_HOTKEY_HELP, type SketchHotkeyAction } from "../../../../packages/workbench-sketch/src/hotkeys.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
-import { autoConstraintsFor, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
+import { autoConstraintsFor, dropConstraintFor, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
+import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
+import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
+import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, buildPolygon, buildSlot, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
 import { entitiesInSelectionBox, selectionBoxMode, selectionRect, type SketchSelectionBoxMode } from "../../../../packages/workbench-sketch/src/selection.js";
 import { SketchCheckPanel, SketchEditPanel, SketchRelationList, type SketchEditToolId } from "./SketchEditPanel.js";
 import { SketchGrid } from "./sketch/SketchGrid.js";
@@ -132,7 +136,7 @@ interface SketchWorkspaceProps {
   readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null) => void;
   readonly onMessage: (message: string) => void;
   readonly optionsRevealRequest: number;
-  readonly onCreateSolid: (profileIds: readonly string[], plane: PlaneKey, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }) => void;
+  readonly onCreateSolid: (profileIds: readonly string[], plane: PlaneKey, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction?: "one-side" | "symmetric" | "flipped") => void;
   readonly onChangePlane: () => void;
   readonly editTool: SketchEditToolId | null;
   readonly showMovable: boolean;
@@ -147,6 +151,23 @@ interface SketchWorkspaceProps {
   readonly onActivateDimension: () => void;
   readonly onExitDimension: () => void;
   readonly onActivateEditTool: (tool: SketchEditToolId) => void;
+}
+
+/** A press on a curve or one of its handles that may turn into a drag. */
+interface DragGesture {
+  readonly pointerId: number;
+  readonly entityId: string;
+  readonly handle: DragHandle;
+  readonly startClient: readonly [number, number];
+  readonly startMm: Vec2;
+  /** The sketch as it was when the press began; every drag step is computed from it. */
+  readonly base: WorkbenchSketch;
+  moved: boolean;
+}
+
+interface DragPreview {
+  readonly entities: readonly SketchEntity[];
+  readonly movedIds: readonly string[];
 }
 
 interface BoxGesture {
@@ -169,6 +190,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // Picking the points of a Coincident or Midpoint relation on the canvas.
   const [pickRelation, setPickRelation] = useState<"coincident" | "midpoint" | null>(null);
   const [pickedPoint, setPickedPoint] = useState<RelationPoint | undefined>(undefined);
+  // The in-place value editor for a driving dimension (opened from Sketch Dimension, or by clicking a dimension's text).
+  const [dimensionEdit, setDimensionEdit] = useState<{ readonly entityId: string; readonly dimension: DrivingDimension; readonly anchor: Vec2; readonly label: string } | undefined>(undefined);
+  const [dimensionText, setDimensionText] = useState("");
+  const [polygonSides, setPolygonSides] = useState(String(POLYGON_DEFAULT_SIDES));
   // Typed input: fields the user has typed into are locked; the others keep following the pointer.
   const [fieldText, setFieldText] = useState<Partial<Record<DynamicFieldId, string>>>({});
   const [dynamicFocused, setDynamicFocused] = useState(false);
@@ -187,6 +212,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [solidOp, setSolidOp] = useState<"extrude" | "revolve">("extrude");
   const [solidValue, setSolidValue] = useState("10");
+  const [solidDirection, setSolidDirection] = useState<"one-side" | "symmetric" | "flipped">("one-side");
   const [edgeKind, setEdgeKind] = useState<"none" | "chamfer" | "fillet">("none");
   const [edgeSize, setEdgeSize] = useState("2");
   const [showProfiles, setShowProfiles] = useState(true);
@@ -194,6 +220,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [showConstraints, setShowConstraints] = useState(true);
   const [selectedProfileIds, setSelectedProfileIds] = useState<readonly string[]>([]);
   const boxGesture = useRef<BoxGesture | undefined>(undefined);
+  // Direct manipulation: the gesture, and the live (uncommitted) result shown while it runs.
+  const dragGesture = useRef<DragGesture | undefined>(undefined);
+  const dragLatest = useRef<{ readonly preview: DragPreview; readonly snap: InferenceResult | undefined } | undefined>(undefined);
+  const dragMessage = useRef("");
+  const [dragLive, setDragLive] = useState<DragPreview | undefined>(undefined);
   const paletteRef = useRef<HTMLDivElement>(null);
   // Seed with the current request so a fresh mount (this panel remounts on every workspace switch)
   // is a no-op; only an actual increment while mounted — i.e. a real Options click — reveals the palette.
@@ -212,13 +243,15 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   const plane = planeKeyOf(props.sketch.plane);
   const planeInfo = PLANE_INFO[plane];
-  const visibleEntities = useMemo(() => props.sketch.entities.filter((entity) => entity.visible !== false), [props.sketch.entities]);
+  // While a curve is being dragged the canvas, the analysis and the profiles follow the live result; nothing is committed until release.
+  const workingSketch = useMemo<WorkbenchSketch>(() => dragLive === undefined ? props.sketch : { ...props.sketch, entities: dragLive.entities }, [props.sketch, dragLive]);
+  const visibleEntities = useMemo(() => workingSketch.entities.filter((entity) => entity.visible !== false), [workingSketch.entities]);
   const visibleSketch = useMemo<WorkbenchSketch>(() => ({
-    ...props.sketch,
+    ...workingSketch,
     entities: visibleEntities,
-    constraints: props.sketch.constraints.filter((constraint) => constraint.entityIds.every((id) => visibleEntities.some((entity) => entity.id === id)))
-  }), [props.sketch, visibleEntities]);
-  const analysis = useMemo(() => analyzeWorkbenchSketch(props.sketch), [props.sketch]);
+    constraints: workingSketch.constraints.filter((constraint) => constraint.entityIds.every((id) => visibleEntities.some((entity) => entity.id === id)))
+  }), [workingSketch, visibleEntities]);
+  const analysis = useMemo(() => analyzeWorkbenchSketch(workingSketch), [workingSketch]);
   const profiles = useMemo(() => detectSketchProfiles(visibleSketch), [visibleSketch]);
   const fitExtents = useMemo(() => {
     if (visibleEntities.length === 0) return undefined;
@@ -228,14 +261,23 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const camera = useSketchCamera(fitExtents, `${props.projectId}:${props.sketch.plane}`, props.fitSerial);
   const px = camera.mmPerPx;
   const grid = gridSteps(props.sketch.gridMm, px);
-  const selectedEntity = props.sketch.entities.find((entity) => entity.id === selectionIds.at(-1));
-  const selectedEntities = selectionIds.map((id) => props.sketch.entities.find((entity) => entity.id === id)).filter((entity): entity is SketchEntity => entity !== undefined);
+  const selectedEntity = workingSketch.entities.find((entity) => entity.id === selectionIds.at(-1));
+  const selectedEntities = selectionIds.map((id) => workingSketch.entities.find((entity) => entity.id === id)).filter((entity): entity is SketchEntity => entity !== undefined);
   const selectedConstraints = props.sketch.constraints.filter((constraint) => constraint.entityIds.some((id) => selectionIds.includes(id)));
   const dimensionHandleEntities = useMemo(() => [
     ...visibleEntities.filter((entity) => !selectionIds.includes(entity.id)),
     ...visibleEntities.filter((entity) => selectionIds.includes(entity.id))
   ], [selectionIds, visibleEntities]);
   const directDimension = useMemo(() => resolveDirectSketchDimension(dimensionPoints), [dimensionPoints]);
+  // Driving dimensions are drawn as real dimensions (extension lines, arrows, editable text); curves without one keep a quiet reference value.
+  const drivingDimensions = useMemo(() => visibleSketch.constraints.flatMap((constraint) => {
+    if ((constraint.kind !== "distance" && constraint.kind !== "radius") || constraint.valueMm === undefined || constraint.entityIds.length !== 1) return [];
+    const dimension: DrivingDimension | undefined = constraint.dimension ?? (constraint.kind === "radius" ? "radius" : undefined);
+    const entity = visibleEntities.find((candidate) => candidate.id === constraint.entityIds[0]);
+    if (dimension === undefined || entity === undefined) return [];
+    return [{ constraint, entity, dimension }];
+  }), [visibleSketch.constraints, visibleEntities]);
+  const dimensionedIds = useMemo(() => new Set(drivingDimensions.map((view) => view.entity.id)), [drivingDimensions]);
   const dimensionModeWasActive = useRef(false);
   const previewEntity = useMemo(() => {
     if (props.tool === "spline") {
@@ -243,6 +285,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     }
     if (props.tool === "select") return undefined;
     const required = requiredSketchPoints(props.tool);
+    if (isShapeTool(props.tool)) {
+      return pending.length >= 1 && pending.length < required - 1
+        ? { id: "entity:tool-preview", kind: "line" as const, start: pending[pending.length - 1]!, end: cursor, construction: false } satisfies SketchEntity
+        : undefined;
+    }
     if (pending.length === required - 1) {
       const preview = buildSketchEntity(props.tool, [...pending, cursor], "entity:tool-preview");
       return preview.ok ? preview.value : undefined;
@@ -254,7 +301,22 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     return undefined;
   }, [cursor, pending, props.tool]);
   const navigationPan = props.tool === "select" && props.viewportState.navigationMode === "pan";
+  /** A whole polygon or slot is built from the points placed so far plus the cursor, so it can be previewed and then placed. */
+  const buildShape = (tool: "polygon" | "slot", points: readonly Vec2[]): ReturnType<typeof buildPolygon> => {
+    const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
+    return tool === "polygon" ? buildPolygon(points[0]!, points[1]!, Math.round(Number(polygonSides)), ids) : buildSlot(points[0]!, points[1]!, points[2]!, ids);
+  };
+  const previewShape = useMemo<SketchShape | undefined>(() => {
+    if (!isShapeTool(props.tool) || pending.length !== requiredSketchPoints(props.tool) - 1) return undefined;
+    const built = buildShape(props.tool, [...pending, cursor]);
+    return built.ok ? built.value : undefined;
+  }, [props.tool, pending, cursor, polygonSides]);
 
+  useEffect(() => {
+    dragGesture.current = undefined;
+    dragLatest.current = undefined;
+    setDragLive(undefined);
+  }, [props.sketch, props.tool, props.cancelVersion]);
   useEffect(() => setPending([]), [props.tool, props.cancelVersion]);
   useEffect(() => {
     if (pending.length === 0) { chainStart.current = undefined; chainSegments.current = 0; setPendingInference([]); }
@@ -356,6 +418,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       props.onMessage(`${sketchToolLabel(props.tool)}: point ${points.length} accepted${label === "" ? "" : ` (${label})`}.`);
       return;
     }
+    if (isShapeTool(props.tool)) {
+      const shape = buildShape(props.tool, points);
+      if (!shape.ok) {
+        props.onMessage(`${shape.diagnostics[0]?.message ?? "The shape was rejected."} Place the last point somewhere else, or press Esc to start over.`);
+        return;
+      }
+      const accepted = props.onApplyEdit({ label: `Added ${sketchToolLabel(props.tool).toLowerCase()} (${shape.value.entities.length} curves, ${shape.value.constraints.length} relations)`, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shape.value.constraints });
+      if (accepted === false) return;
+      setPending([]);
+      props.onMessage(`Added ${sketchToolLabel(props.tool).toLowerCase()} with ${shape.value.entities.length} curves and ${shape.value.constraints.length} relations as one closed profile.`);
+      return;
+    }
     const built = buildSketchEntity(props.tool, points, `entity:user-${crypto.randomUUID()}`);
     if (!built.ok) {
       // Keep the points already placed so one bad click does not throw the whole gesture away.
@@ -417,6 +491,39 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     props.onAddEntity(built.value);
     setPending([]);
     props.onMessage(`Added fit-point spline with ${points.length} points and stable ID ${built.value.id}.`);
+  };
+
+  /** Opens the value editor next to a curve's dimension: the length of a line, the diameter of a circle, the width or height of a rectangle. */
+  const openDimensionEditor = (entity: SketchEntity, dimension: DrivingDimension): void => {
+    const current = entity.kind === "line" ? Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1])
+      : entity.kind === "circle" ? entity.radiusMm * 2
+        : entity.kind === "rectangle" ? (dimension === "height" ? entity.heightMm : entity.widthMm) : undefined;
+    if (current === undefined) { props.onMessage("Only lines, circles and rectangles take a driving dimension here; arcs and splines are reference only."); return; }
+    const existing = props.sketch.constraints.find((constraint) => constraint.entityIds.length === 1 && constraint.entityIds[0] === entity.id && constraint.dimension === dimension && constraint.valueMm !== undefined);
+    const shown = existing?.valueMm === undefined ? current : (entity.kind === "circle" ? existing.valueMm * 2 : existing.valueMm);
+    const layout = dimensionLayout(entity, dimension, entity.kind === "circle" ? shown / 2 : shown, px);
+    const next = {
+      entityId: entity.id,
+      dimension,
+      anchor: layout?.textAt ?? entityAnchor(entity),
+      label: entity.kind === "circle" ? "Diameter" : dimension === "width" ? "Width" : dimension === "height" ? "Height" : "Length"
+    };
+    // Opened after the press has finished: the browser moves focus off the editor on mouse-down, which would close it again at once.
+    window.setTimeout(() => {
+      setDimensionEdit(next);
+      setDimensionText(String(Number(shown.toFixed(3))));
+    }, 0);
+  };
+
+  const commitDimensionEdit = (): void => {
+    const edit = dimensionEdit;
+    if (edit === undefined) return;
+    const typed = parseDynamicNumber(dimensionText);
+    if (typed === undefined || typed <= 0) { props.onMessage("Type a size greater than zero."); return; }
+    const entity = props.sketch.entities.find((candidate) => candidate.id === edit.entityId);
+    // A circle is dimensioned by its diameter on the canvas; the model stores the radius.
+    props.onSetDimension(edit.entityId, edit.dimension, entity?.kind === "circle" ? typed / 2 : typed);
+    setDimensionEdit(undefined);
   };
 
   /** Second step of Midpoint: the line the first point should sit at the middle of. */
@@ -492,7 +599,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       if (props.dimensionMode) {
         const entity = props.sketch.entities.find((candidate) => candidate.id === id);
         setDimensionPoints(entity === undefined || entity.visible === false ? [] : defaultDimensionPoints(entity));
-        props.onMessage("Curve selected for a driving dimension. Use its definition points for an alternate point-to-point reference.");
+        if (entity?.kind === "rectangle") {
+          // Width or height, whichever edge the click was nearer to, measured in the rectangle's own frame.
+          const radians = (entity.rotationDeg * Math.PI) / 180;
+          const dx = cursor[0] - entity.center[0];
+          const dy = cursor[1] - entity.center[1];
+          const localX = dx * Math.cos(radians) + dy * Math.sin(radians);
+          const localY = -dx * Math.sin(radians) + dy * Math.cos(radians);
+          openDimensionEditor(entity, Math.abs(Math.abs(localY) - entity.heightMm / 2) <= Math.abs(Math.abs(localX) - entity.widthMm / 2) ? "width" : "height");
+        } else if (entity !== undefined) {
+          openDimensionEditor(entity, entity.kind === "circle" ? "radius" : "length");
+        }
+        props.onMessage("Type the value and press Enter. Esc closes the editor; pick two blue points instead for a reference distance.");
       }
       return;
     }
@@ -598,6 +716,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         return;
       case "cancel-points": setPending([]); props.onMessage("Cancelled the points placed so far."); return;
       case "undo-point": setPending((current) => current.slice(0, -1)); return;
+      case "cancel-drag":
+        dragGesture.current = undefined;
+        dragLatest.current = undefined;
+        setDragLive(undefined);
+        setInference(undefined);
+        props.onMessage("Move cancelled; the curve is back where it was.");
+        return;
       case "exit-pick": setPickRelation(null); setPickedPoint(undefined); props.onMessage("Relation picking cancelled."); return;
       case "exit-dimension": props.onExitDimension(); return;
       case "exit-edit-tool": props.onCloseEditTool(); return;
@@ -649,7 +774,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
   useSketchHotkeys({
     enabled: true,
-    context: { tool: props.tool, pendingPoints: pending.length, selectionCount: selectionIds.length + selectedProfileIds.length, curveSelectionCount: selectionIds.length, dimensionMode: props.dimensionMode, editToolActive: props.editTool !== null, pickingRelation: pickRelation !== null, dynamicFieldCount: dynamicFields.length },
+    context: { tool: props.tool, pendingPoints: pending.length, selectionCount: selectionIds.length + selectedProfileIds.length, curveSelectionCount: selectionIds.length, dimensionMode: props.dimensionMode, editToolActive: props.editTool !== null, pickingRelation: pickRelation !== null, dragging: dragLive !== undefined || (dragGesture.current?.moved ?? false), dynamicFieldCount: dynamicFields.length },
     onAction: handleHotkey
   });
 
@@ -683,6 +808,74 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       : `${mode === "window" ? "Window" : "Crossing"} selected ${picked.length} curve${picked.length === 1 ? "" : "s"}${gesture.additive ? " (added to the selection)" : ""}.`);
   };
 
+  /** A press on a curve (body) or one of its grab handles: remember it; it becomes a drag once the pointer has moved a few pixels. */
+  const beginDrag = (event: React.PointerEvent, entityId: string, handle: DragHandle): void => {
+    if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey) return;
+    const svg = (event.currentTarget as Element).closest("svg");
+    svg?.setPointerCapture(event.pointerId);
+    dragGesture.current = {
+      pointerId: event.pointerId,
+      entityId,
+      handle,
+      startClient: [event.clientX, event.clientY],
+      startMm: camera.toSketch(event.clientX, event.clientY),
+      base: props.sketch,
+      moved: false
+    };
+    dragMessage.current = "";
+  };
+
+  /** Curves that share a joint with this one move with it, so they are not snap targets for it. */
+  const jointNeighbours = (id: string): readonly string[] => props.sketch.constraints
+    .filter((constraint) => (constraint.kind === "coincident" || constraint.kind === "midpoint") && constraint.suppressed !== true && constraint.entityIds.includes(id))
+    .flatMap((constraint) => constraint.entityIds);
+
+  const updateDrag = (event: React.PointerEvent<SVGSVGElement>, gesture: DragGesture): void => {
+    const raw = camera.toSketch(event.clientX, event.clientY);
+    // Points snap to other geometry while they are dragged; moving a whole curve follows the pointer exactly.
+    const snapping = snapEnabled && gesture.handle.kind !== "body";
+    const snap: InferenceResult | undefined = snapping
+      ? inferSketchPoint(raw, gesture.base, { toleranceMm: SNAP_PIXELS * px, gridMm: grid.minorMm, excludeEntityIds: [gesture.entityId, ...jointNeighbours(gesture.entityId)] })
+      : undefined;
+    const target = snap?.point ?? raw;
+    setCursor(target);
+    setInference(snap);
+    const result = dragSketchHandle(gesture.base, gesture.entityId, gesture.handle, gesture.startMm, target);
+    if (!result.ok) {
+      if (dragMessage.current !== result.message) { dragMessage.current = result.message; props.onMessage(result.message); }
+      return;
+    }
+    dragMessage.current = "";
+    const preview: DragPreview = { entities: result.entities, movedIds: result.movedIds };
+    dragLatest.current = { preview, snap };
+    setDragLive(preview);
+  };
+
+  /** Releasing a drag commits it as one undoable edit, plus the joint it earned if it was dropped on other geometry. */
+  const commitDrag = (gesture: DragGesture): void => {
+    const latest = dragLatest.current;
+    dragLatest.current = undefined;
+    setDragLive(undefined);
+    setInference(undefined);
+    if (latest === undefined) return;
+    const before = new Map(gesture.base.entities.map((entity) => [entity.id, entity]));
+    const changed = latest.preview.entities.filter((entity) => before.get(entity.id) !== entity);
+    if (changed.length === 0) return;
+    const dragged = latest.preview.entities.find((entity) => entity.id === gesture.entityId);
+    const ref = gesture.handle.kind === "point" ? gesture.handle.ref : undefined;
+    const joint = autoConstrain && dragged !== undefined && ref !== undefined
+      ? dropConstraintFor({ entity: dragged, ref, primary: latest.snap?.primary, sketch: gesture.base, newId: () => `constraint:auto-${crypto.randomUUID()}` })
+      : undefined;
+    const name = dragged === undefined ? "curve" : dragged.kind;
+    props.onApplyEdit({
+      label: `Moved ${name}${changed.length > 1 ? ` and ${changed.length - 1} joined curve${changed.length > 2 ? "s" : ""}` : ""}${joint === undefined ? "" : ` and joined it (${joint.kind})`}`,
+      removeEntityIds: [],
+      updateEntities: changed,
+      addEntities: [],
+      addConstraints: joint === undefined ? [] : [joint]
+    });
+  };
+
   const handleCanvasPointerDownCapture = (event: React.PointerEvent<SVGSVGElement>): void => {
     // Panning wins over everything underneath the pointer, including curves, so a middle or Space drag never selects.
     const wantsPan = event.button === 1 || (event.button === 0 && (camera.spaceHeld || navigationPan));
@@ -712,6 +905,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   const handleCanvasPointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (camera.movePan(event)) return;
+    const grab = dragGesture.current;
+    if (grab !== undefined && grab.pointerId === event.pointerId) {
+      if (!grab.moved && Math.hypot(event.clientX - grab.startClient[0], event.clientY - grab.startClient[1]) < 4) return;
+      grab.moved = true;
+      updateDrag(event, grab);
+      return;
+    }
     const gesture = boxGesture.current;
     if (gesture !== undefined && gesture.pointerId === event.pointerId) {
       if (!gesture.dragging && Math.hypot(event.clientX - gesture.startClient[0], event.clientY - gesture.startClient[1]) > 4) gesture.dragging = true;
@@ -723,6 +923,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   const finishCanvasDrag = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (camera.endPan(event)) return;
+    const grab = dragGesture.current;
+    if (grab !== undefined && grab.pointerId === event.pointerId) {
+      dragGesture.current = undefined;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      if (grab.moved && event.type !== "pointercancel") commitDrag(grab);
+      else { dragLatest.current = undefined; setDragLive(undefined); }
+      return;
+    }
     const gesture = boxGesture.current;
     if (gesture === undefined || gesture.pointerId !== event.pointerId) return;
     boxGesture.current = undefined;
@@ -741,7 +949,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const canvasClasses = [
     "sketch-canvas",
     showProfiles ? "show-profiles" : "hide-profiles",
-    camera.panning ? "panning" : camera.spaceHeld || navigationPan ? "pan-ready" : ""
+    camera.panning ? "panning" : camera.spaceHeld || navigationPan ? "pan-ready" : "",
+    dragLive !== undefined ? "dragging" : ""
   ].filter(Boolean).join(" ");
   const constraintSlots = new Map<string, number>();
 
@@ -783,12 +992,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           verticalLabel={planeInfo.verticalLabel}
         />
         {showProfiles && profiles.map((profile) => <SketchProfileShape key={profile.id} profile={profile} selected={selectedProfileIds.includes(profile.id)} {...(interactive ? { onSelect: (additive: boolean) => selectProfile(profile, additive) } : {})} />)}
-        {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={selectionIds.includes(entity.id)} hovered={hoverId === entity.id} movable={props.showMovable && movableIds.has(entity.id)} {...(interactive ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive), onHover: (inside: boolean) => setHoverId(inside ? entity.id : null) } : {})} />)}
+        {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={selectionIds.includes(entity.id)} hovered={hoverId === entity.id} movable={props.showMovable && movableIds.has(entity.id)} constrained={analysis.entityFreedom[entity.id] === 0} {...(interactive ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive), onHover: (inside: boolean) => setHoverId(inside ? entity.id : null), onGrab: (event: React.PointerEvent, handle: DragHandle) => beginDrag(event, entity.id, handle), handles: grabHandlesOf(entity) } : {})} />)}
         {previewEntity !== undefined && <SketchEntityShape entity={previewEntity} px={px} selected={false} hovered={false} preview />}
+        {previewShape?.entities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
+        {showDimensions && drivingDimensions.map((view) => <DimensionMarks key={view.constraint.id} entity={view.entity} dimension={view.dimension} valueMm={view.constraint.valueMm ?? 0} relaxed={view.constraint.suppressed === true} px={px} {...(interactive ? { onEdit: () => openDimensionEditor(view.entity, view.dimension) } : {})} />)}
         {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r={4 * px} className="pending-point" />)}
         {props.tool !== "select" && pointerInside && !camera.panning && inference !== undefined && <InferenceMarks inference={inference} px={px} />}
         {props.tool !== "select" && pointerInside && !camera.panning && <circle cx={cursor[0]} cy={-cursor[1]} r={3.5 * px} className="cursor-point" />}
-        {showDimensions && visibleEntities.map((entity) => <SketchDimensionGlyph key={`dimension:${entity.id}`} entity={entity} px={px} />)}
+        {showDimensions && visibleEntities.filter((entity) => !dimensionedIds.has(entity.id)).map((entity) => <SketchDimensionGlyph key={`dimension:${entity.id}`} entity={entity} px={px} />)}
         {showConstraints && visibleSketch.constraints.map((constraint) => {
           const primary = constraint.entityIds[0] ?? "";
           const slot = constraintSlots.get(primary) ?? 0;
@@ -821,6 +1032,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         />}
       </svg>
 
+      {dimensionEdit !== undefined && <DimensionEditor
+        label={dimensionEdit.label}
+        text={dimensionText}
+        position={(() => {
+          const at = sketchToScreen(dimensionEdit.anchor, { left: 0, top: 0, width: camera.size.width, height: camera.size.height }, camera.camera);
+          return [Math.max(8, Math.min(at[0] - 70, camera.size.width - 190)), Math.max(8, Math.min(at[1] - 62, camera.size.height - 70))] as const;
+        })()}
+        onChange={setDimensionText}
+        onCommit={commitDimensionEdit}
+        onCancel={() => setDimensionEdit(undefined)}
+      />}
       {dynamicFields.length > 0 && (pointerInside || dynamicFocused) && !camera.panning && <DynamicInputBox
         fields={dynamicFields}
         live={liveValues}
@@ -852,6 +1074,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Sketch grid" active={props.viewportState.gridVisible} onToggle={props.onGrid} />
         <PaletteToggle label="Snap" active={snapEnabled} onToggle={setSnapEnabled} />
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
+        {props.tool === "polygon" && <label className="palette-number"><span>Polygon sides</span><input type="number" min={POLYGON_MIN_SIDES} max={POLYGON_MAX_SIDES} step={1} value={polygonSides} aria-label="Number of polygon sides" onChange={(event) => setPolygonSides(event.target.value)} /></label>}
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
         <PaletteToggle label="Constraints" active={showConstraints} onToggle={setShowConstraints} />
@@ -867,6 +1090,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             <small>{solidOp === "extrude" ? "mm" : "°"}</small>
           </div>
           <small className="make-solid-plane">On the {planeInfo.name} plane</small>
+          {solidOp === "extrude" && <div className="make-solid-row" aria-label="Extrude direction">
+            <select aria-label="Extrusion direction" value={solidDirection} onChange={(event) => setSolidDirection(event.target.value as "one-side" | "symmetric" | "flipped")}>
+              <option value="one-side">One side</option>
+              <option value="symmetric">Symmetric</option>
+              <option value="flipped">Flipped</option>
+            </select>
+          </div>}
           {solidOp === "extrude" && <div className="make-solid-row" aria-label="Edge treatment">
             <select aria-label="Edge treatment" value={edgeKind} onChange={(event) => setEdgeKind(event.target.value as "none" | "chamfer" | "fillet")}>
               <option value="none">Edges: sharp</option>
@@ -878,7 +1108,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <small>mm</small>
             </>}
           </div>}
-          <button className="palette-action primary" disabled={profiles.length === 0} onClick={() => props.onCreateSolid(selectedProfileIds, plane, solidOp, Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined)}><CommandIcon name="box" />Create solid</button>
+          <button className="palette-action primary" disabled={profiles.length === 0} onClick={() => props.onCreateSolid(selectedProfileIds, plane, solidOp, Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined, solidOp === "extrude" ? solidDirection : undefined)}><CommandIcon name="box" />Create solid</button>
           {solidOp === "extrude" && <small className="make-solid-hint">{selectedProfileIds.length === 0 ? "Nothing selected: the outermost profile is used and profiles inside it become holes." : "Profiles drawn inside the outline become holes. Shift-select profiles to choose exactly which."}</small>}
         </div>
         <details className="palette-shortcuts">
@@ -958,6 +1188,45 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       <div className="scope-note"><strong>Preview solver boundary</strong><p>A small analytic solver enforces horizontal, vertical, parallel, perpendicular, collinear, tangent, concentric, equal, symmetric and fixed relations plus radius and length dimensions on lines, circles and arcs; a conflict is refused with the reason. Rectangles are rigid, point-on-curve and endpoint relations are recorded but not solved, and there is no general nonlinear solver. Degrees of freedom are an estimate.</p></div>
     </aside>
   </>;
+}
+
+/** A driving dimension drawn like a drawing dimension: extension lines, a dimension line with arrowheads, and editable text. */
+function DimensionMarks({ entity, dimension, valueMm, relaxed, px, onEdit }: { readonly entity: SketchEntity; readonly dimension: DrivingDimension; readonly valueMm: number; readonly relaxed: boolean; readonly px: number; readonly onEdit?: () => void }): React.JSX.Element {
+  const layout = dimensionLayout(entity, dimension, valueMm, px);
+  if (layout === undefined) return <></>;
+  const flip = (point: Vec2): string => `${point[0]},${-point[1]}`;
+  const textWidth = (layout.label.length * 7.4 + 12) * px;
+  return <g className={`driving-dimension${relaxed ? " relaxed" : ""}`} data-dimension-for={entity.id} pointerEvents={onEdit === undefined ? "none" : undefined}>
+    {layout.extensionLines.map((segment, index) => <line key={index} x1={segment.from[0]} y1={-segment.from[1]} x2={segment.to[0]} y2={-segment.to[1]} />)}
+    <line x1={layout.dimensionLine.from[0]} y1={-layout.dimensionLine.from[1]} x2={layout.dimensionLine.to[0]} y2={-layout.dimensionLine.to[1]} />
+    {layout.arrows.map((arrow, index) => <polygon key={index} className="arrow" points={arrowHead(arrow, px).map(flip).join(" ")} />)}
+    <rect className="driving-dimension-hit" x={layout.textAt[0] - textWidth / 2} y={-layout.textAt[1] - 11 * px} width={textWidth} height={20 * px} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onEdit?.(); }} />
+    <text className="driving-dimension-text" x={layout.textAt[0]} y={-layout.textAt[1] + 4 * px} style={{ fontSize: 12.5 * px, strokeWidth: 3.5 * px }} pointerEvents="none">{layout.label}</text>
+  </g>;
+}
+
+/** Type a new value for a driving dimension next to it: Enter applies, Esc closes. */
+function DimensionEditor(props: { readonly label: string; readonly text: string; readonly position: readonly [number, number]; readonly onChange: (text: string) => void; readonly onCommit: () => void; readonly onCancel: () => void }): React.JSX.Element {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
+  return <div className="dimension-editor" style={{ left: props.position[0], top: props.position[1] }} role="group" aria-label={`Edit ${props.label.toLowerCase()}`}>
+    <label><span>{props.label}</span>
+      <input
+        ref={inputRef}
+        inputMode="decimal"
+        aria-label={`${props.label} in millimetres`}
+        value={props.text}
+        onChange={(event) => props.onChange(event.target.value)}
+        onBlur={props.onCancel}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") { event.preventDefault(); props.onCommit(); }
+          else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel(); }
+        }}
+      />
+      <small>mm</small>
+    </label>
+    <em>Enter applies a driving value · Esc closes</em>
+  </div>;
 }
 
 /** The editable length, angle, width, height or radius next to the cursor while a shape is being placed. */
@@ -1106,8 +1375,9 @@ function DirectDimensionPreview({ dimension, px }: { readonly dimension: DirectS
   </g>;
 }
 
-function SketchEntityShape({ entity, px, selected, hovered, onSelect, onHover, preview = false, movable = false }: { readonly entity: SketchEntity; readonly px: number; readonly selected: boolean; readonly hovered: boolean; readonly onSelect?: (additive: boolean) => void; readonly onHover?: (inside: boolean) => void; readonly preview?: boolean; readonly movable?: boolean }): React.JSX.Element {
-  const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""} ${hovered && !selected ? "hover" : ""} ${preview ? "tool-preview" : ""} ${movable && !selected ? "movable" : ""}`;
+function SketchEntityShape({ entity, px, selected, hovered, onSelect, onHover, onGrab, handles, preview = false, movable = false, constrained = false }: { readonly entity: SketchEntity; readonly px: number; readonly selected: boolean; readonly hovered: boolean; readonly onSelect?: (additive: boolean) => void; readonly onHover?: (inside: boolean) => void; readonly onGrab?: (event: React.PointerEvent, handle: DragHandle) => void; readonly handles?: readonly SketchGrabHandle[]; readonly preview?: boolean; readonly movable?: boolean; readonly constrained?: boolean }): React.JSX.Element {
+  // Fully constrained curves are drawn in a neutral tone and under-constrained ones in the working colour, so what can still move is visible at a glance.
+  const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""} ${hovered && !selected ? "hover" : ""} ${preview ? "tool-preview" : ""} ${movable && !selected ? "movable" : ""} ${constrained && !preview && entity.kind !== "point" ? "constrained" : ""}`;
   const geometry = (cls: string, hit: boolean): React.JSX.Element => {
     if (entity.kind === "line") return <line className={cls} x1={entity.start[0]} y1={-entity.start[1]} x2={entity.end[0]} y2={-entity.end[1]} />;
     if (entity.kind === "rectangle") return <rect className={cls} x={entity.center[0] - entity.widthMm / 2} y={-entity.center[1] - entity.heightMm / 2} width={entity.widthMm} height={entity.heightMm} transform={`rotate(${-entity.rotationDeg} ${entity.center[0]} ${-entity.center[1]})`} />;
@@ -1120,12 +1390,23 @@ function SketchEntityShape({ entity, px, selected, hovered, onSelect, onHover, p
   return <g
     className="sketch-entity-group"
     data-selection-id={entity.id}
-    onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onSelect(event.shiftKey || event.ctrlKey || event.metaKey); }}
+    onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onSelect(event.shiftKey || event.ctrlKey || event.metaKey); onGrab?.(event, { kind: "body" }); }}
     onPointerEnter={() => onHover?.(true)}
     onPointerLeave={() => onHover?.(false)}
   >
     {geometry("sketch-hit", true)}
     {geometry(className, false)}
+    {(selected || hovered) && handles?.map((handle) => <circle
+      key={handle.id}
+      className={`grab-handle ${handle.handle.kind}`}
+      data-grab-handle={handle.id}
+      cx={handle.point[0]}
+      cy={-handle.point[1]}
+      r={5 * px}
+      role="button"
+      aria-label={`Drag ${handle.label}`}
+      onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onSelect(false); onGrab?.(event, handle.handle); }}
+    />)}
   </g>;
 }
 
