@@ -156,6 +156,9 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
     </>}
     {!props.masterCartOpen && props.project.activeWorkspace === "part" && <>
+      <RibbonGroup label="Sketch">
+        <RibbonButton icon="sketch" label="New Sketch" hint="plane or face" onClick={props.onNewSketch} />
+      </RibbonGroup>
       <RibbonGroup label="Feature tools">
         {PART_FEATURES.map((feature) => <RibbonButton key={feature.id} icon={feature.icon} label={feature.label} hint={feature.level} active={props.selectedId === feature.id} onClick={() => props.onSelect(feature.id)} />)}
         <RibbonButton icon="revolve" label="Revolve" hint="closed profile" onClick={() => props.onPartFeatureAction("revolve", "Revolve")} />

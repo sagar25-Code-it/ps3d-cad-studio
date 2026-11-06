@@ -1695,7 +1695,7 @@ export function App(): React.JSX.Element {
       });
     } catch (error) {
       if (isAbortError(error)) { setStatus("ready"); setStatusText("Save cancelled; the browser recovery copy is still current."); return; }
-      setStatus("error"); setStatusText(error instanceof Error ? error.message : "Local save failed.");
+      setStatus("error"); setStatusText(fileErrorText(error, "Local save failed."));
     }
   };
 
@@ -1737,7 +1737,7 @@ export function App(): React.JSX.Element {
     } catch (error) {
       if (isAbortError(error)) { setStatusText("Open project cancelled."); return; }
       setStatus("error");
-      setStatusText(error instanceof Error ? error.message : "The project could not be opened.");
+      setStatusText(fileErrorText(error, "The project could not be opened."));
     }
   };
 
@@ -1747,7 +1747,7 @@ export function App(): React.JSX.Element {
     try { await openProjectPayload(await readProjectFilePayload(file)); }
     catch (error) {
       setStatus("error");
-      setStatusText(error instanceof Error ? error.message : "The selected project could not be opened.");
+      setStatusText(fileErrorText(error, "The selected project could not be opened."));
     }
   };
 
@@ -1784,7 +1784,7 @@ export function App(): React.JSX.Element {
       });
     } catch (error) {
       setStatus("error");
-      setStatusText(error instanceof Error ? error.message : "A new design could not be created.");
+      setStatusText(fileErrorText(error, "A new design could not be created."));
     }
   };
 
@@ -1793,7 +1793,7 @@ export function App(): React.JSX.Element {
     try { await openProjectPayload(await openRecentProject(id)); }
     catch (error) {
       if (isAbortError(error)) { setStatus("ready"); setStatusText("Recent project opening cancelled."); return; }
-      setStatus("error"); setStatusText(error instanceof Error ? error.message : "The recent project could not be reopened.");
+      setStatus("error"); setStatusText(fileErrorText(error, "The recent project could not be reopened."));
     }
   };
 
@@ -1807,7 +1807,7 @@ export function App(): React.JSX.Element {
       setStatusText(`Connected ${connected.folderName} with Projects, Exports, Renders, Recovery, and Cache folders.`);
     } catch (error) {
       if (isAbortError(error)) { setStatus("ready"); setStatusText("Folder connection cancelled; browser-private recovery remains available."); return; }
-      setStatus("error"); setStatusText(error instanceof Error ? error.message : "The PS CAD Studio folder could not be connected.");
+      setStatus("error"); setStatusText(fileErrorText(error, "The PS CAD Studio folder could not be connected."));
     }
   };
 
@@ -1864,7 +1864,8 @@ export function App(): React.JSX.Element {
       });
     } catch (error) {
       if (isAbortError(error)) { setStatus("ready"); setStatusText("Save cancelled; the active project was not rebound."); return; }
-      setStatus("error"); setStatusText(error instanceof Error ? error.message : "The project file could not be written.");
+      setStatus("error");
+      setStatusText(fileErrorText(error, "The project file could not be written."));
     }
   };
 
@@ -2696,6 +2697,13 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
+}
+
+/** Error text for file dialogs: turns the browser's gesture refusal into an instruction instead of raw API wording. */
+function fileErrorText(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? error.message : "";
+  if (/user gesture|user activation/iu.test(raw)) return "The browser blocked its file dialog because it was not opened by a direct click. Click the button again.";
+  return raw !== "" ? raw : fallback;
 }
 
 function safeFileStem(value: string): string {
