@@ -150,10 +150,11 @@ export function editDesignSketch(project: WorkbenchProject, featureId: string): 
   return changed({ ...project, sketch: feature.sketch, activeWorkspace: "sketch", design: next }, [featureId], `Reopened ${feature.name} for editing.`);
 }
 
-export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane): DesignChange {
+export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0): DesignChange {
   const history = designOf(project);
-  const sketch = { ...project.sketch, name: "Sketch", plane, entities: [], constraints: [] };
-  return changed({ ...project, sketch, activeWorkspace: "sketch", design: { ...history, editingSketchId: null } }, [project.sketch.id], `Started a new sketch on the ${plane.replace("datum:", "").toUpperCase()} plane.`);
+  const { planeOffsetMm: _previousOffset, ...rest } = project.sketch;
+  const sketch = { ...rest, name: "Sketch", plane, ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), entities: [], constraints: [] };
+  return changed({ ...project, sketch, activeWorkspace: "sketch", design: { ...history, editingSketchId: null } }, [project.sketch.id], `Started a new sketch on the ${plane.replace("datum:", "").toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}.`);
 }
 
 function checkSolidFeature(history: DesignHistory, feature: DesignSolidFeature, body: GeneralSolidBody, replacing: boolean): DesignChange | undefined {
@@ -284,8 +285,13 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "health"])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health"])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut"].includes(String(value.operation))) return false;
+  if (Object.hasOwn(value, "extent")) {
+    // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
+    if (!["distance", "through-all"].includes(String(value.extent))) return false;
+    if (value.extent === "through-all" && (value.kind !== "extrude" || value.operation !== "cut")) return false;
+  }
   if (!stable(value.id) || !shortText(value.name, 120) || (value.kind !== "extrude" && value.kind !== "revolve") || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;

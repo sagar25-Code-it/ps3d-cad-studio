@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { SOLVABLE_POINT_REFS, constraintFit, type ConstraintFit, type SketchDatumPlane, type SketchEntity, type SketchConstraintKind, type SketchPointRef, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
+import { SOLVABLE_POINT_REFS, constraintFit, planeWorldCoordinate, type ConstraintFit, type SketchDatumPlane, type SketchEntity, type SketchConstraintKind, type SketchPointRef, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
 import {
   analyzeWorkbenchSketch,
   buildSketchEntity,
@@ -136,7 +136,7 @@ interface SketchWorkspaceProps {
   readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null) => void;
   readonly onMessage: (message: string) => void;
   readonly optionsRevealRequest: number;
-  readonly onCreateSolid: (profileIds: readonly string[], plane: PlaneKey, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction?: "one-side" | "symmetric" | "flipped", target?: { readonly mode: "join" | "cut"; readonly bodyId: string }) => void;
+  readonly onCreateSolid: (profileIds: readonly string[], plane: PlaneKey, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction?: "one-side" | "symmetric" | "flipped", target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" }) => void;
   /** The solids a join or cut can modify. */
   readonly solidBodies: readonly { readonly id: string; readonly name: string }[];
   readonly onChangePlane: () => void;
@@ -217,11 +217,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [solidDirection, setSolidDirection] = useState<"one-side" | "symmetric" | "flipped">("one-side");
   const [solidResult, setSolidResult] = useState<"new-body" | "join" | "cut">("new-body");
   const [solidTarget, setSolidTarget] = useState("");
+  const [solidExtent, setSolidExtent] = useState<"distance" | "through-all">("distance");
   // A join or cut acts on the picked solid, else the selected one, else the newest.
   const effectiveTarget = props.solidBodies.some((body) => body.id === solidTarget) ? solidTarget
     : props.solidBodies.some((body) => body.id === props.selectedId) ? props.selectedId ?? ""
       : props.solidBodies.at(-1)?.id ?? "";
   const modifying = solidResult !== "new-body" && props.solidBodies.length > 0 && effectiveTarget !== "";
+  // Through all applies to an extruded cut: the cutter is stretched across the solid when the timeline rebuilds.
+  const cutThroughAll = modifying && solidResult === "cut" && solidOp === "extrude" && solidExtent === "through-all";
   const [edgeKind, setEdgeKind] = useState<"none" | "chamfer" | "fillet">("none");
   const [edgeSize, setEdgeSize] = useState("2");
   const [showProfiles, setShowProfiles] = useState(true);
@@ -252,6 +255,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   const plane = planeKeyOf(props.sketch.plane);
   const planeInfo = PLANE_INFO[plane];
+  const planeWhere = planeWorldCoordinate(props.sketch.plane, props.sketch.planeOffsetMm ?? 0);
+  const planePlacement = planeWhere.valueMm === 0 ? `${planeInfo.name} plane` : `${planeInfo.name} plane at ${planeWhere.axisName} = ${Number(planeWhere.valueMm.toFixed(3))} mm`;
   // While a curve is being dragged the canvas, the analysis and the profiles follow the live result; nothing is committed until release.
   const workingSketch = useMemo<WorkbenchSketch>(() => dragLive === undefined ? props.sketch : { ...props.sketch, entities: dragLive.entities }, [props.sketch, dragLive]);
   const visibleEntities = useMemo(() => workingSketch.entities.filter((entity) => entity.visible !== false), [workingSketch.entities]);
@@ -1095,10 +1100,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="extrude">Extrude</option>
               <option value="revolve">Revolve</option>
             </select>
-            <input aria-label={solidOp === "extrude" ? "Height in millimetres" : "Angle in degrees"} type="number" min={solidOp === "extrude" ? 0.1 : 1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "extrude" ? 1 : 5} value={solidValue} onChange={(event) => setSolidValue(event.target.value)} />
+            <input aria-label={solidOp === "extrude" ? "Height in millimetres" : "Angle in degrees"} type="number" min={solidOp === "extrude" ? 0.1 : 1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "extrude" ? 1 : 5} value={solidValue} disabled={cutThroughAll} onChange={(event) => setSolidValue(event.target.value)} />
             <small>{solidOp === "extrude" ? "mm" : "°"}</small>
           </div>
-          <small className="make-solid-plane">On the {planeInfo.name} plane</small>
+          <small className="make-solid-plane">On the {planePlacement}</small>
           <div className="make-solid-row" aria-label="Result of the feature">
             <select aria-label="Result" value={solidResult} onChange={(event) => setSolidResult(event.target.value as "new-body" | "join" | "cut")}>
               <option value="new-body">New body</option>
@@ -1113,7 +1118,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
                 {props.solidBodies.map((body) => <option key={body.id} value={body.id}>{body.name}</option>)}
               </select>}
           </div>}
-          {solidOp === "extrude" && <div className="make-solid-row" aria-label="Extrude direction">
+          {solidResult === "cut" && solidOp === "extrude" && props.solidBodies.length > 0 && <div className="make-solid-row" aria-label="Cut extent">
+            <select aria-label="Cut extent" value={solidExtent} onChange={(event) => setSolidExtent(event.target.value === "through-all" ? "through-all" : "distance")}>
+              <option value="distance">Distance</option>
+              <option value="through-all">Through all</option>
+            </select>
+          </div>}
+          {solidOp === "extrude" && !cutThroughAll && <div className="make-solid-row" aria-label="Extrude direction">
             <select aria-label="Extrusion direction" value={solidDirection} onChange={(event) => setSolidDirection(event.target.value as "one-side" | "symmetric" | "flipped")}>
               <option value="one-side">One side</option>
               <option value="symmetric">Symmetric</option>
@@ -1131,7 +1142,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <small>mm</small>
             </>}
           </div>}
-          <button className="palette-action primary" disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying)} onClick={() => props.onCreateSolid(selectedProfileIds, plane, solidOp, Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined, solidOp === "extrude" ? solidDirection : undefined, modifying ? { mode: solidResult, bodyId: effectiveTarget } : undefined)}><CommandIcon name={solidResult === "cut" ? "subtract" : solidResult === "join" ? "unite" : "box"} />{solidResult === "cut" ? "Cut solid" : solidResult === "join" ? "Join solid" : "Create solid"}</button>
+          <button className="palette-action primary" disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying)} onClick={() => props.onCreateSolid(selectedProfileIds, plane, solidOp, cutThroughAll && !(Number(solidValue) > 0) ? 1 : Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined, solidOp === "extrude" ? solidDirection : undefined, modifying ? { mode: solidResult, bodyId: effectiveTarget, ...(cutThroughAll ? { extent: "through-all" as const } : {}) } : undefined)}><CommandIcon name={solidResult === "cut" ? "subtract" : solidResult === "join" ? "unite" : "box"} />{solidResult === "cut" ? "Cut solid" : solidResult === "join" ? "Join solid" : "Create solid"}</button>
           {solidOp === "extrude" && <small className="make-solid-hint">{selectedProfileIds.length === 0 ? "Nothing selected: the outermost profile is used and profiles inside it become holes." : "Profiles drawn inside the outline become holes. Shift-select profiles to choose exactly which."}</small>}
         </div>
         <details className="palette-shortcuts">
@@ -1140,7 +1151,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         </details>
       </div>
 
-      <div className="canvas-hud"><span>{planeInfo.name} plane · {planeInfo.horizontalLabel} → · {planeInfo.verticalLabel} ↑</span><span>{props.dimensionMode ? "Dimension" : sketchToolLabel(props.tool)}</span><span>Grid {props.viewportState.gridVisible ? `${format(grid.minorMm)} mm` : "off"}</span><span>Snap {snapEnabled ? `${SNAP_PIXELS} px` : "off"}</span><span>{pointerInside ? `${planeInfo.horizontalLabel} ${format(cursor[0])}  ${planeInfo.verticalLabel} ${format(cursor[1])} mm` : "Cursor outside the sketch"}</span><span>{visibleEntities.length}/{props.sketch.entities.length} entities visible</span><strong>{analysis.classification.replace("-", " ")}</strong></div>
+      <div className="canvas-hud"><span>{planePlacement} · {planeInfo.horizontalLabel} → · {planeInfo.verticalLabel} ↑</span><span>{props.dimensionMode ? "Dimension" : sketchToolLabel(props.tool)}</span><span>Grid {props.viewportState.gridVisible ? `${format(grid.minorMm)} mm` : "off"}</span><span>Snap {snapEnabled ? `${SNAP_PIXELS} px` : "off"}</span><span>{pointerInside ? `${planeInfo.horizontalLabel} ${format(cursor[0])}  ${planeInfo.verticalLabel} ${format(cursor[1])} mm` : "Cursor outside the sketch"}</span><span>{visibleEntities.length}/{props.sketch.entities.length} entities visible</span><strong>{analysis.classification.replace("-", " ")}</strong></div>
     </section>
 
     <aside className="inspector-panel" aria-label="Sketch inspector">

@@ -1,5 +1,5 @@
 import type { DesignSolidFeature, SketchEntity, WorkbenchOperation, WorkbenchProject } from "../packages/workbench-core/src/index.js";
-import { applyWorkbenchOperation, createWorkbenchProject, designOf } from "../packages/workbench-core/src/index.js";
+import { applyWorkbenchOperation, createWorkbenchProject, designOf, validateWorkbenchProject, validSolidFeaturePayload } from "../packages/workbench-core/src/index.js";
 import { replayAllBodies, replayBody, type RebuildResult } from "../apps/studio-web/src/design-regeneration.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
@@ -111,6 +111,53 @@ export const designReplayTests: readonly TestCase[] = [
       split = apply(split, results);
       near(bodyVolume(split), PLATE_MINUS_BORE, PLATE_MINUS_BORE * 0.03, "the plate is left as it was");
       assert(designOf(split).features.find((feature) => feature.id === "feature:cut-1")?.health !== undefined, "and the step is flagged in the timeline");
+    }
+  },
+  {
+    name: "a sketch offset along its plane places the solid there, and the offset survives commit and reload",
+    run: async () => {
+      let project = run(createWorkbenchProject("project:test-offset"), { kind: "new-design-sketch", plane: "datum:xy", offsetMm: 25 });
+      equal(project.sketch.planeOffsetMm, 25, "the working sketch carries the offset");
+      project = run(project, { kind: "add-sketch-entity", entity: { id: "entity:pad", kind: "circle", center: [0, 0], radiusMm: 5, construction: false } });
+      project = run(project, { kind: "commit-design-sketch", featureId: "feature:sketch-off", name: "Offset sketch" });
+      const pad: DesignSolidFeature = { id: "feature:pad", name: "Pad", kind: "extrude", suppressed: false, sketchFeatureId: "feature:sketch-off", profileIds: [], valueMm: 5, bodyId: "general-body:pad" };
+      const results = await replayBody({ ...project, design: { ...designOf(project), features: [...designOf(project).features, pad], rollbackIndex: designOf(project).features.length + 1 } }, "general-body:pad");
+      const body = results.find((result) => result.body !== undefined)?.body;
+      assert(body !== undefined, "the pad builds");
+      let minZ = Infinity; let maxZ = -Infinity;
+      for (let index = 2; index < body.positionsMm.length; index += 3) { minZ = Math.min(minZ, body.positionsMm[index]!); maxZ = Math.max(maxZ, body.positionsMm[index]!); }
+      near(minZ, 25, 0.01, "the pad starts on the offset plane");
+      near(maxZ, 30, 0.01, "and extrudes 5 mm up from it");
+      assert(validateWorkbenchProject(JSON.parse(JSON.stringify(project)) as unknown).ok, "a project whose sketch has a plane offset validates on reload");
+    }
+  },
+  {
+    name: "a through-all cut reaches across the plate whatever distance it stores",
+    run: async () => {
+      const hole: SketchEntity = { id: "entity:hole", kind: "circle", center: [0, 12], radiusMm: 4, construction: false };
+      let project = await plateWithSecondSketch(hole);
+      const cut: DesignSolidFeature = { id: "feature:cut-1", name: "Cut 1", kind: "extrude", suppressed: false, sketchFeatureId: "feature:sketch-2", profileIds: [], valueMm: 1, operation: "cut", extent: "through-all", bodyId: BODY };
+      project = { ...project, design: { ...designOf(project), features: [...designOf(project).features, cut], rollbackIndex: designOf(project).features.length + 1 } };
+      project = apply(project, await replayBody(project, BODY));
+      const expected = PLATE_MINUS_BORE - Math.PI * 4 ** 2 * 10;
+      near(bodyVolume(project), expected, expected * 0.03, "a 1 mm through-all cut removes the full-depth hole");
+      assert(designOf(project).features.every((feature) => feature.health === undefined), "nothing failed");
+    }
+  },
+  {
+    name: "through-all is only valid for an extruded cut, and sketch-plane offsets are bounded",
+    run: () => {
+      const base = { id: "feature:x", name: "X", kind: "extrude", suppressed: false, sketchFeatureId: "feature:sketch-1", profileIds: [], valueMm: 5, bodyId: BODY } as const;
+      assert(validSolidFeaturePayload({ ...base, operation: "cut", extent: "through-all" }), "a through-all cut is valid");
+      assert(validSolidFeaturePayload({ ...base, operation: "cut", extent: "distance" }), "an explicit distance extent is valid");
+      assert(!validSolidFeaturePayload({ ...base, operation: "join", extent: "through-all" }), "a through-all join is rejected");
+      assert(!validSolidFeaturePayload({ ...base, extent: "through-all" }), "a through-all new body is rejected");
+      assert(!validSolidFeaturePayload({ ...base, kind: "revolve", operation: "cut", extent: "through-all" }), "a through-all revolve is rejected");
+      const fresh = createWorkbenchProject("project:test-offset-validation");
+      const bad = applyWorkbenchOperation(fresh, { kind: "new-design-sketch", plane: "datum:xy", offsetMm: Number.POSITIVE_INFINITY, operationId: "operation:test-bad-offset", expectedRevision: fresh.revision });
+      assert(!bad.ok, "an infinite plane offset is rejected");
+      const far = applyWorkbenchOperation(fresh, { kind: "set-sketch-plane", plane: "datum:xy", offsetMm: 200_000, operationId: "operation:test-far-offset", expectedRevision: fresh.revision });
+      assert(!far.ok, "an offset past 100 m is rejected");
     }
   }
 ];

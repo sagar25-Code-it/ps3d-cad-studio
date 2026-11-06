@@ -20,6 +20,7 @@ import { solidMetricsTests } from "./solid-metrics.test.js";
 import { designLabelTests } from "./design-labels.test.js";
 import { designChainTests } from "./design-chain.test.js";
 import { designReplayTests } from "./design-replay.test.js";
+import { planarFaceTests } from "./planar-faces.test.js";
 import { sketchSolverTests } from "./sketch-solver.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
@@ -64,6 +65,7 @@ const tests: readonly TestCase[] = [
   ...designLabelTests,
   ...designChainTests,
   ...designReplayTests,
+  ...planarFaceTests,
   ...sketchSolverTests,
   ...sketchEditToolTests,
   ...meshBooleanTests,

@@ -1,4 +1,5 @@
 import { isFeatureActive, modifiesBody } from "./design.js";
+import { planeWorldCoordinate } from "./planar-faces.js";
 import type { DesignFeature, DesignHistory, DesignSolidFeature } from "./types.js";
 
 /** How a timeline step stands right now, in the order that decides what the user sees first. */
@@ -30,12 +31,15 @@ function trimNumber(value: number): string {
 export function describeFeature(history: DesignHistory, feature: DesignFeature): string {
   if (feature.kind === "sketch") {
     const curves = feature.sketch.entities.filter((entity) => !entity.construction).length;
-    return `${sketchPlaneName(feature.sketch.plane)} plane · ${curves} ${curves === 1 ? "curve" : "curves"}`;
+    const where = planeWorldCoordinate(feature.sketch.plane, feature.sketch.planeOffsetMm ?? 0);
+    const offset = where.valueMm === 0 ? "" : ` at ${where.axisName} = ${trimNumber(where.valueMm)} mm`;
+    return `${sketchPlaneName(feature.sketch.plane)} plane${offset} · ${curves} ${curves === 1 ? "curve" : "curves"}`;
   }
   const source = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
-  const amount = feature.kind === "extrude"
-    ? `${trimNumber(feature.valueMm)} mm${feature.direction === undefined || feature.direction === "one-side" ? "" : ` ${DIRECTION[feature.direction]}`}`
-    : `${trimNumber(feature.valueMm)}°`;
+  const amount = feature.extent === "through-all" ? "through all"
+    : feature.kind === "extrude"
+      ? `${trimNumber(feature.valueMm)} mm${feature.direction === undefined || feature.direction === "one-side" ? "" : ` ${DIRECTION[feature.direction]}`}`
+      : `${trimNumber(feature.valueMm)}°`;
   const verb = !modifiesBody(feature) ? "" : feature.operation === "cut" ? "Cut " : "Join ";
   return `${verb}${amount} · from ${source === undefined ? "a deleted sketch" : source.name}`;
 }

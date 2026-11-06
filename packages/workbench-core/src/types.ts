@@ -184,6 +184,11 @@ export interface WorkbenchSketch {
   readonly id: "sketch:primary-profile";
   readonly name: string;
   readonly plane: SketchDatumPlane;
+  /**
+   * How far the sketch plane sits from its datum plane, in mm along the plane's normal (`DATUM_NORMALS`).
+   * Absent means 0 (on the datum itself). Sketching on a planar face of a solid stores that face's plane this way.
+   */
+  readonly planeOffsetMm?: number;
   readonly gridMm: number;
   readonly snapToleranceMm: number;
   readonly entities: readonly SketchEntity[];
@@ -889,6 +894,11 @@ export interface DesignSolidFeature extends DesignFeatureBase {
    * adds to or removes from the body named by `bodyId`, which an earlier new-body step made, and replays in timeline order.
    */
   readonly operation?: "new-body" | "join" | "cut";
+  /**
+   * How far an extruded cut reaches. Absent (or "distance") uses `valueMm`; "through-all" ignores the distance and
+   * cuts through the whole body on both sides of the sketch plane, however the body later changes size.
+   */
+  readonly extent?: "distance" | "through-all";
   /** The body this feature owns in `part.generalBodies` (for a join or cut: the body it modifies). */
   readonly bodyId: string;
   readonly edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number };
@@ -949,13 +959,13 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly label: string;
     }
   | { readonly kind: "set-sketch-constraints-suppressed"; readonly constraintIds: readonly string[]; readonly suppressed: boolean }
-  | { readonly kind: "set-sketch-plane"; readonly plane: SketchDatumPlane }
+  | { readonly kind: "set-sketch-plane"; readonly plane: SketchDatumPlane; readonly offsetMm?: number }
   /** Finishes the working sketch into the timeline: a new sketch feature, or an update of the one being edited. */
   | { readonly kind: "commit-design-sketch"; readonly featureId: string; readonly name: string }
   /** Reopens a sketch feature as the working sketch. */
   | { readonly kind: "edit-design-sketch"; readonly featureId: string }
-  /** Starts a new, empty working sketch on a plane (the previous one should be finished first). */
-  | { readonly kind: "new-design-sketch"; readonly plane: SketchDatumPlane }
+  /** Starts a new, empty working sketch on a plane (the previous one should be finished first), optionally offset along its normal. */
+  | { readonly kind: "new-design-sketch"; readonly plane: SketchDatumPlane; readonly offsetMm?: number }
   /** Adds an extrude or revolve feature together with the solid the kernel built for it. */
   | { readonly kind: "add-design-solid"; readonly feature: DesignSolidFeature; readonly body: GeneralSolidBody }
   /** Changes a solid feature's parameters and replaces its solid. */

@@ -1,5 +1,5 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
-import { dependentsOf, designOf, isFeatureActive, modifiesBody } from "../../../packages/workbench-core/src/index.js";
+import { dependentsOf, designOf, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, resolveProfileRegion } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 
@@ -57,7 +57,28 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     ...(feature.edge === undefined ? {} : { edge: feature.edge })
   });
   if (!built.ok) return { ok: false, message: built.message };
-  return { ok: true, body: shifted(built.body, NORMALS[plane], extrudeStartOffsetMm(feature)) };
+  return { ok: true, body: shifted(built.body, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0)) };
+}
+
+const PLANE_AXIS: Readonly<Record<SketchPlane, 0 | 1 | 2>> = { xy: 2, xz: 1, yz: 0 };
+
+/**
+ * Turns a through-all cut into the distance that reaches across the whole body right now: a symmetric extrusion
+ * about the sketch plane, long enough to pass the body's furthest point on the plane's axis with 1 mm to spare.
+ */
+export function throughAllOverride(step: DesignSolidFeature, sketch: DesignSketchFeature, target: GeneralSolidBody): DesignSolidFeature {
+  const axis = PLANE_AXIS[planeKeyOf(sketch.sketch.plane)];
+  const planeCoordinate = planeWorldCoordinate(sketch.sketch.plane, sketch.sketch.planeOffsetMm ?? 0).valueMm;
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (let index = axis; index < target.positionsMm.length; index += 3) {
+    const value = target.positionsMm[index]!;
+    if (value < minimum) minimum = value;
+    if (value > maximum) maximum = value;
+  }
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return step;
+  const halfSpanMm = Math.max(Math.abs(minimum - planeCoordinate), Math.abs(maximum - planeCoordinate)) + 1;
+  return { ...step, valueMm: halfSpanMm * 2, direction: "symmetric" };
 }
 
 /** The steps that shape a body, in timeline order: the step that made it, then its joins and cuts. */
@@ -89,7 +110,8 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
     const sketchFeature = history.features.find((candidate): candidate is DesignSketchFeature => candidate.id === step.sketchFeatureId && candidate.kind === "sketch");
     if (sketchFeature === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sketch this feature was built on is no longer in the timeline." }); continue; }
     const modifies = modifiesBody(step);
-    const built = await rebuildSolidFeature(modifies ? { ...step, bodyId: `${step.id}:tool` } : step, sketchFeature, existing?.color);
+    const sized = modifies && step.extent === "through-all" && current !== undefined ? throughAllOverride(step, sketchFeature, current) : step;
+    const built = await rebuildSolidFeature(modifies ? { ...sized, bodyId: `${step.id}:tool` } : sized, sketchFeature, existing?.color);
     if (!built.ok) { outcomes.set(step.id, { featureId: step.id, message: built.message }); continue; }
     if (!modifies) { current = built.body; outcomes.set(step.id, { featureId: step.id }); continue; }
     if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this step changes could not be built, so there is nothing to modify." }); continue; }

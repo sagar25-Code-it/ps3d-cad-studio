@@ -197,8 +197,10 @@ export function failure(
 }
 
 function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
-  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints"])
+  const optionalOffset = isRecord(value) && Object.hasOwn(value, "planeOffsetMm") ? ["planeOffsetMm"] : [];
+  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset])
     || value.id !== "sketch:primary-profile" || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(value.plane) || !shortText(value.name, 1, 120)
+    || (optionalOffset.length > 0 && !finiteRange(value.planeOffsetMm, -100_000, 100_000))
     || !finiteRange(value.gridMm, 0.1, 100) || !finiteRange(value.snapToleranceMm, 0.01, 10)
     || !Array.isArray(value.entities) || value.entities.length > WORKBENCH_LIMITS.maxEntities
     || !Array.isArray(value.constraints) || value.constraints.length > WORKBENCH_LIMITS.maxConstraints) {

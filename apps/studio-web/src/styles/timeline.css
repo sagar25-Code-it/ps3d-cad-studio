@@ -55,3 +55,17 @@
 .studio-app .solid-steps li strong { font-size: 12.5px; }
 .studio-app .solid-steps li small { color: #5d6a73; font-size: 12px; overflow-wrap: anywhere; }
 .studio-app .solid-steps li button { flex: none; padding: 0.25rem 0.55rem; font-size: 12px; }
+
+/* Sketch-plane dialog: the offset field and the "sketch on a face" choices. */
+.sketch-plane-offset { display: grid; gap: 0.3rem; margin: 0.65rem 0 0; color: #2c3237; font-size: 12.5px; }
+.sketch-plane-offset .feature-edit-field { display: flex; align-items: center; gap: 0.5rem; }
+.sketch-plane-offset input { width: 7rem; padding: 0.4rem 0.5rem; border: 1px solid #aeb5bb; border-radius: 5px; font: inherit; font-size: 12.5px; }
+.sketch-plane-offset small { color: #5d6a73; font-size: 12px; }
+.sketch-plane-faces { display: grid; gap: 0.35rem; margin-top: 0.7rem; }
+.sketch-plane-faces-title { color: #5d6a73; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+.sketch-plane-face { display: flex; align-items: center; gap: 0.55rem; padding: 0.45rem 0.6rem; border: 1px solid #c5ccd2; border-radius: 6px; background: #fff; font: inherit; text-align: left; cursor: pointer; }
+.sketch-plane-face:hover { border-color: #5a9fd4; background: #f0f7fd; }
+.sketch-plane-face .command-icon { flex: none; width: 17px; height: 17px; color: #1f6fb6; }
+.sketch-plane-face span { display: grid; min-width: 0; }
+.sketch-plane-face strong { font-size: 12.5px; }
+.sketch-plane-face small { color: #5d6a73; font-size: 12px; }

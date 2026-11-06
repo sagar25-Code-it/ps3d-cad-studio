@@ -18,8 +18,10 @@ import {
   createWorkbenchProject,
   defaultElectromechanicalMappings,
   ELECTROMECHANICAL_CATALOG_REVISION,
+  axisAlignedPlanarFaces,
   isElectricalSheetPositionAvailable,
   parseWorkbenchProjectText,
+  sketchPlaneName,
   preferredElectromechanicalLayout,
   resolveWorkbenchContextCommands,
   validateWorkbenchProject,
@@ -65,7 +67,7 @@ import {
 } from "../../../packages/exchange-3d/src/index.js";
 import { detectSketchProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
-import { hasModifiers, rebuildDependents, rebuildSolidFeature, replayAllBodies } from "./design-regeneration.js";
+import { hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
 import { CombineDialog, type CombineChoice } from "./ui/CombineDialog.js";
@@ -107,7 +109,7 @@ import { WorkbenchHeader } from "./ui/WorkbenchHeader.js";
 import { WorkbenchRibbon } from "./ui/WorkbenchRibbon.js";
 import { SaveProjectDialog } from "./ui/SaveProjectDialog.js";
 import { NewProjectDialog } from "./ui/NewProjectDialog.js";
-import { SketchPlaneDialog } from "./ui/SketchPlaneDialog.js";
+import { SketchPlaneDialog, type SketchFaceOption } from "./ui/SketchPlaneDialog.js";
 import { ProjectTree } from "./ui/ProjectTree.js";
 import { CommandPalette } from "./ui/CommandPalette.js";
 import { ExchangeCenter } from "./ui/ExchangeCenter.js";
@@ -321,6 +323,22 @@ export function App(): React.JSX.Element {
   const electrical = useMemo(() => createElectricalSchematic(project.electrical), [project.electrical]);
   const vehiclePreview = useMemo(() => buildVehiclePreview(project.vehicle), [project.vehicle]);
   const designHealth = useMemo(() => buildDesignHealthReport(project), [project]);
+  // The planar faces of the shown solids, as sketch planes: the "sketch on a face" choices in the plane dialog.
+  const sketchFaceOptions = useMemo(() => {
+    const options: SketchFaceOption[] = [];
+    for (const body of project.part.generalBodies ?? []) {
+      if (!body.visible) continue;
+      for (const face of axisAlignedPlanarFaces(body.positionsMm, body.indices, 25).slice(0, 4)) {
+        options.push({
+          plane: planeKeyOf(face.plane),
+          offsetMm: face.offsetMm,
+          label: `${body.name} · ${face.axisName} = ${Number(face.coordinateMm.toFixed(3))} mm`,
+          hint: `${sketchPlaneName(face.plane)}-parallel face · ${Math.round(face.areaMm2).toLocaleString()} mm² · looks ${face.outwardPositive ? "+" : "−"}${face.axisName}`
+        });
+      }
+    }
+    return options.slice(0, 9);
+  }, [project.part.generalBodies]);
   const electromechanicalCandidate = useMemo(() => electromechanicalReviewOpen
     ? createElectromechanicalAssembly(
       project.electrical,
@@ -733,19 +751,22 @@ export function App(): React.JSX.Element {
     switchWorkspace(workspace);
   };
 
-  const confirmSketchPlane = (plane: SketchPlane): void => {
+  const confirmSketchPlane = (plane: SketchPlane, offsetMm = 0): void => {
     setSketchPlaneDialogOpen(false);
     const datum = `datum:${plane}` as const;
+    const where = `${plane.toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}`;
     if (sketchPlaneDialogMode === "new") {
       void (async () => {
         await commitWorkingSketch();
-        if (applyProjectOperation({ kind: "new-design-sketch", plane: datum }, false)) setStatusText(`New sketch on the ${plane.toUpperCase()} plane. The previous sketch is in the timeline.`);
+        if (applyProjectOperation({ kind: "new-design-sketch", plane: datum, ...(offsetMm === 0 ? {} : { offsetMm }) }, false)) setStatusText(`New sketch on the ${where}. The previous sketch is in the timeline.`);
       })();
       return;
     }
-    if (projectRef.current.sketch.plane !== datum && !applyProjectOperation({ kind: "set-sketch-plane", plane: datum })) return;
+    const sketch = projectRef.current.sketch;
+    if ((sketch.plane !== datum || (sketch.planeOffsetMm ?? 0) !== offsetMm)
+      && !applyProjectOperation({ kind: "set-sketch-plane", plane: datum, ...(offsetMm === 0 ? {} : { offsetMm }) })) return;
     if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
-    setStatusText(`Sketch on the ${plane.toUpperCase()} plane, shown face-on. Draw a closed profile, then Create solid extrudes or revolves it from this plane.`);
+    setStatusText(`Sketch on the ${where}, shown face-on. Draw a closed profile, then Create solid extrudes or revolves it from this plane.`);
   };
 
   const openMasterCart = (): void => {
@@ -1441,7 +1462,7 @@ export function App(): React.JSX.Element {
   };
 
   /** Extrude or revolve the working sketch's profiles into a new timeline feature and solid. */
-  const createGeneralSolid = async (selectedProfileIds: readonly string[], _plane: SketchPlane, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction: "one-side" | "symmetric" | "flipped" = "one-side", target?: { readonly mode: "join" | "cut"; readonly bodyId: string }): Promise<void> => {
+  const createGeneralSolid = async (selectedProfileIds: readonly string[], _plane: SketchPlane, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction: "one-side" | "symmetric" | "flipped" = "one-side", target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" }): Promise<void> => {
     if (!Number.isFinite(valueMm) || valueMm <= 0) { setStatus("error"); setStatusText(operation === "extrude" ? "Enter a positive extrusion distance." : "Enter a revolve angle between 1 and 360 degrees."); return; }
     if (detectSketchProfiles(projectRef.current.sketch).length === 0) { setStatus("error"); setStatusText("Draw or select a closed profile before creating a solid."); return; }
     setStatus("working");
@@ -1467,10 +1488,13 @@ export function App(): React.JSX.Element {
       bodyId,
       ...(operation === "extrude" && direction !== "one-side" ? { direction } : {}),
       ...(edge === undefined ? {} : { edge }),
-      ...(target === undefined ? {} : { operation: target.mode })
+      ...(target === undefined ? {} : { operation: target.mode }),
+      ...(target?.extent === "through-all" && operation === "extrude" && target.mode === "cut" ? { extent: "through-all" as const } : {})
     };
     // A join or cut builds its solid as a tool and combines it with the current shape of the body it modifies.
-    const rebuilt = await rebuildSolidFeature(target === undefined ? feature : { ...feature, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color);
+    // A through-all cut is sized across the target body here, the same way the timeline replay sizes it.
+    const sized = feature.extent === "through-all" && targetBody !== undefined ? throughAllOverride(feature, sketchFeature, targetBody) : feature;
+    const rebuilt = await rebuildSolidFeature(target === undefined ? feature : { ...sized, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color);
     if (!rebuilt.ok) { setStatus("error"); setStatusText(rebuilt.message); return; }
     let resultBody = rebuilt.body;
     if (targetBody !== undefined && target !== undefined) {
@@ -2591,7 +2615,7 @@ export function App(): React.JSX.Element {
     {designHealthOpen && <DesignHealthCenter report={designHealth} onClose={() => setDesignHealthOpen(false)} onWorkspace={switchWorkspace} />}
     <SaveProjectDialog open={saveDialogMode !== undefined} mode={saveDialogMode ?? "save-as"} projectName={project.name} workspaceStatus={fileWorkspaceStatus} onConfirm={(fileName) => void confirmSaveDialog(fileName)} onClose={() => setSaveDialogMode(undefined)} />
     <NewProjectDialog open={newDialogOpen} onConfirm={(name, workspace) => { setNewDialogOpen(false); void createNewProject(name, workspace); }} onClose={() => setNewDialogOpen(false)} />
-    <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
+    <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} faces={sketchFaceOptions} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
     <FeatureEditDialog feature={featureEdit} busy={status === "working"} onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />
   </main>;
 }
