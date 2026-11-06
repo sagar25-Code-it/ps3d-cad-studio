@@ -12,5 +12,6 @@
 @import "./styles/brand-alignment.css";
 @import "./styles/master-cart.css";
 @import "./styles/file-studio.css";
+@import "./styles/sketch.css";
 /* Responsive policy must load last so workspace-specific fixed dimensions cannot override it. */
 @import "./styles/responsive.css";

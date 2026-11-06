@@ -1,0 +1,21 @@
+/*
+ * Sketch workspace chrome.
+ * Every label inside the sketch canvas overlays stays at 11.5px or larger, the status strip wraps instead of truncating,
+ * and the palette is wide enough for the larger text. Loaded after the theme sheets and before the responsive policy.
+ */
+.studio-app .sketch-stage .canvas-hud { flex-wrap: wrap; gap: 0.15rem 0.9rem; font-size: 0.74rem; line-height: 1.35; }
+.studio-app .sketch-stage .canvas-hud strong { font-size: 0.74rem; }
+.studio-app .sketch-stage .sketch-palette { width: 204px; font-size: 0.78rem; }
+.studio-app .sketch-stage .sketch-palette header span { font-size: 0.66rem; }
+.studio-app .sketch-stage .sketch-palette header strong { font-size: 0.88rem; }
+.studio-app .sketch-stage .sketch-palette header button { padding: 0.32rem 0.55rem; font-size: 0.76rem; }
+.studio-app .sketch-stage .sketch-palette > label { padding: 0.3rem 0.12rem; font-size: 0.78rem; }
+.studio-app .sketch-stage .sketch-palette .palette-action { margin-top: 0.4rem; padding: 0.4rem 0.5rem; font-size: 0.78rem; }
+.studio-app .sketch-stage .sketch-make-solid .make-solid-title { font-size: 0.68rem; }
+.studio-app .sketch-stage .sketch-make-solid .make-solid-row { grid-template-columns: 1fr 1fr auto; }
+.studio-app .sketch-stage .sketch-make-solid select,
+.studio-app .sketch-stage .sketch-make-solid input { padding: 0.3rem; font-size: 0.76rem; }
+.studio-app .sketch-stage .sketch-make-solid small { font-size: 0.72rem; }
+.studio-app .sketch-stage .make-solid-plane { font-size: 0.72rem; }
+.studio-app .sketch-stage .palette-shortcuts { font-size: 0.72rem; }
+.studio-app .sketch-stage .navigation-bar span { font-size: 0.72rem; }

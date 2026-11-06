@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { normalizeProjectFileName, type PsCadWorkspaceStatus } from "../file-workspace.js";
 import { CommandIcon } from "./CommandIcon.js";
+import { useDialogFocus } from "./useDialogFocus.js";
 
 interface SaveProjectDialogProps {
   readonly open: boolean;
@@ -14,15 +15,15 @@ interface SaveProjectDialogProps {
 export function SaveProjectDialog(props: SaveProjectDialogProps): React.JSX.Element | null {
   const [fileName, setFileName] = useState(props.projectName);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useDialogFocus<HTMLElement>(props.open, props.onClose);
 
+  // The name is seeded when the dialog opens; a parent re-render must not overwrite it while the user types.
   useEffect(() => {
-    if (!props.open) return;
+    if (!props.open) return undefined;
     setFileName(props.mode === "copy" ? `${props.projectName} Copy` : props.projectName);
-    const frame = window.requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.select(); });
-    const keyboard = (event: KeyboardEvent): void => { if (event.key === "Escape") props.onClose(); };
-    document.addEventListener("keydown", keyboard, true);
-    return () => { window.cancelAnimationFrame(frame); document.removeEventListener("keydown", keyboard, true); };
-  }, [props.mode, props.onClose, props.open, props.projectName]);
+    const frame = window.requestAnimationFrame(() => inputRef.current?.select());
+    return () => window.cancelAnimationFrame(frame);
+  }, [props.mode, props.open]);
 
   if (!props.open) return null;
   const normalized = normalizeProjectFileName(fileName);
@@ -31,10 +32,10 @@ export function SaveProjectDialog(props: SaveProjectDialogProps): React.JSX.Elem
     : props.workspaceStatus.apiSupported ? "Browser save picker" : "Downloads";
 
   return <div className="dialog-backdrop save-project-backdrop" role="presentation" onMouseDown={props.onClose}>
-    <section className="save-project-dialog" role="dialog" aria-modal="true" aria-labelledby="save-project-title" onMouseDown={(event) => event.stopPropagation()}>
+    <section ref={dialogRef} tabIndex={-1} className="save-project-dialog" role="dialog" aria-modal="true" aria-labelledby="save-project-title" onMouseDown={(event) => event.stopPropagation()}>
       <header><span><CommandIcon name={props.mode === "copy" ? "copy" : "save"} /></span><div><small>FILE / {props.mode === "copy" ? "SAVE A COPY" : "SAVE AS"}</small><h2 id="save-project-title">{props.mode === "copy" ? "Save an independent copy" : "Name this PS3D project"}</h2></div><button onClick={props.onClose} aria-label="Close Save dialog">×</button></header>
       <div className="save-project-content">
-        <label><span>File name</span><input ref={inputRef} value={fileName} maxLength={96} onChange={(event) => setFileName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") props.onConfirm(normalized); }} /></label>
+        <label><span>File name</span><input ref={inputRef} data-dialog-initial-focus value={fileName} maxLength={96} onChange={(event) => setFileName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") props.onConfirm(normalized); }} /></label>
         <div className="save-file-preview"><CommandIcon name="file" /><span><strong>{normalized}</strong><small>{location}</small></span></div>
         <div className="save-project-note"><CommandIcon name="shield" /><span>PS3D validates the full project before writing. {props.mode === "copy" ? "The active file remains unchanged." : "Future Ctrl+S saves update this file."}</span></div>
       </div>

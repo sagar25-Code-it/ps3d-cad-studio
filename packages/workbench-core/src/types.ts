@@ -167,10 +167,14 @@ export interface WorkbenchSketchConstraint {
   readonly suppressed?: boolean;
 }
 
+/** The datum planes a sketch can lie on. The plane is persisted with the sketch so it survives reload and Undo. */
+export const SKETCH_DATUM_PLANES = ["datum:xy", "datum:xz", "datum:yz"] as const;
+export type SketchDatumPlane = (typeof SKETCH_DATUM_PLANES)[number];
+
 export interface WorkbenchSketch {
   readonly id: "sketch:primary-profile";
   readonly name: string;
-  readonly plane: "datum:xy";
+  readonly plane: SketchDatumPlane;
   readonly gridMm: number;
   readonly snapToleranceMm: number;
   readonly entities: readonly SketchEntity[];
@@ -888,6 +892,7 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly label: string;
     }
   | { readonly kind: "set-sketch-constraints-suppressed"; readonly constraintIds: readonly string[]; readonly suppressed: boolean }
+  | { readonly kind: "set-sketch-plane"; readonly plane: SketchDatumPlane }
   | {
       readonly kind: "set-part-parameter";
       readonly parameter: "widthMm" | "heightMm" | "thicknessMm" | "holeDiameterMm" | "edgeTreatmentMm" | "patternCount" | "revolveAngleDeg";
@@ -1004,7 +1009,7 @@ export type WorkbenchOperation = OperationEnvelope & (
  */
 export const WORKBENCH_OPERATION_KINDS = [
   "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
-  "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
+  "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-sketch-plane", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
   "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility",
   "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
   "isolate-part-preview-body", "set-part-preview-bodies-visibility", "create-part-revolve", "pattern-part-feature", "mirror-part-feature",

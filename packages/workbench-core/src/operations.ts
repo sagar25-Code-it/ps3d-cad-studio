@@ -17,7 +17,7 @@ import type {
   WorkbenchResult,
   WorkspaceId
 } from "./types.js";
-import { ELECTRICAL_SHEET_BOUNDS, ELECTROMECHANICAL_CATALOG_REVISION } from "./types.js";
+import { ELECTRICAL_SHEET_BOUNDS, ELECTROMECHANICAL_CATALOG_REVISION, SKETCH_DATUM_PLANES } from "./types.js";
 import { createBessContainerAssembly, createCargoContainerAssembly, createElectricalTemplate } from "./templates.js";
 import { createElectromechanicalAssembly, electricalSignature } from "./electromechanical.js";
 import { createVehicleTemplate, vehicleHardPoints, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
@@ -196,6 +196,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
     case "set-sketch-constraints-suppressed":
       if (!keys(input, [...common, "constraintIds", "suppressed"]) || !boundedList(input.constraintIds, 500, stableId) || input.constraintIds.length < 1
         || typeof input.suppressed !== "boolean") return invalidOperation("The constraint relax payload is invalid.");
+      break;
+    case "set-sketch-plane":
+      if (!keys(input, [...common, "plane"]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)) return invalidOperation("The sketch plane must be datum:xy, datum:xz or datum:yz.");
       break;
     case "set-part-parameter":
       if (!keys(input, [...common, "parameter", "value"]) || !PART_PARAMETERS.includes(input.parameter as never) || !finite(input.value)) return invalidOperation("The part parameter edit is invalid.");
@@ -540,6 +543,12 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
         `${operation.suppressed ? "Relaxed" : "Restored"} ${wanted.size} sketch relation${wanted.size === 1 ? "" : "s"}.${solved === undefined ? "" : solveSummary(solved)}`
       );
     }
+    case "set-sketch-plane":
+      return changed(
+        { ...project, sketch: { ...project.sketch, plane: operation.plane } },
+        [project.sketch.id],
+        `Placed the sketch on the ${operation.plane.replace("datum:", "").toUpperCase()} plane.`
+      );
     case "toggle-sketch-construction": {
       const target = project.sketch.entities.find((entity) => entity.id === operation.entityId);
       if (target === undefined) return broken(operation.entityId, "The sketch entity does not exist.");

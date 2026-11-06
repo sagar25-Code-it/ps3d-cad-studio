@@ -2,6 +2,7 @@ import {
   WORKBENCH_FORMAT,
   WORKBENCH_SCHEMA_VERSION,
   ELECTROMECHANICAL_CATALOG_REVISION,
+  SKETCH_DATUM_PLANES,
   isElectricalSheetPositionAvailable,
   type AssemblyIntent,
   type AssemblyMate,
@@ -191,7 +192,7 @@ export function failure(
 
 function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints"])
-    || value.id !== "sketch:primary-profile" || value.plane !== "datum:xy" || !shortText(value.name, 1, 120)
+    || value.id !== "sketch:primary-profile" || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(value.plane) || !shortText(value.name, 1, 120)
     || !finiteRange(value.gridMm, 0.1, 100) || !finiteRange(value.snapToleranceMm, 0.01, 10)
     || !Array.isArray(value.entities) || value.entities.length > WORKBENCH_LIMITS.maxEntities
     || !Array.isArray(value.constraints) || value.constraints.length > WORKBENCH_LIMITS.maxConstraints) {

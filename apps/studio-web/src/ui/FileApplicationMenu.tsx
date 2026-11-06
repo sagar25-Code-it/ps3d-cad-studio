@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { WorkbenchProject, WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
 import { formatStorageSize, type PsCadWorkspaceStatus, type RecentProjectEntry } from "../file-workspace.js";
 import { CommandIcon } from "./CommandIcon.js";
+import { useDialogFocus } from "./useDialogFocus.js";
 
 interface FileApplicationMenuProps {
   readonly open: boolean;
@@ -32,18 +33,11 @@ type SectionId = "home" | "open" | "save" | "export" | "utilities" | "properties
 
 export function FileApplicationMenu(props: FileApplicationMenuProps): React.JSX.Element | null {
   const [section, setSection] = useState<SectionId>("home");
-  const panelRef = useRef<HTMLElement>(null);
+  const panelRef = useDialogFocus<HTMLElement>(props.open, props.onClose);
 
   useEffect(() => {
-    if (!props.open) return;
-    setSection("home");
-    const frame = window.requestAnimationFrame(() => panelRef.current?.focus({ preventScroll: true }));
-    const keyboard = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") { event.preventDefault(); props.onClose(); }
-    };
-    document.addEventListener("keydown", keyboard, true);
-    return () => { window.cancelAnimationFrame(frame); document.removeEventListener("keydown", keyboard, true); };
-  }, [props.open, props.onClose]);
+    if (props.open) setSection("home");
+  }, [props.open]);
 
   if (!props.open) return null;
   const run = (action: () => void): void => { props.onClose(); action(); };

@@ -7,6 +7,7 @@ import type {
   SketchDimension,
   SketchGeometry
 } from "../../parametric-sketch-core/src/types.js";
+import { constraintFit } from "./constraint-fit.js";
 import type { SketchEntity, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 
 /** A constraint the analytic solver could not enforce, kept on the sketch as design intent. */
@@ -201,34 +202,18 @@ function translateConstraint(
     return { constraints: constraint.entityIds.filter((id) => present.has(id)).map((id, index) => ({ id: `${constraint.id}#${index}`, suppressed: false, kind: "fix" as const, target: self(id) })), dimensions: [] };
   }
   if (constraint.kind === "radius" || constraint.kind === "distance") return translateDimension(constraint, kindOf, present);
-  if (constraint.entityIds.some((id) => kindOf(id) === "rectangle")) return none("Rectangles are rigid in the solver; only Fixed and their own width and height apply.");
+  // One shared rule table decides which entity kinds each relation can act on (the Constrain buttons and the analysis read it too).
+  const fit = constraintFit(constraint.kind, constraint.entityIds.map(kindOf));
+  if (!fit.ok) return none(fit.reason);
 
   if (constraint.kind === "horizontal" || constraint.kind === "vertical") {
-    return kindOf(first!) === "line"
-      ? { constraints: [{ ...stable, kind: constraint.kind, line: self(first!) }], dimensions: [] }
-      : none(`${constraint.kind} applies to a line.`);
+    return { constraints: [{ ...stable, kind: constraint.kind, line: self(first!) }], dimensions: [] };
   }
   if (constraint.kind === "parallel" || constraint.kind === "perpendicular" || constraint.kind === "collinear") {
-    return kindOf(first!) === "line" && kindOf(second!) === "line"
-      ? { constraints: [{ ...stable, kind: constraint.kind, first: self(first!), second: self(second!) }], dimensions: [] }
-      : none(`${constraint.kind} needs two lines.`);
+    return { constraints: [{ ...stable, kind: constraint.kind, first: self(first!), second: self(second!) }], dimensions: [] };
   }
-  if (constraint.kind === "concentric") {
-    return isRadial(kindOf(first!)) && isRadial(kindOf(second!))
-      ? { constraints: [{ ...stable, kind: "concentric", first: self(first!), second: self(second!) }], dimensions: [] }
-      : none("Concentric needs two circles or arcs.");
-  }
-  if (constraint.kind === "equal") {
-    const bothLines = kindOf(first!) === "line" && kindOf(second!) === "line";
-    return bothLines || (isRadial(kindOf(first!)) && isRadial(kindOf(second!)))
-      ? { constraints: [{ ...stable, kind: "equal", first: self(first!), second: self(second!) }], dimensions: [] }
-      : none("Equal needs two lines, or two circles or arcs.");
-  }
-  if (constraint.kind === "tangent") {
-    const lineAndRadial = (kindOf(first!) === "line" && isRadial(kindOf(second!))) || (kindOf(second!) === "line" && isRadial(kindOf(first!)));
-    return lineAndRadial || (isRadial(kindOf(first!)) && isRadial(kindOf(second!)))
-      ? { constraints: [{ ...stable, kind: "tangent", first: self(first!), second: self(second!) }], dimensions: [] }
-      : none("Tangent solves a line against a circle or arc, or two circles or arcs.");
+  if (constraint.kind === "concentric" || constraint.kind === "equal" || constraint.kind === "tangent") {
+    return { constraints: [{ ...stable, kind: constraint.kind, first: self(first!), second: self(second!) }], dimensions: [] };
   }
   if (constraint.kind === "symmetry") return translateSymmetry(constraint, entities, first, second, third);
   return none(`${constraint.kind} needs endpoint selection, which the sketch records but does not solve yet.`);

@@ -60,7 +60,7 @@ import {
   type ExchangeImportResult,
   type ExchangeUnit
 } from "../../../packages/exchange-3d/src/index.js";
-import { detectSketchProfiles, resolveProfileRegion, resolveQualifiedExtrusion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 import { CombineDialog, type CombineChoice } from "./ui/CombineDialog.js";
 import type { BooleanMode } from "../../../packages/workbench-geometry/src/index.js";
@@ -110,7 +110,7 @@ import { CameraGestureControl, type CameraCursorState } from "./ui/CameraGesture
 import { DesignHealthCenter } from "./ui/DesignHealthCenter.js";
 import { SmartFaultBrain } from "./ui/SmartFaultBrain.js";
 import { WorkbenchContextMenu } from "./ui/WorkbenchContextMenu.js";
-import { SketchWorkspace, type SketchExtrudeOperation } from "./workspaces/SketchWorkspace.js";
+import { SketchWorkspace } from "./workspaces/SketchWorkspace.js";
 import { SKETCH_EDIT_TOOL_LABELS, type SketchEditToolId } from "./workspaces/SketchEditPanel.js";
 import type { SketchEditPlan } from "../../../packages/workbench-sketch/src/edit-tools.js";
 import { PartInspector } from "./workspaces/PartInspector.js";
@@ -254,7 +254,7 @@ export function App(): React.JSX.Element {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [sketchPlaneDialogOpen, setSketchPlaneDialogOpen] = useState(false);
-  const [activeSketchPlane, setActiveSketchPlane] = useState<SketchPlane>("xy");
+  const [sketchFitSerial, setSketchFitSerial] = useState(0);
   const [masterCartOpen, setMasterCartOpen] = useState(false);
   const [renderStudioOpen, setRenderStudioOpen] = useState(false);
   const [renderSettings, setRenderSettings] = useState<RenderStudioSettings>(DEFAULT_RENDER_SETTINGS);
@@ -714,9 +714,10 @@ export function App(): React.JSX.Element {
     setStatusText(`Opened ${workspace === "automate" ? "Automate" : `${workspace[0]!.toUpperCase()}${workspace.slice(1)}`} workspace without changing engineering revision ${current.revision}.`);
   };
 
-  // Fusion-style sketch entry: picking the Sketch tab from elsewhere asks which datum plane first.
+  // Fusion-style sketch entry: starting a sketch that has no geometry yet asks which datum plane to use.
+  // A sketch that already has curves simply opens on its saved plane; the palette "Plane" button changes it.
   const requestWorkspace = (workspace: WorkspaceId): void => {
-    if (workspace === "sketch" && projectRef.current.activeWorkspace !== "sketch" && !masterCartOpen && !renderStudioOpen) {
+    if (workspace === "sketch" && projectRef.current.activeWorkspace !== "sketch" && !masterCartOpen && !renderStudioOpen && projectRef.current.sketch.entities.length === 0) {
       setSketchPlaneDialogOpen(true);
       return;
     }
@@ -725,11 +726,10 @@ export function App(): React.JSX.Element {
 
   const confirmSketchPlane = (plane: SketchPlane): void => {
     setSketchPlaneDialogOpen(false);
-    setActiveSketchPlane(plane);
-    switchWorkspace("sketch");
-    const orientation = plane === "xy" ? "top" : plane === "xz" ? "front" : "right";
-    setViewportOrientation(orientation);
-    setStatusText(`New sketch on the ${plane.toUpperCase()} plane (${orientation} view). Draw a closed profile, then Create Solid extrudes along this plane.`);
+    const datum = `datum:${plane}` as const;
+    if (projectRef.current.sketch.plane !== datum && !applyProjectOperation({ kind: "set-sketch-plane", plane: datum })) return;
+    if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
+    setStatusText(`Sketch on the ${plane.toUpperCase()} plane, shown face-on. Draw a closed profile, then Create solid extrudes or revolves it from this plane.`);
   };
 
   const openMasterCart = (): void => {
@@ -1418,113 +1418,6 @@ export function App(): React.JSX.Element {
     }
   };
 
-  const extrudeSketchProfiles = async (profileIds: readonly string[], distanceMm: number, operation: SketchExtrudeOperation): Promise<void> => {
-    if (operation !== "new-body" && operation !== "new-component") {
-      setStatus("error");
-      setStatusText("Create the solid with Make solid, then join, cut or intersect it with Combine in the Part workspace; no Boolean was attempted here.");
-      return;
-    }
-    const selectedCircleProfiles = detectSketchProfiles(projectRef.current.sketch).filter((profile) => profileIds.includes(profile.id));
-    const circleProfile = selectedCircleProfiles.length === 1 && selectedCircleProfiles[0]!.boundary.kind === "circle" ? selectedCircleProfiles[0]! : undefined;
-    if (circleProfile !== undefined && circleProfile.boundary.kind === "circle") {
-      if (!Number.isFinite(distanceMm) || distanceMm < 1 || distanceMm > 100) {
-        setStatus("error");
-        setStatusText("The cylinder height must be between 1 mm and 100 mm.");
-        return;
-      }
-      const diameterMm = Math.round(circleProfile.boundary.radiusMm * 2 * 1000) / 1000;
-      if (operation === "new-component") {
-        const component: ComponentInstance = {
-          id: `component:sketch-cylinder-${crypto.randomUUID()}`,
-          name: `${projectRef.current.sketch.name} cylinder`,
-          shape: "cylinder",
-          grounded: false,
-          visible: true,
-          color: "#aeb3b8",
-          translationMm: [circleProfile.centroid[0], circleProfile.centroid[1], distanceMm / 2],
-          rotationDeg: [0, 0, 0],
-          sizeMm: [diameterMm, diameterMm, distanceMm],
-          explosionDirection: [0.2, -0.14, 0.65]
-        };
-        if (!applyProjectOperation({ kind: "add-assembly-component", component })) return;
-        switchWorkspace("assembly");
-        setSelectedId(component.id);
-      } else {
-        const ordinal = (projectRef.current.part.previewBodies?.length ?? 0) + 1;
-        const body: PartPreviewBody = {
-          id: `part-body:user-${crypto.randomUUID()}`,
-          name: `Cylinder ${ordinal}`,
-          shape: "cylinder",
-          visible: true,
-          color: partPreviewColor("cylinder"),
-          translationMm: [circleProfile.centroid[0], circleProfile.centroid[1], distanceMm / 2],
-          rotationDeg: [0, 0, 0],
-          sizeMm: [diameterMm, diameterMm, distanceMm]
-        };
-        if (!applyProjectOperation({ kind: "add-part-preview-bodies", bodies: [body] })) return;
-        switchWorkspace("part");
-        setSelectedId(body.id);
-      }
-      setStatus("ready");
-      setStatusText(`Extruded a Ø${diameterMm} mm circle into a ${distanceMm} mm cylinder ${operation === "new-component" ? "component" : "body"}.`);
-      return;
-    }
-    const resolved = resolveQualifiedExtrusion(projectRef.current.sketch, profileIds, distanceMm);
-
-    if (!resolved.ok) {
-      const first = resolved.diagnostics[0];
-      setDiagnostic(first === undefined ? undefined : { code: first.code, message: first.message, recovery: first.recovery });
-      setStatus("error");
-      setStatusText(first?.message ?? "The sketch profiles cannot be extruded by the qualified evaluator.");
-      return;
-    }
-    const client = clientRef.current;
-    if (client === undefined || status === "working") return;
-    const parameters: readonly (readonly [ParameterKey, number])[] = [
-      ["width", resolved.value.widthMm],
-      ["height", resolved.value.heightMm],
-      ["holeDiameter", resolved.value.holeDiameterMm],
-      ["thickness", resolved.value.distanceMm]
-    ];
-    setStatus("working");
-    setStatusText("Regenerating the selected closed profiles in the qualified solid worker…");
-    for (const [parameterKey, value] of parameters) {
-      const current = parameterByKey(documentRef.current, parameterKey).valueMeters * 1000;
-      if (Math.abs(current - value) < 1e-9) continue;
-      const response = await client.commit(documentRef.current.revision, {
-        protocolVersion: 1,
-        kind: "set-parameter",
-        commandId: `command:profile-extrude-${parameterKey}-${crypto.randomUUID()}`,
-        expectedRevision: documentRef.current.revision,
-        parameterKey,
-        expression: { decimal: String(value), unit: "mm" }
-      }).catch(() => undefined);
-      if (response === undefined || !acceptResponse(response)) return;
-    }
-    if (operation === "new-component") {
-      const component: ComponentInstance = {
-        id: `component:sketch-extrusion-${crypto.randomUUID()}`,
-        name: `${projectRef.current.sketch.name} extrusion`,
-        shape: "plate",
-        grounded: false,
-        visible: true,
-        color: "#aeb3b8",
-        translationMm: [0, 0, resolved.value.distanceMm / 2],
-        rotationDeg: [0, 0, 0],
-        sizeMm: [resolved.value.widthMm, resolved.value.heightMm, resolved.value.distanceMm],
-        explosionDirection: [0.2, -0.14, 0.65]
-      };
-      if (!applyProjectOperation({ kind: "add-assembly-component", component })) return;
-      switchWorkspace("assembly");
-      setSelectedId(component.id);
-    } else {
-      switchWorkspace("part");
-      setSelectedId("feature:plate-extrusion");
-    }
-    setStatus("ready");
-    setStatusText(`Created qualified ${resolved.value.widthMm} × ${resolved.value.heightMm} × ${resolved.value.distanceMm} mm ${operation === "new-component" ? "component" : "body"} with Ø${resolved.value.holeDiameterMm} mm through-bore from associative sketch profiles.`);
-  };
-
   const changeUnit = async (unit: DisplayUnit): Promise<void> => {
     if (unit === documentRef.current.displayUnit || clientRef.current === undefined) return;
     setStatus("working");
@@ -2001,6 +1894,7 @@ export function App(): React.JSX.Element {
   };
 
   const fitViewport = (): void => {
+    if (projectRef.current.activeWorkspace === "sketch") { setSketchFitSerial((serial) => serial + 1); return; }
     if (projectRef.current.activeWorkspace === "part" && activeImportRef.current !== undefined) viewportRef.current?.fitCurrent();
     else if (projectRef.current.activeWorkspace === "part") viewportRef.current?.fitPreview(partScene.boundsMm);
     if (projectRef.current.activeWorkspace === "assembly") viewportRef.current?.fitPreview(assemblyScene.boundsMm);
@@ -2051,15 +1945,10 @@ export function App(): React.JSX.Element {
     setSketchTool(tool);
     setSketchEditTool(null);
     setSketchDimensionMode(false);
-    if (tool !== "select") {
-      setViewportNavigation("select");
-      // Snap the view normal to the sketch plane so a drawing tool can place points immediately,
-      // instead of silently requiring a manual "Look At" first.
-      if (projectRef.current.activeWorkspace === "sketch" && viewportState.orientation !== "top") setViewportOrientation("top");
-    }
+    if (tool !== "select") setViewportNavigation("select");
     setStatusText(tool === "select"
-      ? `Select tool active ${source}: click entities or shaded profiles to pick them.`
-      : `${sketchToolLabel(tool)} tool active ${source}: left-click places points on the sketch plane; middle-drag or the ViewCube orbits.`);
+      ? `Select tool active ${source}: click curves or shaded profiles, or drag a box to pick several.`
+      : `${sketchToolLabel(tool)} tool active ${source}: click to place points; the wheel zooms, a middle or Space drag pans, Esc cancels.`);
   };
 
   const activateSketchDimension = (source: string): void => {
@@ -2113,6 +2002,7 @@ export function App(): React.JSX.Element {
   };
 
   const homeViewport = (): void => {
+    if (projectRef.current.activeWorkspace === "sketch") { fitViewport(); setStatusText("Fitted the sketch to the window."); return; }
     viewportRef.current?.setOrientation("isometric");
     if (viewportRef.current === undefined) setViewportOrientation("isometric");
     fitViewport();
@@ -2133,9 +2023,16 @@ export function App(): React.JSX.Element {
     }
     if (commandId === "view.projection.perspective") { setViewportProjection("perspective"); return; }
     if (commandId === "view.projection.orthographic") { setViewportProjection("orthographic"); return; }
+    if (commandId === "sketch.look-at" && projectRef.current.activeWorkspace === "sketch") { setSketchFitSerial((serial) => serial + 1); setStatusText("The sketch is always shown face-on; fitted it to the window."); return; }
     if (commandId === "view.look-at" || commandId === "sketch.look-at") { setViewportOrientation(selectionId === "datum:yz" ? "right" : selectionId === "datum:xz" ? "front" : "top"); return; }
     if (commandId === "inspect.measure") { setViewportNavigation("measure"); return; }
-    if (commandId === "sketch.create" || commandId === "sketch.edit") { switchWorkspace("sketch"); if (selectionId !== null) setSelectedId(selectionId); return; }
+    if (commandId === "sketch.create" || commandId === "sketch.edit") {
+      // Creating a sketch on a datum plane from the tree or a right-click moves the sketch onto that plane.
+      if ((selectionId === "datum:xy" || selectionId === "datum:xz" || selectionId === "datum:yz") && projectRef.current.sketch.plane !== selectionId) applyProjectOperation({ kind: "set-sketch-plane", plane: selectionId });
+      switchWorkspace("sketch");
+      if (selectionId !== null && !selectionId.startsWith("datum:")) setSelectedId(selectionId);
+      return;
+    }
     if (commandId === "sketch.finish") { switchWorkspace("part"); return; }
     if (commandId === "sketch.select-profile" || commandId === "sketch.select-curve" || commandId === "sketch.select-connected" || commandId === "sketch.select-tangent") {
       if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
@@ -2225,10 +2122,11 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     const listener = (event: KeyboardEvent): void => {
       const sketch = projectRef.current.activeWorkspace === "sketch";
-      if (masterCartOpen || !(isThreeDimensional || sketch) || isEditableTarget(event.target) || globalThis.document.querySelector('[role="dialog"]') !== null) return;
+      // The sketch canvas owns its own keyboard model (L, R, C, A, D, T, O, X, F, Esc, Delete...), so the 3D shortcuts stand aside.
+      if (sketch || masterCartOpen || !isThreeDimensional || isEditableTarget(event.target) || globalThis.document.querySelector('[role="dialog"]') !== null) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const key = event.key.toLowerCase();
-      if (key === "f") { if (sketch) setStatusText("Sketch fit is already bounded to all visible entities."); else fitViewportRef.current(); return; }
+      if (key === "f") { fitViewportRef.current(); return; }
       if (key === "1") setViewportOrientation("front");
       if (key === "2") setViewportOrientation("top");
       if (key === "3") setViewportOrientation("right");
@@ -2236,7 +2134,7 @@ export function App(): React.JSX.Element {
       if (key === "v") setViewportNavigation("select");
       if (key === "o") setViewportNavigation("orbit");
       if (key === "p") setViewportNavigation("pan");
-      if (key === "m" && !sketch) setViewportNavigation("measure");
+      if (key === "m") setViewportNavigation("measure");
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
@@ -2439,7 +2337,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} onExtrudeProfiles={extrudeSketchProfiles} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} onFit={() => setStatusText("Sketch fit is already bounded to all visible entities.")} onHome={homeViewport} onContextMenu={openContextMenu} working={status === "working"} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} onCreateSolid={(profileId, plane, operation, valueMm, edge) => void createGeneralSolid(profileId, plane, operation, valueMm, edge)} activePlane={activeSketchPlane} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openContextMenu} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} onCreateSolid={(profileId, plane, operation, valueMm, edge) => void createGeneralSolid(profileId, plane, operation, valueMm, edge)} onChangePlane={() => setSketchPlaneDialogOpen(true)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl
@@ -2527,7 +2425,7 @@ export function App(): React.JSX.Element {
     {designHealthOpen && <DesignHealthCenter report={designHealth} onClose={() => setDesignHealthOpen(false)} onWorkspace={switchWorkspace} />}
     <SaveProjectDialog open={saveDialogMode !== undefined} mode={saveDialogMode ?? "save-as"} projectName={project.name} workspaceStatus={fileWorkspaceStatus} onConfirm={(fileName) => void confirmSaveDialog(fileName)} onClose={() => setSaveDialogMode(undefined)} />
     <NewProjectDialog open={newDialogOpen} onConfirm={(name, workspace) => { setNewDialogOpen(false); void createNewProject(name, workspace); }} onClose={() => setNewDialogOpen(false)} />
-    <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={activeSketchPlane} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
+    <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
   </main>;
 }
 

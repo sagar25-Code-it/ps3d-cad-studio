@@ -1,4 +1,5 @@
 import {
+  constraintFit,
   failure,
   type SketchEntity,
   type Vec2,
@@ -118,7 +119,7 @@ export function analyzeWorkbenchSketch(sketch: WorkbenchSketch): SketchAnalysis 
     }
     if (constraint.kind === "concentric") {
       const entities = constraint.entityIds.map((id) => sketch.entities.find((candidate) => candidate.id === id));
-      if (entities.length !== 2 || entities.some((entity) => entity?.kind !== "circle")) conflicts.push(`${constraint.id} requires two circles.`);
+      if (!constraintFit("concentric", entities.map((entity) => entity?.kind)).ok) conflicts.push(`${constraint.id} requires two circles or arcs.`);
       reduce(freedom, constraint.entityIds, 2);
       applied += 1;
       continue;
@@ -167,19 +168,28 @@ export function analyzeWorkbenchSketch(sketch: WorkbenchSketch): SketchAnalysis 
   };
 }
 
-export function snapSketchPoint(point: Vec2, sketch: WorkbenchSketch): SnapResult {
+export interface SnapOptions {
+  /** Snap reach in millimetres; the canvas passes a fixed number of screen pixels so it feels the same at every zoom. */
+  readonly toleranceMm?: number;
+  /** Grid spacing in millimetres to snap to; the canvas passes the grid step currently drawn. */
+  readonly gridMm?: number;
+}
+
+export function snapSketchPoint(point: Vec2, sketch: WorkbenchSketch, options: SnapOptions = {}): SnapResult {
+  const toleranceMm = options.toleranceMm ?? sketch.snapToleranceMm;
+  const gridMm = options.gridMm ?? sketch.gridMm;
   let closest: { id: string; point: Vec2; distance: number } | undefined;
   for (const entity of sketch.entities) {
     if (entity.visible === false) continue;
     for (const candidate of entityPoints(entity)) {
       const distance = Math.hypot(candidate[0] - point[0], candidate[1] - point[1]);
-      if (distance <= sketch.snapToleranceMm && (closest === undefined || distance < closest.distance)) closest = { id: entity.id, point: candidate, distance };
+      if (distance <= toleranceMm && (closest === undefined || distance < closest.distance)) closest = { id: entity.id, point: candidate, distance };
     }
   }
   if (closest !== undefined) return { point: closest.point, snapped: true, kind: "endpoint", targetId: closest.id };
-  const gridPoint: Vec2 = [roundTo(point[0], sketch.gridMm), roundTo(point[1], sketch.gridMm)];
+  const gridPoint: Vec2 = [roundTo(point[0], gridMm), roundTo(point[1], gridMm)];
   const gridDistance = Math.hypot(gridPoint[0] - point[0], gridPoint[1] - point[1]);
-  return gridDistance <= sketch.snapToleranceMm
+  return gridDistance <= toleranceMm
     ? { point: gridPoint, snapped: true, kind: "grid" }
     : { point, snapped: false, kind: "none" };
 }
@@ -284,7 +294,9 @@ export function sketchToolLabel(tool: SketchTool): string {
  */
 export function detectSketchProfiles(sketch: WorkbenchSketch): readonly SketchProfile[] {
   const profiles: SketchProfile[] = [];
-  for (const entity of sketch.entities) {
+  // Hidden geometry never bounds a profile: what you cannot see must not become a solid or a hole.
+  const shown = sketch.entities.filter((entity) => entity.visible !== false);
+  for (const entity of shown) {
     if (entity.construction) continue;
     if (entity.kind === "rectangle") {
       profiles.push({
@@ -305,7 +317,7 @@ export function detectSketchProfiles(sketch: WorkbenchSketch): readonly SketchPr
       });
     }
   }
-  profiles.push(...detectCurveLoops(sketch.entities.filter((entity): entity is Extract<SketchEntity, { kind: "line" | "arc" | "spline" }> => (entity.kind === "line" || entity.kind === "arc" || entity.kind === "spline") && !entity.construction)));
+  profiles.push(...detectCurveLoops(shown.filter((entity): entity is Extract<SketchEntity, { kind: "line" | "arc" | "spline" }> => (entity.kind === "line" || entity.kind === "arc" || entity.kind === "spline") && !entity.construction)));
   return profiles.sort((left, right) => right.areaMm2 - left.areaMm2 || left.id.localeCompare(right.id));
 }
 
@@ -437,8 +449,34 @@ export function resolveQualifiedExtrusion(
   };
 }
 
+/**
+ * The true bounding box of an entity: circles reach centre ± radius, arcs and splines follow their sampled curve
+ * (defining points alone under-report a bulging arc or a wide circle), rectangles use their rotated corners.
+ */
+export function entityExtents(entity: SketchEntity): { readonly min: Vec2; readonly max: Vec2 } {
+  let points: readonly Vec2[];
+  if (entity.kind === "circle") points = [[entity.center[0] - entity.radiusMm, entity.center[1] - entity.radiusMm], [entity.center[0] + entity.radiusMm, entity.center[1] + entity.radiusMm]];
+  else if (entity.kind === "arc") points = sampleArc(entity.start, entity.mid, entity.end);
+  else if (entity.kind === "spline") points = sampleSpline(entity.fitPoints);
+  else points = entityPoints(entity);
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of points) {
+    if (point[0] < minX) minX = point[0];
+    if (point[0] > maxX) maxX = point[0];
+    if (point[1] < minY) minY = point[1];
+    if (point[1] > maxY) maxY = point[1];
+  }
+  return { min: [minX, minY], max: [maxX, maxY] };
+}
+
 export function sketchBounds(entities: readonly SketchEntity[]): SketchAnalysis["boundsMm"] {
-  const points = entities.flatMap(entityPoints);
+  const points = entities.flatMap((entity) => {
+    const extents = entityExtents(entity);
+    return [extents.min, extents.max];
+  });
   if (points.length === 0) return { min: [-50, -35], max: [50, 35], size: [100, 70] };
   const xs = points.map((point) => point[0]);
   const ys = points.map((point) => point[1]);

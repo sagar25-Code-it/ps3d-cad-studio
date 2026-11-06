@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
 import { CommandIcon } from "./CommandIcon.js";
+import { useDialogFocus } from "./useDialogFocus.js";
 
 interface NewProjectType {
   readonly workspace: WorkspaceId;
@@ -28,26 +29,26 @@ export function NewProjectDialog(props: NewProjectDialogProps): React.JSX.Elemen
   const [name, setName] = useState("Untitled design");
   const [workspace, setWorkspace] = useState<WorkspaceId>("sketch");
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useDialogFocus<HTMLElement>(props.open, props.onClose);
 
+  // Reset only when the dialog opens; a parent re-render must not wipe what the user typed.
   useEffect(() => {
     if (!props.open) return undefined;
     setName("Untitled design");
     setWorkspace("sketch");
-    const frame = window.requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.select(); });
-    const keyboard = (event: KeyboardEvent): void => { if (event.key === "Escape") props.onClose(); };
-    document.addEventListener("keydown", keyboard, true);
-    return () => { window.cancelAnimationFrame(frame); document.removeEventListener("keydown", keyboard, true); };
-  }, [props.open, props.onClose]);
+    const frame = window.requestAnimationFrame(() => inputRef.current?.select());
+    return () => window.cancelAnimationFrame(frame);
+  }, [props.open]);
 
   if (!props.open) return null;
   const trimmed = name.trim().length === 0 ? "Untitled design" : name.trim();
   const selected = NEW_PROJECT_TYPES.find((type) => type.workspace === workspace);
 
   return <div className="dialog-backdrop save-project-backdrop" role="presentation" onMouseDown={props.onClose}>
-    <section className="save-project-dialog new-project-dialog" role="dialog" aria-modal="true" aria-labelledby="new-project-title" onMouseDown={(event) => event.stopPropagation()}>
+    <section ref={dialogRef} tabIndex={-1} className="save-project-dialog new-project-dialog" role="dialog" aria-modal="true" aria-labelledby="new-project-title" onMouseDown={(event) => event.stopPropagation()}>
       <header><span><CommandIcon name="file" /></span><div><small>FILE / NEW DESIGN</small><h2 id="new-project-title">Create a new design</h2></div><button onClick={props.onClose} aria-label="Close New dialog">×</button></header>
       <div className="save-project-content">
-        <label><span>Design name</span><input ref={inputRef} value={name} maxLength={96} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") props.onConfirm(trimmed, workspace); }} /></label>
+        <label><span>Design name</span><input ref={inputRef} data-dialog-initial-focus value={name} maxLength={96} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") props.onConfirm(trimmed, workspace); }} /></label>
         <span className="new-project-label">Start in environment</span>
         <div className="new-project-types" role="radiogroup" aria-label="Starting environment">
           {NEW_PROJECT_TYPES.map((type) => <button key={type.workspace} type="button" role="radio" aria-checked={workspace === type.workspace} className={workspace === type.workspace ? "active" : ""} onClick={() => setWorkspace(type.workspace)}><CommandIcon name={type.icon} /><strong>{type.label}</strong><small>{type.hint}</small></button>)}

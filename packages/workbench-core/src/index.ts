@@ -12,4 +12,5 @@ export * from "./master-cart.js";
 export * from "./part-features.js";
 export * from "./validation.js";
 export * from "./operations.js";
+export * from "./constraint-fit.js";
 export * from "./engineering-intent.js";

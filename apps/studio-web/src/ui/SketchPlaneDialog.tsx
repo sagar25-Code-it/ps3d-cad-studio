@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SketchPlane } from "../general-modeling.js";
 import { CommandIcon } from "./CommandIcon.js";
+import { useDialogFocus } from "./useDialogFocus.js";
 
 interface SketchPlaneOption {
   readonly plane: SketchPlane;
@@ -27,28 +28,30 @@ interface SketchPlaneDialogProps {
 /** Asks which datum plane a new sketch is created on, the way Fusion, SolidWorks, and NX do. */
 export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Element | null {
   const [plane, setPlane] = useState<SketchPlane>(props.initialPlane);
-  const firstRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useDialogFocus<HTMLElement>(props.open, props.onClose);
 
   useEffect(() => {
-    if (!props.open) return undefined;
-    setPlane(props.initialPlane);
-    const frame = window.requestAnimationFrame(() => firstRef.current?.focus());
-    const keyboard = (event: KeyboardEvent): void => { if (event.key === "Escape") props.onClose(); };
-    document.addEventListener("keydown", keyboard, true);
-    return () => { window.cancelAnimationFrame(frame); document.removeEventListener("keydown", keyboard, true); };
-  }, [props.open, props.initialPlane, props.onClose]);
+    if (props.open) setPlane(props.initialPlane);
+  }, [props.open, props.initialPlane]);
 
   if (!props.open) return null;
   const selected = SKETCH_PLANES.find((option) => option.plane === plane) ?? SKETCH_PLANES[0]!;
 
   return <div className="dialog-backdrop save-project-backdrop" role="presentation" onMouseDown={props.onClose}>
-    <section className="save-project-dialog new-project-dialog sketch-plane-dialog" role="dialog" aria-modal="true" aria-labelledby="sketch-plane-title" onMouseDown={(event) => event.stopPropagation()}>
+    <section ref={dialogRef} tabIndex={-1} className="save-project-dialog new-project-dialog sketch-plane-dialog" role="dialog" aria-modal="true" aria-labelledby="sketch-plane-title" onMouseDown={(event) => event.stopPropagation()}>
       <header><span><CommandIcon name="sketch" /></span><div><small>SKETCH / SELECT PLANE</small><h2 id="sketch-plane-title">Which plane do you want to sketch on?</h2></div><button onClick={props.onClose} aria-label="Cancel plane selection">×</button></header>
       <div className="save-project-content">
         <div className="new-project-types sketch-plane-types" role="radiogroup" aria-label="Sketch plane">
           {SKETCH_PLANES.map((option, index) => <button
             key={option.plane}
-            ref={index === 0 ? firstRef : undefined}
+            {...(plane === option.plane ? { "data-dialog-initial-focus": "" } : {})}
+            onKeyDown={(event) => {
+              // Radio-group keys: arrows move the choice, Enter confirms.
+              const current = SKETCH_PLANES.findIndex((candidate) => candidate.plane === plane);
+              if (event.key === "ArrowRight" || event.key === "ArrowDown") { event.preventDefault(); setPlane(SKETCH_PLANES[(current + 1) % SKETCH_PLANES.length]!.plane); }
+              else if (event.key === "ArrowLeft" || event.key === "ArrowUp") { event.preventDefault(); setPlane(SKETCH_PLANES[(current + SKETCH_PLANES.length - 1) % SKETCH_PLANES.length]!.plane); }
+              else if (event.key === "Enter") { event.preventDefault(); props.onConfirm(plane); }
+            }}
             type="button"
             role="radio"
             aria-checked={plane === option.plane}

@@ -75,7 +75,7 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
       <div className="controller-group" aria-label="Navigation mode">
         <span>NAV</span>
         {(["select", "orbit", "pan", "measure"] as const)
-          .filter((mode) => !sketch || mode !== "measure")
+          .filter((mode) => !sketch || (mode !== "measure" && mode !== "orbit"))
           .map((mode) => <button
           key={mode}
           className={props.state.navigationMode === mode ? "active" : ""}
@@ -112,13 +112,12 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
       </>}
     </div>
 
-    <ViewCube state={props.state} onOrientation={props.onOrientation} onViewAngles={props.onViewAngles} />
-    <AxisViewer state={props.state} />
+    {!sketch && <ViewCube state={props.state} onOrientation={props.onOrientation} onViewAngles={props.onViewAngles} />}
+    {!sketch && <AxisViewer state={props.state} />}
 
     <div className="navigation-bar" aria-label="Viewport display controls">
-      <button onClick={props.onHome} title="Fit and return to the isometric home view"><CommandIcon name="home" />Home</button>
+      {!sketch && <button onClick={props.onHome} title="Fit and return to the isometric home view"><CommandIcon name="home" />Home</button>}
       <button onClick={props.onFit} title="Fit all visible geometry (F)"><CommandIcon name="fit" />Fit</button>
-      {sketch && <button onClick={() => props.onOrientation("top")} title="Look normal to the active XY sketch plane"><CommandIcon name="view" />Look At</button>}
       <button className={props.state.gridVisible ? "active" : ""} aria-pressed={props.state.gridVisible} onClick={() => props.onGrid(!props.state.gridVisible)}><CommandIcon name="grid" />Grid</button>
       {!sketch && <button className={props.state.axesVisible ? "active" : ""} aria-pressed={props.state.axesVisible} onClick={() => props.onAxes(!props.state.axesVisible)}><CommandIcon name="axes" />Axes</button>}
       {props.workspace === "part" && <button
@@ -128,7 +127,7 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
         onClick={() => setDisplayOpen((open) => !open)}
         title="Part display style and body color"
       ><CommandIcon name="display" />Display</button>}
-      <span>MMB pan · Shift+MMB orbit · wheel zoom · RMB commands</span>
+      <span>{sketch ? "Wheel zoom · MMB or Space+drag pan · F fit · Esc cancel" : "MMB pan · Shift+MMB orbit · wheel zoom · RMB commands"}</span>
     </div>
 
     {props.workspace === "part" && displayOpen && <aside id="part-display-popover" className="display-popover" aria-label="Part display settings">
@@ -257,9 +256,9 @@ function add3(left: Vec3, right: Vec3): Vec3 { return [left[0] + right[0], left[
 
 function navigationTitle(mode: NavigationMode, sketch: boolean): string {
   if (mode === "orbit") return sketch ? "Drag to orbit the camera around the active sketch plane; geometry remains on XY." : "Left drag or Shift+middle drag to orbit.";
-  if (mode === "pan") return "Left drag to pan; middle drag pans from any mode.";
+  if (mode === "pan") return sketch ? "Left drag pans the sketch (P). Middle drag or Space+drag pans from any tool." : "Left drag to pan; middle drag pans from any mode.";
   if (mode === "measure") return "Pick two model points for XYZ delta and distance.";
-  return "Click visible geometry to select it; right-click opens contextual commands.";
+  return sketch ? "Click a curve to select it, or drag a box: left to right takes what it fully encloses, right to left takes anything it touches. Right-click opens commands." : "Click visible geometry to select it; right-click opens contextual commands.";
 }
 
 function subtract(right: readonly [number, number, number], left: readonly [number, number, number]): readonly [number, number, number] {

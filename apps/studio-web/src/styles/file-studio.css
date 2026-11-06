@@ -105,6 +105,8 @@
 .workspace-permission i { width: 7px; height: 7px; border-radius: 50%; background: #d39520; }
 .workspace-permission.ready i { background: #17a37a; box-shadow: 0 0 8px #17a37a88; }
 
+/* Base modal overlay shared by the New, Save and Sketch-plane dialogs (it was missing, so they rendered inline at the bottom of the page). */
+.dialog-backdrop { position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; padding: 1.25rem; background: rgba(2, 7, 13, 0.72); backdrop-filter: blur(6px); }
 .save-project-backdrop { z-index: 160; }
 .save-project-dialog { width: min(520px, calc(100vw - 2rem)); overflow: hidden; border: 1px solid #8c9aa5; border-radius: 8px; color: #35424a; background: #f7f8f9; box-shadow: 0 28px 90px #000a; }
 .save-project-dialog > header { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 0.65rem; padding: 0.75rem; border-bottom: 1px solid #9ab1c0; color: #eef8fb; background: linear-gradient(110deg, #103b60, #17699e); }
