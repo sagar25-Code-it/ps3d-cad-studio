@@ -69,3 +69,11 @@
 .sketch-plane-face span { display: grid; min-width: 0; }
 .sketch-plane-face strong { font-size: 12.5px; }
 .sketch-plane-face small { color: #5d6a73; font-size: 12px; }
+
+/* Menubar dropdowns: section dividers and disabled items that still explain themselves. */
+.cad-menu-popover button.has-divider { margin-top: 0.3rem; border-top: 1px solid #dfe3e7; border-radius: 0 0 4px 4px; padding-top: 0.55rem; }
+.cad-menu-popover button:disabled { opacity: 0.5; cursor: default; }
+
+/* Command palette: the gated-commands toggle in the footer. */
+.palette-unavailable-toggle { display: inline-flex; align-items: center; gap: 0.35rem; color: inherit; font-size: inherit; cursor: pointer; }
+.palette-unavailable-toggle input { margin: 0; accent-color: #1f6fb6; }

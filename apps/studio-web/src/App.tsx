@@ -19,6 +19,7 @@ import {
   defaultElectromechanicalMappings,
   ELECTROMECHANICAL_CATALOG_REVISION,
   axisAlignedPlanarFaces,
+  featureOfBody,
   isElectricalSheetPositionAvailable,
   parseWorkbenchProjectText,
   sketchPlaneName,
@@ -110,6 +111,7 @@ import { WorkbenchRibbon } from "./ui/WorkbenchRibbon.js";
 import { SaveProjectDialog } from "./ui/SaveProjectDialog.js";
 import { NewProjectDialog } from "./ui/NewProjectDialog.js";
 import { SketchPlaneDialog, type SketchFaceOption } from "./ui/SketchPlaneDialog.js";
+import { buildWorkbenchMenus } from "./ui/menu-model.js";
 import { ProjectTree } from "./ui/ProjectTree.js";
 import { CommandPalette } from "./ui/CommandPalette.js";
 import { ExchangeCenter } from "./ui/ExchangeCenter.js";
@@ -188,6 +190,7 @@ const SHORTCUT_GROUPS: readonly { readonly title: string; readonly items: readon
   {
     title: "File & history",
     items: [
+      { keys: ["S"], label: "Command search (outside dialogs and text fields)" },
       { keys: ["Ctrl", "K"], label: "Open the command palette" },
       { keys: ["Ctrl", "S"], label: "Save" },
       { keys: ["Ctrl", "Shift", "S"], label: "Save as" },
@@ -2352,6 +2355,12 @@ export function App(): React.JSX.Element {
         event.preventDefault();
         setShortcutsOpen(true);
       }
+      // Fusion's S: the command search, anywhere a dialog or menu does not own the keyboard. No sketch tool uses S.
+      if (event.key.toLowerCase() === "s" && !event.shiftKey) {
+        if (globalThis.document.querySelector('[role="dialog"], [role="menu"]') !== null) return;
+        event.preventDefault();
+        setPaletteOpen(true);
+      }
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
@@ -2396,10 +2405,76 @@ export function App(): React.JSX.Element {
   };
   const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo });
 
+  // What the current selection means to the menus: the timeline feature it resolves to, and whether it can be deleted.
+  const selectedTimelineFeature = ((): DesignFeature | undefined => {
+    if (selectedId === null) return undefined;
+    const history = designOf(project);
+    return history.features.find((feature) => feature.id === selectedId) ?? featureOfBody(history, selectedId);
+  })();
+  const previewBodySelected = selectedId?.startsWith("part-body:") === true;
+  const selectedGeneralBody = (project.part.generalBodies ?? []).find((body) => body.id === selectedId);
+  const openCombineDialog = (): void => {
+    const bodies = projectRef.current.part.generalBodies ?? [];
+    if (bodies.length < 2) { setStatusText("Combine needs two solid bodies. Create them with Make solid in the Sketch workspace."); return; }
+    setCombineRequest({ targetId: bodies.some((body) => body.id === selectedId) ? selectedId ?? undefined : undefined, mode: "join" });
+  };
+  const openSketchCreateSolid = (): void => {
+    if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
+    setSketchOptionsRevealRequest((request) => request + 1);
+    setStatusText("Create solid is in the sketch palette: pick Extrude or Revolve, the result (new body, join or cut), and the distance or extent.");
+  };
+  const deleteSelection = (): void => {
+    if (selectedTimelineFeature !== undefined) { timelineOperation({ kind: "delete-design-feature", featureId: selectedTimelineFeature.id }, () => setSelectedId(null)); return; }
+    if (previewBodySelected && selectedId !== null) { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId: selectedId })) setSelectedId(null); return; }
+    if (selectedGeneralBody !== undefined) { if (applyProjectOperation({ kind: "delete-general-body", bodyId: selectedGeneralBody.id })) setSelectedId(null); }
+  };
+  const workbenchMenus = buildWorkbenchMenus({
+    workspace: project.activeWorkspace,
+    masterCartOpen,
+    renderStudioOpen,
+    working: status === "working",
+    gridVisible: viewportState.gridVisible,
+    canUndo,
+    canRedo,
+    generalBodyCount: (project.part.generalBodies ?? []).length,
+    previewBodySelected,
+    ...(selectedTimelineFeature === undefined ? {} : { selectedFeature: { name: selectedTimelineFeature.name, suppressed: selectedTimelineFeature.suppressed, kind: selectedTimelineFeature.kind } }),
+    selectionDeletable: selectedTimelineFeature !== undefined || previewBodySelected || selectedGeneralBody !== undefined
+  }, {
+    onUndo: () => historyActionRef.current.undo(),
+    onRedo: () => historyActionRef.current.redo(),
+    onCommandPalette: () => setPaletteOpen(true),
+    onNewSketch: () => { setSketchPlaneDialogMode("new"); setSketchPlaneDialogOpen(true); },
+    onCreateSolidFromSketch: openSketchCreateSolid,
+    onCreatePrimitive: createPartPreviewBody,
+    onCombine: openCombineDialog,
+    onInsertToAssembly: insertCurrentPartIntoAssembly,
+    onMasterCart: openMasterCart,
+    onRenderStudio: openRenderStudio,
+    onEditSelectedFeature: () => { if (selectedTimelineFeature !== undefined) editTimelineFeature(selectedTimelineFeature); },
+    onToggleSuppressSelected: () => { if (selectedTimelineFeature !== undefined) timelineOperation({ kind: "set-design-feature-suppressed", featureId: selectedTimelineFeature.id, suppressed: !selectedTimelineFeature.suppressed }); },
+    onDeleteSelected: deleteSelection,
+    onMoveSelectedBody: () => runSelectedPartPreviewAction("edit-transform", "Move Body"),
+    onResizeSelectedBody: () => runSelectedPartPreviewAction("edit-size", "Scale Body"),
+    onFit: fitViewport,
+    onHome: homeViewport,
+    onToggleGrid: () => setViewportGrid(!viewportState.gridVisible),
+    onWorkspace: requestWorkspace,
+    onDesignHealth: openDesignHealth,
+    onMeasure: () => setViewportNavigation("measure"),
+    onExchange: () => setExchangeOpen(true),
+    onAccess: () => window.location.assign("/access"),
+    onExportStl: () => void exportStl(),
+    onPlateJson: () => void downloadNative(),
+    onLearning: () => window.location.assign("/learn"),
+    onShortcuts: () => setShortcutsOpen(true)
+  });
+
   const showTimeline = !renderStudioOpen && !masterCartOpen && (project.activeWorkspace === "sketch" || project.activeWorkspace === "part");
   return <main className="studio-app" data-timeline={showTimeline ? "on" : "off"} data-workspace={renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace} aria-busy={status === "working"}>
     <WorkbenchHeader
       project={project}
+      menus={workbenchMenus}
       masterCartOpen={masterCartOpen}
       renderStudioOpen={renderStudioOpen}
       status={status}
@@ -2447,14 +2522,14 @@ export function App(): React.JSX.Element {
       selectedId={selectedId}
       onSketchTool={(tool) => activateSketchTool(tool, "in the top ribbon")}
       onSolveMates={() => applyProjectOperation({ kind: "solve-assembly-mates" })}
-      onCombine={() => { const bodies = projectRef.current.part.generalBodies ?? []; if (bodies.length < 2) { setStatusText("Combine needs two solid bodies. Create them with Make solid in the Sketch workspace."); return; } setCombineRequest({ targetId: bodies.some((body) => body.id === selectedId) ? selectedId ?? undefined : undefined, mode: "join" }); }}
+      onCombine={openCombineDialog}
       onSketchDimension={() => activateSketchDimension("in the top ribbon")}
       sketchEditTool={sketchEditTool}
       sketchShowMovable={sketchShowMovable}
       sketchCheckOpen={sketchCheckOpen}
       onSketchEditTool={(tool) => activateSketchEdit(tool, "in the top ribbon")}
       onSketchCommand={(command) => runSketchCommand(command, "in the top ribbon")}
-      onOpenSketchOptions={() => { if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch"); setSketchOptionsRevealRequest((request) => request + 1); setStatusText("Sketch palette: grid, snap, profile shading, dimensions, constraints, and construction toggles are in the right-side panel."); }}
+      onOpenSketchOptions={openSketchCreateSolid}
       onToggleSketchEntityVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })}
       onFinishSketch={() => void finishSketch()}
       onNewSketch={() => { setSketchPlaneDialogMode("new"); setSketchPlaneDialogOpen(true); }}

@@ -6,6 +6,7 @@ import type { PsCadWorkspaceStatus, RecentProjectEntry } from "../file-workspace
 import { BrandLogo } from "./BrandLogo.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { FileApplicationMenu } from "./FileApplicationMenu.js";
+import type { WorkbenchMenu, WorkbenchMenuItem } from "./menu-model.js";
 
 const WORKSPACES: readonly { id: WorkspaceId; label: string; icon: string }[] = [
   { id: "sketch", label: "Sketch", icon: "sketch" },
@@ -20,6 +21,8 @@ const WORKSPACES: readonly { id: WorkspaceId; label: string; icon: string }[] = 
 
 interface WorkbenchHeaderProps {
   readonly project: WorkbenchProject;
+  /** The application menus, built by `buildWorkbenchMenus` from the live project state. */
+  readonly menus: readonly WorkbenchMenu[];
   readonly masterCartOpen: boolean;
   readonly renderStudioOpen: boolean;
   readonly status: "starting" | "ready" | "working" | "error";
@@ -58,26 +61,13 @@ interface WorkbenchHeaderProps {
   readonly designHealthScore: number;
 }
 
-interface MenuItem {
-  readonly label: string;
-  readonly icon: string;
-  readonly shortcut?: string;
-  readonly disabled?: boolean;
-  readonly action: () => void;
-}
-
-interface MenuDefinition {
-  readonly id: string;
-  readonly label: string;
-  readonly icon: string;
-  readonly items: readonly MenuItem[];
-}
-
 export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLElement>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
+  const menus = props.menus;
   const is3d = !props.masterCartOpen && !props.renderStudioOpen && (props.project.activeWorkspace === "part" || props.project.activeWorkspace === "assembly" || props.project.activeWorkspace === "surface" || props.project.activeWorkspace === "vehicle");
-  const gridToggleEnabled = is3d || (!props.masterCartOpen && !props.renderStudioOpen && props.project.activeWorkspace === "sketch");
 
   useEffect(() => {
     if (openMenu === null || openMenu === "file") return;
@@ -88,52 +78,38 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
     return () => document.removeEventListener("mousedown", closeOutside);
   }, [openMenu]);
 
-  const menus: readonly MenuDefinition[] = [
-    { id: "edit", label: "Edit", icon: "command", items: [
-      { label: "Undo", icon: "undo", shortcut: "Ctrl+Z", disabled: !props.canUndo || props.status === "working", action: props.onUndo },
-      { label: "Redo", icon: "redo", shortcut: "Ctrl+Shift+Z", disabled: !props.canRedo || props.status === "working", action: props.onRedo },
-      { label: "Find command", icon: "command", shortcut: "Ctrl+K", action: props.onCommandPalette }
-    ] },
-    { id: "create", label: "Create", icon: "insert", items: [
-      { label: "Sketch tools", icon: "sketch", action: () => props.onWorkspace("sketch") },
-      { label: "Part features", icon: "extrude", action: () => props.onWorkspace("part") },
-      { label: "Assembly components", icon: "assembly", action: () => props.onWorkspace("assembly") },
-      { label: "Master Cart component library", icon: "master-cart", action: props.onMasterCart },
-      { label: "Render Studio", icon: "appearance", action: props.onRenderStudio },
-      { label: "Surface tools", icon: "surface", action: () => props.onWorkspace("surface") },
-      { label: "Electrical schematic", icon: "electrical", action: () => props.onWorkspace("electrical") },
-      { label: "Vehicle engineering", icon: "vehicle", action: () => props.onWorkspace("vehicle") }
-    ] },
-    { id: "view", label: "View", icon: "view", items: [
-      { label: "Fit canvas", icon: "fit", shortcut: "F", disabled: !is3d, action: props.onFit },
-      { label: "Home view", icon: "home", disabled: !is3d, action: props.onHome },
-      { label: props.gridVisible ? "Hide grid" : "Show grid", icon: "grid", disabled: !gridToggleEnabled, action: props.onToggleGrid },
-      { label: "Render Studio", icon: "appearance", action: props.onRenderStudio },
-      { label: "Drawing workspace", icon: "drawing", action: () => props.onWorkspace("drawing") },
-      { label: "Electrical workspace", icon: "electrical", action: () => props.onWorkspace("electrical") },
-      { label: "Vehicle workspace", icon: "vehicle", action: () => props.onWorkspace("vehicle") }
-    ] },
-    { id: "inspect", label: "Inspect", icon: "inspect", items: [
-      { label: "Design Health Center", icon: "inspect", action: props.onDesignHealth },
-      { label: "Measure points", icon: "measure", shortcut: "M", disabled: !is3d, action: props.onMeasure },
-      { label: "Fit current model", icon: "fit", disabled: !is3d, action: props.onFit },
-      { label: "Capability catalog", icon: "command", shortcut: "Ctrl+K", action: props.onCommandPalette }
-    ] },
-    { id: "automate", label: "Automate", icon: "automate", items: [
-      { label: "MCP workspace", icon: "mcp", action: () => props.onWorkspace("automate") },
-      { label: "MCP account and tokens", icon: "mcp", action: props.onAccess },
-      { label: "Search automation commands", icon: "command", action: props.onCommandPalette }
-    ] },
-    { id: "help", label: "Help", icon: "help", items: [
-      { label: "Learning Center and PDF manual", icon: "help", action: props.onLearning },
-      { label: "Design readiness and dependencies", icon: "inspect", action: props.onDesignHealth },
-      { label: "Command and shortcut guide", icon: "command", shortcut: "Ctrl+K", action: props.onCommandPalette }
-    ] }
-  ];
+  // An opened dropdown moves focus to its first usable item, so arrows work at once.
+  useEffect(() => {
+    if (openMenu === null || openMenu === "file") return;
+    popoverRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')?.focus();
+  }, [openMenu]);
 
-  const runMenuItem = (item: MenuItem): void => {
+  const runMenuItem = (item: WorkbenchMenuItem): void => {
     setOpenMenu(null);
+    triggerRefs.current.get(openMenu ?? "")?.focus();
     item.action();
+  };
+
+  /** Left and right arrows move across the dropdown menus (the File dialog stays on its own). */
+  const stepMenu = (delta: number): void => {
+    if (openMenu === null || openMenu === "file") return;
+    const ids = menus.map((menu) => menu.id);
+    const index = ids.indexOf(openMenu);
+    if (index < 0) return;
+    setOpenMenu(ids[(index + delta + ids.length) % ids.length]!);
+  };
+
+  const onPopoverKeyDown = (event: React.KeyboardEvent): void => {
+    const nodes = [...(popoverRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)') ?? [])];
+    if (nodes.length === 0) return;
+    const current = nodes.findIndex((node) => node === document.activeElement);
+    if (event.key === "ArrowDown") { event.preventDefault(); nodes[(current + 1) % nodes.length]!.focus(); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); nodes[(current - 1 + nodes.length) % nodes.length]!.focus(); }
+    else if (event.key === "Home") { event.preventDefault(); nodes[0]!.focus(); }
+    else if (event.key === "End") { event.preventDefault(); nodes[nodes.length - 1]!.focus(); }
+    else if (event.key === "ArrowRight") { event.preventDefault(); stepMenu(1); }
+    else if (event.key === "ArrowLeft") { event.preventDefault(); stepMenu(-1); }
+    else if (event.key === "Tab") { setOpenMenu(null); }
   };
 
   return <>
@@ -158,7 +134,7 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
         <button className="primary header-icon-button" onClick={props.onSave} aria-label="Save PS3D project locally" title="Save PS3D project locally"><CommandIcon name="save" /><span>Save local</span></button>
       </div>
     </header>
-    <nav className="cad-menu-bar" aria-label="Application menus" ref={menuRef} onKeyDown={(event) => { if (event.key === "Escape") setOpenMenu(null); }}>
+    <nav className="cad-menu-bar" aria-label="Application menus" ref={menuRef} onKeyDown={(event) => { if (event.key === "Escape" && openMenu !== null && openMenu !== "file") { event.stopPropagation(); const trigger = triggerRefs.current.get(openMenu); setOpenMenu(null); trigger?.focus(); } }}>
       <div className="cad-menu-groups">
         <div className="cad-menu">
           <button
@@ -170,13 +146,23 @@ export function WorkbenchHeader(props: WorkbenchHeaderProps): React.JSX.Element 
         </div>
         {menus.map((menu) => <div className="cad-menu" key={menu.id}>
           <button
+            ref={(node) => { if (node === null) triggerRefs.current.delete(menu.id); else triggerRefs.current.set(menu.id, node); }}
             className={openMenu === menu.id ? "active" : ""}
             aria-haspopup="menu"
             aria-expanded={openMenu === menu.id}
             onClick={() => setOpenMenu((current) => current === menu.id ? null : menu.id)}
+            onMouseEnter={() => { if (openMenu !== null && openMenu !== "file" && openMenu !== menu.id) setOpenMenu(menu.id); }}
+            onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); setOpenMenu(menu.id); } }}
           ><CommandIcon name={menu.icon} />{menu.label}<span aria-hidden="true">⌄</span></button>
-          {openMenu === menu.id && <div className="cad-menu-popover" role="menu" aria-label={`${menu.label} menu`}>
-            {menu.items.map((item) => <button key={item.label} role="menuitem" disabled={item.disabled} onClick={() => runMenuItem(item)}>
+          {openMenu === menu.id && <div className="cad-menu-popover" role="menu" aria-label={`${menu.label} menu`} ref={popoverRef} onKeyDown={onPopoverKeyDown}>
+            {menu.items.map((item) => <button
+              key={item.id}
+              role="menuitem"
+              className={item.divider === true ? "has-divider" : ""}
+              disabled={item.disabled}
+              {...(item.hint === undefined ? {} : { title: item.hint })}
+              onClick={() => runMenuItem(item)}
+            >
               <span className="menu-item-icon"><CommandIcon name={item.icon} /></span>
               <span>{item.label}</span>
               {item.shortcut !== undefined && <kbd>{item.shortcut}</kbd>}

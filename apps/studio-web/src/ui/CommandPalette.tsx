@@ -25,6 +25,7 @@ interface CommandPaletteProps {
 export function CommandPalette({ open, workspace, onClose, onCommand }: CommandPaletteProps): React.JSX.Element | null {
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<"all" | WorkspaceId>("all");
+  const [showUnavailable, setShowUnavailable] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const dialogRef = useDialogFocus<HTMLElement>(open, onClose);
 
@@ -32,10 +33,11 @@ export function CommandPalette({ open, workspace, onClose, onCommand }: CommandP
     if (!open) return;
     setQuery("");
     setScope(workspace);
+    setShowUnavailable(false);
     setActiveIndex(0);
   }, [open, workspace]);
 
-  const filtered = useMemo(() => {
+  const matching = useMemo(() => {
     const queryTokens = query.trim().toLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
     return CAD_COMMANDS.filter((command) => {
       if (scope !== "all" && command.workspace !== scope) return false;
@@ -48,8 +50,11 @@ export function CommandPalette({ open, workspace, onClose, onCommand }: CommandP
       return queryTokens.every((token) => searchTokens.some((candidate) => candidate.startsWith(token)));
     });
   }, [query, scope]);
+  // Runnable commands first-class: gated ones are hidden until asked for, so the list is what the app can actually do.
+  const filtered = useMemo(() => showUnavailable ? matching : matching.filter((command) => command.level !== "unavailable"), [matching, showUnavailable]);
+  const hiddenCount = matching.length - filtered.length;
 
-  useEffect(() => { setActiveIndex(0); }, [query, scope]);
+  useEffect(() => { setActiveIndex(0); }, [query, scope, showUnavailable]);
   if (!open) return null;
 
   const execute = (command: CadCommandRecord): void => {
@@ -110,11 +115,16 @@ export function CommandPalette({ open, workspace, onClose, onCommand }: CommandP
             <span><strong>{command.name}</strong><small>{command.description}</small><em><b className={`command-level ${command.level}`}>{command.level}</b>{command.group}{command.shortcut === undefined ? "" : ` · ${command.shortcut}`}</em></span>
             <kbd>{command.shortcut ?? "↵"}</kbd>
           </button>)}
-          {filtered.length === 0 && <p><CommandIcon name="inspect" />No bounded command matches that search.</p>}
+          {filtered.length === 0 && <p><CommandIcon name="inspect" />{hiddenCount === 0 ? "No bounded command matches that search." : `No runnable command matches; ${hiddenCount} gated ${hiddenCount === 1 ? "command" : "commands"} hidden.`}</p>}
         </div>
         <CommandGuide command={filtered[activeIndex]} onRun={execute} />
       </div>
-      <footer><span><strong>{filtered.length}</strong> of {CAD_COMMANDS.length} commands</span><span>↑ ↓ inspect · Enter run · double-click run</span><span>Capability state is explicit</span><button onClick={onClose}>Esc close</button></footer>
+      <footer>
+        <span><strong>{filtered.length}</strong> of {CAD_COMMANDS.length} commands</span>
+        <label className="palette-unavailable-toggle"><input type="checkbox" checked={showUnavailable} onChange={(event) => setShowUnavailable(event.target.checked)} />Show gated ({hiddenCount === 0 && !showUnavailable ? "none here" : showUnavailable ? "shown" : hiddenCount})</label>
+        <span>↑ ↓ inspect · Enter run · double-click run</span>
+        <button onClick={onClose}>Esc close</button>
+      </footer>
     </section>
   </div>;
 }
