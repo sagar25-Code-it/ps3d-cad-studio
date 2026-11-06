@@ -16,12 +16,17 @@ export type SketchHotkeyAction =
   | { readonly kind: "select-tool" }
   | { readonly kind: "cancel-points" }
   | { readonly kind: "undo-point" }
+  | { readonly kind: "exit-pick" }
   | { readonly kind: "exit-dimension" }
   | { readonly kind: "exit-edit-tool" }
   | { readonly kind: "clear-selection" }
   | { readonly kind: "delete-selection" }
   | { readonly kind: "finish" }
-  | { readonly kind: "select-all" };
+  | { readonly kind: "select-all" }
+  /** A digit, point or minus pressed while typed-input fields are showing: start typing into the first field. */
+  | { readonly kind: "type-value"; readonly key: string }
+  /** Tab while typed-input fields are showing: move the focus into them. */
+  | { readonly kind: "focus-dynamic" };
 
 export interface SketchHotkeyInput {
   readonly key: string;
@@ -40,6 +45,10 @@ export interface SketchHotkeyContext {
   readonly curveSelectionCount: number;
   readonly dimensionMode: boolean;
   readonly editToolActive: boolean;
+  /** Picking the points of a Coincident or Midpoint relation on the canvas. */
+  readonly pickingRelation: boolean;
+  /** How many typed-input fields (length, angle, width...) the canvas is showing next to the cursor. */
+  readonly dynamicFieldCount: number;
 }
 
 const LETTER_TOOLS: Readonly<Record<string, Exclude<SketchTool, "select">>> = {
@@ -57,6 +66,7 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
   if (key === "Escape") {
     // Escape backs out one level at a time: points being placed, then a dimension or edit tool, then the drawing tool, then the selection.
     if (context.pendingPoints > 0) return { kind: "cancel-points" };
+    if (context.pickingRelation) return { kind: "exit-pick" };
     if (context.dimensionMode) return { kind: "exit-dimension" };
     if (context.editToolActive) return { kind: "exit-edit-tool" };
     if (context.tool !== "select") return { kind: "select-tool" };
@@ -72,6 +82,8 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
     return context.curveSelectionCount > 0 ? { kind: "delete-selection" } : undefined;
   }
   if (key === "Enter") return context.tool === "spline" && context.pendingPoints >= 3 ? { kind: "finish" } : undefined;
+  if (key === "Tab") return context.dynamicFieldCount > 0 && !input.shift ? { kind: "focus-dynamic" } : undefined;
+  if (context.dynamicFieldCount > 0 && /^[0-9.,-]$/.test(input.key)) return { kind: "type-value", key: input.key };
 
   if (input.shift) return undefined;
   const tool = LETTER_TOOLS[key];

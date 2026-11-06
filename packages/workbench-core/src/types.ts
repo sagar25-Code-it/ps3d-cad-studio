@@ -157,10 +157,19 @@ export type SketchConstraintKind =
   | "distance"
   | "fixed";
 
+/** Which defining point of an entity a point-level relation (Coincident, Midpoint) refers to. */
+export const SKETCH_POINT_REFS = ["start", "end", "mid", "center", "self"] as const;
+export type SketchPointRef = (typeof SKETCH_POINT_REFS)[number];
+
 export interface WorkbenchSketchConstraint {
   readonly id: string;
   readonly kind: SketchConstraintKind;
   readonly entityIds: readonly string[];
+  /**
+   * Coincident and Midpoint only: the defining point each referenced entity contributes, in the same order as
+   * `entityIds` (a Midpoint names only the point's owner; its second entity is the whole line).
+   */
+  readonly points?: readonly SketchPointRef[];
   readonly valueMm?: number;
   readonly dimension?: "length" | "width" | "height" | "radius";
   /** A relaxed constraint stays recorded but is ignored by the solver and the degree-of-freedom estimate. */

@@ -3,6 +3,7 @@ import {
   WORKBENCH_SCHEMA_VERSION,
   ELECTROMECHANICAL_CATALOG_REVISION,
   SKETCH_DATUM_PLANES,
+  SKETCH_POINT_REFS,
   isElectricalSheetPositionAvailable,
   type AssemblyIntent,
   type AssemblyMate,
@@ -254,9 +255,16 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   const hasValue = Object.hasOwn(value, "valueMm");
   const hasDimension = Object.hasOwn(value, "dimension");
   const hasSuppressed = Object.hasOwn(value, "suppressed");
-  const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : [])];
+  const hasPoints = Object.hasOwn(value, "points");
+  const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : []), ...(hasPoints ? ["points"] : [])];
   if (!exactKeys(value, expectedKeys) || (hasDimension && !hasValue) || (hasSuppressed && typeof value.suppressed !== "boolean")) return false;
   if (hasDimension && !["length", "width", "height", "radius"].includes(String(value.dimension))) return false;
+  if (hasPoints) {
+    // Only point-level relations name defining points, and each name must be a known point reference.
+    const points = value.points;
+    if ((value.kind !== "coincident" && value.kind !== "midpoint") || !Array.isArray(points) || points.length < 1 || points.length > value.entityIds.length
+      || points.some((point) => !(SKETCH_POINT_REFS as readonly unknown[]).includes(point))) return false;
+  }
   return !hasValue || finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, 20_000);
 }
 

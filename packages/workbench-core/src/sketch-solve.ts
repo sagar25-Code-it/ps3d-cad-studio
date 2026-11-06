@@ -8,7 +8,7 @@ import type {
   SketchGeometry
 } from "../../parametric-sketch-core/src/types.js";
 import { constraintFit } from "./constraint-fit.js";
-import type { SketchEntity, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
+import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 
 /** A constraint the analytic solver could not enforce, kept on the sketch as design intent. */
 export interface UnsolvedConstraint {
@@ -139,8 +139,14 @@ interface ArcFrame {
   readonly radiusMm: number;
 }
 
+/** The solver names a line's middle "midpoint" and a point entity's location "self"; everything else matches. */
+function solverSelector(ref: SketchPointRef | undefined): GeometryReference["selector"] {
+  return ref === "mid" ? "midpoint" : ref ?? "self";
+}
+
 function toSolverGeometry(entity: SketchEntity, arcFrames: Map<string, ArcFrame>): SketchGeometry | undefined {
   const base = { id: entity.id, construction: entity.construction, suppressed: false } as const;
+  if (entity.kind === "point") return { ...base, kind: "point", point: entity.point };
   if (entity.kind === "line") return { ...base, kind: "line", start: entity.start, end: entity.end };
   if (entity.kind === "circle") return { ...base, kind: "circle", center: entity.center, radiusMm: entity.radiusMm };
   if (entity.kind === "arc") {
@@ -162,6 +168,9 @@ function fromSolverGeometry(entity: SketchEntity, solved: SketchGeometry, frame:
   }
   if (entity.kind === "circle" && solved.kind === "circle") {
     return near2(entity.center, solved.center) && Math.abs(entity.radiusMm - solved.radiusMm) <= MOVE_TOLERANCE_MM ? undefined : { ...entity, center: solved.center, radiusMm: solved.radiusMm };
+  }
+  if (entity.kind === "point" && solved.kind === "point") {
+    return near2(entity.point, solved.point) ? undefined : { ...entity, point: solved.point };
   }
   if (entity.kind === "arc" && solved.kind === "arc" && frame !== undefined) {
     if (near2(frame.center, solved.center) && Math.abs(frame.radiusMm - solved.radiusMm) <= MOVE_TOLERANCE_MM) return undefined;
@@ -203,8 +212,17 @@ function translateConstraint(
   }
   if (constraint.kind === "radius" || constraint.kind === "distance") return translateDimension(constraint, kindOf, present);
   // One shared rule table decides which entity kinds each relation can act on (the Constrain buttons and the analysis read it too).
-  const fit = constraintFit(constraint.kind, constraint.entityIds.map(kindOf));
+  const fit = constraintFit(constraint.kind, constraint.entityIds.map(kindOf), constraint.points);
   if (!fit.ok) return none(fit.reason);
+
+  if (constraint.kind === "coincident" || constraint.kind === "midpoint") {
+    const refs = constraint.points ?? [];
+    const at = (id: string, ref: SketchPointRef | undefined): GeometryReference => ({ entityId: id, selector: solverSelector(ref) });
+    if (!present.has(first!) || !present.has(second!)) return none("The joined entities are not solved by the live solver.");
+    return constraint.kind === "coincident"
+      ? { constraints: [{ ...stable, kind: "coincident", first: at(first!, refs[0]), second: at(second!, refs[1]) }], dimensions: [] }
+      : { constraints: [{ ...stable, kind: "midpoint", point: at(first!, refs[0]), line: self(second!) }], dimensions: [] };
+  }
 
   if (constraint.kind === "horizontal" || constraint.kind === "vertical") {
     return { constraints: [{ ...stable, kind: constraint.kind, line: self(first!) }], dimensions: [] };

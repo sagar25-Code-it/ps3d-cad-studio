@@ -7,6 +7,10 @@ import { sketchRegionTests } from "./sketch-regions.test.js";
 import { sketchCameraTests } from "./sketch-camera.test.js";
 import { sketchInteractionTests } from "./sketch-interaction.test.js";
 import { sketchConstraintFitTests } from "./sketch-constraint-fit.test.js";
+import { sketchInferenceTests } from "./sketch-inference.test.js";
+import { sketchDynamicInputTests } from "./sketch-dynamic-input.test.js";
+import { sketchPointConstraintTests } from "./sketch-point-constraints.test.js";
+import { sketchAutoConstraintTests } from "./sketch-auto-constraints.test.js";
 import { sketchSolverTests } from "./sketch-solver.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
@@ -38,6 +42,10 @@ const tests: readonly TestCase[] = [
   ...sketchCameraTests,
   ...sketchInteractionTests,
   ...sketchConstraintFitTests,
+  ...sketchInferenceTests,
+  ...sketchDynamicInputTests,
+  ...sketchPointConstraintTests,
+  ...sketchAutoConstraintTests,
   ...sketchSolverTests,
   ...sketchEditToolTests,
   ...meshBooleanTests,

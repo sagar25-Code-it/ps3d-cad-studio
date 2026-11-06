@@ -1,4 +1,4 @@
-import type { SketchConstraintKind, SketchEntity } from "./types.js";
+import type { SketchConstraintKind, SketchEntity, SketchPointRef } from "./types.js";
 
 export type SketchEntityKind = SketchEntity["kind"];
 
@@ -16,13 +16,49 @@ function no(reason: string): ConstraintFit {
 
 const radial = (kind: SketchEntityKind | undefined): boolean => kind === "circle" || kind === "arc";
 
+/** The defining points the live solver can read and move, per entity kind. Arc ends, rectangle corners and spline points are recorded only. */
+export const SOLVABLE_POINT_REFS: Readonly<Record<SketchEntityKind, readonly SketchPointRef[]>> = {
+  line: ["start", "end", "mid"],
+  circle: ["center"],
+  arc: ["center"],
+  point: ["self"],
+  rectangle: [],
+  spline: []
+};
+
+function whyNotPoint(kind: SketchEntityKind, ref: SketchPointRef): string {
+  if (kind === "rectangle") return "Rectangles are rigid in the solver; their corners cannot be joined yet.";
+  if (kind === "spline") return "Splines cannot be joined at a point yet.";
+  if (kind === "arc") return "Arc end points cannot be joined yet; an arc's center can.";
+  return `A ${kind} has no ${ref} point to join.`;
+}
+
+function pointFit(kind: "coincident" | "midpoint", kinds: readonly (SketchEntityKind | undefined)[], points: readonly SketchPointRef[] | undefined): ConstraintFit {
+  if (points === undefined) return no(`${kind === "coincident" ? "Coincident" : "Midpoint"} needs the points to join; pick them on the canvas.`);
+  if (kind === "coincident") {
+    if (kinds.length !== 2 || points.length !== 2) return no("Coincident joins exactly two points.");
+    for (let index = 0; index < 2; index += 1) {
+      const entityKind = kinds[index]!;
+      const ref = points[index]!;
+      if (!SOLVABLE_POINT_REFS[entityKind].includes(ref)) return no(whyNotPoint(entityKind, ref));
+    }
+    return FITS;
+  }
+  if (kinds.length !== 2 || points.length < 1) return no("Midpoint needs a point and a line.");
+  if (kinds[1] !== "line") return no("Midpoint needs a line to sit at the middle of.");
+  const ownerKind = kinds[0]!;
+  const ref = points[0]!;
+  return SOLVABLE_POINT_REFS[ownerKind].includes(ref) ? FITS : no(whyNotPoint(ownerKind, ref));
+}
+
 /**
  * The single rule table for which entity kinds each geometric relation can act on, in the order they were picked.
  * The live solver, the degree-of-freedom analysis and the Constrain buttons all read it, so a button is enabled
  * exactly when the solver will actually enforce the relation, and the analysis never reports a "conflict" for a
- * pair the solver is happy with (or the reverse).
+ * pair the solver is happy with (or the reverse). Point-level relations (Coincident, Midpoint) also take the
+ * defining point each entity contributes.
  */
-export function constraintFit(kind: SketchConstraintKind, kinds: readonly (SketchEntityKind | undefined)[]): ConstraintFit {
+export function constraintFit(kind: SketchConstraintKind, kinds: readonly (SketchEntityKind | undefined)[], points?: readonly SketchPointRef[]): ConstraintFit {
   if (kinds.some((entry) => entry === undefined)) return no("A referenced entity no longer exists.");
   const [first, second, third] = kinds;
   switch (kind) {
@@ -32,6 +68,9 @@ export function constraintFit(kind: SketchConstraintKind, kinds: readonly (Sketc
       return kinds.length === 1 && radial(first) ? FITS : no("A radius dimension applies to one circle or arc.");
     case "distance":
       return kinds.length === 1 && (first === "line" || first === "rectangle") ? FITS : no("A distance dimension applies to one line or rectangle.");
+    case "coincident":
+    case "midpoint":
+      return pointFit(kind, kinds, points);
     default:
       break;
   }
@@ -58,9 +97,6 @@ export function constraintFit(kind: SketchConstraintKind, kinds: readonly (Sketc
       return (first === "line" && second === "line") || (first === "circle" && second === "circle")
         ? FITS
         : no("Symmetric solves two lines or two circles about a line axis; arcs and mixed pairs are recorded only.");
-    case "coincident":
-    case "midpoint":
-      return no(`${kind[0]!.toUpperCase()}${kind.slice(1)} needs endpoint selection, which the sketch records but does not solve yet.`);
     default:
       return no("This relation is not supported.");
   }

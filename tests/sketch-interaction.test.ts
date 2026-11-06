@@ -5,7 +5,7 @@ import { entitiesInSelectionBox, selectionBoxMode, selectionRect } from "../pack
 import { snapSketchPoint } from "../packages/workbench-sketch/src/index.js";
 import { assert, equal, type TestCase } from "./test-kit.js";
 
-const idle: SketchHotkeyContext = { tool: "select", pendingPoints: 0, selectionCount: 0, curveSelectionCount: 0, dimensionMode: false, editToolActive: false };
+const idle: SketchHotkeyContext = { tool: "select", pendingPoints: 0, selectionCount: 0, curveSelectionCount: 0, dimensionMode: false, editToolActive: false, pickingRelation: false, dynamicFieldCount: 0 };
 const press = (key: string, extra: Partial<SketchHotkeyInput> = {}): SketchHotkeyInput => ({ key, ctrl: false, meta: false, alt: false, shift: false, ...extra });
 
 function sketchOf(entities: readonly SketchEntity[]): WorkbenchSketch {
@@ -34,6 +34,14 @@ export const sketchInteractionTests: readonly TestCase[] = [
       equal(resolveSketchHotkey(press("s", { ctrl: true }), idle), undefined, "Ctrl+S falls through to save");
       equal(resolveSketchHotkey(press("a", { ctrl: true }), idle)?.kind, "select-all", "Ctrl+A selects every curve");
       equal(resolveSketchHotkey(press("q"), idle), undefined, "unbound keys fall through");
+      // Typed input: while fields are showing, digits and Tab are theirs; otherwise they fall through.
+      const typing: SketchHotkeyContext = { ...idle, tool: "line", pendingPoints: 1, dynamicFieldCount: 2 };
+      equal(JSON.stringify(resolveSketchHotkey(press("5"), typing)), JSON.stringify({ kind: "type-value", key: "5" }), "a digit starts typing into the first field");
+      equal(resolveSketchHotkey(press("-"), typing)?.kind, "type-value", "a minus sign too");
+      equal(resolveSketchHotkey(press("Tab"), typing)?.kind, "focus-dynamic", "Tab moves into the fields");
+      equal(resolveSketchHotkey(press("5"), idle), undefined, "digits fall through when no fields are showing");
+      equal(resolveSketchHotkey(press("Tab"), idle), undefined, "so does Tab");
+      equal(resolveSketchHotkey(press("5", { ctrl: true }), typing), undefined, "Ctrl+5 is never typed input");
     }
   },
   {
@@ -47,6 +55,8 @@ export const sketchInteractionTests: readonly TestCase[] = [
       equal(resolveSketchHotkey(press("Delete"), { ...idle, selectionCount: 1, curveSelectionCount: 0 }), undefined, "Delete never removes a profile, only curves");
       equal(resolveSketchHotkey(press("Escape"), idle), undefined, "Escape with nothing to cancel falls through");
       equal(resolveSketchHotkey(press("Escape"), { ...idle, dimensionMode: true })?.kind, "exit-dimension", "Escape ends Sketch Dimension");
+      equal(resolveSketchHotkey(press("Escape"), { ...idle, pickingRelation: true })?.kind, "exit-pick", "Escape ends picking the points of a relation");
+      equal(resolveSketchHotkey(press("Escape"), { ...idle, pickingRelation: true, pendingPoints: 1 })?.kind, "cancel-points", "placed points are cancelled before a pick mode ends");
       equal(resolveSketchHotkey(press("Escape"), { ...idle, editToolActive: true })?.kind, "exit-edit-tool", "Escape closes an edit tool");
       equal(resolveSketchHotkey(press("Backspace"), drawing)?.kind, "undo-point", "Backspace removes the last placed point first");
       equal(resolveSketchHotkey(press("Delete"), drawing)?.kind, "cancel-points", "Delete while placing points cancels them instead of deleting curves");

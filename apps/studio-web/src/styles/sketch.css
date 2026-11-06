@@ -19,3 +19,13 @@
 .studio-app .sketch-stage .make-solid-plane { font-size: 0.72rem; }
 .studio-app .sketch-stage .palette-shortcuts { font-size: 0.72rem; }
 .studio-app .sketch-stage .navigation-bar span { font-size: 0.72rem; }
+
+/* Typed input next to the cursor while a shape is being placed. */
+.studio-app .sketch-stage .dynamic-input { position: absolute; z-index: 9; display: grid; gap: 0.25rem; width: 190px; padding: 0.4rem 0.5rem; border: 1px solid #3a8fd0; border-radius: 6px; color: #e2eefb; background: #0b1a27f2; box-shadow: 0 6px 20px #0007; font-family: var(--mono); }
+.studio-app .sketch-stage .dynamic-input label { display: grid; grid-template-columns: 4.2rem 1fr 1.4rem; align-items: center; gap: 0.35rem; font-size: 0.74rem; }
+.studio-app .sketch-stage .dynamic-input label span { color: #9fc2de; }
+.studio-app .sketch-stage .dynamic-input input { min-width: 0; padding: 0.18rem 0.3rem; border: 1px solid #35597a; border-radius: 3px; color: #f2f8ff; background: #07131d; font: 0.78rem var(--mono); text-align: right; }
+.studio-app .sketch-stage .dynamic-input label.locked input { border-color: #f2b84a; color: #ffe7b0; }
+.studio-app .sketch-stage .dynamic-input input:focus { outline: 2px solid #5db4f2; outline-offset: 0; }
+.studio-app .sketch-stage .dynamic-input small { color: #7f9db6; font-size: 0.72rem; }
+.studio-app .sketch-stage .dynamic-input em { color: #7f9db6; font-size: 0.68rem; font-style: normal; }

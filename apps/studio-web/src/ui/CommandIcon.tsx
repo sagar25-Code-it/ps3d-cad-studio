@@ -83,7 +83,7 @@ export function inferCommandIcon(text: string, workspace = ""): string {
 export function iconTone(name: string): "create" | "modify" | "inspect" | "data" | "danger" | "neutral" {
   if (["line", "rectangle", "circle", "arc", "extrude", "bore", "box", "cylinder", "cone", "sphere", "insert", "bezier", "loft", "battery", "fuse", "breaker", "disconnect", "contactor", "inverter", "transformer", "motor", "sensor", "wire", "container", "vehicle", "scooter", "three-wheel", "wheel", "chassis", "master-cart", "fastener", "bearing", "bushing", "gear", "chain", "sprocket", "belt", "o-ring", "linear-motion", "hose-fitting", "tube-fitting", "hand-tool"].includes(name)) return "create";
   if (["trim", "offset", "spline", "edge", "edge-blend", "chamfer", "resize-blend", "pattern", "revolve", "sweep", "shell", "draft", "boolean", "unite", "subtract", "move", "move-face", "offset-face", "replace-face", "delete-face", "update-model", "ground", "explode", "flatten", "canopy", "stitch", "thicken"].includes(name)) return "modify";
-  if (["measure", "fit", "home", "orbit", "pan", "projection", "grid", "axes", "display", "shaded", "shaded-edges", "wireframe", "appearance", "interference", "section", "detail", "dimension", "constraint", "horizontal", "vertical", "parallel", "perpendicular", "collinear", "concentric", "equal", "tangent", "fixed", "auto-view", "tolerance", "datum", "gdt-position", "flatness", "hardpoint", "suspension", "steering", "brake", "cg"].includes(name)) return "inspect";
+  if (["measure", "fit", "home", "orbit", "pan", "projection", "grid", "axes", "display", "shaded", "shaded-edges", "wireframe", "appearance", "interference", "section", "detail", "dimension", "constraint", "horizontal", "vertical", "parallel", "perpendicular", "collinear", "concentric", "equal", "tangent", "fixed", "coincident", "midpoint", "unfixed", "auto-view", "tolerance", "datum", "gdt-position", "flatness", "hardpoint", "suspension", "steering", "brake", "cg"].includes(name)) return "inspect";
   if (["json", "open", "save", "import", "export", "download", "exchange", "cube-file", "scene-file", "mesh-file", "triangle-file", "points-file", "package-file", "pdf-package", "pdf-3d", "matrix", "link-file", "mcp", "python", "bom", "circuit-3d"].includes(name)) return "data";
   if (["trash", "cancel", "eye-off"].includes(name)) return "danger";
   return "neutral";
@@ -114,6 +114,9 @@ function geometry(name: string): React.ReactNode {
     case "equal": return <><path d="M5 9h14M5 15h14" /></>;
     case "tangent": return <><circle cx="8" cy="12" r="5" /><circle cx="17" cy="12" r="4" /><circle cx="13" cy="12" r=".8" fill="currentColor" /></>;
     case "fixed": return <><path d="m12 4 4 5-4 3-4-3zM12 12v8" /><path d="M8 20h8" /></>;
+    case "coincident": return <><rect x="4" y="4" width="9" height="9" rx="1" /><rect x="11" y="11" width="9" height="9" rx="1" /><circle cx="12" cy="12" r="1.3" fill="currentColor" /></>;
+    case "midpoint": return <><path d="M3 18h18" /><path d="m12 5 4 8H8z" /><circle cx="12" cy="18" r="1.3" fill="currentColor" /></>;
+    case "unfixed": return <><path d="m12 4 4 5-4 3-4-3zM12 12v8" /><path d="M8 20h8" /><path d="M4 4l16 16" /></>;
     case "construction": return <><path d="M4 12h3m2 0h3m2 0h3m2 0h1" /><circle cx="4" cy="12" r="1" /><circle cx="20" cy="12" r="1" /></>;
     case "trim": return <><circle cx="8" cy="17" r="2.2" /><circle cx="16" cy="17" r="2.2" /><path d="m9.5 15.4 7-10.4M14.5 15.4 7.5 5" /></>;
     case "offset": return <><path d="M5 17 17 5" /><path d="M8 20 20 8" /><path d="m5 12-2 5 5-2" /></>;
