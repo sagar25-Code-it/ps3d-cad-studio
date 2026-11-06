@@ -232,8 +232,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       if (!keys(input, [...common, "results"]) || !boundedList(input.results, 64, isRecord)
         || input.results.some((result) => !stableId(result.featureId) || Object.keys(result).some((key) => !["featureId", "body", "message"].includes(key))
           || (Object.hasOwn(result, "body") && !validGeneralSolidBodyPayload(result.body))
-          || (Object.hasOwn(result, "message") && !shortText(result.message, 1, 400))
-          || (!Object.hasOwn(result, "body") && !Object.hasOwn(result, "message")))) return invalidOperation("The rebuild results are invalid.");
+          // A result with neither a body nor a message means the step applied cleanly (a join or cut reports this: the
+          // finished shape travels with the step that made the body).
+          || (Object.hasOwn(result, "message") && !shortText(result.message, 1, 400)))) return invalidOperation("The rebuild results are invalid.");
       break;
     case "set-design-feature-suppressed":
       if (!keys(input, [...common, "featureId", "suppressed"]) || !stableId(input.featureId) || typeof input.suppressed !== "boolean") return invalidOperation("The suppress request is invalid.");

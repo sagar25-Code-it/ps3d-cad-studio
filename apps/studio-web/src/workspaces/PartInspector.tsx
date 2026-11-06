@@ -144,12 +144,23 @@ function SolidCard(props: {
   const metrics = useMemo(() => solidMetrics(body.positionsMm, body.indices), [body.positionsMm, body.indices]);
   const feature = featureOfBody(history, body.id);
   const status = feature === undefined ? "" : featureStatusText(featureStatus(history, feature));
+  // The steps that shaped the body, in the order they apply: the step that made it, then its joins and cuts.
+  const steps = history.features.filter((candidate): candidate is DesignSolidFeature => candidate.kind !== "sketch" && candidate.bodyId === body.id);
   return <section className="inspector-section solid-card" aria-label={`${body.name} properties`}>
     <header><strong>{feature === undefined ? "Ordinary solid" : feature.name}</strong><span>{feature === undefined ? "not in the timeline" : "timeline step"}</span></header>
     <p className="solid-source">{feature === undefined
       ? "This body is not driven by the timeline (it came from Combine, or was saved before the timeline existed), so editing a sketch does not change it."
       : `${describeFeature(history, feature)}${status === "" ? "" : ` · ${status}`}. Edit the step, or edit its sketch, and this solid rebuilds.`}</p>
     {feature?.health !== undefined && <p className="solid-warning" role="alert">{feature.health.message}</p>}
+    {steps.length > 1 && <ol className="solid-steps" aria-label="Steps that shaped this solid">
+      {steps.map((step) => {
+        const stepStatus = featureStatusText(featureStatus(history, step));
+        return <li key={step.id} className={step.health === undefined ? "" : "failed"}>
+          <span><strong>{step.name}</strong><small>{describeFeature(history, step)}{stepStatus === "" ? "" : ` · ${stepStatus}`}{step.health === undefined ? "" : ` · ${step.health.message}`}</small></span>
+          <button onClick={() => props.onEdit(step)} aria-label={`Edit ${step.name}`}>Edit</button>
+        </li>;
+      })}
+    </ol>}
     <dl className="metric-grid">
       <div><dt>Volume</dt><dd>{formatNumber(metrics.volumeMm3)} mm³{metrics.volumeMm3 >= 1000 ? ` (${formatNumber(metrics.volumeMm3 / 1000)} cm³)` : ""}</dd></div>
       <div><dt>Surface area</dt><dd>{formatNumber(metrics.surfaceAreaMm2)} mm²</dd></div>

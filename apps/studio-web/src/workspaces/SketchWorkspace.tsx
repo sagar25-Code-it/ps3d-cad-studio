@@ -136,7 +136,9 @@ interface SketchWorkspaceProps {
   readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null) => void;
   readonly onMessage: (message: string) => void;
   readonly optionsRevealRequest: number;
-  readonly onCreateSolid: (profileIds: readonly string[], plane: PlaneKey, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction?: "one-side" | "symmetric" | "flipped") => void;
+  readonly onCreateSolid: (profileIds: readonly string[], plane: PlaneKey, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction?: "one-side" | "symmetric" | "flipped", target?: { readonly mode: "join" | "cut"; readonly bodyId: string }) => void;
+  /** The solids a join or cut can modify. */
+  readonly solidBodies: readonly { readonly id: string; readonly name: string }[];
   readonly onChangePlane: () => void;
   readonly editTool: SketchEditToolId | null;
   readonly showMovable: boolean;
@@ -213,6 +215,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [solidOp, setSolidOp] = useState<"extrude" | "revolve">("extrude");
   const [solidValue, setSolidValue] = useState("10");
   const [solidDirection, setSolidDirection] = useState<"one-side" | "symmetric" | "flipped">("one-side");
+  const [solidResult, setSolidResult] = useState<"new-body" | "join" | "cut">("new-body");
+  const [solidTarget, setSolidTarget] = useState("");
+  // A join or cut acts on the picked solid, else the selected one, else the newest.
+  const effectiveTarget = props.solidBodies.some((body) => body.id === solidTarget) ? solidTarget
+    : props.solidBodies.some((body) => body.id === props.selectedId) ? props.selectedId ?? ""
+      : props.solidBodies.at(-1)?.id ?? "";
+  const modifying = solidResult !== "new-body" && props.solidBodies.length > 0 && effectiveTarget !== "";
   const [edgeKind, setEdgeKind] = useState<"none" | "chamfer" | "fillet">("none");
   const [edgeSize, setEdgeSize] = useState("2");
   const [showProfiles, setShowProfiles] = useState(true);
@@ -1090,6 +1099,20 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             <small>{solidOp === "extrude" ? "mm" : "°"}</small>
           </div>
           <small className="make-solid-plane">On the {planeInfo.name} plane</small>
+          <div className="make-solid-row" aria-label="Result of the feature">
+            <select aria-label="Result" value={solidResult} onChange={(event) => setSolidResult(event.target.value as "new-body" | "join" | "cut")}>
+              <option value="new-body">New body</option>
+              <option value="join" disabled={props.solidBodies.length === 0}>Join to a solid</option>
+              <option value="cut" disabled={props.solidBodies.length === 0}>Cut from a solid</option>
+            </select>
+          </div>
+          {solidResult !== "new-body" && <div className="make-solid-row" aria-label="Solid to change">
+            {props.solidBodies.length === 0
+              ? <small>Make a solid first, then join or cut with another sketch.</small>
+              : <select aria-label="Solid to change" value={effectiveTarget} onChange={(event) => setSolidTarget(event.target.value)}>
+                {props.solidBodies.map((body) => <option key={body.id} value={body.id}>{body.name}</option>)}
+              </select>}
+          </div>}
           {solidOp === "extrude" && <div className="make-solid-row" aria-label="Extrude direction">
             <select aria-label="Extrusion direction" value={solidDirection} onChange={(event) => setSolidDirection(event.target.value as "one-side" | "symmetric" | "flipped")}>
               <option value="one-side">One side</option>
@@ -1108,7 +1131,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <small>mm</small>
             </>}
           </div>}
-          <button className="palette-action primary" disabled={profiles.length === 0} onClick={() => props.onCreateSolid(selectedProfileIds, plane, solidOp, Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined, solidOp === "extrude" ? solidDirection : undefined)}><CommandIcon name="box" />Create solid</button>
+          <button className="palette-action primary" disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying)} onClick={() => props.onCreateSolid(selectedProfileIds, plane, solidOp, Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined, solidOp === "extrude" ? solidDirection : undefined, modifying ? { mode: solidResult, bodyId: effectiveTarget } : undefined)}><CommandIcon name={solidResult === "cut" ? "subtract" : solidResult === "join" ? "unite" : "box"} />{solidResult === "cut" ? "Cut solid" : solidResult === "join" ? "Join solid" : "Create solid"}</button>
           {solidOp === "extrude" && <small className="make-solid-hint">{selectedProfileIds.length === 0 ? "Nothing selected: the outermost profile is used and profiles inside it become holes." : "Profiles drawn inside the outline become holes. Shift-select profiles to choose exactly which."}</small>}
         </div>
         <details className="palette-shortcuts">

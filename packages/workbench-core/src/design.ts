@@ -47,7 +47,23 @@ export function isSolidFeature(feature: DesignFeature): feature is DesignSolidFe
   return feature.kind !== "sketch";
 }
 
-/** The features that rebuild from a sketch feature, directly or through another feature that depends on it. */
+/** A join or cut changes a body that an earlier step made; every other solid step makes a body of its own. */
+export function modifiesBody(feature: DesignFeature): feature is DesignSolidFeature & { readonly operation: "join" | "cut" } {
+  return feature.kind !== "sketch" && (feature.operation === "join" || feature.operation === "cut");
+}
+
+/** The step that made a body (its new-body step), if that step is still in the timeline. */
+export function baseFeatureOf(history: DesignHistory, bodyId: string): DesignSolidFeature | undefined {
+  for (const feature of history.features) {
+    if (feature.kind !== "sketch" && feature.bodyId === bodyId && !modifiesBody(feature)) return feature;
+  }
+  return undefined;
+}
+
+/**
+ * The features that go when a feature goes: those built on a sketch feature, and the joins and cuts of a body whose
+ * new-body step is among them, directly or through another feature that depends on it.
+ */
 export function dependentsOf(history: DesignHistory, featureId: string): readonly DesignFeature[] {
   const closure = new Set<string>([featureId]);
   let grew = true;
@@ -55,20 +71,25 @@ export function dependentsOf(history: DesignHistory, featureId: string): readonl
     grew = false;
     for (const feature of history.features) {
       if (closure.has(feature.id) || feature.kind === "sketch") continue;
-      if (closure.has(feature.sketchFeatureId)) { closure.add(feature.id); grew = true; }
+      const builtOnClosure = closure.has(feature.sketchFeatureId);
+      const modifiesClosureBody = modifiesBody(feature) && history.features.some((other) => closure.has(other.id) && other.kind !== "sketch" && !modifiesBody(other) && other.bodyId === feature.bodyId);
+      if (builtOnClosure || modifiesClosureBody) { closure.add(feature.id); grew = true; }
     }
   }
   return history.features.filter((feature) => feature.id !== featureId && closure.has(feature.id));
 }
 
-/** Whether a feature takes part in the model right now: before the rollback marker, not suppressed, and built on live sketches. */
+/** Whether a feature takes part in the model right now: before the rollback marker, not suppressed, and built on live sketches. A join or cut also needs its body's new-body step to be live. */
 export function isFeatureActive(history: DesignHistory, featureId: string): boolean {
   const index = history.features.findIndex((feature) => feature.id === featureId);
   const feature = history.features[index];
   if (feature === undefined || index >= history.rollbackIndex || feature.suppressed) return false;
   if (feature.kind === "sketch") return true;
   const sketch = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
-  return sketch !== undefined && !sketch.suppressed;
+  if (sketch === undefined || sketch.suppressed) return false;
+  if (!modifiesBody(feature)) return true;
+  const base = baseFeatureOf(history, feature.bodyId);
+  return base !== undefined && history.features.indexOf(base) < index && isFeatureActive(history, base.id);
 }
 
 /**
@@ -91,7 +112,8 @@ export function pruneOrphanedSolidFeatures(project: WorkbenchProject): { readonl
 function withHistory(project: WorkbenchProject, history: DesignHistory): WorkbenchProject {
   const owned = new Map<string, boolean>();
   for (const feature of history.features) {
-    if (feature.kind !== "sketch") owned.set(feature.bodyId, isFeatureActive(history, feature.id));
+    // A body is shown while the step that made it is live; its joins and cuts change its shape, not whether it is shown.
+    if (feature.kind !== "sketch" && !modifiesBody(feature)) owned.set(feature.bodyId, isFeatureActive(history, feature.id));
   }
   const bodies = project.part.generalBodies ?? [];
   const synced = owned.size === 0 ? bodies : bodies.map((body) => owned.has(body.id) && body.visible !== owned.get(body.id) ? { ...body, visible: owned.get(body.id)! } : body);
@@ -140,6 +162,11 @@ function checkSolidFeature(history: DesignHistory, feature: DesignSolidFeature, 
   if (sketch === undefined || sketch.kind !== "sketch") return missing(feature.sketchFeatureId, "The feature must be built on a sketch feature in the timeline.");
   const duplicate = history.features.find((candidate) => (candidate.id === feature.id) !== replacing && candidate.id === feature.id);
   if (duplicate !== undefined) return fail("INVALID_OPERATION", "A timeline feature with this ID already exists.", [feature.id], "Use a new feature ID.");
+  if (modifiesBody(feature)) {
+    const base = baseFeatureOf(history, feature.bodyId);
+    const before = replacing ? history.features.findIndex((candidate) => candidate.id === feature.id) : history.rollbackIndex;
+    if (base === undefined || history.features.indexOf(base) >= before) return fail("INVALID_OPERATION", "A join or cut needs a body that an earlier step made.", [feature.id, feature.bodyId], "Pick a body that was created earlier in the timeline.");
+  }
   return undefined;
 }
 
@@ -149,9 +176,15 @@ export function addDesignSolid(project: WorkbenchProject, feature: DesignSolidFe
   if (problem !== undefined) return problem;
   if (history.features.length >= MAX_DESIGN_FEATURES) return fail("RESOURCE_LIMIT", "The timeline reached its feature limit.", [], "Delete a feature before adding another.");
   const bodies = project.part.generalBodies ?? [];
+  const next: DesignHistory = { ...history, features: insertAt(history.features, history.rollbackIndex, feature), rollbackIndex: history.rollbackIndex + 1 };
+  if (modifiesBody(feature)) {
+    // A join or cut replaces the shape of the body it modifies instead of adding a body.
+    if (!bodies.some((candidate) => candidate.id === body.id)) return missing(body.id, "The body this feature modifies does not exist.");
+    const replaced = bodies.map((candidate) => candidate.id === body.id ? { ...body, visible: candidate.visible } : candidate);
+    return changed(withHistory({ ...project, part: { ...project.part, generalBodies: replaced } }, next), [feature.id, body.id], `Added ${feature.name} to the timeline.`);
+  }
   if (bodies.length >= MAX_GENERAL_BODIES) return fail("RESOURCE_LIMIT", "The part reached its general mesh-body limit.", [project.part.id], "Delete a general body before adding another.");
   if (bodies.some((candidate) => candidate.id === body.id)) return fail("INVALID_OPERATION", "The general body ID already exists.", [body.id], "Use a new body ID.");
-  const next: DesignHistory = { ...history, features: insertAt(history.features, history.rollbackIndex, feature), rollbackIndex: history.rollbackIndex + 1 };
   const withBody: WorkbenchProject = { ...project, part: { ...project.part, generalBodies: [...bodies, body] } };
   return changed(withHistory(withBody, next), [feature.id, body.id], `Added ${feature.name} to the timeline.`);
 }
@@ -212,7 +245,8 @@ export function deleteDesignFeature(project: WorkbenchProject, featureId: string
   if (feature === undefined) return missing(featureId, "The timeline feature does not exist.");
   const removed = new Set<string>([featureId, ...dependentsOf(history, featureId).map((dependent) => dependent.id)]);
   const removedBeforeMarker = history.features.filter((candidate, index) => removed.has(candidate.id) && index < history.rollbackIndex).length;
-  const goneBodies = new Set(history.features.filter((candidate): candidate is DesignSolidFeature => removed.has(candidate.id) && candidate.kind !== "sketch").map((candidate) => candidate.bodyId));
+  // Only a body's own (new-body) step takes the body with it; removing a join or cut leaves the body, which the caller rebuilds.
+  const goneBodies = new Set(history.features.filter((candidate): candidate is DesignSolidFeature => removed.has(candidate.id) && candidate.kind !== "sketch" && !modifiesBody(candidate)).map((candidate) => candidate.bodyId));
   const next: DesignHistory = {
     features: history.features.filter((candidate) => !removed.has(candidate.id)),
     rollbackIndex: history.rollbackIndex - removedBeforeMarker,
@@ -250,7 +284,8 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "health"])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "health"])) return false;
+  if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut"].includes(String(value.operation))) return false;
   if (!stable(value.id) || !shortText(value.name, 120) || (value.kind !== "extrude" && value.kind !== "revolve") || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
@@ -281,8 +316,14 @@ export function validateDesignHistory(value: unknown, validSketch: (sketch: unkn
       if (!hasOnly(feature, ["id", "name", "kind", "suppressed", "sketch"], ["health"]) || !shortText(feature.name, 120) || typeof feature.suppressed !== "boolean" || !validSketch(feature.sketch)) return false;
       sketchIds.add(feature.id);
     } else {
-      if (!validSolidFeaturePayload(feature) || !sketchIds.has(feature.sketchFeatureId) || bodyIds.has(feature.bodyId)) return false;
-      bodyIds.add(feature.bodyId);
+      if (!validSolidFeaturePayload(feature) || !sketchIds.has(feature.sketchFeatureId)) return false;
+      if (feature.operation === "join" || feature.operation === "cut") {
+        // A join or cut modifies a body an earlier step made.
+        if (!bodyIds.has(feature.bodyId)) return false;
+      } else {
+        if (bodyIds.has(feature.bodyId)) return false;
+        bodyIds.add(feature.bodyId);
+      }
     }
   }
   return value.editingSketchId === null || (typeof value.editingSketchId === "string" && sketchIds.has(value.editingSketchId));

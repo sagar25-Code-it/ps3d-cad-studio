@@ -65,7 +65,7 @@ import {
 } from "../../../packages/exchange-3d/src/index.js";
 import { detectSketchProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
-import { rebuildDependents, rebuildSolidFeature } from "./design-regeneration.js";
+import { hasModifiers, rebuildDependents, rebuildSolidFeature, replayAllBodies } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
 import { CombineDialog, type CombineChoice } from "./ui/CombineDialog.js";
@@ -1441,7 +1441,7 @@ export function App(): React.JSX.Element {
   };
 
   /** Extrude or revolve the working sketch's profiles into a new timeline feature and solid. */
-  const createGeneralSolid = async (selectedProfileIds: readonly string[], _plane: SketchPlane, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction: "one-side" | "symmetric" | "flipped" = "one-side"): Promise<void> => {
+  const createGeneralSolid = async (selectedProfileIds: readonly string[], _plane: SketchPlane, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction: "one-side" | "symmetric" | "flipped" = "one-side", target?: { readonly mode: "join" | "cut"; readonly bodyId: string }): Promise<void> => {
     if (!Number.isFinite(valueMm) || valueMm <= 0) { setStatus("error"); setStatusText(operation === "extrude" ? "Enter a positive extrusion distance." : "Enter a revolve angle between 1 and 360 degrees."); return; }
     if (detectSketchProfiles(projectRef.current.sketch).length === 0) { setStatus("error"); setStatusText("Draw or select a closed profile before creating a solid."); return; }
     setStatus("working");
@@ -1452,10 +1452,13 @@ export function App(): React.JSX.Element {
     if (sketchId === undefined) return;
     if (sketchFeature?.kind !== "sketch") { setStatus("error"); setStatusText("The sketch feature could not be found in the timeline."); return; }
     const ordinal = designOf(projectRef.current).features.filter((feature) => feature.kind === operation).length + 1;
-    const bodyId = `general-body:${crypto.randomUUID()}`;
+    const targetBody = target === undefined ? undefined : projectRef.current.part.generalBodies?.find((body) => body.id === target.bodyId);
+    if (target !== undefined && targetBody === undefined) { setStatus("error"); setStatusText(`Pick the solid to ${target.mode} first. Create a solid with New body, then ${target.mode} with another sketch.`); return; }
+    const bodyId = targetBody?.id ?? `general-body:${crypto.randomUUID()}`;
+    const verb = target === undefined ? (operation === "extrude" ? "Extrude" : "Revolve") : target.mode === "cut" ? "Cut" : "Join";
     const feature: DesignSolidFeature = {
       id: `feature:${operation}-${crypto.randomUUID()}`,
-      name: `${operation === "extrude" ? "Extrude" : "Revolve"} ${ordinal}`,
+      name: `${verb} ${target === undefined ? ordinal : designOf(projectRef.current).features.filter((candidate) => candidate.kind !== "sketch" && candidate.operation === target.mode).length + 1}`,
       kind: operation,
       suppressed: false,
       sketchFeatureId: sketchId,
@@ -1463,20 +1466,76 @@ export function App(): React.JSX.Element {
       valueMm,
       bodyId,
       ...(operation === "extrude" && direction !== "one-side" ? { direction } : {}),
-      ...(edge === undefined ? {} : { edge })
+      ...(edge === undefined ? {} : { edge }),
+      ...(target === undefined ? {} : { operation: target.mode })
     };
-    const rebuilt = await rebuildSolidFeature(feature, sketchFeature);
+    // A join or cut builds its solid as a tool and combines it with the current shape of the body it modifies.
+    const rebuilt = await rebuildSolidFeature(target === undefined ? feature : { ...feature, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color);
     if (!rebuilt.ok) { setStatus("error"); setStatusText(rebuilt.message); return; }
-    if (applyProjectOperation({ kind: "add-design-solid", feature, body: rebuilt.body }, false)) {
+    let resultBody = rebuilt.body;
+    if (targetBody !== undefined && target !== undefined) {
+      const combined = await combineGeneralBodies({ target: targetBody, tool: rebuilt.body, mode: target.mode, bodyId: targetBody.id, name: targetBody.name });
+      if (!combined.ok) { setStatus("error"); setStatusText(`${verb} did not change the solid: ${combined.message}`); return; }
+      resultBody = { ...combined.body, color: targetBody.color };
+    }
+    if (applyProjectOperation({ kind: "add-design-solid", feature, body: resultBody }, false)) {
       switchWorkspace("part");
       setSelectedId(bodyId);
       setStatus("ready");
-      const brep = rebuilt.body.brep;
+      const brep = resultBody.brep;
       const detail = brep !== undefined
-        ? `B-rep solid · ${brep.topology.vertices} vertices · ${brep.topology.edges} edges · ${brep.topology.faces} named faces`
-        : `general mesh solid (${rebuilt.body.positionsMm.length / 3} vertices)`;
-      setStatusText(`Added ${feature.name} to the timeline as a ${detail}. Double-click it in the timeline to edit, or edit the sketch and it rebuilds.`);
+        ? `${brep.origin === "mesh-boolean" ? "Boolean mesh" : "B-rep"} solid · ${brep.topology.vertices} vertices · ${brep.topology.edges} edges · ${brep.topology.faces} named faces`
+        : `general mesh solid (${resultBody.positionsMm.length / 3} vertices)`;
+      setStatusText(target === undefined
+        ? `Added ${feature.name} to the timeline as a ${detail}. Double-click it in the timeline to edit, or edit the sketch and it rebuilds.`
+        : `Added ${feature.name} to the timeline: ${target.mode === "cut" ? "cut from" : "joined to"} ${targetBody?.name ?? "the solid"} (${detail}). Edit the step or its sketch and the solid is rebuilt in order.`);
     }
+  };
+
+  /**
+   * Applies an operation and then replays the timeline, as one undo step. Used when the design has joins or cuts, because
+   * suppressing, rolling back, deleting or editing a step then changes the shape of a body, not only whether it is shown.
+   * With `mustApply`, the change is refused (nothing is applied) when that feature cannot be rebuilt.
+   */
+  const commitWithReplay = async (intent: OperationIntent, mustApply?: string): Promise<boolean> => {
+    const before = projectRef.current;
+    const first = applyWorkbenchOperation(before, { ...intent, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: before.revision } as WorkbenchOperation);
+    if (!first.ok) {
+      const problem = first.diagnostics[0];
+      setDiagnostic(problem === undefined ? undefined : { code: problem.code, message: problem.message, recovery: problem.recovery });
+      setStatus("error");
+      setStatusText(problem?.message ?? "The project operation was rejected.");
+      return false;
+    }
+    let next = first.value.project;
+    let summary = first.value.summary;
+    if (hasModifiers(next) || hasModifiers(before)) {
+      setStatus("working");
+      setStatusText("Rebuilding the timeline…");
+      const results = await replayAllBodies(next);
+      if (projectRef.current !== before) { setStatus("ready"); setStatusText("The design changed while it was rebuilding, so that edit was not applied. Try it again."); return false; }
+      const blocked = mustApply === undefined ? undefined : results.find((result) => result.featureId === mustApply && result.message !== undefined);
+      if (blocked?.message !== undefined) { setStatus("error"); setStatusText(`Not applied: ${blocked.message}`); return false; }
+      if (results.length > 0) {
+        const second = applyWorkbenchOperation(next, { kind: "regenerate-design", results, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: next.revision } as WorkbenchOperation);
+        if (second.ok) {
+          next = second.value.project;
+          const failed = results.filter((result) => result.message !== undefined);
+          if (failed.length > 0) summary = `${summary} ${failed.length} step${failed.length === 1 ? "" : "s"} could not be applied: ${failed[0]!.message}`;
+        }
+      }
+    }
+    pushProject(next);
+    setDiagnostic(undefined);
+    setStatus("ready");
+    setStatusText(summary);
+    return true;
+  };
+
+  /** A timeline change that only shows or hides solids is cheap; once a body has joins or cuts it is replayed with the change. */
+  const timelineOperation = (intent: OperationIntent, then?: () => void): void => {
+    if (hasModifiers(projectRef.current)) { void commitWithReplay(intent).then((ok) => { if (ok) then?.(); }); return; }
+    if (applyProjectOperation(intent)) then?.();
   };
 
   /** Applies an edited timeline solid: rebuilds it from its sketch with the new parameters. */
@@ -1486,6 +1545,11 @@ export function App(): React.JSX.Element {
     if (sketchFeature?.kind !== "sketch") return;
     setStatus("working");
     const existing = projectRef.current.part.generalBodies?.find((body) => body.id === next.bodyId);
+    if (hasModifiers(projectRef.current) && existing !== undefined) {
+      // The body is shaped by several steps, so the edit is applied and the whole body replayed, as one undo step.
+      if (await commitWithReplay({ kind: "update-design-solid", feature: next, body: existing }, next.id)) setFeatureEdit(undefined);
+      return;
+    }
     const rebuilt = await rebuildSolidFeature(next, sketchFeature, existing?.color);
     if (!rebuilt.ok) { setStatus("error"); setStatusText(rebuilt.message); return; }
     if (applyProjectOperation({ kind: "update-design-solid", feature: next, body: rebuilt.body })) setFeatureEdit(undefined);
@@ -2428,7 +2492,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openContextMenu} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction)} onChangePlane={() => setSketchPlaneDialogOpen(true)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openContextMenu} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target)} onChangePlane={() => setSketchPlaneDialogOpen(true)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl
@@ -2486,9 +2550,9 @@ export function App(): React.JSX.Element {
       busy={status === "working"}
       onSelect={(feature) => setSelectedId(feature.kind === "sketch" ? feature.id : feature.bodyId)}
       onEdit={editTimelineFeature}
-      onRollback={(index) => { applyProjectOperation({ kind: "set-design-rollback", index }); }}
-      onSuppress={(feature, suppressed) => { applyProjectOperation({ kind: "set-design-feature-suppressed", featureId: feature.id, suppressed }); }}
-      onDelete={(feature) => { if (applyProjectOperation({ kind: "delete-design-feature", featureId: feature.id })) setSelectedId(null); }}
+      onRollback={(index) => timelineOperation({ kind: "set-design-rollback", index })}
+      onSuppress={(feature, suppressed) => timelineOperation({ kind: "set-design-feature-suppressed", featureId: feature.id, suppressed })}
+      onDelete={(feature) => timelineOperation({ kind: "delete-design-feature", featureId: feature.id }, () => setSelectedId(null))}
       onRename={(feature, name) => { applyProjectOperation({ kind: "rename-design-feature", featureId: feature.id, name }); }}
     />}
     <footer className="app-status"><div className={`status-copy ${status}`} role="status" aria-live="polite"><span />{statusText}</div><div className="status-facts"><a className="app-brand-credit" href="/about" title={`${PS3D_BRAND.name} - ${PS3D_BRAND.serviceLine}`}>{PS3D_BRAND.name}</a><button className={`status-health ${designHealth.overallStatus}`} onClick={openDesignHealth}>health {designHealth.score}</button><button className="status-shortcuts" onClick={() => setShortcutsOpen(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">? keys</button><span>{document.displayUnit}</span><span>{selectedId === null ? "0 selected" : "1 selected"}</span><span>{renderStudioOpen ? `${renderSettings.resolution} ${renderSettings.format}` : masterCartOpen ? "parametric preview" : isThreeDimensional ? viewportState.selectionFilter : project.activeWorkspace === "electrical" ? `ERC ${electrical.erc.status}` : "local"}</span><span>{renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace}</span></div>{diagnostic !== undefined && <div className="diagnostic-toast" role="alert"><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span><small>{diagnostic.recovery}</small><button onClick={() => setDiagnostic(undefined)} aria-label="Dismiss diagnostic">×</button></div>}</footer>

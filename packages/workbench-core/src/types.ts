@@ -884,7 +884,12 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   readonly valueMm: number;
   /** Extrude only: which way from the sketch plane. */
   readonly direction?: "one-side" | "symmetric" | "flipped";
-  /** The body this feature owns in `part.generalBodies`. */
+  /**
+   * What the feature does with the solid it builds. Absent (or "new-body") makes a body of its own. A "join" or "cut"
+   * adds to or removes from the body named by `bodyId`, which an earlier new-body step made, and replays in timeline order.
+   */
+  readonly operation?: "new-body" | "join" | "cut";
+  /** The body this feature owns in `part.generalBodies` (for a join or cut: the body it modifies). */
   readonly bodyId: string;
   readonly edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number };
 }

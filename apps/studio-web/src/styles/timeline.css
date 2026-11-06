@@ -48,3 +48,10 @@
 .studio-app .solid-actions button.primary { border-color: #1f6fb6; color: #fff; background: #1f6fb6; }
 .studio-app .solid-actions button.danger { color: #b02a1c; }
 .studio-app .solid-actions .command-icon { width: 15px; height: 15px; }
+.studio-app .solid-steps { display: grid; gap: 0.3rem; margin: 0 0 0.6rem; padding: 0; list-style: none; }
+.studio-app .solid-steps li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.35rem 0.5rem; border: 1px solid #d3d9de; border-radius: 5px; background: #f7f9fa; }
+.studio-app .solid-steps li.failed { border-color: #c0392b; background: #fdeceb; }
+.studio-app .solid-steps li span { display: grid; min-width: 0; }
+.studio-app .solid-steps li strong { font-size: 12.5px; }
+.studio-app .solid-steps li small { color: #5d6a73; font-size: 12px; overflow-wrap: anywhere; }
+.studio-app .solid-steps li button { flex: none; padding: 0.25rem 0.55rem; font-size: 12px; }

@@ -1,4 +1,4 @@
-import { isFeatureActive } from "./design.js";
+import { isFeatureActive, modifiesBody } from "./design.js";
 import type { DesignFeature, DesignHistory, DesignSolidFeature } from "./types.js";
 
 /** How a timeline step stands right now, in the order that decides what the user sees first. */
@@ -36,7 +36,8 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
   const amount = feature.kind === "extrude"
     ? `${trimNumber(feature.valueMm)} mm${feature.direction === undefined || feature.direction === "one-side" ? "" : ` ${DIRECTION[feature.direction]}`}`
     : `${trimNumber(feature.valueMm)}°`;
-  return `${amount} · from ${source === undefined ? "a deleted sketch" : source.name}`;
+  const verb = !modifiesBody(feature) ? "" : feature.operation === "cut" ? "Cut " : "Join ";
+  return `${verb}${amount} · from ${source === undefined ? "a deleted sketch" : source.name}`;
 }
 
 export function featureStatus(history: DesignHistory, feature: DesignFeature): DesignFeatureStatus {
