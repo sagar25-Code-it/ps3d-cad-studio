@@ -32,6 +32,7 @@ import {
   type ComponentInstance,
   type DesignFeature,
   type DesignSolidFeature,
+  type GeneralSolidBody,
   type ElectricalComponentKind,
   type ElectricalNet,
   type ElectricalNetClass,
@@ -49,7 +50,7 @@ import {
   type Vec3,
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
-import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference } from "../../../packages/workbench-geometry/src/index.js";
+import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshFillet, meshHole, meshShell } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
 import { createDrawingSvg } from "../../../packages/workbench-drawing/src/index.js";
@@ -876,6 +877,55 @@ export function App(): React.JSX.Element {
     setSelectedId(result.body.id);
     setCombineRequest(null);
     return undefined;
+  };
+
+  const modifierLabelOf = (modifier: "hole" | "fillet" | "chamfer" | "shell"): string => (
+    modifier === "hole" ? "Hole" : modifier === "fillet" ? "Fillet" : modifier === "chamfer" ? "Chamfer" : "Shell"
+  );
+
+  const handleModifyGeneralBody = (modifier: "hole" | "fillet" | "chamfer" | "shell"): void => {
+    const current = projectRef.current;
+    const bodies = current.part.generalBodies ?? [];
+    const body = bodies.find((candidate) => candidate.id === selectedId);
+    if (body === undefined) { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)} needs a general solid body selected first.`); return; }
+    const defaults = { hole: 6, fillet: 2, chamfer: 2, shell: 2 } as const;
+    const prompt: Record<typeof modifier, string> = {
+      hole: "Hole diameter (mm):",
+      fillet: "Fillet radius (mm):",
+      chamfer: "Chamfer distance (mm):",
+      shell: "Shell wall thickness (mm):"
+    };
+    const raw = typeof window === "undefined" ? String(defaults[modifier]) : window.prompt(prompt[modifier], String(defaults[modifier]));
+    if (raw === null) return;
+    const value = Number.parseFloat(raw);
+    if (!Number.isFinite(value) || value <= 0) { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)}: enter a positive number in millimetres.`); return; }
+    const input = { positionsMm: body.positionsMm, indices: body.indices };
+    let result: { readonly ok: true; readonly positionsMm: readonly number[]; readonly indices: readonly number[] } | { readonly ok: false; readonly message: string };
+    let label: string;
+    if (modifier === "hole") {
+      // Default hole axis is +Z, through the body with a small overshoot either side.
+      const maxZ = Math.max(...body.positionsMm.filter((_, index) => index % 3 === 2));
+      const minZ = Math.min(...body.positionsMm.filter((_, index) => index % 3 === 2));
+      const depth = (maxZ - minZ) + 4;
+      result = meshHole(input, { diameterMm: value, depthMm: depth, axis: "z" });
+      label = `Hole Ø ${value} mm`;
+    } else if (modifier === "fillet") {
+      result = meshFillet(input, { sizeMm: value });
+      label = `Fillet R ${value} mm`;
+    } else if (modifier === "chamfer") {
+      result = meshChamfer(input, { sizeMm: value });
+      label = `Chamfer ${value} mm`;
+    } else {
+      result = meshShell(input, { thicknessMm: value, openFace: "+z" });
+      label = `Shell ${value} mm`;
+    }
+    if (!result.ok) { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)} failed: ${result.message}`); return; }
+    const { feature: _feature, brep: _brep, ...keep } = body;
+    void _feature; void _brep;
+    const nextBody: GeneralSolidBody = { ...keep, positionsMm: Array.from(result.positionsMm), indices: Array.from(result.indices) };
+    if (!applyProjectOperation({ kind: "modify-general-body", targetBodyId: body.id, modifier, label, body: nextBody })) { setStatus("ready"); setStatusText(`The project rejected the ${modifierLabelOf(modifier)} result.`); return; }
+    setSelectedId(body.id);
+    setStatusText(`Applied ${label} to ${body.name}.`);
   };
 
   const runPartFeatureAction = (operation: Extract<CadCommandRecord["action"], { kind: "part-feature-action" }>["operation"], commandName: string, bodyIdOverride: string | null = selectedId): void => {
@@ -2470,6 +2520,7 @@ export function App(): React.JSX.Element {
     canRedo,
     generalBodyCount: (project.part.generalBodies ?? []).length,
     previewBodySelected,
+    generalBodySelected: selectedGeneralBody !== undefined,
     ...(selectedTimelineFeature === undefined ? {} : { selectedFeature: { name: selectedTimelineFeature.name, suppressed: selectedTimelineFeature.suppressed, kind: selectedTimelineFeature.kind } }),
     selectionDeletable: selectedTimelineFeature !== undefined || previewBodySelected || selectedGeneralBody !== undefined
   }, {
@@ -2488,6 +2539,7 @@ export function App(): React.JSX.Element {
     onDeleteSelected: deleteSelection,
     onMoveSelectedBody: () => runSelectedPartPreviewAction("edit-transform", "Move Body"),
     onResizeSelectedBody: () => runSelectedPartPreviewAction("edit-size", "Scale Body"),
+    onModifyGeneralBody: handleModifyGeneralBody,
     onFit: fitViewport,
     onHome: homeViewport,
     onToggleGrid: () => setViewportGrid(!viewportState.gridVisible),
@@ -2587,6 +2639,7 @@ export function App(): React.JSX.Element {
       onCreatePartPreviewBody={createPartPreviewBody}
       onPartPreviewAction={(operation, commandName) => runSelectedPartPreviewAction(operation, commandName)}
       onPartFeatureAction={(operation, commandName) => runPartFeatureAction(operation, commandName)}
+      onModifyGeneralBody={handleModifyGeneralBody}
       onFit={fitViewport}
       onMeasure={() => setViewportNavigation("measure")}
       onNativeDownload={() => void downloadNative()}

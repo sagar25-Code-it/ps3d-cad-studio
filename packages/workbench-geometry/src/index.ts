@@ -4,3 +4,4 @@ export * from "./part.js";
 export * from "./surface.js";
 export * from "./tessellate.js";
 export * from "./mesh-boolean.js";
+export * from "./mesh-modify.js";

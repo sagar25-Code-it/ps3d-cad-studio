@@ -27,6 +27,7 @@ import { selectionMetricTests } from "./selection-metrics.test.js";
 import { sketchSolverTests } from "./sketch-solver.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
+import { meshModifyTests } from "./mesh-modify.test.js";
 import { assemblyMeshTests } from "./assembly-mesh.test.js";
 import { assemblyMateTests } from "./assembly-mates.test.js";
 import { workbenchCoreTests } from "./workbench-core.test.js";
@@ -75,6 +76,7 @@ const tests: readonly TestCase[] = [
   ...sketchSolverTests,
   ...sketchEditToolTests,
   ...meshBooleanTests,
+  ...meshModifyTests,
   ...assemblyMeshTests,
   ...assemblyMateTests,
   ...evidenceAndSolidTests,

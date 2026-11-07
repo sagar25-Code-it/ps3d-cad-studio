@@ -46,6 +46,7 @@ interface WorkbenchRibbonProps {
   readonly onCreatePartPreviewBody: (shape: PartPreviewBodyShape) => void;
   readonly onPartPreviewAction: (operation: "edit-transform" | "edit-size" | "edit-appearance" | "duplicate" | "mirror-x" | "pattern-x" | "toggle-visible" | "delete", commandName: string) => void;
   readonly onPartFeatureAction: (operation: "revolve" | "pattern-feature" | "mirror-feature" | "unite" | "subtract" | "trim-body" | "edge-blend" | "chamfer" | "draft" | "shell" | "move-face" | "offset-face" | "replace-face" | "delete-face" | "resize-blend" | "update-model", commandName: string) => void;
+  readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell") => void;
   readonly onInsertComponent: (shape: "box" | "cylinder") => void;
   readonly onDeleteComponent: (componentId: string) => void;
   readonly onToggleGrounded: (componentId: string) => void;
@@ -194,6 +195,12 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="unite" label="Unite" hint="target + tool" disabled={!(analyticBodySelected && (props.project.part.previewBodies?.length ?? 0) >= 2) && !(generalBodySelected && (props.project.part.generalBodies?.length ?? 0) >= 2)} onClick={() => props.onPartFeatureAction("unite", "Unite")} />
         <RibbonButton icon="subtract" label="Subtract" hint="through cylinder" disabled={!(analyticBodySelected && (props.project.part.previewBodies?.length ?? 0) >= 2) && !(generalBodySelected && (props.project.part.generalBodies?.length ?? 0) >= 2)} onClick={() => props.onPartFeatureAction("subtract", "Subtract")} />
         <RibbonButton icon="trim" label="Trim Body" hint="keep 70%" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("trim-body", "Trim Body")} />
+      </RibbonGroup>
+      <RibbonGroup label="Solid modify">
+        <RibbonButton icon="hole" label="Hole" hint="Ø 6 · through" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("hole")} />
+        <RibbonButton icon="fillet" label="Fillet" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("fillet")} />
+        <RibbonButton icon="chamfer" label="Chamfer" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer")} />
+        <RibbonButton icon="shell" label="Shell" hint="open +Z" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("shell")} />
       </RibbonGroup>
       <RibbonGroup label="Detail features">
         <RibbonButton icon="edge-blend" label="Edge Blend" hint="vertical chain" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("edge-blend", "Edge Blend")} />

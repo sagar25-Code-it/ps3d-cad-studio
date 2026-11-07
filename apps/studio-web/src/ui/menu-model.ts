@@ -38,6 +38,8 @@ export interface WorkbenchMenuState {
   readonly generalBodyCount: number;
   /** An analytic preview body (Block, Cylinder, …) is selected. */
   readonly previewBodySelected: boolean;
+  /** A general solid body (built from a sketch extrude or revolve) is selected. */
+  readonly generalBodySelected: boolean;
   /** The timeline feature the current selection resolves to, if any. */
   readonly selectedFeature?: { readonly name: string; readonly suppressed: boolean; readonly kind: "sketch" | "extrude" | "revolve" };
   /** Something deletable is selected: a timeline feature, a solid body, or a preview body. */
@@ -60,6 +62,7 @@ export interface WorkbenchMenuActions {
   readonly onDeleteSelected: () => void;
   readonly onMoveSelectedBody: () => void;
   readonly onResizeSelectedBody: () => void;
+  readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell") => void;
   readonly onFit: () => void;
   readonly onHome: () => void;
   readonly onToggleGrid: () => void;
@@ -113,7 +116,15 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
     { id: "modify.resize", label: "Resize body…", icon: "scale", disabled: !state.previewBodySelected,
       hint: state.previewBodySelected ? "Edit its dimensions in the inspector" : "Select a preview body (Block, Cylinder, …) first", action: actions.onResizeSelectedBody },
     { id: "modify.combine", label: "Combine bodies…", icon: "unite", divider: true, disabled: state.generalBodyCount < 2,
-      hint: state.generalBodyCount < 2 ? "Needs two solid bodies made from sketches" : "Join, cut or intersect two solids", action: actions.onCombine }
+      hint: state.generalBodyCount < 2 ? "Needs two solid bodies made from sketches" : "Join, cut or intersect two solids", action: actions.onCombine },
+    { id: "modify.hole", label: "Hole…", icon: "hole", divider: true, disabled: !state.generalBodySelected,
+      hint: state.generalBodySelected ? "Drill a through-hole along +Z into the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("hole") },
+    { id: "modify.fillet", label: "Fillet…", icon: "fillet", disabled: !state.generalBodySelected,
+      hint: state.generalBodySelected ? "Round every sharp convex edge on the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("fillet") },
+    { id: "modify.chamfer", label: "Chamfer…", icon: "chamfer", disabled: !state.generalBodySelected,
+      hint: state.generalBodySelected ? "Bevel every sharp convex edge on the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("chamfer") },
+    { id: "modify.shell", label: "Shell…", icon: "shell", disabled: !state.generalBodySelected,
+      hint: state.generalBodySelected ? "Hollow the selected solid with the +Z face left open" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("shell") }
   ] };
 
   const view: WorkbenchMenu = { id: "view", label: "View", icon: "view", items: [

@@ -274,6 +274,11 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
     case "toggle-general-body-visibility":
       if (!keys(input, [...common, "bodyId"]) || !stableId(input.bodyId)) return invalidOperation("The general body ID is invalid.");
       break;
+    case "modify-general-body":
+      if (!keys(input, [...common, "targetBodyId", "modifier", "label", "body"]) || !stableId(input.targetBodyId)
+        || !["hole", "shell", "chamfer", "fillet"].includes(String(input.modifier)) || !shortText(input.label, 1, 120)
+        || !validGeneralSolidBodyPayload(input.body)) return invalidOperation("The modify-general-body payload is invalid.");
+      break;
     case "create-part-revolve":
       if (!keys(input, [...common, "bodyId", "name", "outerDiameterMm", "innerDiameterMm", "heightMm", "angleDeg", "translationMm"])
         || !stableId(input.bodyId) || !shortText(input.name, 1, 120)
@@ -681,6 +686,14 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const target = current.find((body) => body.id === operation.bodyId);
       if (target === undefined) return broken(operation.bodyId, "The general body does not exist.");
       return changed({ ...project, part: { ...project.part, generalBodies: current.map((body) => body.id === target.id ? { ...body, visible: !body.visible } : body) } }, [target.id], `${target.visible ? "Hid" : "Showed"} ${target.name}.`);
+    }
+    case "modify-general-body": {
+      const current = project.part.generalBodies ?? [];
+      const target = current.find((body) => body.id === operation.targetBodyId);
+      if (target === undefined) return broken(operation.targetBodyId, "The general body being modified does not exist.");
+      if (operation.body.id !== operation.targetBodyId) return invalidOperation("A modify result must keep the target body's ID.");
+      const next = current.map((body) => body.id === target.id ? { ...operation.body, visible: body.visible } : body);
+      return changed({ ...project, part: { ...project.part, generalBodies: next } }, [target.id], `${operation.label} on ${target.name}.`);
     }
     case "set-part-preview-body-transform": {
       const currentBodies = project.part.previewBodies ?? [];

@@ -995,6 +995,14 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly body: GeneralSolidBody;
     }
   | { readonly kind: "toggle-general-body-visibility"; readonly bodyId: string }
+  | {
+      /** Replaces the target body with the result of a mesh-level modify operation computed by the caller. */
+      readonly kind: "modify-general-body";
+      readonly targetBodyId: string;
+      readonly modifier: "hole" | "shell" | "chamfer" | "fillet";
+      readonly label: string;
+      readonly body: GeneralSolidBody;
+    }
   | { readonly kind: "set-part-preview-body-transform"; readonly bodyId: string; readonly translationMm: Vec3; readonly rotationDeg: Vec3 }
   | { readonly kind: "set-part-preview-body-size"; readonly bodyId: string; readonly sizeMm: Vec3 }
   | { readonly kind: "set-part-preview-body-color"; readonly bodyId: string; readonly color: string }
@@ -1095,7 +1103,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-sketch-plane",
   "commit-design-sketch", "edit-design-sketch", "new-design-sketch", "add-design-solid", "update-design-solid", "regenerate-design",
   "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
-  "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility",
+  "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility", "modify-general-body",
   "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
   "isolate-part-preview-body", "set-part-preview-bodies-visibility", "create-part-revolve", "pattern-part-feature", "mirror-part-feature",
   "boolean-part-bodies", "trim-part-body", "set-part-body-edge-treatment", "set-part-body-draft", "set-part-body-shell",

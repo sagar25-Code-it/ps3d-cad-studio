@@ -11,7 +11,7 @@ function recordingActions(): { readonly actions: WorkbenchMenuActions; readonly 
     onCombine: record("combine"), onInsertToAssembly: record("insert-assembly"),
     onMasterCart: record("master-cart"), onRenderStudio: record("render-studio"),
     onEditSelectedFeature: record("edit-feature"), onToggleSuppressSelected: record("suppress"),
-    onDeleteSelected: record("delete"), onMoveSelectedBody: record("move"), onResizeSelectedBody: record("resize"),
+    onDeleteSelected: record("delete"), onMoveSelectedBody: record("move"), onResizeSelectedBody: record("resize"), onModifyGeneralBody: (modifier: string) => record(`modify-${modifier}`)(),
     onFit: record("fit"), onHome: record("home"), onToggleGrid: record("grid"),
     onWorkspace: (workspace) => { calls.push(`workspace:${workspace}`); },
     onDesignHealth: record("health"), onMeasure: record("measure"), onExchange: record("exchange"),
@@ -24,7 +24,7 @@ function recordingActions(): { readonly actions: WorkbenchMenuActions; readonly 
 const BASE: WorkbenchMenuState = {
   workspace: "part", masterCartOpen: false, renderStudioOpen: false, working: false,
   gridVisible: true, canUndo: false, canRedo: false, generalBodyCount: 0,
-  previewBodySelected: false, selectionDeletable: false
+  previewBodySelected: false, generalBodySelected: false, selectionDeletable: false
 };
 
 const item = (menus: ReturnType<typeof buildWorkbenchMenus>, id: string) => {
