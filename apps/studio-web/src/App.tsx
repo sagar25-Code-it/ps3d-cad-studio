@@ -50,7 +50,7 @@ import {
   type Vec3,
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
-import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshFillet, meshHole, meshShell } from "../../../packages/workbench-geometry/src/index.js";
+import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
 import { createDrawingSvg } from "../../../packages/workbench-drawing/src/index.js";
@@ -882,6 +882,50 @@ export function App(): React.JSX.Element {
   const modifierLabelOf = (modifier: "hole" | "fillet" | "chamfer" | "shell"): string => (
     modifier === "hole" ? "Hole" : modifier === "fillet" ? "Fillet" : modifier === "chamfer" ? "Chamfer" : "Shell"
   );
+
+  const handleHoleWizard = (): void => {
+    const current = projectRef.current;
+    const bodies = current.part.generalBodies ?? [];
+    const body = bodies.find((candidate) => candidate.id === selectedId);
+    if (body === undefined) { setStatus("ready"); setStatusText("Hole Wizard needs a general solid body selected first."); return; }
+    const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
+    const typeRaw = (ask("Hole type (simple, counterbore, countersink, tapped):", "counterbore") ?? "").trim().toLowerCase();
+    if (!["simple", "counterbore", "countersink", "tapped"].includes(typeRaw)) { setStatus("ready"); setStatusText("Hole Wizard: enter simple, counterbore, countersink or tapped."); return; }
+    const fastenerRaw = (ask("Fastener size (M3, M4, M5, M6, M8, M10):", "M6") ?? "").trim().toUpperCase();
+    const spec = METRIC_FASTENERS[fastenerRaw];
+    if (spec === undefined) { setStatus("ready"); setStatusText("Hole Wizard: enter M3, M4, M5, M6, M8 or M10."); return; }
+    const zs = body.positionsMm.filter((_, index) => index % 3 === 2);
+    const extentZ = Math.max(...zs) - Math.min(...zs);
+    const defaultDepth = extentZ + 4;
+    const depthRaw = ask(`Pilot depth in mm (blank = through, body extent ${extentZ.toFixed(1)} mm):`, String(extentZ + 2));
+    const pilotDepth = depthRaw === null || depthRaw.trim() === "" ? defaultDepth : Number.parseFloat(depthRaw);
+    if (!Number.isFinite(pilotDepth) || pilotDepth <= 0) { setStatus("ready"); setStatusText("Hole Wizard: pilot depth must be a positive number."); return; }
+
+    const input = { positionsMm: body.positionsMm, indices: body.indices };
+    let result: { readonly ok: true; readonly positionsMm: readonly number[]; readonly indices: readonly number[] } | { readonly ok: false; readonly message: string };
+    let label: string;
+    if (typeRaw === "simple") {
+      result = meshHole(input, { diameterMm: spec.clearanceDiameterMm, depthMm: pilotDepth, axis: "z" });
+      label = `${fastenerRaw} clearance hole Ø ${spec.clearanceDiameterMm.toFixed(2)} mm`;
+    } else if (typeRaw === "counterbore") {
+      result = meshCounterbore(input, { pilotDiameterMm: spec.clearanceDiameterMm, pilotDepthMm: pilotDepth, headDiameterMm: spec.counterboreDiameterMm, headDepthMm: spec.counterboreDepthMm, axis: "z" });
+      label = `${fastenerRaw} counterbore (pilot Ø ${spec.clearanceDiameterMm}, head Ø ${spec.counterboreDiameterMm} × ${spec.counterboreDepthMm} mm)`;
+    } else if (typeRaw === "countersink") {
+      result = meshCountersink(input, { pilotDiameterMm: spec.clearanceDiameterMm, pilotDepthMm: pilotDepth, headDiameterMm: spec.countersinkDiameterMm, headAngleDeg: 90, axis: "z" });
+      label = `${fastenerRaw} countersink (pilot Ø ${spec.clearanceDiameterMm}, head Ø ${spec.countersinkDiameterMm} @ 90°)`;
+    } else {
+      result = meshTappedHole(input, { nominalDiameterMm: spec.nominalDiameterMm, depthMm: pilotDepth, axis: "z" });
+      label = `${fastenerRaw} tapped hole (tap-drill Ø ${(spec.nominalDiameterMm * 0.85).toFixed(2)} mm)`;
+    }
+    if (!result.ok) { setStatus("ready"); setStatusText(`Hole Wizard failed: ${result.message}`); return; }
+    const { feature: _feature, brep: _brep, ...keep } = body;
+    void _feature; void _brep;
+    const nextBody: GeneralSolidBody = { ...keep, positionsMm: Array.from(result.positionsMm), indices: Array.from(result.indices) };
+    const modifier = typeRaw === "simple" ? "hole" : typeRaw === "counterbore" ? "counterbore" : typeRaw === "countersink" ? "countersink" : "tapped-hole";
+    if (!applyProjectOperation({ kind: "modify-general-body", targetBodyId: body.id, modifier, label, body: nextBody })) { setStatus("ready"); setStatusText("The project rejected the Hole Wizard result."); return; }
+    setSelectedId(body.id);
+    setStatusText(`Applied ${label} to ${body.name}.`);
+  };
 
   const handleAddConstructionPlane = (mode: "offset" | "angle" | "three-points" | "midplane"): void => {
     const current = projectRef.current;
@@ -2699,6 +2743,7 @@ export function App(): React.JSX.Element {
       onPartFeatureAction={(operation, commandName) => runPartFeatureAction(operation, commandName)}
       onModifyGeneralBody={handleModifyGeneralBody}
       onAddConstructionPlane={handleAddConstructionPlane}
+      onHoleWizard={handleHoleWizard}
       onFit={fitViewport}
       onMeasure={() => setViewportNavigation("measure")}
       onNativeDownload={() => void downloadNative()}

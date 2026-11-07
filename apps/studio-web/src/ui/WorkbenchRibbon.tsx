@@ -48,6 +48,7 @@ interface WorkbenchRibbonProps {
   readonly onPartFeatureAction: (operation: "revolve" | "pattern-feature" | "mirror-feature" | "unite" | "subtract" | "trim-body" | "edge-blend" | "chamfer" | "draft" | "shell" | "move-face" | "offset-face" | "replace-face" | "delete-face" | "resize-blend" | "update-model", commandName: string) => void;
   readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell") => void;
   readonly onAddConstructionPlane: (mode: "offset" | "angle" | "three-points" | "midplane") => void;
+  readonly onHoleWizard: () => void;
   readonly onInsertComponent: (shape: "box" | "cylinder") => void;
   readonly onDeleteComponent: (componentId: string) => void;
   readonly onToggleGrounded: (componentId: string) => void;
@@ -206,6 +207,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
       <RibbonGroup label="Solid modify">
         <RibbonButton icon="hole" label="Hole" hint="Ø 6 · through" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("hole")} />
+        <RibbonButton icon="bore" label="Hole Wizard" hint="M-series + style" disabled={!generalBodySelected} onClick={props.onHoleWizard} />
         <RibbonButton icon="fillet" label="Fillet" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("fillet")} />
         <RibbonButton icon="chamfer" label="Chamfer" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer")} />
         <RibbonButton icon="shell" label="Shell" hint="open +Z" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("shell")} />

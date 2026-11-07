@@ -276,7 +276,7 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "modify-general-body":
       if (!keys(input, [...common, "targetBodyId", "modifier", "label", "body"]) || !stableId(input.targetBodyId)
-        || !["hole", "shell", "chamfer", "fillet"].includes(String(input.modifier)) || !shortText(input.label, 1, 120)
+        || !["hole", "shell", "chamfer", "fillet", "counterbore", "countersink", "tapped-hole"].includes(String(input.modifier)) || !shortText(input.label, 1, 120)
         || !validGeneralSolidBodyPayload(input.body)) return invalidOperation("The modify-general-body payload is invalid.");
       break;
     case "add-construction-plane":

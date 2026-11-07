@@ -1040,7 +1040,7 @@ export type WorkbenchOperation = OperationEnvelope & (
       /** Replaces the target body with the result of a mesh-level modify operation computed by the caller. */
       readonly kind: "modify-general-body";
       readonly targetBodyId: string;
-      readonly modifier: "hole" | "shell" | "chamfer" | "fillet";
+      readonly modifier: "hole" | "shell" | "chamfer" | "fillet" | "counterbore" | "countersink" | "tapped-hole";
       readonly label: string;
       readonly body: GeneralSolidBody;
     }

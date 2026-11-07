@@ -39,6 +39,54 @@ export interface HoleOptions {
   readonly segments?: number;
 }
 
+export interface CounterboreOptions {
+  readonly pilotDiameterMm: number;
+  readonly pilotDepthMm: number;
+  readonly headDiameterMm: number;
+  readonly headDepthMm: number;
+  readonly axis?: Axis;
+  readonly originMm?: V3;
+  readonly segments?: number;
+}
+
+export interface CountersinkOptions {
+  readonly pilotDiameterMm: number;
+  readonly pilotDepthMm: number;
+  readonly headDiameterMm: number;
+  /** Included angle of the countersink cone (ISO 10642 socket head = 90°). */
+  readonly headAngleDeg: number;
+  readonly axis?: Axis;
+  readonly originMm?: V3;
+  readonly segments?: number;
+}
+
+export interface TappedHoleOptions {
+  /** Nominal fastener diameter (M-size). The tap-drill diameter is 0.85 × nominal for a basic ISO metric thread. */
+  readonly nominalDiameterMm: number;
+  readonly depthMm: number;
+  readonly axis?: Axis;
+  readonly originMm?: V3;
+  readonly segments?: number;
+}
+
+/** ISO-metric clearance + socket-head counterbore dimensions for common sizes (DIN 912 / ISO 4762). */
+export interface FastenerSpec {
+  readonly nominalDiameterMm: number;
+  readonly clearanceDiameterMm: number;
+  readonly counterboreDiameterMm: number;
+  readonly counterboreDepthMm: number;
+  readonly countersinkDiameterMm: number;
+}
+
+export const METRIC_FASTENERS: Readonly<Record<string, FastenerSpec>> = {
+  M3: { nominalDiameterMm: 3.0, clearanceDiameterMm: 3.4, counterboreDiameterMm: 6.5, counterboreDepthMm: 3.3, countersinkDiameterMm: 6.3 },
+  M4: { nominalDiameterMm: 4.0, clearanceDiameterMm: 4.5, counterboreDiameterMm: 8.0, counterboreDepthMm: 4.4, countersinkDiameterMm: 9.4 },
+  M5: { nominalDiameterMm: 5.0, clearanceDiameterMm: 5.5, counterboreDiameterMm: 10.0, counterboreDepthMm: 5.4, countersinkDiameterMm: 10.4 },
+  M6: { nominalDiameterMm: 6.0, clearanceDiameterMm: 6.6, counterboreDiameterMm: 11.0, counterboreDepthMm: 6.5, countersinkDiameterMm: 12.6 },
+  M8: { nominalDiameterMm: 8.0, clearanceDiameterMm: 9.0, counterboreDiameterMm: 15.0, counterboreDepthMm: 8.6, countersinkDiameterMm: 17.3 },
+  M10: { nominalDiameterMm: 10.0, clearanceDiameterMm: 11.0, counterboreDiameterMm: 18.0, counterboreDepthMm: 10.8, countersinkDiameterMm: 20.0 }
+};
+
 export interface ShellOptions {
   readonly thicknessMm: number;
   /** Which face to leave open. Default "+z". */
@@ -73,10 +121,145 @@ export function meshHole(body: ModifyMeshInput, options: HoleOptions): ModifyMes
   if (!Number.isInteger(segments) || segments < 8 || segments > 128) return { ok: false, message: "Hole tessellation must be between 8 and 128 segments." };
 
   const origin = options.originMm ?? defaultHoleOrigin(body, axis);
-  const cutter = buildCylinderCutter(radius, depth + 4, origin, axis, segments);
+  const cutter = cylinderCutterAbove(radius, depth, origin, axis, segments);
   const result = booleanMeshes(body, cutter, "cut");
   if (!result.ok) return { ok: false, message: `Hole could not be cut: ${result.message}` };
   return { ok: true, positionsMm: result.value.positionsMm, indices: result.value.indices };
+}
+
+/**
+ * Counterbore: drill a pilot hole all the way through (or to the given depth), then widen the top
+ * section to accept a socket cap screw head. Two Boolean cuts in sequence — pilot, then head —
+ * so the result stays a single clean manifold.
+ */
+export function meshCounterbore(body: ModifyMeshInput, options: CounterboreOptions): ModifyMeshResult {
+  const pilotRadius = options.pilotDiameterMm / 2;
+  const headRadius = options.headDiameterMm / 2;
+  if (!(pilotRadius > 0) || !(headRadius > pilotRadius)) return { ok: false, message: "Counterbore: head diameter must be larger than the pilot diameter." };
+  if (!(options.pilotDepthMm > 0) || !(options.headDepthMm > 0)) return { ok: false, message: "Counterbore: pilot and head depths must be positive." };
+  const axis: Axis = options.axis ?? "z";
+  const segments = options.segments ?? DEFAULT_CYLINDER_SEGMENTS;
+  const origin = options.originMm ?? defaultHoleOrigin(body, axis);
+  const pilotCutter = cylinderCutterAbove(pilotRadius, options.pilotDepthMm, origin, axis, segments);
+  const pilotResult = booleanMeshes(body, pilotCutter, "cut");
+  if (!pilotResult.ok) return { ok: false, message: `Counterbore pilot cut failed: ${pilotResult.message}` };
+  const bored: ModifyMeshInput = { positionsMm: pilotResult.value.positionsMm, indices: pilotResult.value.indices };
+  const headCutter = cylinderCutterAbove(headRadius, options.headDepthMm, origin, axis, segments);
+  const headResult = booleanMeshes(bored, headCutter, "cut");
+  if (!headResult.ok) return { ok: false, message: `Counterbore head cut failed: ${headResult.message}` };
+  return { ok: true, positionsMm: headResult.value.positionsMm, indices: headResult.value.indices };
+}
+
+/**
+ * Countersink: pilot hole + a conical cap at the top sized for an ISO flat-head screw
+ * (default 90° included angle).
+ */
+export function meshCountersink(body: ModifyMeshInput, options: CountersinkOptions): ModifyMeshResult {
+  const pilotRadius = options.pilotDiameterMm / 2;
+  const headRadius = options.headDiameterMm / 2;
+  if (!(pilotRadius > 0) || !(headRadius > pilotRadius)) return { ok: false, message: "Countersink: head diameter must be larger than the pilot diameter." };
+  if (!(options.pilotDepthMm > 0)) return { ok: false, message: "Countersink: pilot depth must be positive." };
+  if (!(options.headAngleDeg > 1) || !(options.headAngleDeg < 179)) return { ok: false, message: "Countersink: included angle must be between 1° and 179°." };
+  const axis: Axis = options.axis ?? "z";
+  const segments = options.segments ?? DEFAULT_CYLINDER_SEGMENTS;
+  const origin = options.originMm ?? defaultHoleOrigin(body, axis);
+  const halfAngle = options.headAngleDeg * Math.PI / 360;
+  const sinkDepth = (headRadius - pilotRadius) / Math.tan(halfAngle);
+  if (!(sinkDepth > 0)) return { ok: false, message: "Countersink: computed sink depth is not positive." };
+
+  const pilotCutter = cylinderCutterAbove(pilotRadius, options.pilotDepthMm, origin, axis, segments);
+  const pilotResult = booleanMeshes(body, pilotCutter, "cut");
+  if (!pilotResult.ok) return { ok: false, message: `Countersink pilot cut failed: ${pilotResult.message}` };
+  const bored: ModifyMeshInput = { positionsMm: pilotResult.value.positionsMm, indices: pilotResult.value.indices };
+  // Cone frustum: narrower face (pilot diameter) at the BOTTOM at depth `sinkDepth`, wider face
+  // (head diameter) at the TOP flush with the body surface. `coneCutterAbove` places the wider
+  // top face at `origin` + overshoot and the narrower base face at `origin − sinkDepth`.
+  const coneCutter = coneCutterAbove(pilotRadius, headRadius, sinkDepth, origin, axis, segments);
+  const coneResult = booleanMeshes(bored, coneCutter, "cut");
+  if (!coneResult.ok) return { ok: false, message: `Countersink cone cut failed: ${coneResult.message}` };
+  return { ok: true, positionsMm: coneResult.value.positionsMm, indices: coneResult.value.indices };
+}
+
+/**
+ * Tapped (threaded) hole: in V1 we draw it as a tap-drill-diameter cylinder (0.85 × nominal
+ * for an ISO basic metric thread) — the thread pitch itself isn't modelled yet. The modifier
+ * label carries the tap size so the browser and audit record the engineering intent.
+ */
+export function meshTappedHole(body: ModifyMeshInput, options: TappedHoleOptions): ModifyMeshResult {
+  const nominal = options.nominalDiameterMm;
+  if (!(nominal > 0)) return { ok: false, message: "Tapped hole: nominal diameter must be positive." };
+  if (!(options.depthMm > 0)) return { ok: false, message: "Tapped hole: depth must be positive." };
+  return meshHole(body, { diameterMm: nominal * 0.85, depthMm: options.depthMm, ...(options.axis !== undefined ? { axis: options.axis } : {}), ...(options.originMm !== undefined ? { originMm: options.originMm } : {}), ...(options.segments !== undefined ? { segments: options.segments } : {}) });
+}
+
+
+function buildConeCutter(baseRadius: number, topRadius: number, height: number, center: V3, axis: Axis, segments: number): BooleanMeshInput {
+  // Builds a frustum (circular top AND bottom) so the cutter is always a closed manifold.
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const z0 = -height / 2;
+  const z1 = height / 2;
+  for (let i = 0; i < segments; i += 1) {
+    const t = (i / segments) * 2 * Math.PI;
+    positions.push(Math.cos(t) * baseRadius, Math.sin(t) * baseRadius, z0);
+  }
+  for (let i = 0; i < segments; i += 1) {
+    const t = (i / segments) * 2 * Math.PI;
+    positions.push(Math.cos(t) * topRadius, Math.sin(t) * topRadius, z1);
+  }
+  const bottomCenter = 2 * segments; positions.push(0, 0, z0);
+  const topCenter = 2 * segments + 1; positions.push(0, 0, z1);
+  for (let i = 0; i < segments; i += 1) {
+    const a = i;
+    const b = (i + 1) % segments;
+    const c = i + segments;
+    const d = (i + 1) % segments + segments;
+    indices.push(a, b, d, a, d, c);
+  }
+  for (let i = 0; i < segments; i += 1) {
+    const a = i;
+    const b = (i + 1) % segments;
+    indices.push(bottomCenter, b, a);
+  }
+  for (let i = 0; i < segments; i += 1) {
+    const a = i + segments;
+    const b = (i + 1) % segments + segments;
+    indices.push(topCenter, a, b);
+  }
+  const final = new Array<number>(positions.length);
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i]!; const y = positions[i + 1]!; const z = positions[i + 2]!;
+    if (axis === "x") { final[i] = z + center[0]; final[i + 1] = y + center[1]; final[i + 2] = -x + center[2]; }
+    else if (axis === "y") { final[i] = x + center[0]; final[i + 1] = z + center[1]; final[i + 2] = -y + center[2]; }
+    else { final[i] = x + center[0]; final[i + 1] = y + center[1]; final[i + 2] = z + center[2]; }
+  }
+  return { positionsMm: final, indices };
+}
+
+/**
+ * `originMm` is the point on the TOP face of the hole — where the drill enters the body.
+ * `depthMm` is how far the hole extends from there INTO the body along the axis.
+ * Cutters extend from (origin − depth) up to (origin + overshoot) so the Boolean cleanly
+ * reaches the top face regardless of small numerical drift.
+ */
+const HOLE_OVERSHOOT_MM = 2;
+
+function cylinderCutterAbove(radius: number, depthMm: number, holeOrigin: V3, axis: Axis, segments: number): BooleanMeshInput {
+  const height = depthMm + HOLE_OVERSHOOT_MM;
+  const cutterCenter = shiftAlongAxis(holeOrigin, axis, (HOLE_OVERSHOOT_MM - depthMm) / 2);
+  return buildCylinderCutter(radius, height, cutterCenter, axis, segments);
+}
+
+function coneCutterAbove(baseRadius: number, topRadius: number, depthMm: number, holeOrigin: V3, axis: Axis, segments: number): BooleanMeshInput {
+  const height = depthMm + HOLE_OVERSHOOT_MM;
+  const cutterCenter = shiftAlongAxis(holeOrigin, axis, (HOLE_OVERSHOOT_MM - depthMm) / 2);
+  return buildConeCutter(baseRadius, topRadius, height, cutterCenter, axis, segments);
+}
+
+function shiftAlongAxis(point: V3, axis: Axis, delta: number): V3 {
+  if (axis === "x") return [point[0] + delta, point[1], point[2]];
+  if (axis === "y") return [point[0], point[1] + delta, point[2]];
+  return [point[0], point[1], point[2] + delta];
 }
 
 function defaultHoleOrigin(body: ModifyMeshInput, axis: Axis): V3 {
@@ -92,7 +275,7 @@ function defaultHoleOrigin(body: ModifyMeshInput, axis: Axis): V3 {
     if (along > maxAlong) maxAlong = along;
   }
   const centroid: [number, number, number] = [sumX / count, sumY / count, sumZ / count];
-  centroid[axisIndex] = maxAlong + 2;
+  centroid[axisIndex] = maxAlong;
   return [centroid[0], centroid[1], centroid[2]];
 }
 
