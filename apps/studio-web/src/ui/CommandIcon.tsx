@@ -184,6 +184,8 @@ function geometry(name: string): React.ReactNode {
     case "cylinder": return <><ellipse cx="12" cy="6" rx="6" ry="3" /><path d="M6 6v12c0 1.7 2.7 3 6 3s6-1.3 6-3V6" /><path d="M6 18c0 1.7 2.7 3 6 3s6-1.3 6-3" /></>;
     case "cone": return <><ellipse cx="12" cy="18" rx="7" ry="3" /><path d="M5 18 10 5M19 18 14 5" /><ellipse cx="12" cy="5" rx="2" ry="1" /></>;
     case "sphere": return <><circle cx="12" cy="12" r="8" /><ellipse cx="12" cy="12" rx="3.4" ry="8" /><path d="M4 12h16" /></>;
+    case "torus": return <><ellipse cx="12" cy="12" rx="9" ry="4" /><ellipse cx="12" cy="12" rx="3.5" ry="1.5" /></>;
+    case "lock": return <><rect x="5" y="11" width="14" height="9" rx="1.5" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /><circle cx="12" cy="15.5" r="1.3" fill="currentColor" /></>;
     case "master-cart": return <><path d="M3 5h2l2 10h11l2-7H7" /><circle cx="9" cy="19" r="1.5" /><circle cx="17" cy="19" r="1.5" /><path d="m10 7 3-1.5L16 7l-3 1.5zM10 7v4l3 1.5 3-1.5V7M13 8.5v4" /></>;
     case "fastener": return <><path d="m5 7 3-3h4l3 3-3 3H8z" /><path d="M10 10v10M7.5 13h5M7.5 16h5M7.5 19h5" /></>;
     case "bearing": return <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="5.8" r="1" fill="currentColor" /><circle cx="18.2" cy="12" r="1" fill="currentColor" /><circle cx="12" cy="18.2" r="1" fill="currentColor" /><circle cx="5.8" cy="12" r="1" fill="currentColor" /></>;

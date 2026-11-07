@@ -171,6 +171,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="cylinder" label="Cylinder" hint="preview body" onClick={() => props.onCreatePartPreviewBody("cylinder")} />
         <RibbonButton icon="cone" label="Cone" hint="preview body" onClick={() => props.onCreatePartPreviewBody("cone")} />
         <RibbonButton icon="sphere" label="Sphere" hint="preview body" onClick={() => props.onCreatePartPreviewBody("sphere")} />
+        <RibbonButton icon="torus" label="Torus" hint="preview body" onClick={() => props.onCreatePartPreviewBody("torus")} />
       </RibbonGroup>
       <RibbonGroup label="Direct body edit">
         <RibbonButton icon="move" label="Move" hint="XYZ / rotate" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-transform", "Move Body")} />

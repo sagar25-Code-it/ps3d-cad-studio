@@ -23,6 +23,7 @@ import { designReplayTests } from "./design-replay.test.js";
 import { planarFaceTests } from "./planar-faces.test.js";
 import { menuModelTests } from "./menu-model.test.js";
 import { mcpRecipeTests } from "./mcp-recipes.test.js";
+import { selectionMetricTests } from "./selection-metrics.test.js";
 import { sketchSolverTests } from "./sketch-solver.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
@@ -70,6 +71,7 @@ const tests: readonly TestCase[] = [
   ...planarFaceTests,
   ...menuModelTests,
   ...mcpRecipeTests,
+  ...selectionMetricTests,
   ...sketchSolverTests,
   ...sketchEditToolTests,
   ...meshBooleanTests,

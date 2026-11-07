@@ -50,7 +50,7 @@ export interface WorkbenchMenuActions {
   readonly onCommandPalette: () => void;
   readonly onNewSketch: () => void;
   readonly onCreateSolidFromSketch: () => void;
-  readonly onCreatePrimitive: (shape: "block" | "cylinder" | "cone" | "sphere") => void;
+  readonly onCreatePrimitive: (shape: "block" | "cylinder" | "cone" | "sphere" | "torus") => void;
   readonly onCombine: () => void;
   readonly onInsertToAssembly: () => void;
   readonly onMasterCart: () => void;
@@ -95,6 +95,7 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
     { id: "create.cylinder", label: "Cylinder", icon: "cylinder", hint: "Independent preview body", action: () => actions.onCreatePrimitive("cylinder") },
     { id: "create.cone", label: "Cone", icon: "cone", hint: "Independent preview body", action: () => actions.onCreatePrimitive("cone") },
     { id: "create.sphere", label: "Sphere", icon: "sphere", hint: "Independent preview body", action: () => actions.onCreatePrimitive("sphere") },
+    { id: "create.torus", label: "Torus", icon: "torus", hint: "Ring body: sizeMm[0] = major diameter, sizeMm[2] = tube diameter", action: () => actions.onCreatePrimitive("torus") },
     { id: "create.insert-assembly", label: "Insert part into assembly", icon: "assemble", divider: true, action: actions.onInsertToAssembly },
     { id: "create.master-cart", label: "Master Cart component library", icon: "master-cart", action: actions.onMasterCart },
     { id: "create.render-studio", label: "Render Studio scene", icon: "appearance", action: actions.onRenderStudio }

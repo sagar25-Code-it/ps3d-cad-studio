@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/index.js";
 import { dependentsOf, describeFeature, designOf, featureOfBody, featureStatus, featureStatusText, vehicleHardPoints, type DesignFeature, type WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { DesignHealthReport } from "../../../../packages/workbench-health/src/index.js";
-import { detectSketchProfiles } from "../../../../packages/workbench-sketch/src/index.js";
+import { analyzeWorkbenchSketch, detectSketchProfiles } from "../../../../packages/workbench-sketch/src/index.js";
+import type { WorkbenchSketch } from "../../../../packages/workbench-core/src/index.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, inferCommandIcon } from "./CommandIcon.js";
 
@@ -46,6 +47,7 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
   const drawingGdtCount = (project.drawing.showGdt ?? false) ? (drawingHasDatumFrame ? 3 : 1) : 0;
   const vehiclePoints = project.activeWorkspace === "vehicle" ? vehicleHardPoints(project.vehicle) : [];
   const sketchProfiles = detectSketchProfiles(project.sketch);
+  const workingSketchFullyConstrained = isSketchFullyConstrained(project.sketch);
   const linkedOutline = project.sketch.entities.find((entity) => entity.kind === "rectangle" && !entity.construction && Math.abs(entity.widthMm - project.part.widthMm) < 1e-6 && Math.abs(entity.heightMm - project.part.heightMm) < 1e-6);
   const linkedBore = project.sketch.entities.find((entity) => entity.kind === "circle" && !entity.construction && Math.hypot(entity.center[0] - (linkedOutline?.kind === "rectangle" ? linkedOutline.center[0] : 0), entity.center[1] - (linkedOutline?.kind === "rectangle" ? linkedOutline.center[1] : 0)) < 0.01 && Math.abs(entity.radiusMm * 2 - project.part.holeDiameterMm) < 1e-6);
   const relationships = selectionRelationships(project, selectedId);
@@ -73,22 +75,25 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
       <TreeItem kind="datum" id="datum:xz" label="XZ plane" meta="reference" selectedId={selectedId} onSelect={onSelect} indent />
     </TreeSection>}
     {showSketch && <TreeSection title={`Sketches · ${project.sketch.entities.length} entities · ${sketchProfiles.length} profiles`} badge="preview">
-      <TreeItem kind="sketch" id={project.sketch.id} label={project.sketch.name} meta={`${project.sketch.constraints.length} constraints`} selectedId={selectedId} onSelect={onSelect} />
+      <TreeItem kind="sketch" id={project.sketch.id} label={project.sketch.name} meta={`${project.sketch.constraints.length} constraints${workingSketchFullyConstrained ? " · fully constrained" : ""}`} selectedId={selectedId} onSelect={onSelect} {...(workingSketchFullyConstrained ? { trailingIcon: "lock" as const } : {})} />
       {project.sketch.entities.map((entity) => <TreeItem key={entity.id} kind="sketch" id={entity.id} label={entityLabel(entity.kind)} meta={`${shortId(entity.id)} · ${entity.visible === false ? "hidden" : "shown"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
       {sketchProfiles.map((profile, index) => <TreeItem key={profile.id} kind="sketch" id={profile.id} label={`Profile P${index + 1}`} meta={`${profile.boundary.kind.replaceAll("-", " ")} · ${formatArea(profile.areaMm2)} mm²`} selectedId={selectedId} onSelect={onSelect} indent />)}
     </TreeSection>}
     {history.features.length > 0 && <TreeSection title={`Timeline · ${history.features.length} step${history.features.length === 1 ? "" : "s"}`} badge="preview">
       {history.features.map((feature) => {
         const status = featureStatusText(featureStatus(history, feature));
+        // A sketch feature in the timeline is a snapshot, so we read its classification from that snapshot directly.
+        const locked = feature.kind === "sketch" && isSketchFullyConstrained(feature.sketch);
         return <TreeItem
           key={feature.id}
           kind={feature.kind === "sketch" ? "sketch" : "feature"}
           icon={feature.kind}
           id={timelineSelectionId(feature)}
           label={feature.name}
-          meta={`${describeFeature(history, feature)}${status === "" ? "" : ` · ${status}`}${feature.health === undefined ? "" : ` · ${feature.health.message}`}`}
+          meta={`${describeFeature(history, feature)}${locked ? " · fully constrained" : ""}${status === "" ? "" : ` · ${status}`}${feature.health === undefined ? "" : ` · ${feature.health.message}`}`}
           selectedId={selectedId}
           onSelect={onSelect}
+          {...(locked ? { trailingIcon: "lock" as const } : {})}
         />;
       })}
     </TreeSection>}
@@ -195,9 +200,15 @@ function TreeSection({ title, badge, children, initiallyOpen = true }: { readonl
   return <details className="tree-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}><summary><span className="tree-chevron" aria-hidden="true">›</span><strong>{title}</strong><CapabilityBadge level={badge} /></summary><div>{children}</div></details>;
 }
 
-function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean; readonly icon?: string }): React.JSX.Element {
+function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean; readonly icon?: string; readonly trailingIcon?: string }): React.JSX.Element {
   const selected = props.selectedId === props.id;
-  return <button data-tree-id={props.id} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => props.onSelect(selected ? null : props.id)}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={props.icon ?? treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span></button>;
+  return <button data-tree-id={props.id} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => props.onSelect(selected ? null : props.id)}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={props.icon ?? treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span>{props.trailingIcon !== undefined && <span className="tree-trailing" aria-label="Fully constrained" title="Fully constrained"><CommandIcon name={props.trailingIcon} /></span>}</button>;
+}
+
+/** A sketch is fully constrained when every drawn primitive has a determined pose: the solver reports zero degrees of freedom. An empty sketch is not called "fully constrained" because there is nothing to constrain yet. */
+function isSketchFullyConstrained(sketch: WorkbenchSketch): boolean {
+  if (sketch.entities.every((entity) => entity.construction)) return false;
+  return analyzeWorkbenchSketch(sketch).classification === "fully-constrained";
 }
 
 /** A timeline solid is selected through its body (so the viewport highlights it); a sketch step is selected by its own ID. */

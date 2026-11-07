@@ -93,6 +93,7 @@ function partPreviewPrimitive(body: PartPreviewBody): PreviewPrimitive {
 }
 
 function analyticBodyMesh(body: PartPreviewBody): TriangleMesh | undefined {
+  if (body.shape === "torus") return torusMesh(body.sizeMm[0] / 2, body.sizeMm[2] / 2);
   if (body.shape === "revolved") return annularSectorMesh(body.sizeMm[0], body.sizeMm[1], body.sizeMm[2], body.revolveAngleDeg ?? 360);
   if (body.boreDiameterMm !== undefined && body.shape === "block") return boredBlockMesh(body.sizeMm[0], body.sizeMm[1], body.sizeMm[2], body.boreDiameterMm);
   if (body.boreDiameterMm !== undefined && body.shape === "cylinder") return annularSectorMesh(body.sizeMm[0], body.boreDiameterMm, body.sizeMm[2], 360);
@@ -189,6 +190,36 @@ function boredBlockMesh(width: number, depth: number, height: number, boreDiamet
     indices.push(ob + index, ib + next, ob + next, ob + index, ib + index, ib + next);
     addQuad(indices, ob + index, ob + next, ot + next, ot + index);
     indices.push(ib + index, it + next, ib + next, ib + index, it + index, it + next);
+  }
+  return { positions, indices };
+}
+
+/**
+ * A closed torus (Clifford ring) tessellated as a triangle mesh. The major radius R sweeps the centre of the tube
+ * around Z; the minor radius r sweeps the tube wall. The parametric surface is x = (R + r cos v) cos u,
+ * y = (R + r cos v) sin u, z = r sin v, for u, v in [0, 2π). Both inputs are the radii, in mm (the preview-body
+ * sizeMm holds diameters, so the caller divides by two). The mesh winds so outward normals leave the solid.
+ */
+function torusMesh(majorRadius: number, minorRadius: number): TriangleMesh {
+  const uSegments = RADIAL_SEGMENTS;
+  const vSegments = Math.max(16, Math.round(RADIAL_SEGMENTS / 2));
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let iv = 0; iv < vSegments; iv += 1) {
+    const v = (iv / vSegments) * Math.PI * 2;
+    const cv = Math.cos(v); const sv = Math.sin(v);
+    for (let iu = 0; iu < uSegments; iu += 1) {
+      const u = (iu / uSegments) * Math.PI * 2;
+      const cu = Math.cos(u); const su = Math.sin(u);
+      positions.push((majorRadius + minorRadius * cv) * cu, (majorRadius + minorRadius * cv) * su, minorRadius * sv);
+    }
+  }
+  const at = (iv: number, iu: number): number => ((iv % vSegments) + vSegments) % vSegments * uSegments + ((iu % uSegments) + uSegments) % uSegments;
+  for (let iv = 0; iv < vSegments; iv += 1) {
+    for (let iu = 0; iu < uSegments; iu += 1) {
+      const a = at(iv, iu); const b = at(iv + 1, iu); const c = at(iv + 1, iu + 1); const d = at(iv, iu + 1);
+      indices.push(a, b, c, a, c, d);
+    }
   }
   return { positions, indices };
 }

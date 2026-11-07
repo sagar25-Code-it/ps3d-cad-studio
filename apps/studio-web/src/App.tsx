@@ -113,6 +113,7 @@ import { NewProjectDialog } from "./ui/NewProjectDialog.js";
 import { SketchPlaneDialog, type SketchFaceOption } from "./ui/SketchPlaneDialog.js";
 import { buildWorkbenchMenus } from "./ui/menu-model.js";
 import { exportFileName, safeFileStem } from "./file-names.js";
+import { selectionMetrics } from "./selection-metrics.js";
 import { ProjectTree } from "./ui/ProjectTree.js";
 import { CommandPalette } from "./ui/CommandPalette.js";
 import { ExchangeCenter } from "./ui/ExchangeCenter.js";
@@ -2513,6 +2514,9 @@ export function App(): React.JSX.Element {
     ];
   })();
 
+  // The selected entity's measure, one short line under the viewport. Memoized because it crawls the project for a match.
+  const quickMeasure = useMemo(() => selectionMetrics(project, selectedId), [project, selectedId]);
+
   const showTimeline = !renderStudioOpen && !masterCartOpen && (project.activeWorkspace === "sketch" || project.activeWorkspace === "part");
   return <main className="studio-app" data-timeline={showTimeline ? "on" : "off"} data-workspace={renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace} aria-busy={status === "working"}>
     <WorkbenchHeader
@@ -2676,6 +2680,7 @@ export function App(): React.JSX.Element {
           onClearMeasure={() => setMeasurePoints([])}
         />
         <ViewportMetrics workspace={project.activeWorkspace} model={model} imported={activeImport} project={project} interferenceCount={interferences.length} surfaceTriangles={surfacePreview.metrics.triangles} vehicleAnalysis={vehiclePreview.analysis} vehiclePrimitiveCount={vehiclePreview.scene.primitives.length} />
+        {quickMeasure !== undefined && <div className="quick-measure-bar" role="status" aria-live="polite" aria-label="Quick measure"><span className="quick-measure-title">{quickMeasure.title}</span>{quickMeasure.metrics.map((metric, index) => <span key={index}>{metric}</span>)}</div>}
       </section>}
       {!masterCartOpen && <>
       {project.activeWorkspace === "part" && activeImport === undefined && <PartInspector onGeneralBodyToAssembly={createComponentFromGeneralBody} onGeneralBodyVisibility={(bodyId) => { applyProjectOperation({ kind: "toggle-general-body-visibility", bodyId }); }} onGeneralBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-general-body", bodyId })) setSelectedId(null); }} design={designOf(project)} onEditFeature={editTimelineFeature} part={project.part} model={model} working={status === "working"} bodyColor={viewportState.bodyColor} shadingMode={viewportState.shadingMode} selectedId={selectedId} selectedFace={selectedFace !== null && selectedFace.bodyId === selectedId ? selectedFace.faceIndex : null} onSelectFace={(bodyId, faceIndex) => setSelectedFace(faceIndex === null ? null : { bodyId, faceIndex })} onSelect={setSelectedId} onBodyColor={(color) => viewportRef.current?.setBodyColor(color)} onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)} onCommit={(parameter, value) => void commitPartParameter(parameter, value)} onInsertIntoAssembly={insertCurrentPartIntoAssembly} onCreatePreviewBody={createPartPreviewBody} onPreviewBodyTransform={(bodyId, translationMm, rotationDeg) => applyProjectOperation({ kind: "set-part-preview-body-transform", bodyId, translationMm, rotationDeg })} onPreviewBodySize={(bodyId, sizeMm) => applyProjectOperation({ kind: "set-part-preview-body-size", bodyId, sizeMm })} onPreviewBodyColor={(bodyId, color) => applyProjectOperation({ kind: "set-part-preview-body-color", bodyId, color })} onPreviewBodyVisibility={(bodyId) => applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId })} onPreviewBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId })) setSelectedId(null); }} />}
@@ -2766,6 +2771,8 @@ function defaultPartPreviewSize(shape: PartPreviewBodyShape): Vec3 {
   if (shape === "block") return [36, 28, 20];
   if (shape === "sphere") return [26, 26, 26];
   if (shape === "cone") return [28, 14, 34];
+  // A torus uses sizeMm[0] as the major diameter and sizeMm[2] as the tube diameter; Y is unused.
+  if (shape === "torus") return [40, 40, 10];
   return [28, 28, 34];
 }
 
@@ -2773,6 +2780,7 @@ function partPreviewShapeLabel(shape: PartPreviewBodyShape): string {
   if (shape === "block") return "Block";
   if (shape === "cylinder") return "Cylinder";
   if (shape === "cone") return "Cone";
+  if (shape === "torus") return "Torus";
   return "Sphere";
 }
 
@@ -2780,6 +2788,7 @@ function partPreviewColor(shape: PartPreviewBodyShape): string {
   if (shape === "block") return "#b9bec5";
   if (shape === "cylinder") return "#d2d5da";
   if (shape === "cone") return "#adb3ba";
+  if (shape === "torus") return "#bec4cc";
   return "#c5c9ce";
 }
 

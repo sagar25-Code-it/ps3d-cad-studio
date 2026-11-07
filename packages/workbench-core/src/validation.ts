@@ -345,7 +345,7 @@ function validatePartPreviewBody(value: unknown): value is PartPreviewBody {
   const optional = ["boreDiameterMm", "edgeTreatment", "shellThicknessMm", "draftAngleDeg", "revolveAngleDeg", "featureTrace"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || !stableId(value.id) || !shortText(value.name, 1, 120)
-    || !["block", "cylinder", "cone", "sphere", "revolved"].includes(String(value.shape))
+    || !["block", "cylinder", "cone", "sphere", "torus", "revolved"].includes(String(value.shape))
     || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)
     || !vec3(value.translationMm) || !vec3(value.rotationDeg, 360)
     || !Array.isArray(value.sizeMm) || value.sizeMm.length !== 3

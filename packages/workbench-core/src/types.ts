@@ -226,7 +226,7 @@ export interface PartIntent {
   readonly generalBodies?: readonly GeneralSolidBody[];
 }
 
-export type PartPreviewBodyShape = "block" | "cylinder" | "cone" | "sphere";
+export type PartPreviewBodyShape = "block" | "cylinder" | "cone" | "sphere" | "torus";
 
 export type PartAnalyticBodyShape = PartPreviewBodyShape | "revolved";
 export type PartBodyFaceId = "x-negative" | "x-positive" | "y-negative" | "y-positive" | "z-negative" | "z-positive";

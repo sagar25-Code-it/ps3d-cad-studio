@@ -1250,7 +1250,7 @@ function validPartPreviewBodyPayload(value: unknown): value is PartPreviewBody {
   if (!isRecord(value)
     || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || !stableId(value.id) || !shortText(value.name, 1, 120)
-    || !["block", "cylinder", "cone", "sphere", "revolved"].includes(String(value.shape))
+    || !["block", "cylinder", "cone", "sphere", "torus", "revolved"].includes(String(value.shape))
     || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)
     || !vec3(value.translationMm, WORKBENCH_LIMITS.maxCoordinateMm) || !vec3(value.rotationDeg, 360)
     || !partPreviewSize(value.sizeMm)) return false;
