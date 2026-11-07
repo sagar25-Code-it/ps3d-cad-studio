@@ -1,6 +1,6 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
-import { detectSketchProfiles, resolveProfileRegion } from "../../../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 
 /**
@@ -56,7 +56,21 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     color,
     ...(feature.edge === undefined ? {} : { edge: feature.edge }),
     ...(feature.kind === "sweep" && feature.sweepDirectionMm !== undefined ? { sweepDirectionMm: feature.sweepDirectionMm } : {}),
+    ...(feature.kind === "sweep" && feature.sweepPathEntityId !== undefined ? (() => {
+      const pathEntity = sketch.entities.find((entity) => entity.id === feature.sweepPathEntityId);
+      if (pathEntity === undefined) return {};
+      let samples: readonly (readonly [number, number])[] = [];
+      if (pathEntity.kind === "line") samples = [pathEntity.start, pathEntity.end];
+      else if (pathEntity.kind === "arc") samples = sampleArc(pathEntity.start, pathEntity.mid, pathEntity.end);
+      else if (pathEntity.kind === "spline") samples = sampleSpline(pathEntity.fitPoints);
+      return samples.length >= 2 ? { sweepPathSamplesMm: samples } : {};
+    })() : {}),
     ...(feature.kind === "loft" && feature.loftTopScale !== undefined ? { loftTopScale: feature.loftTopScale } : {}),
+    ...(feature.kind === "loft" && feature.loftSecondaryProfileIds !== undefined && feature.loftSecondaryProfileIds.length > 0 ? (() => {
+      const secondary = resolveProfileRegion(profiles, feature.loftSecondaryProfileIds!, { includeIslands: false });
+      return secondary.ok ? { loftSecondaryProfile: secondary.value.outer } : {};
+    })() : {}),
+    ...(feature.kind === "loft" && feature.loftContinuity !== undefined ? { loftContinuity: feature.loftContinuity } : {}),
     ...(feature.kind === "shell" && feature.shellThicknessMm !== undefined ? { shellThicknessMm: feature.shellThicknessMm } : {}),
     ...(feature.kind === "shell" && feature.shellOpenFace !== undefined ? { shellOpenFace: feature.shellOpenFace } : {}),
     ...(feature.kind === "draft" && feature.draftAngleDeg !== undefined ? { draftAngleDeg: feature.draftAngleDeg } : {}),

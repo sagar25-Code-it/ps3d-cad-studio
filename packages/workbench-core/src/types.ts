@@ -267,7 +267,14 @@ export type ConstructionPlaneDefinition =
   | { readonly kind: "offset"; readonly basePlane: SketchDatumPlane; readonly offsetMm: number }
   | { readonly kind: "angle"; readonly basePlane: SketchDatumPlane; readonly axis: "x" | "y" | "z"; readonly angleDeg: number }
   | { readonly kind: "three-points"; readonly points: readonly [Vec3, Vec3, Vec3] }
-  | { readonly kind: "midplane"; readonly basePlane: SketchDatumPlane; readonly fromMm: number; readonly toMm: number };
+  | { readonly kind: "midplane"; readonly basePlane: SketchDatumPlane; readonly fromMm: number; readonly toMm: number }
+  /**
+   * Tangent to a cylinder-class body (revolve / extrude general body) at a given angle around its axis. The body's
+   * axis comes from its originating `feature.plane`; the origin sits on the cylinder's surface at the requested
+   * angle (measured in the plane perpendicular to the axis, zero along the first perpendicular basis), and the
+   * plane's normal is the outward radial direction. The plane's in-plane axes line up with the body's axis.
+   */
+  | { readonly kind: "tangent-to-cylinder"; readonly bodyId: string; readonly angleDeg: number };
 
 export interface ConstructionPlane {
   readonly id: string;
@@ -989,11 +996,25 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   /**
    * Sweep only: the direction in world space (unit vector; the builder normalizes it). The profile is translated along
    * this vector by `valueMm`. A direction parallel to the sketch plane is refused; a direction equal to the plane normal
-   * is equivalent to an extrude of distance `valueMm`.
+   * is equivalent to an extrude of distance `valueMm`. Mutually exclusive with `sweepPathEntityId`.
    */
   readonly sweepDirectionMm?: readonly [number, number, number];
-  /** Loft only: the scale factor of the top profile relative to the base (0.1 – 10). 1 behaves like an extrude. */
+  /**
+   * Sweep only: a sketch entity (line, arc or spline) from the same sketch whose samples the profile follows. Each
+   * sample translates the profile in-plane by (sample − path_start); rings rise linearly out of the plane across the
+   * whole path by `valueMm`. Mutually exclusive with `sweepDirectionMm`.
+   */
+  readonly sweepPathEntityId?: string;
+  /** Loft only: the scale factor of the top profile relative to the base (0.1 – 10). 1 behaves like an extrude. Used only when `loftSecondaryProfileIds` is absent. */
   readonly loftTopScale?: number;
+  /**
+   * Loft only: profile IDs from the same sketch that drive the TOP ring (the second profile). When set, the loft
+   * interpolates between the primary profile(s) at height 0 and these at height `valueMm`, with `loftContinuity`
+   * controlling how the ribbon leaves each cap. When absent, the loft falls back to the `loftTopScale` form.
+   */
+  readonly loftSecondaryProfileIds?: readonly string[];
+  /** Loft only: how the ribbon meets the caps — G0 straight, G1 tangent-smooth, G2 curvature-smooth. */
+  readonly loftContinuity?: "position" | "tangent" | "curvature";
   /** Shell only: which cap face to leave open. */
   readonly shellOpenFace?: "top" | "bottom" | "none";
   /** Shell only: the wall thickness in mm (the inset the inner cavity is offset by). */

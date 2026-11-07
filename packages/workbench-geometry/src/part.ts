@@ -46,7 +46,7 @@ export function buildPartPreview(part: PartIntent): PreviewScene {
     points.push(...generalBodyBounds(body.positionsMm));
   }
   for (const plane of (part.construction ?? []).filter((candidate) => candidate.visible)) {
-    const primitive = constructionPlanePrimitives(plane);
+    const primitive = constructionPlanePrimitives(plane, generalBodies);
     if (primitive !== undefined) {
       primitives.push(...primitive.primitives);
       points.push(...primitive.bounds);
@@ -75,8 +75,8 @@ export function buildPartPreview(part: PartIntent): PreviewScene {
   };
 }
 
-function constructionPlanePrimitives(plane: ConstructionPlane): { readonly primitives: readonly PreviewPrimitive[]; readonly bounds: readonly Vec3[] } | undefined {
-  const frame = evaluateConstructionPlane(plane);
+function constructionPlanePrimitives(plane: ConstructionPlane, bodies: readonly import("../../workbench-core/src/index.js").GeneralSolidBody[]): { readonly primitives: readonly PreviewPrimitive[]; readonly bounds: readonly Vec3[] } | undefined {
+  const frame = evaluateConstructionPlane(plane, bodies);
   if ("error" in frame) return undefined;
   const corners = constructionPlaneCorners(frame);
   const positionsMm = corners.flatMap((corner) => [corner[0], corner[1], corner[2]]);

@@ -90,8 +90,8 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 |---|---|---|
 | Extrude (Boss / Cut, Pad / Pocket, One-side, Symmetric, Through-all, To-face) | Partial | One-side, Symmetric, Flipped and Through-all for a cut shipped. To-face and To-vertex missing. |
 | Revolve (One / Two / Symmetric / Thin, To-first / To-last) | Partial | Base revolve shipped; thin wall and "to" terminations missing |
-| Sweep (section along path with twist control) | Partial | Linear sweep along an arbitrary world-space direction is shipped (`DesignSolidFeature.kind: "sweep"` with `sweepDirectionMm`); a non-linear path (sketch guide curve) is still not supported |
-| Loft / Boundary (G0/G1/G2 continuity, rails, tangency weight) | Partial | Scaled-top loft between a base profile and the same profile scaled about its centroid is shipped (`DesignSolidFeature.kind: "loft"` with `loftTopScale`); loft between two distinct profiles on parallel planes, rails and G1/G2 continuity are still out |
+| Sweep (section along path with twist control) | Partial | Linear sweep (`sweepDirectionMm`) and path-guided sweep along a sketch line/arc/spline (`sweepPathEntityId`) are both shipped; twist control and perpendicular-to-tangent frame transport are still out — the profile stays in its sketch-plane orientation at every sample |
+| Loft / Boundary (G0/G1/G2 continuity, rails, tangency weight) | Partial | Scaled-top loft (single profile + `loftTopScale`) and two-profile loft (`loftSecondaryProfileIds`) are shipped with G0 / G1 / G2 continuity (linear, smoothstep, smootherstep); rails and tangency-weight control are still out, and two-profile loft requires matching vertex counts (no resampling yet) |
 | Helix / Coil / Thread | Missing | |
 | Rib, Web, Emboss, Wrap | Missing | |
 | Solid primitives (Box, Cylinder, Sphere, Cone, Torus, Ellipsoid, Prism, Wedge, Spiral, Tube) | Partial | Box, Cylinder, Sphere, Cone and Torus shipped (see `PartPreviewBodyShape` and `torusMesh`); Ellipsoid / Prism / Wedge / Spiral / Tube still missing |
@@ -112,7 +112,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 |---|---|---|
 | Offset plane | Have | Sketch-plane dialog carries `planeOffsetMm` |
 | Plane at angle | Missing | |
-| Tangent plane | Missing | |
+| Tangent plane | Have | `ConstructionPlaneDefinition.kind: "tangent-to-cylinder"` ships: the plane sits on a revolve/extrude body's maximum-radius envelope at a chosen angle around its axis; origin is at the cylinder surface, normal is outward radial, in-plane axes line up with the body axis |
 | Midplane | Missing | |
 | Perpendicular plane | Missing | |
 | Plane through two edges | Missing | |

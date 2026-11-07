@@ -927,7 +927,7 @@ export function App(): React.JSX.Element {
     setStatusText(`Applied ${label} to ${body.name}.`);
   };
 
-  const handleAddConstructionPlane = (mode: "offset" | "angle" | "three-points" | "midplane"): void => {
+  const handleAddConstructionPlane = (mode: "offset" | "angle" | "three-points" | "midplane" | "tangent-to-cylinder"): void => {
     const current = projectRef.current;
     const existing = current.part.construction ?? [];
     const ordinal = existing.length + 1;
@@ -965,7 +965,7 @@ export function App(): React.JSX.Element {
       if (p2 === undefined) { setStatus("ready"); setStatusText("Three-Point Plane: point 3 is required."); return; }
       definition = { kind: "three-points", points: [p0, p1, p2] };
       labelText = "Three-point plane";
-    } else {
+    } else if (mode === "midplane") {
       const base = (ask("Base plane (xy, xz, yz):", "xy") ?? "").trim().toLowerCase();
       if (!["xy", "xz", "yz"].includes(base)) { setStatus("ready"); setStatusText("Midplane: enter xy, xz or yz as the base plane."); return; }
       const fromMm = parseNumber(ask("Start offset (mm):", "-20"));
@@ -973,6 +973,17 @@ export function App(): React.JSX.Element {
       if (fromMm === undefined || toMm === undefined || fromMm === toMm) { setStatus("ready"); setStatusText("Midplane: enter two different offsets in millimetres."); return; }
       definition = { kind: "midplane", basePlane: `datum:${base}` as "datum:xy" | "datum:xz" | "datum:yz", fromMm, toMm };
       labelText = `Midplane ${fromMm}..${toMm} mm of ${base.toUpperCase()}`;
+    } else {
+      // tangent-to-cylinder
+      const bodies = current.part.generalBodies ?? [];
+      if (bodies.length === 0) { setStatus("ready"); setStatusText("Tangent plane: create a revolve or extrude body first; the tangent plane rides that body's cylinder."); return; }
+      const nameOrId = (ask(`Body name or id (available: ${bodies.map((body) => body.name).join(", ")}):`, bodies[0]!.name) ?? "").trim();
+      const body = bodies.find((candidate) => candidate.name === nameOrId || candidate.id === nameOrId);
+      if (body === undefined) { setStatus("ready"); setStatusText("Tangent plane: no body matched that name or id."); return; }
+      const angleDeg = parseNumber(ask("Angle around the body axis (degrees, 0 is along the first in-plane axis):", "0"));
+      if (angleDeg === undefined) { setStatus("ready"); setStatusText("Tangent plane: enter an angle in degrees."); return; }
+      definition = { kind: "tangent-to-cylinder", bodyId: body.id, angleDeg };
+      labelText = `Tangent to ${body.name} at ${angleDeg}°`;
     }
     const plane = {
       id: `construction-plane:${crypto.randomUUID()}`,
@@ -1741,7 +1752,10 @@ export function App(): React.JSX.Element {
     target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" },
     advancedParams?: {
       readonly sweepDirectionMm?: readonly [number, number, number];
+      readonly sweepPathEntityId?: string;
       readonly loftTopScale?: number;
+      readonly loftSecondaryProfileIds?: readonly string[];
+      readonly loftContinuity?: "position" | "tangent" | "curvature";
       readonly shellThicknessMm?: number;
       readonly shellOpenFace?: "top" | "bottom" | "none";
       readonly draftAngleDeg?: number;
@@ -1751,11 +1765,19 @@ export function App(): React.JSX.Element {
     if (!Number.isFinite(valueMm) || valueMm <= 0) { setStatus("error"); setStatusText(operation === "revolve" ? "Enter a revolve angle between 1 and 360 degrees." : operation === "sweep" ? "Enter a positive sweep distance." : operation === "loft" ? "Enter a positive loft height." : "Enter a positive extrusion distance."); return; }
     if (operation === "sweep") {
       const direction = advancedParams?.sweepDirectionMm;
-      if (direction === undefined || Math.hypot(direction[0], direction[1], direction[2]) < 1e-6) { setStatus("error"); setStatusText("Enter a non-zero sweep direction."); return; }
+      const pathId = advancedParams?.sweepPathEntityId;
+      if ((pathId === undefined || pathId.length === 0) && (direction === undefined || Math.hypot(direction[0], direction[1], direction[2]) < 1e-6)) {
+        setStatus("error"); setStatusText("Sweep: pick a path entity or enter a non-zero direction."); return;
+      }
     }
     if (operation === "loft") {
       const scale = advancedParams?.loftTopScale;
-      if (scale === undefined || !Number.isFinite(scale) || scale <= 0) { setStatus("error"); setStatusText("Enter a positive loft top scale."); return; }
+      const secondary = advancedParams?.loftSecondaryProfileIds;
+      if (secondary !== undefined && secondary.length > 0) {
+        // Two-profile loft: no top-scale required.
+      } else if (scale === undefined || !Number.isFinite(scale) || scale <= 0) {
+        setStatus("error"); setStatusText("Enter a positive loft top scale, or pick two profiles for a two-profile loft."); return;
+      }
     }
     if (operation === "shell") {
       const thickness = advancedParams?.shellThicknessMm;
@@ -1803,8 +1825,11 @@ export function App(): React.JSX.Element {
       ...(edge === undefined ? {} : { edge }),
       ...(target === undefined ? {} : { operation: target.mode }),
       ...(target?.extent === "through-all" && operation === "extrude" && target.mode === "cut" ? { extent: "through-all" as const } : {}),
-      ...(operation === "sweep" && advancedParams?.sweepDirectionMm !== undefined ? { sweepDirectionMm: advancedParams.sweepDirectionMm } : {}),
+      ...(operation === "sweep" && advancedParams?.sweepDirectionMm !== undefined && (advancedParams.sweepPathEntityId === undefined || advancedParams.sweepPathEntityId === "") ? { sweepDirectionMm: advancedParams.sweepDirectionMm } : {}),
+      ...(operation === "sweep" && advancedParams?.sweepPathEntityId !== undefined && advancedParams.sweepPathEntityId !== "" ? { sweepPathEntityId: advancedParams.sweepPathEntityId } : {}),
       ...(operation === "loft" && advancedParams?.loftTopScale !== undefined ? { loftTopScale: advancedParams.loftTopScale } : {}),
+      ...(operation === "loft" && advancedParams?.loftSecondaryProfileIds !== undefined && advancedParams.loftSecondaryProfileIds.length > 0 ? { loftSecondaryProfileIds: advancedParams.loftSecondaryProfileIds } : {}),
+      ...(operation === "loft" && advancedParams?.loftContinuity !== undefined ? { loftContinuity: advancedParams.loftContinuity } : {}),
       ...(operation === "shell" && advancedParams?.shellThicknessMm !== undefined ? { shellThicknessMm: advancedParams.shellThicknessMm } : {}),
       ...(operation === "shell" && advancedParams?.shellOpenFace !== undefined ? { shellOpenFace: advancedParams.shellOpenFace } : {}),
       ...(operation === "draft" && advancedParams?.draftAngleDeg !== undefined ? { draftAngleDeg: advancedParams.draftAngleDeg } : {}),

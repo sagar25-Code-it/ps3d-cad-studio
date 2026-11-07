@@ -180,6 +180,95 @@ export function tessellateLoft(polygonMm: readonly Point2[], topScale: number, t
   return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };
 }
 
+/**
+ * Sweep a closed profile polygon along a sketch-plane path (2D samples). At each sample i the ring is the profile
+ * translated in-plane by `(sample_i − sample_0)`, with Z lifted linearly from 0 to `heightMm` across the samples.
+ * For a line path this reproduces a slanted prism; for an arc or spline path it traces the curvature. The caller
+ * samples the path entity into at least two points; three or more give a visible curve.
+ */
+export function tessellateSweepPath(polygonMm: readonly Point2[], pathSamples: readonly Point2[], heightMm: number, plane: TessellatePlane): TessellatedMesh {
+  const polygon = sanitizePolygon(polygonMm);
+  if (polygon.length < 3 || pathSamples.length < 2) return { positionsMm: [], indices: [] };
+  if (!Number.isFinite(heightMm) || heightMm === 0) return { positionsMm: [], indices: [] };
+  const height = Math.abs(heightMm);
+  const start = pathSamples[0]!;
+  const count = polygon.length;
+  const positions: number[] = [];
+  for (let s = 0; s < pathSamples.length; s += 1) {
+    const sample = pathSamples[s]!;
+    const dx = sample[0] - start[0];
+    const dy = sample[1] - start[1];
+    const z = height * (s / (pathSamples.length - 1));
+    for (const [px, py] of polygon) positions.push(px + dx, py + dy, z);
+  }
+  const capTriangles = triangulatePolygon(polygon);
+  const indices: number[] = [];
+  for (let i = 0; i < capTriangles.length; i += 3) indices.push(capTriangles[i]!, capTriangles[i + 2]!, capTriangles[i + 1]!);
+  const topBase = (pathSamples.length - 1) * count;
+  for (let i = 0; i < capTriangles.length; i += 3) indices.push(topBase + capTriangles[i]!, topBase + capTriangles[i + 1]!, topBase + capTriangles[i + 2]!);
+  for (let r = 0; r < pathSamples.length - 1; r += 1) {
+    const base = r * count;
+    const nextBase = (r + 1) * count;
+    for (let i = 0; i < count; i += 1) {
+      const next = (i + 1) % count;
+      indices.push(base + i, base + next, nextBase + next, base + i, nextBase + next, nextBase + i);
+    }
+  }
+  return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };
+}
+
+/**
+ * Loft between two explicit profiles on parallel sketch planes. Both polygons must have the same vertex count; the
+ * caller is responsible for resampling. `continuity` selects the shape of the ribbon: "position" is a straight linear
+ * interpolation between the two rings (G0), "tangent" eases with smoothstep `3t²−2t³` so the ribbon meets each cap
+ * tangentially (G1), and "curvature" eases with smootherstep `6t⁵−15t⁴+10t³` so the second derivative is also zero at
+ * each cap (G2). The Z coordinate stays linear with t so the caps keep their intended heights.
+ */
+export function tessellateLoftTwoProfiles(bottom: readonly Point2[], top: readonly Point2[], heightMm: number, continuity: "position" | "tangent" | "curvature", plane: TessellatePlane, rings = 12): TessellatedMesh {
+  const bottomClean = sanitizePolygon(bottom);
+  const topClean = sanitizePolygon(top);
+  if (bottomClean.length < 3 || topClean.length < 3) return { positionsMm: [], indices: [] };
+  if (bottomClean.length !== topClean.length) return { positionsMm: [], indices: [] };
+  if (!Number.isFinite(heightMm) || heightMm === 0) return { positionsMm: [], indices: [] };
+  const height = Math.abs(heightMm);
+  const sampleCount = continuity === "position" ? 2 : Math.max(2, rings);
+  const count = bottomClean.length;
+  const positions: number[] = [];
+  const ease = continuity === "position"
+    ? (t: number): number => t
+    : continuity === "tangent"
+      ? (t: number): number => t * t * (3 - 2 * t)
+      : (t: number): number => t * t * t * (t * (t * 6 - 15) + 10);
+  for (let r = 0; r < sampleCount; r += 1) {
+    const linear = r / (sampleCount - 1);
+    const s = ease(linear);
+    const z = height * linear;
+    for (let i = 0; i < count; i += 1) {
+      const a = bottomClean[i]!;
+      const b = topClean[i]!;
+      positions.push(a[0] + (b[0] - a[0]) * s, a[1] + (b[1] - a[1]) * s, z);
+    }
+  }
+  const capTrianglesBottom = triangulatePolygon(bottomClean);
+  const capTrianglesTop = triangulatePolygon(topClean);
+  const indices: number[] = [];
+  // Bottom cap (reverse winding).
+  for (let i = 0; i < capTrianglesBottom.length; i += 3) indices.push(capTrianglesBottom[i]!, capTrianglesBottom[i + 2]!, capTrianglesBottom[i + 1]!);
+  // Top cap at ring `sampleCount - 1`.
+  const topBase = (sampleCount - 1) * count;
+  for (let i = 0; i < capTrianglesTop.length; i += 3) indices.push(topBase + capTrianglesTop[i]!, topBase + capTrianglesTop[i + 1]!, topBase + capTrianglesTop[i + 2]!);
+  // Side ribbons between consecutive rings.
+  for (let r = 0; r < sampleCount - 1; r += 1) {
+    const base = r * count;
+    const nextBase = (r + 1) * count;
+    for (let i = 0; i < count; i += 1) {
+      const next = (i + 1) % count;
+      indices.push(base + i, base + next, nextBase + next, base + i, nextBase + next, nextBase + i);
+    }
+  }
+  return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };
+}
+
 function polygonCentroid(polygon: readonly Point2[]): Point2 {
   let signed = 0;
   let cx = 0;

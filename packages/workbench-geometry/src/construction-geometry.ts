@@ -26,11 +26,11 @@ const DATUM_FRAMES: Readonly<Record<SketchDatumPlane, { readonly normal: Vec3; r
 
 const DEFAULT_HALF_SIZE_MM = 60;
 
-export function evaluateConstructionPlane(plane: ConstructionPlane): ConstructionPlaneFrame | { readonly error: string } {
-  return evaluateConstructionPlaneDefinition(plane.definition);
+export function evaluateConstructionPlane(plane: ConstructionPlane, bodies: readonly GeneralSolidBody[] = []): ConstructionPlaneFrame | { readonly error: string } {
+  return evaluateConstructionPlaneDefinition(plane.definition, bodies);
 }
 
-export function evaluateConstructionPlaneDefinition(definition: ConstructionPlaneDefinition): ConstructionPlaneFrame | { readonly error: string } {
+export function evaluateConstructionPlaneDefinition(definition: ConstructionPlaneDefinition, bodies: readonly GeneralSolidBody[] = []): ConstructionPlaneFrame | { readonly error: string } {
   if (definition.kind === "offset") {
     const base = DATUM_FRAMES[definition.basePlane];
     const origin: Vec3 = [base.normal[0] * definition.offsetMm, base.normal[1] * definition.offsetMm, base.normal[2] * definition.offsetMm];
@@ -57,11 +57,47 @@ export function evaluateConstructionPlaneDefinition(definition: ConstructionPlan
     const halfV = Math.max(DEFAULT_HALF_SIZE_MM, Math.hypot(v[0], v[1], v[2]));
     return { origin: p0, normal, uAxis, vAxis, sizeMm: [halfU, halfV], description: `Through 3 points` };
   }
-  // midplane: halfway between two offsets of the same base plane
-  const base = DATUM_FRAMES[definition.basePlane];
-  const mid = (definition.fromMm + definition.toMm) / 2;
-  const origin: Vec3 = [base.normal[0] * mid, base.normal[1] * mid, base.normal[2] * mid];
-  return { origin, normal: base.normal, uAxis: base.uAxis, vAxis: base.vAxis, sizeMm: [DEFAULT_HALF_SIZE_MM, DEFAULT_HALF_SIZE_MM], description: `Midplane between ${definition.fromMm.toFixed(2)} and ${definition.toMm.toFixed(2)} mm of ${base.label}` };
+  if (definition.kind === "midplane") {
+    const base = DATUM_FRAMES[definition.basePlane];
+    const mid = (definition.fromMm + definition.toMm) / 2;
+    const origin: Vec3 = [base.normal[0] * mid, base.normal[1] * mid, base.normal[2] * mid];
+    return { origin, normal: base.normal, uAxis: base.uAxis, vAxis: base.vAxis, sizeMm: [DEFAULT_HALF_SIZE_MM, DEFAULT_HALF_SIZE_MM], description: `Midplane between ${definition.fromMm.toFixed(2)} and ${definition.toMm.toFixed(2)} mm of ${base.label}` };
+  }
+  // tangent-to-cylinder: a plane tangent to a revolve / extrude body at a given angle around its axis
+  const body = bodies.find((candidate) => candidate.id === definition.bodyId);
+  if (body === undefined) return { error: "The body this tangent plane is built on is no longer in the part." };
+  const operation = body.feature?.operation;
+  if (operation !== "revolve" && operation !== "extrude") return { error: `Only revolve and extrude bodies donate a tangent plane in this slice (this body is ${operation ?? "unknown"}).` };
+  const bodyPlaneKey: SketchDatumPlane = body.feature!.plane === "xy" ? "datum:xy" : body.feature!.plane === "xz" ? "datum:xz" : "datum:yz";
+  const bodyFrame = DATUM_FRAMES[bodyPlaneKey];
+  // Centroid of the body as the reference point on its axis; max radial distance as the cylinder radius.
+  let cx = 0; let cy = 0; let cz = 0;
+  const vertexCount = body.positionsMm.length / 3;
+  if (vertexCount === 0) return { error: "The body has no vertices to source a tangent plane from." };
+  for (let index = 0; index < body.positionsMm.length; index += 3) { cx += body.positionsMm[index]!; cy += body.positionsMm[index + 1]!; cz += body.positionsMm[index + 2]!; }
+  const centroid: Vec3 = [cx / vertexCount, cy / vertexCount, cz / vertexCount];
+  const axis = bodyFrame.normal;
+  const perp1 = bodyFrame.uAxis;
+  const perp2 = bodyFrame.vAxis;
+  let maxRadius = 0;
+  for (let index = 0; index < body.positionsMm.length; index += 3) {
+    const dx = body.positionsMm[index]! - centroid[0];
+    const dy = body.positionsMm[index + 1]! - centroid[1];
+    const dz = body.positionsMm[index + 2]! - centroid[2];
+    // Radial distance = projection onto the plane perpendicular to the axis.
+    const radialU = dx * perp1[0] + dy * perp1[1] + dz * perp1[2];
+    const radialV = dx * perp2[0] + dy * perp2[1] + dz * perp2[2];
+    const r = Math.hypot(radialU, radialV);
+    if (r > maxRadius) maxRadius = r;
+  }
+  if (maxRadius < 1e-6) return { error: "The body has no measurable radial extent to source a tangent plane from." };
+  const theta = definition.angleDeg * Math.PI / 180;
+  const outward: Vec3 = [perp1[0] * Math.cos(theta) + perp2[0] * Math.sin(theta), perp1[1] * Math.cos(theta) + perp2[1] * Math.sin(theta), perp1[2] * Math.cos(theta) + perp2[2] * Math.sin(theta)];
+  const origin: Vec3 = [centroid[0] + outward[0] * maxRadius, centroid[1] + outward[1] * maxRadius, centroid[2] + outward[2] * maxRadius];
+  // The plane's in-plane axes: along the body axis for one, perpendicular to both for the other.
+  const inPlaneU = axis;
+  const inPlaneV = normalize(cross(outward, axis)) ?? perp2;
+  return { origin, normal: outward, uAxis: inPlaneU, vAxis: inPlaneV, sizeMm: [DEFAULT_HALF_SIZE_MM, DEFAULT_HALF_SIZE_MM], description: `Tangent to ${body.name} at ${definition.angleDeg.toFixed(1)}°` };
 }
 
 /** An evaluated construction axis: an origin point and a unit direction, plus the nominal half-length to draw it at. */

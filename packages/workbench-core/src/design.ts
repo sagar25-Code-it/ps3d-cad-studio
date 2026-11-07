@@ -285,7 +285,7 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "loftTopScale", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut"].includes(String(value.operation))) return false;
   if (Object.hasOwn(value, "extent")) {
     // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
@@ -311,9 +311,20 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
     if (!Array.isArray(direction) || direction.length !== 3 || direction.some((component) => typeof component !== "number" || !Number.isFinite(component))) return false;
     if (Math.hypot(direction[0], direction[1], direction[2]) < 1e-6) return false;
   }
+  if (Object.hasOwn(value, "sweepPathEntityId")) {
+    if (value.kind !== "sweep" || typeof value.sweepPathEntityId !== "string" || value.sweepPathEntityId.length === 0 || value.sweepPathEntityId.length > 160) return false;
+  }
   if (Object.hasOwn(value, "loftTopScale")) {
     if (value.kind !== "loft") return false;
     if (typeof value.loftTopScale !== "number" || !Number.isFinite(value.loftTopScale) || value.loftTopScale <= 0 || value.loftTopScale > 100) return false;
+  }
+  if (Object.hasOwn(value, "loftSecondaryProfileIds")) {
+    if (value.kind !== "loft") return false;
+    const ids = value.loftSecondaryProfileIds;
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > 64 || ids.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
+  }
+  if (Object.hasOwn(value, "loftContinuity")) {
+    if (value.kind !== "loft" || !["position", "tangent", "curvature"].includes(String(value.loftContinuity))) return false;
   }
   if (Object.hasOwn(value, "shellOpenFace")) {
     if (value.kind !== "shell" || !["top", "bottom", "none"].includes(String(value.shellOpenFace))) return false;

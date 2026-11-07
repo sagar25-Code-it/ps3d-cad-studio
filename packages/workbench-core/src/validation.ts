@@ -436,6 +436,10 @@ function validateConstructionPlane(value: unknown): value is import("./types.js"
       && typeof def.toMm === "number" && Number.isFinite(def.toMm) && Math.abs(def.toMm) <= 10_000 && def.fromMm !== def.toMm
       && Object.keys(def).every((key) => ["kind", "basePlane", "fromMm", "toMm"].includes(key));
   }
+  if (def.kind === "tangent-to-cylinder") {
+    return stableId(def.bodyId) && typeof def.angleDeg === "number" && Number.isFinite(def.angleDeg) && Math.abs(def.angleDeg) <= 360
+      && Object.keys(def).every((key) => ["kind", "bodyId", "angleDeg"].includes(key));
+  }
   return false;
 }
 
