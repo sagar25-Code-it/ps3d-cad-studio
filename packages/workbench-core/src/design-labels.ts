@@ -43,7 +43,15 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
         ? `${trimNumber(feature.valueMm)}°`
         : feature.kind === "sweep"
           ? `${trimNumber(feature.valueMm)} mm sweep`
-          : `${trimNumber(feature.valueMm)} mm loft · top ${trimNumber(feature.loftTopScale ?? 1)}×`;
+          : feature.kind === "loft"
+            ? `${trimNumber(feature.valueMm)} mm loft · top ${trimNumber(feature.loftTopScale ?? 1)}×`
+            : feature.kind === "edge-fillet"
+              ? `${trimNumber(feature.valueMm)} mm · fillet ${trimNumber(feature.edge?.sizeMm ?? 0)} mm`
+              : feature.kind === "edge-chamfer"
+                ? `${trimNumber(feature.valueMm)} mm · chamfer ${trimNumber(feature.edge?.sizeMm ?? 0)} mm`
+                : feature.kind === "shell"
+                  ? `${trimNumber(feature.valueMm)} mm · wall ${trimNumber(feature.shellThicknessMm ?? 0)} mm${feature.shellOpenFace === "none" ? "" : ` · ${feature.shellOpenFace ?? "top"} open`}`
+                  : `${trimNumber(feature.valueMm)} mm · ${trimNumber(feature.draftAngleDeg ?? 0)}° draft · ${feature.draftNeutralFace ?? "bottom"} neutral`;
   const verb = !modifiesBody(feature) ? "" : feature.operation === "cut" ? "Cut " : "Join ";
   return `${verb}${amount} · from ${source === undefined ? "a deleted sketch" : source.name}`;
 }

@@ -332,9 +332,9 @@ export interface GeneralSolidBody {
   /** Flat triangle vertex indices; length is a multiple of 3. */
   readonly indices: readonly number[];
   readonly feature?: {
-    readonly operation: "extrude" | "revolve" | "sweep" | "loft";
+    readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft";
     readonly plane: "xy" | "xz" | "yz";
-    /** Extrusion height / revolve angle (degrees) / sweep distance / loft height. */
+    /** Extrusion height / revolve angle (degrees) / sweep distance / loft height / treatment size. */
     readonly valueMm: number;
   };
   /**
@@ -917,18 +917,19 @@ export interface DesignSketchFeature extends DesignFeatureBase {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
   readonly profileIds: readonly string[];
-  /** Extrusion distance in mm, or revolve angle in degrees, or sweep distance along direction, or loft bottom-to-top distance. */
+  /** Extrusion distance in mm, or revolve angle in degrees, or sweep distance along direction, or loft bottom-to-top distance. For modifier kinds (edge-fillet/chamfer/shell/draft) this is the treatment's size (radius/distance/thickness/angle). */
   readonly valueMm: number;
   /** Extrude only: which way from the sketch plane. */
   readonly direction?: "one-side" | "symmetric" | "flipped";
   /**
    * What the feature does with the solid it builds. Absent (or "new-body") makes a body of its own. A "join" or "cut"
    * adds to or removes from the body named by `bodyId`, which an earlier new-body step made, and replays in timeline order.
+   * Modifier kinds (edge-fillet/chamfer/shell/draft) always modify the target body in place; this field is left absent for them.
    */
   readonly operation?: "new-body" | "join" | "cut";
   /**
@@ -947,6 +948,14 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   readonly sweepDirectionMm?: readonly [number, number, number];
   /** Loft only: the scale factor of the top profile relative to the base (0.1 – 10). 1 behaves like an extrude. */
   readonly loftTopScale?: number;
+  /** Shell only: which cap face to leave open. */
+  readonly shellOpenFace?: "top" | "bottom" | "none";
+  /** Shell only: the wall thickness in mm (the inset the inner cavity is offset by). */
+  readonly shellThicknessMm?: number;
+  /** Draft only: which cap stays fixed (the opposite cap moves). */
+  readonly draftNeutralFace?: "top" | "bottom";
+  /** Draft only: taper angle in degrees. */
+  readonly draftAngleDeg?: number;
 }
 
 export type DesignFeature = DesignSketchFeature | DesignSolidFeature;

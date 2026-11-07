@@ -1,5 +1,5 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { booleanMeshes, revolveAxisRelation, tessellateLoft, tessellateRevolve, tessellateSweep, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { booleanMeshes, revolveAxisRelation, tessellateExtrude, tessellateLoft, tessellateRevolve, tessellateSweep, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism, evaluateProfileRevolution, stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { profileOutlineMm, stableEntityToken, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
@@ -13,6 +13,39 @@ type WorldPoint = readonly [number, number, number];
 /** Convert a detected sketch profile boundary into a closed polygon (millimetres). */
 function profilePolygonMm(boundary: SketchProfile["boundary"]): readonly PolygonPoint[] {
   return profileOutlineMm(boundary).map((point) => [point[0], point[1]] as PolygonPoint);
+}
+
+/**
+ * Offset a profile inward by `insetMm`. Supported for rectangles (shrink each side) and circles (reduce the radius). For
+ * arbitrary polygons the shell operation is refused upstream, so this helper returns `undefined` only when the inset leaves
+ * nothing behind.
+ */
+function insetPolygon(polygonMm: readonly PolygonPoint[], insetMm: number, kind: "rectangle" | "circle"): readonly PolygonPoint[] | undefined {
+  if (kind === "rectangle") {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const [x, y] of polygonMm) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    const newMinX = minX + insetMm;
+    const newMaxX = maxX - insetMm;
+    const newMinY = minY + insetMm;
+    const newMaxY = maxY - insetMm;
+    if (newMaxX - newMinX < 0.1 || newMaxY - newMinY < 0.1) return undefined;
+    return [[newMinX, newMinY], [newMaxX, newMinY], [newMaxX, newMaxY], [newMinX, newMaxY]];
+  }
+  // Circle: polygonMm is a faceted circle. Shrink each vertex toward the centroid.
+  const centroid = polygonMm.reduce((sum, point) => [sum[0] + point[0] / polygonMm.length, sum[1] + point[1] / polygonMm.length] as const, [0, 0] as const);
+  const radius = Math.hypot(polygonMm[0]![0] - centroid[0], polygonMm[0]![1] - centroid[1]);
+  const newRadius = radius - insetMm;
+  if (newRadius < 0.05) return undefined;
+  const scale = newRadius / radius;
+  return polygonMm.map(([x, y]) => [centroid[0] + (x - centroid[0]) * scale, centroid[1] + (y - centroid[1]) * scale] as PolygonPoint);
 }
 
 /** One kernel side face per sketch entity of a curve loop, so arcs stay single cylindrical walls with stable names. */
@@ -47,13 +80,13 @@ function rotateLocalToPlane(point: WorldPoint, plane: SketchPlane): WorldPoint {
 export interface CreateGeneralSolidRequest {
   readonly profile: SketchProfile;
   readonly plane: SketchPlane;
-  readonly operation: "extrude" | "revolve" | "sweep" | "loft";
-  /** Extrusion height / revolve angle (deg) / sweep distance / loft height, in millimetres (angle: degrees). */
+  readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft";
+  /** Extrusion height / revolve angle (deg) / sweep distance / loft height, in millimetres (angle: degrees). For edge-fillet/chamfer, shell and draft this is still the extrusion height. */
   readonly valueMm: number;
   readonly bodyId: string;
   readonly name: string;
   readonly color: string;
-  /** Optional chamfer or fillet of the extruded prism's vertical edges (extrude only). */
+  /** Optional chamfer or fillet of the extruded prism's vertical edges (extrude / edge-fillet / edge-chamfer). */
   readonly edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number };
   /** Profiles that lie inside `profile` and are cut through it (extrude only). */
   readonly holes?: readonly SketchProfile[];
@@ -61,6 +94,14 @@ export interface CreateGeneralSolidRequest {
   readonly sweepDirectionMm?: readonly [number, number, number];
   /** Loft only: top scale factor (>0). */
   readonly loftTopScale?: number;
+  /** Shell only: wall thickness in mm (the inset the inner cavity is offset by). */
+  readonly shellThicknessMm?: number;
+  /** Shell only: which cap face to leave open. */
+  readonly shellOpenFace?: "top" | "bottom" | "none";
+  /** Draft only: taper angle in degrees. */
+  readonly draftAngleDeg?: number;
+  /** Draft only: which cap stays fixed. */
+  readonly draftNeutralFace?: "top" | "bottom";
 }
 
 /** Maps a hole profile to the kernel's hole loop; the id comes from its sketch entities so wall names survive edits. */
@@ -103,6 +144,64 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     feature: { operation: request.operation, plane: request.plane, valueMm: request.valueMm }
   };
 
+  if (request.operation === "draft") {
+    const angleDeg = request.draftAngleDeg;
+    if (angleDeg === undefined || !Number.isFinite(angleDeg) || angleDeg <= 0 || angleDeg >= 80) return { ok: false, message: "Draft needs an angle between 0° and 80°." };
+    const height = Math.abs(request.valueMm);
+    // characteristicRadius: the largest distance from the centroid to any profile boundary vertex.
+    const centroid = polygonMm.reduce((sum, point) => [sum[0] + point[0] / polygonMm.length, sum[1] + point[1] / polygonMm.length] as const, [0, 0] as const);
+    const characteristic = polygonMm.reduce((maximum, point) => Math.max(maximum, Math.hypot(point[0] - centroid[0], point[1] - centroid[1])), 0);
+    if (characteristic < 0.05) return { ok: false, message: "The profile is too small to receive a draft." };
+    const shift = height * Math.tan(angleDeg * Math.PI / 180);
+    const neutral = request.draftNeutralFace ?? "bottom";
+    // Inward draft (positive angle): top shrinks relative to bottom when neutral is "bottom", bottom shrinks when neutral is "top".
+    const topScale = Math.max(0.01, 1 - shift / characteristic);
+    if (topScale < 0.05) return { ok: false, message: "The draft angle collapses the top face. Use a smaller angle or a shorter height." };
+    // Rebuild the lofted mesh using the loft tessellator with the computed top scale. Flip the mesh if neutral is "top".
+    const mesh = tessellateLoft(polygonMm, neutral === "bottom" ? topScale : 1, Math.abs(request.valueMm), request.plane);
+    if (neutral === "top") {
+      // Scale the BASE instead: reuse tessellateLoft for the top-scale-as-base interpretation by inverting.
+      const inverted = tessellateLoft(polygonMm.map((point) => [centroid[0] + (point[0] - centroid[0]) * topScale, centroid[1] + (point[1] - centroid[1]) * topScale] as const), 1 / topScale, Math.abs(request.valueMm), request.plane);
+      if (inverted.positionsMm.length < 9) return { ok: false, message: "The profile could not be drafted." };
+      return { ok: true, body: { ...base, positionsMm: Array.from(inverted.positionsMm), indices: Array.from(inverted.indices) } };
+    }
+    if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be drafted." };
+    return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
+  }
+  if (request.operation === "shell") {
+    const thickness = request.shellThicknessMm;
+    if (thickness === undefined || !Number.isFinite(thickness) || thickness <= 0) return { ok: false, message: "Shell needs a positive wall thickness." };
+    const height = Math.abs(request.valueMm);
+    if (height <= thickness * 2) return { ok: false, message: "The shell is thicker than the body it would hollow. Use a thinner wall or a taller body." };
+    // For MVP we support rectangles and circles: the inner inset is well-defined.
+    if (request.profile.boundary.kind !== "rectangle" && request.profile.boundary.kind !== "circle") {
+      return { ok: false, message: "Shell is supported for rectangular and circular profiles in this slice." };
+    }
+    const outer = tessellateExtrude(polygonMm, height, request.plane);
+    if (outer.positionsMm.length < 9) return { ok: false, message: "The outer shell could not be built." };
+    const insetPoints = insetPolygon(polygonMm, thickness, request.profile.boundary.kind);
+    if (insetPoints === undefined) return { ok: false, message: "The wall thickness is larger than the profile; nothing would remain." };
+    const openFace = request.shellOpenFace ?? "top";
+    const innerHeight = openFace === "none" ? height - thickness * 2 : height - thickness;
+    const innerStart = openFace === "top" ? 0 : openFace === "bottom" ? thickness : thickness;
+    const inner = tessellateExtrude(insetPoints, innerHeight, request.plane);
+    if (inner.positionsMm.length < 9) return { ok: false, message: "The inner cavity could not be built." };
+    // Translate the inner mesh along the plane normal by innerStart.
+    const normal = planeNormal(request.plane);
+    const innerShifted = inner.positionsMm.map((value, index) => value + normal[index % 3]! * innerStart);
+    const booleanResult = booleanMeshes({ positionsMm: outer.positionsMm, indices: outer.indices }, { positionsMm: innerShifted, indices: inner.indices }, "cut");
+    if (!booleanResult.ok) return { ok: false, message: `Shell could not be built: ${booleanResult.message}` };
+    return { ok: true, body: { ...base, positionsMm: Array.from(booleanResult.value.positionsMm), indices: Array.from(booleanResult.value.indices) } };
+  }
+  if (request.operation === "edge-fillet" || request.operation === "edge-chamfer") {
+    // These reuse the extrude kernel with the `edge` cornerTreatment overlaid.
+    if (request.edge === undefined || !Number.isFinite(request.edge.sizeMm) || request.edge.sizeMm <= 0) {
+      return { ok: false, message: `${request.operation === "edge-fillet" ? "Fillet" : "Chamfer"} needs a positive size.` };
+    }
+    // Fall through to the extrude path below by treating operation as extrude. We can't just reassign since operation is readonly,
+    // so delegate to a nested call with operation swapped.
+    return createGeneralSolidBody({ ...request, operation: "extrude" });
+  }
   if (request.operation === "sweep") {
     if (request.sweepDirectionMm === undefined) return { ok: false, message: "A sweep needs a direction vector." };
     const length = Math.hypot(request.sweepDirectionMm[0], request.sweepDirectionMm[1], request.sweepDirectionMm[2]);

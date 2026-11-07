@@ -285,22 +285,25 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "loftTopScale"])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "loftTopScale", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut"].includes(String(value.operation))) return false;
   if (Object.hasOwn(value, "extent")) {
     // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
     if (!["distance", "through-all"].includes(String(value.extent))) return false;
     if (value.extent === "through-all" && (value.kind !== "extrude" || value.operation !== "cut")) return false;
   }
-  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
+  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
   if (typeof value.valueMm !== "number" || !Number.isFinite(value.valueMm) || value.valueMm === 0 || Math.abs(value.valueMm) > 100_000) return false;
   if (Object.hasOwn(value, "direction") && (value.kind !== "extrude" || !["one-side", "symmetric", "flipped"].includes(String(value.direction)))) return false;
   if (Object.hasOwn(value, "edge")) {
     const edge = value.edge;
-    if (value.kind !== "extrude" || !isRecord(edge) || !hasOnly(edge, ["kind", "sizeMm"], []) || !["chamfer", "fillet"].includes(String(edge.kind))
+    if (!["extrude", "edge-fillet", "edge-chamfer"].includes(String(value.kind)) || !isRecord(edge) || !hasOnly(edge, ["kind", "sizeMm"], []) || !["chamfer", "fillet"].includes(String(edge.kind))
       || typeof edge.sizeMm !== "number" || !Number.isFinite(edge.sizeMm) || edge.sizeMm <= 0 || edge.sizeMm > 10_000) return false;
+    // The treatment kind must match the feature kind so a saved "edge-fillet" step always carries a fillet.
+    if (value.kind === "edge-fillet" && edge.kind !== "fillet") return false;
+    if (value.kind === "edge-chamfer" && edge.kind !== "chamfer") return false;
   }
   if (Object.hasOwn(value, "sweepDirectionMm")) {
     if (value.kind !== "sweep") return false;
@@ -311,6 +314,18 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (Object.hasOwn(value, "loftTopScale")) {
     if (value.kind !== "loft") return false;
     if (typeof value.loftTopScale !== "number" || !Number.isFinite(value.loftTopScale) || value.loftTopScale <= 0 || value.loftTopScale > 100) return false;
+  }
+  if (Object.hasOwn(value, "shellOpenFace")) {
+    if (value.kind !== "shell" || !["top", "bottom", "none"].includes(String(value.shellOpenFace))) return false;
+  }
+  if (Object.hasOwn(value, "shellThicknessMm")) {
+    if (value.kind !== "shell" || typeof value.shellThicknessMm !== "number" || !Number.isFinite(value.shellThicknessMm) || value.shellThicknessMm <= 0 || value.shellThicknessMm > 10_000) return false;
+  }
+  if (Object.hasOwn(value, "draftNeutralFace")) {
+    if (value.kind !== "draft" || !["top", "bottom"].includes(String(value.draftNeutralFace))) return false;
+  }
+  if (Object.hasOwn(value, "draftAngleDeg")) {
+    if (value.kind !== "draft" || typeof value.draftAngleDeg !== "number" || !Number.isFinite(value.draftAngleDeg) || value.draftAngleDeg <= 0 || value.draftAngleDeg >= 80) return false;
   }
   if (Object.hasOwn(value, "health") && !(isRecord(value.health) && hasOnly(value.health, ["message"], []) && shortText(value.health.message, 400))) return false;
   return true;

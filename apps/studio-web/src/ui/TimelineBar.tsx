@@ -15,7 +15,7 @@ interface TimelineBarProps {
   readonly onRename: (feature: DesignFeature, name: string) => void;
 }
 
-const ICONS: Readonly<Record<DesignFeature["kind"], string>> = { sketch: "sketch", extrude: "extrude", revolve: "revolve", sweep: "extrude", loft: "extrude" };
+const ICONS: Readonly<Record<DesignFeature["kind"], string>> = { sketch: "sketch", extrude: "extrude", revolve: "revolve", sweep: "extrude", loft: "extrude", "edge-fillet": "fillet", "edge-chamfer": "chamfer", shell: "shell", draft: "draft" };
 
 /**
  * The parametric timeline: one chip per step, a rollback marker you can move to see the model as it was, and a menu on each

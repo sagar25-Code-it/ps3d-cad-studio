@@ -138,7 +138,23 @@ interface SketchWorkspaceProps {
   readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null) => void;
   readonly onMessage: (message: string) => void;
   readonly optionsRevealRequest: number;
-  readonly onCreateSolid: (profileIds: readonly string[], plane: PlaneKey, operation: "extrude" | "revolve" | "sweep" | "loft", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction?: "one-side" | "symmetric" | "flipped", target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" }, sweepLoftParams?: { readonly sweepDirectionMm?: readonly [number, number, number]; readonly loftTopScale?: number }) => void;
+  readonly onCreateSolid: (
+    profileIds: readonly string[],
+    plane: PlaneKey,
+    operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft",
+    valueMm: number,
+    edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number },
+    direction?: "one-side" | "symmetric" | "flipped",
+    target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" },
+    advancedParams?: {
+      readonly sweepDirectionMm?: readonly [number, number, number];
+      readonly loftTopScale?: number;
+      readonly shellThicknessMm?: number;
+      readonly shellOpenFace?: "top" | "bottom" | "none";
+      readonly draftAngleDeg?: number;
+      readonly draftNeutralFace?: "top" | "bottom";
+    }
+  ) => void;
   /** The solids a join or cut can modify. */
   readonly solidBodies: readonly { readonly id: string; readonly name: string }[];
   readonly onChangePlane: () => void;
@@ -218,12 +234,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [selectionBox, setSelectionBox] = useState<{ readonly start: Vec2; readonly end: Vec2 } | undefined>(undefined);
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
-  const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft">("extrude");
+  const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft">("extrude");
   const [solidValue, setSolidValue] = useState("10");
   const [sweepDx, setSweepDx] = useState("0");
   const [sweepDy, setSweepDy] = useState("0");
   const [sweepDz, setSweepDz] = useState("1");
   const [loftTopScale, setLoftTopScale] = useState("0.7");
+  const [modifierEdgeSize, setModifierEdgeSize] = useState("1");
+  const [shellThickness, setShellThickness] = useState("2");
+  const [shellOpenFace, setShellOpenFace] = useState<"top" | "bottom" | "none">("top");
+  const [draftAngle, setDraftAngle] = useState("5");
+  const [draftNeutralFace, setDraftNeutralFace] = useState<"top" | "bottom">("bottom");
   const [solidDirection, setSolidDirection] = useState<"one-side" | "symmetric" | "flipped">("one-side");
   const [solidResult, setSolidResult] = useState<"new-body" | "join" | "cut">("new-body");
   const [solidTarget, setSolidTarget] = useState("");
@@ -1108,13 +1129,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <div className="sketch-make-solid" aria-label="Create a solid from a profile">
           <span className="make-solid-title">Create solid</span>
           <div className="make-solid-row">
-            <select aria-label="Operation" value={solidOp} onChange={(event) => { const next = event.target.value as "extrude" | "revolve" | "sweep" | "loft"; setSolidOp(next); setSolidValue(next === "revolve" ? "360" : next === "loft" ? "20" : next === "sweep" ? "20" : "10"); }}>
+            <select aria-label="Operation" value={solidOp} onChange={(event) => { const next = event.target.value as "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft"; setSolidOp(next); setSolidValue(next === "revolve" ? "360" : "20"); }}>
               <option value="extrude">Extrude</option>
               <option value="revolve">Revolve</option>
               <option value="sweep">Sweep (linear)</option>
               <option value="loft">Loft (scaled top)</option>
+              <option value="edge-fillet">Fillet extrude</option>
+              <option value="edge-chamfer">Chamfer extrude</option>
+              <option value="shell">Shell (hollow)</option>
+              <option value="draft">Draft (tapered)</option>
             </select>
-            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? "Sweep distance in millimetres" : solidOp === "loft" ? "Loft height in millimetres" : "Height in millimetres"} type="number" min={solidOp === "revolve" ? 1 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : 1} value={solidValue} disabled={cutThroughAll} onChange={(event) => setSolidValue(event.target.value)} />
+            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? "Sweep distance in millimetres" : "Height in millimetres"} type="number" min={solidOp === "revolve" ? 1 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : 1} value={solidValue} disabled={cutThroughAll} onChange={(event) => setSolidValue(event.target.value)} />
             <small>{solidOp === "revolve" ? "°" : "mm"}</small>
           </div>
           <small className="make-solid-plane">On the {planePlacement}</small>
@@ -1155,6 +1180,28 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             <small>Top scale</small>
             <input aria-label="Loft top scale" type="number" min={0.05} max={20} step={0.1} value={loftTopScale} onChange={(event) => setLoftTopScale(event.target.value)} />
           </div>}
+          {(solidOp === "edge-fillet" || solidOp === "edge-chamfer") && <div className="make-solid-row" aria-label="Edge treatment size">
+            <small>{solidOp === "edge-fillet" ? "Radius" : "Distance"}</small>
+            <input aria-label={solidOp === "edge-fillet" ? "Fillet radius in millimetres" : "Chamfer distance in millimetres"} type="number" min={0.1} step={0.5} value={modifierEdgeSize} onChange={(event) => setModifierEdgeSize(event.target.value)} />
+            <small>mm</small>
+          </div>}
+          {solidOp === "shell" && <div className="make-solid-row" aria-label="Shell parameters">
+            <small>Wall</small>
+            <input aria-label="Shell wall thickness in millimetres" type="number" min={0.1} step={0.5} value={shellThickness} onChange={(event) => setShellThickness(event.target.value)} />
+            <select aria-label="Shell open face" value={shellOpenFace} onChange={(event) => setShellOpenFace(event.target.value as "top" | "bottom" | "none")}>
+              <option value="top">Open top</option>
+              <option value="bottom">Open bottom</option>
+              <option value="none">Fully closed</option>
+            </select>
+          </div>}
+          {solidOp === "draft" && <div className="make-solid-row" aria-label="Draft parameters">
+            <small>Angle</small>
+            <input aria-label="Draft angle in degrees" type="number" min={0.5} max={75} step={0.5} value={draftAngle} onChange={(event) => setDraftAngle(event.target.value)} />
+            <select aria-label="Draft neutral face" value={draftNeutralFace} onChange={(event) => setDraftNeutralFace(event.target.value as "top" | "bottom")}>
+              <option value="bottom">Bottom neutral</option>
+              <option value="top">Top neutral</option>
+            </select>
+          </div>}
           {solidOp === "extrude" && <div className="make-solid-row" aria-label="Edge treatment">
             <select aria-label="Edge treatment" value={edgeKind} onChange={(event) => setEdgeKind(event.target.value as "none" | "chamfer" | "fillet")}>
               <option value="none">Edges: sharp</option>
@@ -1166,7 +1213,34 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <small>mm</small>
             </>}
           </div>}
-          <button className="palette-action primary" disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying) || (solidOp !== "extrude" && solidOp !== "revolve" && solidResult !== "new-body")} onClick={() => props.onCreateSolid(selectedProfileIds, plane, solidOp, cutThroughAll && !(Number(solidValue) > 0) ? 1 : Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined, solidOp === "extrude" ? solidDirection : undefined, modifying ? { mode: solidResult, bodyId: effectiveTarget, ...(cutThroughAll ? { extent: "through-all" as const } : {}) } : undefined, solidOp === "sweep" ? { sweepDirectionMm: [Number(sweepDx), Number(sweepDy), Number(sweepDz)] as const } : solidOp === "loft" ? { loftTopScale: Number(loftTopScale) } : undefined)}><CommandIcon name={solidResult === "cut" ? "subtract" : solidResult === "join" ? "unite" : "box"} />{solidResult === "cut" ? "Cut solid" : solidResult === "join" ? "Join solid" : "Create solid"}</button>
+          <button className="palette-action primary" disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying) || (solidOp !== "extrude" && solidOp !== "revolve" && solidResult !== "new-body")} onClick={() => {
+            const advanced = solidOp === "sweep"
+              ? { sweepDirectionMm: [Number(sweepDx), Number(sweepDy), Number(sweepDz)] as const }
+              : solidOp === "loft"
+                ? { loftTopScale: Number(loftTopScale) }
+                : solidOp === "shell"
+                  ? { shellThicknessMm: Number(shellThickness), shellOpenFace }
+                  : solidOp === "draft"
+                    ? { draftAngleDeg: Number(draftAngle), draftNeutralFace }
+                    : undefined;
+            const edgeForOp = solidOp === "edge-fillet"
+              ? { kind: "fillet" as const, sizeMm: Number(modifierEdgeSize) }
+              : solidOp === "edge-chamfer"
+                ? { kind: "chamfer" as const, sizeMm: Number(modifierEdgeSize) }
+                : solidOp === "extrude" && edgeKind !== "none"
+                  ? { kind: edgeKind, sizeMm: Number(edgeSize) }
+                  : undefined;
+            props.onCreateSolid(
+              selectedProfileIds,
+              plane,
+              solidOp,
+              cutThroughAll && !(Number(solidValue) > 0) ? 1 : Number(solidValue),
+              edgeForOp,
+              solidOp === "extrude" ? solidDirection : undefined,
+              modifying ? { mode: solidResult, bodyId: effectiveTarget, ...(cutThroughAll ? { extent: "through-all" as const } : {}) } : undefined,
+              advanced
+            );
+          }}><CommandIcon name={solidResult === "cut" ? "subtract" : solidResult === "join" ? "unite" : "box"} />{solidResult === "cut" ? "Cut solid" : solidResult === "join" ? "Join solid" : "Create solid"}</button>
           {solidOp === "extrude" && <small className="make-solid-hint">{selectedProfileIds.length === 0 ? "Nothing selected: the outermost profile is used and profiles inside it become holes." : "Profiles drawn inside the outline become holes. Shift-select profiles to choose exactly which."}</small>}
         </div>
         <details className="palette-shortcuts">

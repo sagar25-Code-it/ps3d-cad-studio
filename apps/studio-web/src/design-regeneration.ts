@@ -56,7 +56,11 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     color,
     ...(feature.edge === undefined ? {} : { edge: feature.edge }),
     ...(feature.kind === "sweep" && feature.sweepDirectionMm !== undefined ? { sweepDirectionMm: feature.sweepDirectionMm } : {}),
-    ...(feature.kind === "loft" && feature.loftTopScale !== undefined ? { loftTopScale: feature.loftTopScale } : {})
+    ...(feature.kind === "loft" && feature.loftTopScale !== undefined ? { loftTopScale: feature.loftTopScale } : {}),
+    ...(feature.kind === "shell" && feature.shellThicknessMm !== undefined ? { shellThicknessMm: feature.shellThicknessMm } : {}),
+    ...(feature.kind === "shell" && feature.shellOpenFace !== undefined ? { shellOpenFace: feature.shellOpenFace } : {}),
+    ...(feature.kind === "draft" && feature.draftAngleDeg !== undefined ? { draftAngleDeg: feature.draftAngleDeg } : {}),
+    ...(feature.kind === "draft" && feature.draftNeutralFace !== undefined ? { draftNeutralFace: feature.draftNeutralFace } : {})
   });
   if (!built.ok) return { ok: false, message: built.message };
   return { ok: true, body: shifted(built.body, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0)) };

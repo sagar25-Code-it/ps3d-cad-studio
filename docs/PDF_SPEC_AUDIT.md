@@ -90,18 +90,18 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 |---|---|---|
 | Extrude (Boss / Cut, Pad / Pocket, One-side, Symmetric, Through-all, To-face) | Partial | One-side, Symmetric, Flipped and Through-all for a cut shipped. To-face and To-vertex missing. |
 | Revolve (One / Two / Symmetric / Thin, To-first / To-last) | Partial | Base revolve shipped; thin wall and "to" terminations missing |
-| Sweep (section along path with twist control) | **Missing** | |
-| Loft / Boundary (G0/G1/G2 continuity, rails, tangency weight) | **Missing** | |
+| Sweep (section along path with twist control) | Partial | Linear sweep along an arbitrary world-space direction is shipped (`DesignSolidFeature.kind: "sweep"` with `sweepDirectionMm`); a non-linear path (sketch guide curve) is still not supported |
+| Loft / Boundary (G0/G1/G2 continuity, rails, tangency weight) | Partial | Scaled-top loft between a base profile and the same profile scaled about its centroid is shipped (`DesignSolidFeature.kind: "loft"` with `loftTopScale`); loft between two distinct profiles on parallel planes, rails and G1/G2 continuity are still out |
 | Helix / Coil / Thread | Missing | |
 | Rib, Web, Emboss, Wrap | Missing | |
 | Solid primitives (Box, Cylinder, Sphere, Cone, Torus, Ellipsoid, Prism, Wedge, Spiral, Tube) | Partial | Box, Cylinder, Sphere, Cone and Torus shipped (see `PartPreviewBodyShape` and `torusMesh`); Ellipsoid / Prism / Wedge / Spiral / Tube still missing |
 | Hole / Hole Wizard (counterbore, countersink, threaded) | Missing | `set-part-parameter:holeDiameterMm` on the template plate only; no hole wizard |
 | Dome, Indent, Flex, Scale | Missing | |
 | Combine (Union, Cut, Intersect) | Have | `combine-general-bodies` with `mode: join|cut|intersect` |
-| Fillet / Edge blend (constant radius, variable, G2) | Missing | `edge` pre-processed during extrude only; no post-op fillet picking |
-| Chamfer (symmetric, asymmetric, offset+angle) | Missing | Same as fillet |
-| Shell / Thickness | Missing | |
-| Draft | Missing | |
+| Fillet / Edge blend (constant radius, variable, G2) | Partial | `DesignSolidFeature.kind: "edge-fillet"` creates a solid with the fillet treatment applied through the same corner-treatment kernel path extrude already uses; true post-op edge picking (select an edge of an existing body and apply a fillet) still needs edge-selection UI |
+| Chamfer (symmetric, asymmetric, offset+angle) | Partial | `DesignSolidFeature.kind: "edge-chamfer"` ships; symmetric only in this slice (the sketch-side chamfer already ships the three asymmetric/distance+angle modes) |
+| Shell / Thickness | Partial | `DesignSolidFeature.kind: "shell"` hollows an extrude-class body with a wall thickness, open-top/open-bottom/fully-closed options via `shellThicknessMm` and `shellOpenFace`; only rectangular and circular profiles are supported in this slice |
+| Draft | Partial | `DesignSolidFeature.kind: "draft"` produces a tapered prism with `draftAngleDeg` and `draftNeutralFace`; per-face selection is still out — the taper applies uniformly to every side face |
 | Linear / Circular / Mirror pattern | Partial | `pattern-part-feature` and `mirror-part-feature` on the template plate; no general-body pattern |
 | Surface / Patch tools, T-Splines | Missing | Surface workspace is a bezier preview, not a full surfacing layer |
 | Synchronous direct editing (Move / Pull / Offset region / Replace face) | Missing | |
