@@ -985,6 +985,111 @@ export function App(): React.JSX.Element {
     setStatusText(`Created ${plane.name} (plane ${ordinal}).`);
   };
 
+  const handleAddConstructionAxis = (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis"): void => {
+    const current = projectRef.current;
+    const existing = current.part.constructionAxes ?? [];
+    const ordinal = existing.length + 1;
+    const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
+    const parsePoint = (raw: string | null): [number, number, number] | undefined => {
+      if (raw === null) return undefined;
+      const parts = raw.split(/[,\s]+/).map((part) => Number.parseFloat(part.trim())).filter((value) => Number.isFinite(value));
+      return parts.length === 3 ? [parts[0]!, parts[1]!, parts[2]!] : undefined;
+    };
+    let definition: import("../../../packages/workbench-core/src/index.js").ConstructionAxisDefinition | undefined;
+    let labelText: string;
+    if (mode === "two-points") {
+      const a = parsePoint(ask("Axis start point (x, y, z in mm):", "0, 0, 0"));
+      const b = parsePoint(ask("Axis end point (x, y, z in mm):", "50, 0, 0"));
+      if (a === undefined || b === undefined) { setStatus("ready"); setStatusText("Two-point axis: each point is three numbers in millimetres, separated by commas."); return; }
+      if (a[0] === b[0] && a[1] === b[1] && a[2] === b[2]) { setStatus("ready"); setStatusText("Two-point axis: the two points must not coincide."); return; }
+      definition = { kind: "two-points", a, b };
+      labelText = "Axis through two points";
+    } else if (mode === "point-and-direction") {
+      const origin = parsePoint(ask("Axis origin (x, y, z in mm):", "0, 0, 0"));
+      const direction = parsePoint(ask("Axis direction vector (x, y, z):", "0, 0, 1"));
+      if (origin === undefined || direction === undefined) { setStatus("ready"); setStatusText("Point-and-direction axis: enter three numbers for origin and three for direction."); return; }
+      if (Math.hypot(direction[0], direction[1], direction[2]) < 1e-6) { setStatus("ready"); setStatusText("Point-and-direction axis: the direction must not be zero."); return; }
+      definition = { kind: "point-and-direction", origin, direction };
+      labelText = "Axis along a direction";
+    } else if (mode === "plane-intersection") {
+      const a = (ask("First plane (xy, xz, yz):", "xy") ?? "").trim().toLowerCase();
+      const b = (ask("Second plane (xy, xz, yz):", "xz") ?? "").trim().toLowerCase();
+      if (!["xy", "xz", "yz"].includes(a) || !["xy", "xz", "yz"].includes(b) || a === b) { setStatus("ready"); setStatusText("Plane-intersection axis: enter two different primary planes (xy, xz, yz)."); return; }
+      definition = { kind: "plane-intersection", planeA: `datum:${a}` as "datum:xy" | "datum:xz" | "datum:yz", planeB: `datum:${b}` as "datum:xy" | "datum:xz" | "datum:yz" };
+      labelText = `Axis ${a.toUpperCase()} ∩ ${b.toUpperCase()}`;
+    } else if (mode === "perpendicular-to-plane") {
+      const plane = (ask("Base plane (xy, xz, yz):", "xy") ?? "").trim().toLowerCase();
+      if (!["xy", "xz", "yz"].includes(plane)) { setStatus("ready"); setStatusText("Perpendicular axis: enter xy, xz or yz as the base plane."); return; }
+      const point = parsePoint(ask("Pass-through point (x, y, z in mm):", "0, 0, 0"));
+      if (point === undefined) { setStatus("ready"); setStatusText("Perpendicular axis: enter three numbers for the point in millimetres."); return; }
+      definition = { kind: "perpendicular-to-plane", plane: `datum:${plane}` as "datum:xy" | "datum:xz" | "datum:yz", point };
+      labelText = `Axis perpendicular to ${plane.toUpperCase()}`;
+    } else {
+      // cylinder-axis: ask for a body name match (any general body counts in this slice).
+      const bodies = current.part.generalBodies ?? [];
+      if (bodies.length === 0) { setStatus("ready"); setStatusText("Cylinder axis: create a revolve or extrude body first; this mode donates that body's axis."); return; }
+      const nameOrId = (ask(`Body name or id (available: ${bodies.map((body) => body.name).join(", ")}):`, bodies[0]!.name) ?? "").trim();
+      const body = bodies.find((candidate) => candidate.name === nameOrId || candidate.id === nameOrId);
+      if (body === undefined) { setStatus("ready"); setStatusText("Cylinder axis: no body matched that name or id."); return; }
+      definition = { kind: "cylinder-axis", bodyId: body.id };
+      labelText = `Axis of ${body.name}`;
+    }
+    const axis = {
+      id: `construction-axis:${crypto.randomUUID()}`,
+      name: labelText.length > 60 ? `${labelText.slice(0, 57)}…` : labelText,
+      visible: true,
+      definition
+    };
+    if (!applyProjectOperation({ kind: "add-construction-axis", axis })) { setStatus("ready"); setStatusText(`The project rejected ${labelText}.`); return; }
+    setSelectedId(axis.id);
+    setStatusText(`Created ${axis.name} (axis ${ordinal}).`);
+  };
+
+  const handleAddConstructionPoint = (mode: "xyz" | "midpoint" | "axis-plane-intersection"): void => {
+    const current = projectRef.current;
+    const existing = current.part.constructionPoints ?? [];
+    const ordinal = existing.length + 1;
+    const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
+    const parsePoint = (raw: string | null): [number, number, number] | undefined => {
+      if (raw === null) return undefined;
+      const parts = raw.split(/[,\s]+/).map((part) => Number.parseFloat(part.trim())).filter((value) => Number.isFinite(value));
+      return parts.length === 3 ? [parts[0]!, parts[1]!, parts[2]!] : undefined;
+    };
+    let definition: import("../../../packages/workbench-core/src/index.js").ConstructionPointDefinition | undefined;
+    let labelText: string;
+    if (mode === "xyz") {
+      const position = parsePoint(ask("Point (x, y, z in mm):", "0, 0, 0"));
+      if (position === undefined) { setStatus("ready"); setStatusText("XYZ point: enter three numbers in millimetres."); return; }
+      definition = { kind: "xyz", position };
+      labelText = `Point (${position.map((value) => value.toFixed(1)).join(", ")} mm)`;
+    } else if (mode === "midpoint") {
+      const a = parsePoint(ask("First point (x, y, z in mm):", "0, 0, 0"));
+      const b = parsePoint(ask("Second point (x, y, z in mm):", "50, 0, 0"));
+      if (a === undefined || b === undefined) { setStatus("ready"); setStatusText("Midpoint: enter three numbers for each point in millimetres."); return; }
+      definition = { kind: "midpoint", a, b };
+      labelText = "Midpoint of two points";
+    } else {
+      const axes = current.part.constructionAxes ?? [];
+      if (axes.length === 0) { setStatus("ready"); setStatusText("Axis ∩ plane point: create a construction axis first."); return; }
+      const nameOrId = (ask(`Axis name or id (available: ${axes.map((axis) => axis.name).join(", ")}):`, axes[0]!.name) ?? "").trim();
+      const axis = axes.find((candidate) => candidate.name === nameOrId || candidate.id === nameOrId);
+      if (axis === undefined) { setStatus("ready"); setStatusText("Axis ∩ plane point: no axis matched that name or id."); return; }
+      const plane = (ask("Plane (xy, xz, yz):", "xy") ?? "").trim().toLowerCase();
+      if (!["xy", "xz", "yz"].includes(plane)) { setStatus("ready"); setStatusText("Axis ∩ plane point: enter xy, xz or yz as the plane."); return; }
+      definition = { kind: "axis-plane-intersection", axisId: axis.id, plane: `datum:${plane}` as "datum:xy" | "datum:xz" | "datum:yz" };
+      labelText = `${axis.name} ∩ ${plane.toUpperCase()}`;
+    }
+    const point = {
+      id: `construction-point:${crypto.randomUUID()}`,
+      name: labelText.length > 60 ? `${labelText.slice(0, 57)}…` : labelText,
+      visible: true,
+      definition
+    };
+    if (!applyProjectOperation({ kind: "add-construction-point", point })) { setStatus("ready"); setStatusText(`The project rejected ${labelText}.`); return; }
+    setSelectedId(point.id);
+    setStatusText(`Created ${point.name} (point ${ordinal}).`);
+  };
+
   const handleModifyGeneralBody = (modifier: "hole" | "fillet" | "chamfer" | "shell"): void => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
@@ -2793,6 +2898,8 @@ export function App(): React.JSX.Element {
       onPartFeatureAction={(operation, commandName) => runPartFeatureAction(operation, commandName)}
       onModifyGeneralBody={handleModifyGeneralBody}
       onAddConstructionPlane={handleAddConstructionPlane}
+      onAddConstructionAxis={handleAddConstructionAxis}
+      onAddConstructionPoint={handleAddConstructionPoint}
       onHoleWizard={handleHoleWizard}
       onFit={fitViewport}
       onMeasure={() => setViewportNavigation("measure")}

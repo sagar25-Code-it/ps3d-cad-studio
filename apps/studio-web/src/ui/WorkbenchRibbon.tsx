@@ -48,6 +48,8 @@ interface WorkbenchRibbonProps {
   readonly onPartFeatureAction: (operation: "revolve" | "pattern-feature" | "mirror-feature" | "unite" | "subtract" | "trim-body" | "edge-blend" | "chamfer" | "draft" | "shell" | "move-face" | "offset-face" | "replace-face" | "delete-face" | "resize-blend" | "update-model", commandName: string) => void;
   readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell") => void;
   readonly onAddConstructionPlane: (mode: "offset" | "angle" | "three-points" | "midplane") => void;
+  readonly onAddConstructionAxis: (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis") => void;
+  readonly onAddConstructionPoint: (mode: "xyz" | "midpoint" | "axis-plane-intersection") => void;
   readonly onHoleWizard: () => void;
   readonly onInsertComponent: (shape: "box" | "cylinder") => void;
   readonly onDeleteComponent: (componentId: string) => void;
@@ -207,6 +209,14 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="projection" label="Angle Plane" hint="base + axis + angle" onClick={() => props.onAddConstructionPlane("angle")} />
         <RibbonButton icon="projection" label="Three-Point Plane" hint="3 points" onClick={() => props.onAddConstructionPlane("three-points")} />
         <RibbonButton icon="projection" label="Midplane" hint="between two offsets" onClick={() => props.onAddConstructionPlane("midplane")} />
+        <RibbonButton icon="axes" label="Axis: 2 points" hint="a → b" onClick={() => props.onAddConstructionAxis("two-points")} />
+        <RibbonButton icon="axes" label="Axis: point + dir" hint="origin + vec" onClick={() => props.onAddConstructionAxis("point-and-direction")} />
+        <RibbonButton icon="axes" label="Axis: plane ∩ plane" hint="two datums" onClick={() => props.onAddConstructionAxis("plane-intersection")} />
+        <RibbonButton icon="axes" label="Axis ⟂ plane" hint="plane + point" onClick={() => props.onAddConstructionAxis("perpendicular-to-plane")} />
+        <RibbonButton icon="axes" label="Axis of body" hint="revolve / extrude" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onAddConstructionAxis("cylinder-axis")} />
+        <RibbonButton icon="insert" label="Point: XYZ" hint="coords" onClick={() => props.onAddConstructionPoint("xyz")} />
+        <RibbonButton icon="insert" label="Point: midpoint" hint="(a + b) / 2" onClick={() => props.onAddConstructionPoint("midpoint")} />
+        <RibbonButton icon="insert" label="Point: axis ∩ plane" hint="axis + plane" disabled={(props.project.part.constructionAxes?.length ?? 0) === 0} onClick={() => props.onAddConstructionPoint("axis-plane-intersection")} />
       </RibbonGroup>
       <RibbonGroup label="Solid modify">
         <RibbonButton icon="hole" label="Hole" hint="Ø 6 · through" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("hole")} />

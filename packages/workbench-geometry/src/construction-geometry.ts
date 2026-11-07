@@ -6,7 +6,7 @@
  * and by the browser tree / inspector to describe the plane.
  */
 
-import type { ConstructionPlane, ConstructionPlaneDefinition, SketchDatumPlane, Vec3 } from "../../workbench-core/src/index.js";
+import type { ConstructionAxis, ConstructionAxisDefinition, ConstructionPlane, ConstructionPlaneDefinition, ConstructionPoint, ConstructionPointDefinition, GeneralSolidBody, SketchDatumPlane, Vec3 } from "../../workbench-core/src/index.js";
 
 export interface ConstructionPlaneFrame {
   readonly origin: Vec3;
@@ -62,6 +62,99 @@ export function evaluateConstructionPlaneDefinition(definition: ConstructionPlan
   const mid = (definition.fromMm + definition.toMm) / 2;
   const origin: Vec3 = [base.normal[0] * mid, base.normal[1] * mid, base.normal[2] * mid];
   return { origin, normal: base.normal, uAxis: base.uAxis, vAxis: base.vAxis, sizeMm: [DEFAULT_HALF_SIZE_MM, DEFAULT_HALF_SIZE_MM], description: `Midplane between ${definition.fromMm.toFixed(2)} and ${definition.toMm.toFixed(2)} mm of ${base.label}` };
+}
+
+/** An evaluated construction axis: an origin point and a unit direction, plus the nominal half-length to draw it at. */
+export interface ConstructionAxisFrame {
+  readonly origin: Vec3;
+  readonly direction: Vec3;
+  /** Half-length of the rendered segment in millimetres. */
+  readonly halfLengthMm: number;
+  readonly description: string;
+}
+
+const DEFAULT_AXIS_HALF_LENGTH_MM = 80;
+
+/**
+ * Evaluate a construction axis down to an oriented line segment: origin, unit direction and nominal half-length. For
+ * `cylinder-axis` the caller must pass the bodies registry so the axis can be derived from the body's generating
+ * operation (revolve or extrude) — when the body is absent or can't donate an axis, an error is reported.
+ */
+export function evaluateConstructionAxis(axis: ConstructionAxis, bodies: readonly GeneralSolidBody[] = []): ConstructionAxisFrame | { readonly error: string } {
+  return evaluateConstructionAxisDefinition(axis.definition, bodies);
+}
+
+export function evaluateConstructionAxisDefinition(definition: ConstructionAxisDefinition, bodies: readonly GeneralSolidBody[] = []): ConstructionAxisFrame | { readonly error: string } {
+  if (definition.kind === "two-points") {
+    const direction = normalize(sub(definition.b, definition.a));
+    if (direction === undefined) return { error: "The two axis points coincide." };
+    const length = Math.hypot(definition.b[0] - definition.a[0], definition.b[1] - definition.a[1], definition.b[2] - definition.a[2]);
+    const origin: Vec3 = [(definition.a[0] + definition.b[0]) / 2, (definition.a[1] + definition.b[1]) / 2, (definition.a[2] + definition.b[2]) / 2];
+    return { origin, direction, halfLengthMm: Math.max(DEFAULT_AXIS_HALF_LENGTH_MM, length / 2), description: "Through two points" };
+  }
+  if (definition.kind === "point-and-direction") {
+    const direction = normalize(definition.direction);
+    if (direction === undefined) return { error: "The axis direction has zero length." };
+    return { origin: definition.origin, direction, halfLengthMm: DEFAULT_AXIS_HALF_LENGTH_MM, description: "Point and direction" };
+  }
+  if (definition.kind === "plane-intersection") {
+    if (definition.planeA === definition.planeB) return { error: "The two planes must be different." };
+    const normalA = DATUM_FRAMES[definition.planeA].normal;
+    const normalB = DATUM_FRAMES[definition.planeB].normal;
+    const direction = normalize(cross(normalA, normalB));
+    if (direction === undefined) return { error: "The two planes are parallel and do not intersect." };
+    return { origin: [0, 0, 0], direction, halfLengthMm: DEFAULT_AXIS_HALF_LENGTH_MM, description: `Intersection of ${DATUM_FRAMES[definition.planeA].label} and ${DATUM_FRAMES[definition.planeB].label}` };
+  }
+  if (definition.kind === "perpendicular-to-plane") {
+    const base = DATUM_FRAMES[definition.plane];
+    return { origin: definition.point, direction: base.normal, halfLengthMm: DEFAULT_AXIS_HALF_LENGTH_MM, description: `Perpendicular to ${base.label}` };
+  }
+  if (definition.kind === "cylinder-axis") {
+    const body = bodies.find((candidate) => candidate.id === definition.bodyId);
+    if (body === undefined) return { error: "The body this axis is built on is no longer in the part." };
+    const operation = body.feature?.operation;
+    if (operation === undefined) return { error: "The body carries no originating operation to donate an axis." };
+    if (operation !== "revolve" && operation !== "extrude") return { error: `Only revolve and extrude bodies donate an axis in this slice (this body is ${operation}).` };
+    const plane = body.feature!.plane;
+    // Centroid of the body's vertices, projected onto the plane's normal line.
+    let cx = 0; let cy = 0; let cz = 0;
+    const count = body.positionsMm.length / 3;
+    for (let index = 0; index < body.positionsMm.length; index += 3) { cx += body.positionsMm[index]!; cy += body.positionsMm[index + 1]!; cz += body.positionsMm[index + 2]!; }
+    const origin: Vec3 = count === 0 ? [0, 0, 0] : [cx / count, cy / count, cz / count];
+    const direction = DATUM_FRAMES[plane === "xy" ? "datum:xy" : plane === "xz" ? "datum:xz" : "datum:yz"].normal;
+    return { origin, direction, halfLengthMm: DEFAULT_AXIS_HALF_LENGTH_MM, description: `${operation === "revolve" ? "Revolve" : "Extrude"} axis of ${body.name}` };
+  }
+  return { error: "Unknown construction-axis kind." };
+}
+
+/** An evaluated construction point: a world-space position. */
+export interface ConstructionPointFrame {
+  readonly position: Vec3;
+  readonly description: string;
+}
+
+export function evaluateConstructionPoint(point: ConstructionPoint, axes: readonly ConstructionAxis[] = [], bodies: readonly GeneralSolidBody[] = []): ConstructionPointFrame | { readonly error: string } {
+  return evaluateConstructionPointDefinition(point.definition, axes, bodies);
+}
+
+export function evaluateConstructionPointDefinition(definition: ConstructionPointDefinition, axes: readonly ConstructionAxis[] = [], bodies: readonly GeneralSolidBody[] = []): ConstructionPointFrame | { readonly error: string } {
+  if (definition.kind === "xyz") return { position: definition.position, description: "XYZ" };
+  if (definition.kind === "midpoint") {
+    return { position: [(definition.a[0] + definition.b[0]) / 2, (definition.a[1] + definition.b[1]) / 2, (definition.a[2] + definition.b[2]) / 2], description: "Midpoint of two points" };
+  }
+  if (definition.kind === "axis-plane-intersection") {
+    const axis = axes.find((candidate) => candidate.id === definition.axisId);
+    if (axis === undefined) return { error: "The axis this point is built on is no longer in the part." };
+    const frame = evaluateConstructionAxisDefinition(axis.definition, bodies);
+    if ("error" in frame) return { error: `The axis could not be evaluated: ${frame.error}` };
+    const base = DATUM_FRAMES[definition.plane];
+    const denom = frame.direction[0] * base.normal[0] + frame.direction[1] * base.normal[1] + frame.direction[2] * base.normal[2];
+    if (Math.abs(denom) < 1e-9) return { error: "The axis is parallel to the plane; they do not intersect." };
+    // Plane passes through the origin; parameter t: (origin + t × direction) · normal = 0.
+    const t = -(frame.origin[0] * base.normal[0] + frame.origin[1] * base.normal[1] + frame.origin[2] * base.normal[2]) / denom;
+    return { position: [frame.origin[0] + frame.direction[0] * t, frame.origin[1] + frame.direction[1] * t, frame.origin[2] + frame.direction[2] * t], description: `${axis.name} ∩ ${base.label}` };
+  }
+  return { error: "Unknown construction-point kind." };
 }
 
 /** Four corners of the plane's rendering quad in the order BL, BR, TR, TL. */

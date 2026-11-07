@@ -241,6 +241,17 @@ export interface PartIntent {
    * next sketch-plane picker refresh). Optional for backward compatibility.
    */
   readonly construction?: readonly ConstructionPlane[];
+  /**
+   * User-authored construction axes. Rendered as thin cyan line segments in the 3D viewport
+   * and listed in the model browser's Origin / Construction tree. Optional for backward
+   * compatibility with earlier documents.
+   */
+  readonly constructionAxes?: readonly ConstructionAxis[];
+  /**
+   * User-authored construction points. Rendered as small spheres in the 3D viewport. Optional
+   * for backward compatibility.
+   */
+  readonly constructionPoints?: readonly ConstructionPoint[];
 }
 
 export type PartPreviewBodyShape = "block" | "cylinder" | "cone" | "sphere" | "torus";
@@ -263,6 +274,41 @@ export interface ConstructionPlane {
   readonly name: string;
   readonly visible: boolean;
   readonly definition: ConstructionPlaneDefinition;
+}
+
+/**
+ * A user-authored construction axis. Built from any of five definitions and recomputed on demand
+ * by `evaluateConstructionAxis`. Not a selectable sketch reference yet (that comes with the sketch
+ * plane picker's next refresh), but listed in the model browser and rendered in the 3D viewport.
+ */
+export type ConstructionAxisDefinition =
+  | { readonly kind: "two-points"; readonly a: Vec3; readonly b: Vec3 }
+  | { readonly kind: "point-and-direction"; readonly origin: Vec3; readonly direction: Vec3 }
+  | { readonly kind: "plane-intersection"; readonly planeA: SketchDatumPlane; readonly planeB: SketchDatumPlane }
+  | { readonly kind: "perpendicular-to-plane"; readonly plane: SketchDatumPlane; readonly point: Vec3 }
+  | { readonly kind: "cylinder-axis"; readonly bodyId: string };
+
+export interface ConstructionAxis {
+  readonly id: string;
+  readonly name: string;
+  readonly visible: boolean;
+  readonly definition: ConstructionAxisDefinition;
+}
+
+/**
+ * A user-authored construction point. Three modes: direct world coordinates, midpoint between
+ * two points, and intersection of a construction axis with a (primary) datum plane.
+ */
+export type ConstructionPointDefinition =
+  | { readonly kind: "xyz"; readonly position: Vec3 }
+  | { readonly kind: "midpoint"; readonly a: Vec3; readonly b: Vec3 }
+  | { readonly kind: "axis-plane-intersection"; readonly axisId: string; readonly plane: SketchDatumPlane };
+
+export interface ConstructionPoint {
+  readonly id: string;
+  readonly name: string;
+  readonly visible: boolean;
+  readonly definition: ConstructionPointDefinition;
 }
 
 export type PartAnalyticBodyShape = PartPreviewBodyShape | "revolved";
@@ -1053,6 +1099,14 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "delete-construction-plane"; readonly planeId: string }
   | { readonly kind: "toggle-construction-plane-visibility"; readonly planeId: string }
   | { readonly kind: "rename-construction-plane"; readonly planeId: string; readonly name: string }
+  | { readonly kind: "add-construction-axis"; readonly axis: ConstructionAxis }
+  | { readonly kind: "delete-construction-axis"; readonly axisId: string }
+  | { readonly kind: "toggle-construction-axis-visibility"; readonly axisId: string }
+  | { readonly kind: "rename-construction-axis"; readonly axisId: string; readonly name: string }
+  | { readonly kind: "add-construction-point"; readonly point: ConstructionPoint }
+  | { readonly kind: "delete-construction-point"; readonly pointId: string }
+  | { readonly kind: "toggle-construction-point-visibility"; readonly pointId: string }
+  | { readonly kind: "rename-construction-point"; readonly pointId: string; readonly name: string }
   | {
       /** Replaces the target body with the result of a mesh-level modify operation computed by the caller. */
       readonly kind: "modify-general-body";
@@ -1163,6 +1217,8 @@ export const WORKBENCH_OPERATION_KINDS = [
   "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
   "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility", "modify-general-body",
   "add-construction-plane", "delete-construction-plane", "toggle-construction-plane-visibility", "rename-construction-plane",
+  "add-construction-axis", "delete-construction-axis", "toggle-construction-axis-visibility", "rename-construction-axis",
+  "add-construction-point", "delete-construction-point", "toggle-construction-point-visibility", "rename-construction-point",
   "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
   "isolate-part-preview-body", "set-part-preview-bodies-visibility", "create-part-revolve", "pattern-part-feature", "mirror-part-feature",
   "boolean-part-bodies", "trim-part-body", "set-part-body-edge-treatment", "set-part-body-draft", "set-part-body-shell",

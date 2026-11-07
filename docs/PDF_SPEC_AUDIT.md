@@ -118,8 +118,8 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Plane through two edges | Missing | |
 | Plane through three points | Missing | |
 | Plane along path | Missing | |
-| Construction axes (5 modes) | Missing | |
-| Construction points & UCS | Missing | |
+| Construction axes (5 modes) | Have | `ConstructionAxis` carries all five modes: `two-points`, `point-and-direction`, `plane-intersection`, `perpendicular-to-plane`, and `cylinder-axis` (donates the axis of a revolve or extrude body). Rendered as dashed line segments in the viewport; UCS not yet modelled |
+| Construction points & UCS | Partial | `ConstructionPoint` ships `xyz`, `midpoint` and `axis-plane-intersection` modes with sphere rendering; UCS (user coordinate systems) still missing |
 | Shape binder / Sub-shape binder | Missing | |
 
 ## 7. Work-window UX (PDF Table 7)

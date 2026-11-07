@@ -284,7 +284,7 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
 
 function validatePart(value: unknown): WorkbenchResult<PartIntent> {
   const required = ["id", "name", "widthMm", "heightMm", "thicknessMm", "holeDiameterMm", "edgeTreatmentMm", "patternCount", "revolveAngleDeg"];
-  const optional = ["previewBodies", "modelUpdateSerial", "generalBodies", "construction"];
+  const optional = ["previewBodies", "modelUpdateSerial", "generalBodies", "construction", "constructionAxes", "constructionPoints"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key))
     || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || value.id !== "part:mounting-plate" || !shortText(value.name, 1, 120)
@@ -315,6 +315,22 @@ function validatePart(value: unknown): WorkbenchResult<PartIntent> {
     for (const plane of value.construction) {
       if (!validateConstructionPlane(plane) || planeIds.has(plane.id)) return invalid("A construction plane is invalid or duplicated.");
       planeIds.add(plane.id);
+    }
+  }
+  if (Object.hasOwn(value, "constructionAxes") && (!Array.isArray(value.constructionAxes) || value.constructionAxes.length > 64)) return invalid("The construction-axis collection is invalid.");
+  if (Array.isArray(value.constructionAxes)) {
+    const axisIds = new Set<string>();
+    for (const axis of value.constructionAxes) {
+      if (!validateConstructionAxis(axis) || axisIds.has(axis.id)) return invalid("A construction axis is invalid or duplicated.");
+      axisIds.add(axis.id);
+    }
+  }
+  if (Object.hasOwn(value, "constructionPoints") && (!Array.isArray(value.constructionPoints) || value.constructionPoints.length > 128)) return invalid("The construction-point collection is invalid.");
+  if (Array.isArray(value.constructionPoints)) {
+    const pointIds = new Set<string>();
+    for (const point of value.constructionPoints) {
+      if (!validateConstructionPoint(point) || pointIds.has(point.id)) return invalid("A construction point is invalid or duplicated.");
+      pointIds.add(point.id);
     }
   }
   if ((Math.min(value.widthMm as number, value.heightMm as number) - (value.holeDiameterMm as number)) / 2 < 1) {
@@ -353,6 +369,47 @@ function validateGeneralSolidBody(value: unknown): value is GeneralSolidBody {
     if (brep.faceTriangles.some((face) => typeof face !== "number" || !Number.isInteger(face) || face < -1 || face >= faceCount)) return false;
   }
   return true;
+}
+
+function validateVec3Mm(value: unknown): value is readonly [number, number, number] {
+  return Array.isArray(value) && value.length === 3 && value.every((component) => typeof component === "number" && Number.isFinite(component) && Math.abs(component) <= 100_000);
+}
+
+function validateConstructionAxis(value: unknown): value is import("./types.js").ConstructionAxis {
+  if (!isRecord(value) || !stableId(value.id) || !shortText(value.name, 1, 120) || typeof value.visible !== "boolean" || !isRecord(value.definition)) return false;
+  const def = value.definition;
+  if (def.kind === "two-points") {
+    return validateVec3Mm(def.a) && validateVec3Mm(def.b) && (def.a[0] !== def.b[0] || def.a[1] !== def.b[1] || def.a[2] !== def.b[2])
+      && Object.keys(def).every((key) => ["kind", "a", "b"].includes(key));
+  }
+  if (def.kind === "point-and-direction") {
+    return validateVec3Mm(def.origin) && validateVec3Mm(def.direction)
+      && Math.hypot(def.direction[0], def.direction[1], def.direction[2]) > 1e-6
+      && Object.keys(def).every((key) => ["kind", "origin", "direction"].includes(key));
+  }
+  if (def.kind === "plane-intersection") {
+    return SKETCH_DATUM_PLANES.includes(def.planeA as never) && SKETCH_DATUM_PLANES.includes(def.planeB as never) && def.planeA !== def.planeB
+      && Object.keys(def).every((key) => ["kind", "planeA", "planeB"].includes(key));
+  }
+  if (def.kind === "perpendicular-to-plane") {
+    return SKETCH_DATUM_PLANES.includes(def.plane as never) && validateVec3Mm(def.point)
+      && Object.keys(def).every((key) => ["kind", "plane", "point"].includes(key));
+  }
+  if (def.kind === "cylinder-axis") {
+    return stableId(def.bodyId) && Object.keys(def).every((key) => ["kind", "bodyId"].includes(key));
+  }
+  return false;
+}
+
+function validateConstructionPoint(value: unknown): value is import("./types.js").ConstructionPoint {
+  if (!isRecord(value) || !stableId(value.id) || !shortText(value.name, 1, 120) || typeof value.visible !== "boolean" || !isRecord(value.definition)) return false;
+  const def = value.definition;
+  if (def.kind === "xyz") return validateVec3Mm(def.position) && Object.keys(def).every((key) => ["kind", "position"].includes(key));
+  if (def.kind === "midpoint") return validateVec3Mm(def.a) && validateVec3Mm(def.b) && Object.keys(def).every((key) => ["kind", "a", "b"].includes(key));
+  if (def.kind === "axis-plane-intersection") {
+    return stableId(def.axisId) && SKETCH_DATUM_PLANES.includes(def.plane as never) && Object.keys(def).every((key) => ["kind", "axisId", "plane"].includes(key));
+  }
+  return false;
 }
 
 function validateConstructionPlane(value: unknown): value is import("./types.js").ConstructionPlane {

@@ -289,6 +289,26 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
     case "rename-construction-plane":
       if (!keys(input, [...common, "planeId", "name"]) || !stableId(input.planeId) || !shortText(input.name, 1, 120)) return invalidOperation("The construction-plane rename is invalid.");
       break;
+    case "add-construction-axis":
+      if (!keys(input, [...common, "axis"]) || !validConstructionAxisPayload(input.axis)) return invalidOperation("The construction-axis insertion is invalid.");
+      break;
+    case "delete-construction-axis":
+    case "toggle-construction-axis-visibility":
+      if (!keys(input, [...common, "axisId"]) || !stableId(input.axisId)) return invalidOperation("The construction-axis ID is invalid.");
+      break;
+    case "rename-construction-axis":
+      if (!keys(input, [...common, "axisId", "name"]) || !stableId(input.axisId) || !shortText(input.name, 1, 120)) return invalidOperation("The construction-axis rename is invalid.");
+      break;
+    case "add-construction-point":
+      if (!keys(input, [...common, "point"]) || !validConstructionPointPayload(input.point)) return invalidOperation("The construction-point insertion is invalid.");
+      break;
+    case "delete-construction-point":
+    case "toggle-construction-point-visibility":
+      if (!keys(input, [...common, "pointId"]) || !stableId(input.pointId)) return invalidOperation("The construction-point ID is invalid.");
+      break;
+    case "rename-construction-point":
+      if (!keys(input, [...common, "pointId", "name"]) || !stableId(input.pointId) || !shortText(input.name, 1, 120)) return invalidOperation("The construction-point rename is invalid.");
+      break;
     case "create-part-revolve":
       if (!keys(input, [...common, "bodyId", "name", "outerDiameterMm", "innerDiameterMm", "heightMm", "angleDeg", "translationMm"])
         || !stableId(input.bodyId) || !shortText(input.name, 1, 120)
@@ -728,6 +748,59 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const target = current.find((plane) => plane.id === operation.planeId);
       if (target === undefined) return broken(operation.planeId, "The construction plane does not exist.");
       return changed({ ...project, part: { ...project.part, construction: current.map((plane) => plane.id === target.id ? { ...plane, name: operation.name } : plane) } }, [target.id], `Renamed ${target.name} to ${operation.name}.`);
+    }
+    case "add-construction-axis": {
+      const current = project.part.constructionAxes ?? [];
+      if (current.length >= 64) return failure("RESOURCE_LIMIT", "The part reached its construction-axis limit.", [project.part.id], "Delete a construction axis before adding another.");
+      if (current.some((axis) => axis.id === operation.axis.id)) return invalidOperation("The construction-axis ID already exists.");
+      return changed({ ...project, part: { ...project.part, constructionAxes: [...current, operation.axis] } }, [operation.axis.id], `Created ${operation.axis.name}.`);
+    }
+    case "delete-construction-axis": {
+      const current = project.part.constructionAxes ?? [];
+      const target = current.find((axis) => axis.id === operation.axisId);
+      if (target === undefined) return broken(operation.axisId, "The construction axis does not exist.");
+      // Dependent construction points referring to this axis lose their binding; drop them to keep the project valid.
+      const dependents = (project.part.constructionPoints ?? []).filter((point) => point.definition.kind !== "axis-plane-intersection" || point.definition.axisId !== target.id);
+      return changed({ ...project, part: { ...project.part, constructionAxes: current.filter((axis) => axis.id !== target.id), constructionPoints: dependents } }, [target.id], `Deleted ${target.name}.`);
+    }
+    case "toggle-construction-axis-visibility": {
+      const current = project.part.constructionAxes ?? [];
+      const target = current.find((axis) => axis.id === operation.axisId);
+      if (target === undefined) return broken(operation.axisId, "The construction axis does not exist.");
+      return changed({ ...project, part: { ...project.part, constructionAxes: current.map((axis) => axis.id === target.id ? { ...axis, visible: !axis.visible } : axis) } }, [target.id], `${target.visible ? "Hid" : "Showed"} ${target.name}.`);
+    }
+    case "rename-construction-axis": {
+      const current = project.part.constructionAxes ?? [];
+      const target = current.find((axis) => axis.id === operation.axisId);
+      if (target === undefined) return broken(operation.axisId, "The construction axis does not exist.");
+      return changed({ ...project, part: { ...project.part, constructionAxes: current.map((axis) => axis.id === target.id ? { ...axis, name: operation.name } : axis) } }, [target.id], `Renamed ${target.name} to ${operation.name}.`);
+    }
+    case "add-construction-point": {
+      const current = project.part.constructionPoints ?? [];
+      if (current.length >= 128) return failure("RESOURCE_LIMIT", "The part reached its construction-point limit.", [project.part.id], "Delete a construction point before adding another.");
+      if (current.some((point) => point.id === operation.point.id)) return invalidOperation("The construction-point ID already exists.");
+      if (operation.point.definition.kind === "axis-plane-intersection" && !(project.part.constructionAxes ?? []).some((axis) => axis.id === (operation.point.definition as { readonly axisId: string }).axisId)) {
+        return broken(operation.point.id, "The construction axis this point is built on does not exist.");
+      }
+      return changed({ ...project, part: { ...project.part, constructionPoints: [...current, operation.point] } }, [operation.point.id], `Created ${operation.point.name}.`);
+    }
+    case "delete-construction-point": {
+      const current = project.part.constructionPoints ?? [];
+      const target = current.find((point) => point.id === operation.pointId);
+      if (target === undefined) return broken(operation.pointId, "The construction point does not exist.");
+      return changed({ ...project, part: { ...project.part, constructionPoints: current.filter((point) => point.id !== target.id) } }, [target.id], `Deleted ${target.name}.`);
+    }
+    case "toggle-construction-point-visibility": {
+      const current = project.part.constructionPoints ?? [];
+      const target = current.find((point) => point.id === operation.pointId);
+      if (target === undefined) return broken(operation.pointId, "The construction point does not exist.");
+      return changed({ ...project, part: { ...project.part, constructionPoints: current.map((point) => point.id === target.id ? { ...point, visible: !point.visible } : point) } }, [target.id], `${target.visible ? "Hid" : "Showed"} ${target.name}.`);
+    }
+    case "rename-construction-point": {
+      const current = project.part.constructionPoints ?? [];
+      const target = current.find((point) => point.id === operation.pointId);
+      if (target === undefined) return broken(operation.pointId, "The construction point does not exist.");
+      return changed({ ...project, part: { ...project.part, constructionPoints: current.map((point) => point.id === target.id ? { ...point, name: operation.name } : point) } }, [target.id], `Renamed ${target.name} to ${operation.name}.`);
     }
     case "set-part-preview-body-transform": {
       const currentBodies = project.part.previewBodies ?? [];
@@ -1312,6 +1385,56 @@ function validPartPreviewBodyPayload(value: unknown): value is PartPreviewBody {
   if (Object.hasOwn(value, "edgeTreatment") && !validPartEdgeTreatment(value.edgeTreatment)) return false;
   if (Object.hasOwn(value, "featureTrace") && !validPartFeatureTrace(value.featureTrace)) return false;
   return validatePartFeatureStack(value as unknown as PartPreviewBody).ok;
+}
+
+function vec3Mm(value: unknown): value is readonly [number, number, number] {
+  return Array.isArray(value) && value.length === 3 && value.every((component) => typeof component === "number" && Number.isFinite(component) && Math.abs(component) <= 100_000);
+}
+
+function validConstructionAxisPayload(value: unknown): value is import("./types.js").ConstructionAxis {
+  if (!isRecord(value) || !stableId(value.id) || !shortText(value.name, 1, 120) || typeof value.visible !== "boolean"
+    || !isRecord(value.definition) || Object.keys(value).some((key) => !["id", "name", "visible", "definition"].includes(key))) return false;
+  const def = value.definition;
+  if (def.kind === "two-points") {
+    return vec3Mm(def.a) && vec3Mm(def.b)
+      && (def.a[0] !== def.b[0] || def.a[1] !== def.b[1] || def.a[2] !== def.b[2])
+      && Object.keys(def).every((key) => ["kind", "a", "b"].includes(key));
+  }
+  if (def.kind === "point-and-direction") {
+    return vec3Mm(def.origin) && vec3Mm(def.direction)
+      && Math.hypot(def.direction[0], def.direction[1], def.direction[2]) > 1e-6
+      && Object.keys(def).every((key) => ["kind", "origin", "direction"].includes(key));
+  }
+  if (def.kind === "plane-intersection") {
+    return SKETCH_DATUM_PLANES.includes(def.planeA as never) && SKETCH_DATUM_PLANES.includes(def.planeB as never)
+      && def.planeA !== def.planeB
+      && Object.keys(def).every((key) => ["kind", "planeA", "planeB"].includes(key));
+  }
+  if (def.kind === "perpendicular-to-plane") {
+    return SKETCH_DATUM_PLANES.includes(def.plane as never) && vec3Mm(def.point)
+      && Object.keys(def).every((key) => ["kind", "plane", "point"].includes(key));
+  }
+  if (def.kind === "cylinder-axis") {
+    return stableId(def.bodyId) && Object.keys(def).every((key) => ["kind", "bodyId"].includes(key));
+  }
+  return false;
+}
+
+function validConstructionPointPayload(value: unknown): value is import("./types.js").ConstructionPoint {
+  if (!isRecord(value) || !stableId(value.id) || !shortText(value.name, 1, 120) || typeof value.visible !== "boolean"
+    || !isRecord(value.definition) || Object.keys(value).some((key) => !["id", "name", "visible", "definition"].includes(key))) return false;
+  const def = value.definition;
+  if (def.kind === "xyz") {
+    return vec3Mm(def.position) && Object.keys(def).every((key) => ["kind", "position"].includes(key));
+  }
+  if (def.kind === "midpoint") {
+    return vec3Mm(def.a) && vec3Mm(def.b) && Object.keys(def).every((key) => ["kind", "a", "b"].includes(key));
+  }
+  if (def.kind === "axis-plane-intersection") {
+    return stableId(def.axisId) && SKETCH_DATUM_PLANES.includes(def.plane as never)
+      && Object.keys(def).every((key) => ["kind", "axisId", "plane"].includes(key));
+  }
+  return false;
 }
 
 function validConstructionPlanePayload(value: unknown): value is import("./types.js").ConstructionPlane {

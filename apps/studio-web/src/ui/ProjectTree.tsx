@@ -73,6 +73,8 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
       <TreeItem kind="datum" id="datum:xy" label="XY plane" meta="primary sketch plane" selectedId={selectedId} onSelect={onSelect} indent />
       <TreeItem kind="datum" id="datum:yz" label="YZ plane" meta="reference" selectedId={selectedId} onSelect={onSelect} indent />
       <TreeItem kind="datum" id="datum:xz" label="XZ plane" meta="reference" selectedId={selectedId} onSelect={onSelect} indent />
+      {(project.part.constructionAxes ?? []).map((axis) => <TreeItem key={axis.id} kind="datum" id={axis.id} label={axis.name} meta={`axis · ${axis.definition.kind.replaceAll("-", " ")}${axis.visible ? "" : " · hidden"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
+      {(project.part.constructionPoints ?? []).map((point) => <TreeItem key={point.id} kind="datum" id={point.id} label={point.name} meta={`point · ${point.definition.kind.replaceAll("-", " ")}${point.visible ? "" : " · hidden"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
     </TreeSection>}
     {showSketch && <TreeSection title={`Sketches · ${project.sketch.entities.length} entities · ${sketchProfiles.length} profiles`} badge="preview">
       <TreeItem kind="sketch" id={project.sketch.id} label={project.sketch.name} meta={`${project.sketch.constraints.length} constraints${workingSketchFullyConstrained ? " · fully constrained" : ""}`} selectedId={selectedId} onSelect={onSelect} {...(workingSketchFullyConstrained ? { trailingIcon: "lock" as const } : {})} />

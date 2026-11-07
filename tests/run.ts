@@ -34,6 +34,7 @@ import { sketchChamferModeTests } from "./sketch-chamfer-modes.test.js";
 import { sketchArcAndSlotModeTests } from "./sketch-arc-and-slot-modes.test.js";
 import { sweepAndLoftTests } from "./sweep-and-loft.test.js";
 import { edgeShellDraftTests } from "./edge-shell-draft.test.js";
+import { constructionAxesAndPointsTests } from "./construction-axes-and-points.test.js";
 import { constructionPlaneTests } from "./construction-planes.test.js";
 import { assemblyMeshTests } from "./assembly-mesh.test.js";
 import { assemblyMateTests } from "./assembly-mates.test.js";
@@ -90,6 +91,7 @@ const tests: readonly TestCase[] = [
   ...sketchArcAndSlotModeTests,
   ...sweepAndLoftTests,
   ...edgeShellDraftTests,
+  ...constructionAxesAndPointsTests,
   ...constructionPlaneTests,
   ...assemblyMeshTests,
   ...assemblyMateTests,

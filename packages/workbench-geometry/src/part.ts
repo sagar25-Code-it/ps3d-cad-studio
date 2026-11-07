@@ -1,6 +1,6 @@
-import type { ConstructionPlane, PartIntent, PartPreviewBody, Vec3 } from "../../workbench-core/src/index.js";
+import type { ConstructionAxis, ConstructionPlane, ConstructionPoint, PartIntent, PartPreviewBody, Vec3 } from "../../workbench-core/src/index.js";
 import { boundsFromPoints } from "./assembly.js";
-import { constructionPlaneCorners, evaluateConstructionPlane } from "./construction-geometry.js";
+import { constructionPlaneCorners, evaluateConstructionAxis, evaluateConstructionPlane, evaluateConstructionPoint } from "./construction-geometry.js";
 import type { PreviewPrimitive, PreviewScene } from "./types.js";
 
 const RADIAL_SEGMENTS = 64;
@@ -52,6 +52,21 @@ export function buildPartPreview(part: PartIntent): PreviewScene {
       points.push(...primitive.bounds);
     }
   }
+  const axes = part.constructionAxes ?? [];
+  for (const axis of axes.filter((candidate) => candidate.visible)) {
+    const primitive = constructionAxisPrimitive(axis, generalBodies);
+    if (primitive !== undefined) {
+      primitives.push(primitive.primitive);
+      points.push(...primitive.bounds);
+    }
+  }
+  for (const point of (part.constructionPoints ?? []).filter((candidate) => candidate.visible)) {
+    const primitive = constructionPointPrimitive(point, axes, generalBodies);
+    if (primitive !== undefined) {
+      primitives.push(primitive.primitive);
+      points.push(primitive.position);
+    }
+  }
   return {
     id: "part-scene:native-with-analytic-bodies",
     kind: "part",
@@ -91,6 +106,48 @@ function constructionPlanePrimitives(plane: ConstructionPlane): { readonly primi
     dashed: false
   };
   return { primitives: [quad, border], bounds: corners };
+}
+
+function constructionAxisPrimitive(axis: ConstructionAxis, bodies: readonly import("../../workbench-core/src/index.js").GeneralSolidBody[]): { readonly primitive: PreviewPrimitive; readonly bounds: readonly Vec3[] } | undefined {
+  const frame = evaluateConstructionAxis(axis, bodies);
+  if ("error" in frame) return undefined;
+  const half = frame.halfLengthMm;
+  const start: Vec3 = [frame.origin[0] - frame.direction[0] * half, frame.origin[1] - frame.direction[1] * half, frame.origin[2] - frame.direction[2] * half];
+  const end: Vec3 = [frame.origin[0] + frame.direction[0] * half, frame.origin[1] + frame.direction[1] * half, frame.origin[2] + frame.direction[2] * half];
+  return {
+    primitive: {
+      id: axis.id,
+      name: `${axis.name} · construction axis`,
+      color: "#9ad4ff",
+      opacity: 0.95,
+      selectable: true,
+      kind: "line",
+      pointsMm: [start[0], start[1], start[2], end[0], end[1], end[2]],
+      dashed: true
+    },
+    bounds: [start, end]
+  };
+}
+
+function constructionPointPrimitive(point: ConstructionPoint, axes: readonly ConstructionAxis[], bodies: readonly import("../../workbench-core/src/index.js").GeneralSolidBody[]): { readonly primitive: PreviewPrimitive; readonly position: Vec3 } | undefined {
+  const frame = evaluateConstructionPoint(point, axes, bodies);
+  if ("error" in frame) return undefined;
+  return {
+    primitive: {
+      id: point.id,
+      name: `${point.name} · construction point`,
+      color: "#ffcc66",
+      opacity: 1,
+      selectable: true,
+      kind: "sphere",
+      positionMm: frame.position,
+      rotationDeg: [0, 0, 0],
+      radiusMm: 1.8,
+      widthSegments: 12,
+      heightSegments: 8
+    },
+    position: frame.position
+  };
 }
 
 function generalBodyBounds(positionsMm: readonly number[]): readonly Vec3[] {
