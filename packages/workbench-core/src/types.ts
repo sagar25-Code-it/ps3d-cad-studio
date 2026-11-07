@@ -332,9 +332,9 @@ export interface GeneralSolidBody {
   /** Flat triangle vertex indices; length is a multiple of 3. */
   readonly indices: readonly number[];
   readonly feature?: {
-    readonly operation: "extrude" | "revolve";
+    readonly operation: "extrude" | "revolve" | "sweep" | "loft";
     readonly plane: "xy" | "xz" | "yz";
-    /** Extrusion height in mm, or revolve angle in degrees. */
+    /** Extrusion height / revolve angle (degrees) / sweep distance / loft height. */
     readonly valueMm: number;
   };
   /**
@@ -917,12 +917,12 @@ export interface DesignSketchFeature extends DesignFeatureBase {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
   readonly profileIds: readonly string[];
-  /** Extrusion distance in mm, or revolve angle in degrees. */
+  /** Extrusion distance in mm, or revolve angle in degrees, or sweep distance along direction, or loft bottom-to-top distance. */
   readonly valueMm: number;
   /** Extrude only: which way from the sketch plane. */
   readonly direction?: "one-side" | "symmetric" | "flipped";
@@ -939,6 +939,14 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   /** The body this feature owns in `part.generalBodies` (for a join or cut: the body it modifies). */
   readonly bodyId: string;
   readonly edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number };
+  /**
+   * Sweep only: the direction in world space (unit vector; the builder normalizes it). The profile is translated along
+   * this vector by `valueMm`. A direction parallel to the sketch plane is refused; a direction equal to the plane normal
+   * is equivalent to an extrude of distance `valueMm`.
+   */
+  readonly sweepDirectionMm?: readonly [number, number, number];
+  /** Loft only: the scale factor of the top profile relative to the base (0.1 – 10). 1 behaves like an extrude. */
+  readonly loftTopScale?: number;
 }
 
 export type DesignFeature = DesignSketchFeature | DesignSolidFeature;

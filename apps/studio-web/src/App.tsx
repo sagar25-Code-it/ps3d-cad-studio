@@ -1626,11 +1626,28 @@ export function App(): React.JSX.Element {
   };
 
   /** Extrude or revolve the working sketch's profiles into a new timeline feature and solid. */
-  const createGeneralSolid = async (selectedProfileIds: readonly string[], _plane: SketchPlane, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction: "one-side" | "symmetric" | "flipped" = "one-side", target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" }): Promise<void> => {
-    if (!Number.isFinite(valueMm) || valueMm <= 0) { setStatus("error"); setStatusText(operation === "extrude" ? "Enter a positive extrusion distance." : "Enter a revolve angle between 1 and 360 degrees."); return; }
+  const createGeneralSolid = async (
+    selectedProfileIds: readonly string[],
+    _plane: SketchPlane,
+    operation: "extrude" | "revolve" | "sweep" | "loft",
+    valueMm: number,
+    edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number },
+    direction: "one-side" | "symmetric" | "flipped" = "one-side",
+    target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" },
+    sweepLoftParams?: { readonly sweepDirectionMm?: readonly [number, number, number]; readonly loftTopScale?: number }
+  ): Promise<void> => {
+    if (!Number.isFinite(valueMm) || valueMm <= 0) { setStatus("error"); setStatusText(operation === "revolve" ? "Enter a revolve angle between 1 and 360 degrees." : operation === "sweep" ? "Enter a positive sweep distance." : operation === "loft" ? "Enter a positive loft height." : "Enter a positive extrusion distance."); return; }
+    if (operation === "sweep") {
+      const direction = sweepLoftParams?.sweepDirectionMm;
+      if (direction === undefined || Math.hypot(direction[0], direction[1], direction[2]) < 1e-6) { setStatus("error"); setStatusText("Enter a non-zero sweep direction."); return; }
+    }
+    if (operation === "loft") {
+      const scale = sweepLoftParams?.loftTopScale;
+      if (scale === undefined || !Number.isFinite(scale) || scale <= 0) { setStatus("error"); setStatusText("Enter a positive loft top scale."); return; }
+    }
     if (detectSketchProfiles(projectRef.current.sketch).length === 0) { setStatus("error"); setStatusText("Draw or select a closed profile before creating a solid."); return; }
     setStatus("working");
-    setStatusText(`Building ${operation === "extrude" ? "extruded" : "revolved"} solid…`);
+    setStatusText(`Building ${operation === "extrude" ? "extruded" : operation === "revolve" ? "revolved" : operation === "sweep" ? "swept" : "lofted"} solid…`);
     const sketchId = await commitWorkingSketch();
     const sketchFeature = designOf(projectRef.current).features.find((feature) => feature.id === sketchId);
     // A refused commit has already reported why (status and diagnostic); keep that message.
@@ -1640,7 +1657,9 @@ export function App(): React.JSX.Element {
     const targetBody = target === undefined ? undefined : projectRef.current.part.generalBodies?.find((body) => body.id === target.bodyId);
     if (target !== undefined && targetBody === undefined) { setStatus("error"); setStatusText(`Pick the solid to ${target.mode} first. Create a solid with New body, then ${target.mode} with another sketch.`); return; }
     const bodyId = targetBody?.id ?? `general-body:${crypto.randomUUID()}`;
-    const verb = target === undefined ? (operation === "extrude" ? "Extrude" : "Revolve") : target.mode === "cut" ? "Cut" : "Join";
+    const verb = target === undefined
+      ? (operation === "extrude" ? "Extrude" : operation === "revolve" ? "Revolve" : operation === "sweep" ? "Sweep" : "Loft")
+      : target.mode === "cut" ? "Cut" : "Join";
     const feature: DesignSolidFeature = {
       id: `feature:${operation}-${crypto.randomUUID()}`,
       name: `${verb} ${target === undefined ? ordinal : designOf(projectRef.current).features.filter((candidate) => candidate.kind !== "sketch" && candidate.operation === target.mode).length + 1}`,
@@ -1653,7 +1672,9 @@ export function App(): React.JSX.Element {
       ...(operation === "extrude" && direction !== "one-side" ? { direction } : {}),
       ...(edge === undefined ? {} : { edge }),
       ...(target === undefined ? {} : { operation: target.mode }),
-      ...(target?.extent === "through-all" && operation === "extrude" && target.mode === "cut" ? { extent: "through-all" as const } : {})
+      ...(target?.extent === "through-all" && operation === "extrude" && target.mode === "cut" ? { extent: "through-all" as const } : {}),
+      ...(operation === "sweep" && sweepLoftParams?.sweepDirectionMm !== undefined ? { sweepDirectionMm: sweepLoftParams.sweepDirectionMm } : {}),
+      ...(operation === "loft" && sweepLoftParams?.loftTopScale !== undefined ? { loftTopScale: sweepLoftParams.loftTopScale } : {})
     };
     // A join or cut builds its solid as a tool and combines it with the current shape of the body it modifies.
     // A through-all cut is sized across the target body here, the same way the timeline replay sizes it.
@@ -2798,7 +2819,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openContextMenu} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target)} onChangePlane={() => setSketchPlaneDialogOpen(true)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={() => { setSketchCancelVersion((version) => version + 1); switchWorkspace("part"); setStatusText("Cancelled the sketch and returned to Design. Pending points were dropped; committed geometry is kept."); }} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openContextMenu} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, sweepLoftParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, sweepLoftParams)} onChangePlane={() => setSketchPlaneDialogOpen(true)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={() => { setSketchCancelVersion((version) => version + 1); switchWorkspace("part"); setStatusText("Cancelled the sketch and returned to Design. Pending points were dropped; committed geometry is kept."); }} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl

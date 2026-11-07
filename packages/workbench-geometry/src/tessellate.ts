@@ -110,6 +110,97 @@ export function tessellateRevolve(polygonMm: readonly Point2[], degrees: number,
   return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };
 }
 
+/**
+ * Sweep a closed profile polygon (millimetres) along a world-space direction. Unlike extrude (which goes along the
+ * sketch-plane normal) sweep goes along an arbitrary 3D direction, which gives a skewed prism. The top ring is the
+ * bottom ring translated by `directionWorld * distanceMm` so caps are parallel; the ribbon sides stay planar quads.
+ * Caller must ensure the direction is not parallel to the sketch plane (the builder refuses that).
+ */
+export function tessellateSweep(polygonMm: readonly Point2[], directionWorldMm: readonly [number, number, number], distanceMm: number, plane: TessellatePlane): TessellatedMesh {
+  const polygon = sanitizePolygon(polygonMm);
+  if (polygon.length < 3) return { positionsMm: [], indices: [] };
+  const length = Math.hypot(directionWorldMm[0], directionWorldMm[1], directionWorldMm[2]);
+  if (length < 1e-9 || !Number.isFinite(distanceMm) || distanceMm === 0) return { positionsMm: [], indices: [] };
+  const unit: readonly [number, number, number] = [directionWorldMm[0] / length, directionWorldMm[1] / length, directionWorldMm[2] / length];
+  const offset = Math.abs(distanceMm);
+  const shift: readonly [number, number, number] = [unit[0] * offset, unit[1] * offset, unit[2] * offset];
+  const capTriangles = triangulatePolygon(polygon);
+  const count = polygon.length;
+  // Build in sketch-plane local 3D (Z = 0 for bottom, Z = ? — doesn't apply: we translate the TOP in WORLD after rotation).
+  // Because the rotation is applied uniformly to every (x, y, 0) point, we instead rotate the whole set first, then translate
+  // the top ring by the WORLD shift. That keeps caps parallel.
+  const localPositions: number[] = [];
+  for (const [x, y] of polygon) localPositions.push(x, y, 0);
+  for (const [x, y] of polygon) localPositions.push(x, y, 0);
+  const rotated = rotatePositions(localPositions, PLANE_ROTATION_DEG[plane]).slice();
+  // Translate the top half by the world shift.
+  const positions = [...rotated];
+  for (let index = count * 3; index < positions.length; index += 3) {
+    positions[index] = positions[index]! + shift[0];
+    positions[index + 1] = positions[index + 1]! + shift[1];
+    positions[index + 2] = positions[index + 2]! + shift[2];
+  }
+  const indices: number[] = [];
+  // Bottom cap (reverse CCW so the normal faces the plane's -normal direction).
+  for (let i = 0; i < capTriangles.length; i += 3) indices.push(capTriangles[i]!, capTriangles[i + 2]!, capTriangles[i + 1]!);
+  // Top cap.
+  for (let i = 0; i < capTriangles.length; i += 3) indices.push(count + capTriangles[i]!, count + capTriangles[i + 1]!, count + capTriangles[i + 2]!);
+  // Side ribbon.
+  for (let i = 0; i < count; i += 1) {
+    const next = (i + 1) % count;
+    indices.push(i, next, count + next, i, count + next, count + i);
+  }
+  return { positionsMm: positions, indices };
+}
+
+/**
+ * Loft between a base profile and the same profile scaled by `topScale` (about its 2D centroid), placed at height
+ * `topZMm` along the sketch-plane normal. topScale = 1 reduces to an extrude. A non-positive topScale is refused.
+ */
+export function tessellateLoft(polygonMm: readonly Point2[], topScale: number, topZMm: number, plane: TessellatePlane): TessellatedMesh {
+  const polygon = sanitizePolygon(polygonMm);
+  if (polygon.length < 3) return { positionsMm: [], indices: [] };
+  if (!Number.isFinite(topScale) || topScale <= 0) return { positionsMm: [], indices: [] };
+  if (!Number.isFinite(topZMm) || topZMm === 0) return { positionsMm: [], indices: [] };
+  const height = Math.abs(topZMm);
+  // Centroid of the polygon (area-weighted via shoelace; falls back to average for a degenerate signed area).
+  const centroid = polygonCentroid(polygon);
+  const capTriangles = triangulatePolygon(polygon);
+  const count = polygon.length;
+  const positions: number[] = [];
+  for (const [x, y] of polygon) positions.push(x, y, 0);
+  for (const [x, y] of polygon) positions.push(centroid[0] + (x - centroid[0]) * topScale, centroid[1] + (y - centroid[1]) * topScale, height);
+  const indices: number[] = [];
+  for (let i = 0; i < capTriangles.length; i += 3) indices.push(capTriangles[i]!, capTriangles[i + 2]!, capTriangles[i + 1]!);
+  for (let i = 0; i < capTriangles.length; i += 3) indices.push(count + capTriangles[i]!, count + capTriangles[i + 1]!, count + capTriangles[i + 2]!);
+  for (let i = 0; i < count; i += 1) {
+    const next = (i + 1) % count;
+    indices.push(i, next, count + next, i, count + next, count + i);
+  }
+  return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };
+}
+
+function polygonCentroid(polygon: readonly Point2[]): Point2 {
+  let signed = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i]!;
+    const b = polygon[(i + 1) % polygon.length]!;
+    const cross = a[0] * b[1] - b[0] * a[1];
+    signed += cross;
+    cx += (a[0] + b[0]) * cross;
+    cy += (a[1] + b[1]) * cross;
+  }
+  if (Math.abs(signed) < 1e-9) {
+    // Degenerate signed area: fall back to average of vertices.
+    const avg = polygon.reduce<Point2>((acc, point) => [acc[0] + point[0] / polygon.length, acc[1] + point[1] / polygon.length], [0, 0]);
+    return avg;
+  }
+  const area6 = signed * 3;
+  return [cx / area6, cy / area6];
+}
+
 /** Remove a duplicated closing vertex and any zero-length segments so triangulation stays robust. */
 function sanitizePolygon(polygon: readonly Point2[]): readonly Point2[] {
   const cleaned: Point2[] = [];

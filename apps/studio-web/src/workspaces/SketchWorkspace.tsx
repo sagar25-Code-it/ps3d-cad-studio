@@ -138,7 +138,7 @@ interface SketchWorkspaceProps {
   readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null) => void;
   readonly onMessage: (message: string) => void;
   readonly optionsRevealRequest: number;
-  readonly onCreateSolid: (profileIds: readonly string[], plane: PlaneKey, operation: "extrude" | "revolve", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction?: "one-side" | "symmetric" | "flipped", target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" }) => void;
+  readonly onCreateSolid: (profileIds: readonly string[], plane: PlaneKey, operation: "extrude" | "revolve" | "sweep" | "loft", valueMm: number, edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number }, direction?: "one-side" | "symmetric" | "flipped", target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" }, sweepLoftParams?: { readonly sweepDirectionMm?: readonly [number, number, number]; readonly loftTopScale?: number }) => void;
   /** The solids a join or cut can modify. */
   readonly solidBodies: readonly { readonly id: string; readonly name: string }[];
   readonly onChangePlane: () => void;
@@ -218,8 +218,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [selectionBox, setSelectionBox] = useState<{ readonly start: Vec2; readonly end: Vec2 } | undefined>(undefined);
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
-  const [solidOp, setSolidOp] = useState<"extrude" | "revolve">("extrude");
+  const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft">("extrude");
   const [solidValue, setSolidValue] = useState("10");
+  const [sweepDx, setSweepDx] = useState("0");
+  const [sweepDy, setSweepDy] = useState("0");
+  const [sweepDz, setSweepDz] = useState("1");
+  const [loftTopScale, setLoftTopScale] = useState("0.7");
   const [solidDirection, setSolidDirection] = useState<"one-side" | "symmetric" | "flipped">("one-side");
   const [solidResult, setSolidResult] = useState<"new-body" | "join" | "cut">("new-body");
   const [solidTarget, setSolidTarget] = useState("");
@@ -1104,12 +1108,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <div className="sketch-make-solid" aria-label="Create a solid from a profile">
           <span className="make-solid-title">Create solid</span>
           <div className="make-solid-row">
-            <select aria-label="Operation" value={solidOp} onChange={(event) => { setSolidOp(event.target.value as "extrude" | "revolve"); setSolidValue(event.target.value === "revolve" ? "360" : "10"); }}>
+            <select aria-label="Operation" value={solidOp} onChange={(event) => { const next = event.target.value as "extrude" | "revolve" | "sweep" | "loft"; setSolidOp(next); setSolidValue(next === "revolve" ? "360" : next === "loft" ? "20" : next === "sweep" ? "20" : "10"); }}>
               <option value="extrude">Extrude</option>
               <option value="revolve">Revolve</option>
+              <option value="sweep">Sweep (linear)</option>
+              <option value="loft">Loft (scaled top)</option>
             </select>
-            <input aria-label={solidOp === "extrude" ? "Height in millimetres" : "Angle in degrees"} type="number" min={solidOp === "extrude" ? 0.1 : 1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "extrude" ? 1 : 5} value={solidValue} disabled={cutThroughAll} onChange={(event) => setSolidValue(event.target.value)} />
-            <small>{solidOp === "extrude" ? "mm" : "°"}</small>
+            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? "Sweep distance in millimetres" : solidOp === "loft" ? "Loft height in millimetres" : "Height in millimetres"} type="number" min={solidOp === "revolve" ? 1 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : 1} value={solidValue} disabled={cutThroughAll} onChange={(event) => setSolidValue(event.target.value)} />
+            <small>{solidOp === "revolve" ? "°" : "mm"}</small>
           </div>
           <small className="make-solid-plane">On the {planePlacement}</small>
           <div className="make-solid-row" aria-label="Result of the feature">
@@ -1139,6 +1145,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="flipped">Flipped</option>
             </select>
           </div>}
+          {solidOp === "sweep" && <div className="make-solid-row" aria-label="Sweep direction">
+            <small>Direction (world)</small>
+            <input aria-label="Sweep direction X" type="number" step={0.1} value={sweepDx} onChange={(event) => setSweepDx(event.target.value)} />
+            <input aria-label="Sweep direction Y" type="number" step={0.1} value={sweepDy} onChange={(event) => setSweepDy(event.target.value)} />
+            <input aria-label="Sweep direction Z" type="number" step={0.1} value={sweepDz} onChange={(event) => setSweepDz(event.target.value)} />
+          </div>}
+          {solidOp === "loft" && <div className="make-solid-row" aria-label="Loft top scale">
+            <small>Top scale</small>
+            <input aria-label="Loft top scale" type="number" min={0.05} max={20} step={0.1} value={loftTopScale} onChange={(event) => setLoftTopScale(event.target.value)} />
+          </div>}
           {solidOp === "extrude" && <div className="make-solid-row" aria-label="Edge treatment">
             <select aria-label="Edge treatment" value={edgeKind} onChange={(event) => setEdgeKind(event.target.value as "none" | "chamfer" | "fillet")}>
               <option value="none">Edges: sharp</option>
@@ -1150,7 +1166,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <small>mm</small>
             </>}
           </div>}
-          <button className="palette-action primary" disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying)} onClick={() => props.onCreateSolid(selectedProfileIds, plane, solidOp, cutThroughAll && !(Number(solidValue) > 0) ? 1 : Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined, solidOp === "extrude" ? solidDirection : undefined, modifying ? { mode: solidResult, bodyId: effectiveTarget, ...(cutThroughAll ? { extent: "through-all" as const } : {}) } : undefined)}><CommandIcon name={solidResult === "cut" ? "subtract" : solidResult === "join" ? "unite" : "box"} />{solidResult === "cut" ? "Cut solid" : solidResult === "join" ? "Join solid" : "Create solid"}</button>
+          <button className="palette-action primary" disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying) || (solidOp !== "extrude" && solidOp !== "revolve" && solidResult !== "new-body")} onClick={() => props.onCreateSolid(selectedProfileIds, plane, solidOp, cutThroughAll && !(Number(solidValue) > 0) ? 1 : Number(solidValue), solidOp === "extrude" && edgeKind !== "none" ? { kind: edgeKind, sizeMm: Number(edgeSize) } : undefined, solidOp === "extrude" ? solidDirection : undefined, modifying ? { mode: solidResult, bodyId: effectiveTarget, ...(cutThroughAll ? { extent: "through-all" as const } : {}) } : undefined, solidOp === "sweep" ? { sweepDirectionMm: [Number(sweepDx), Number(sweepDy), Number(sweepDz)] as const } : solidOp === "loft" ? { loftTopScale: Number(loftTopScale) } : undefined)}><CommandIcon name={solidResult === "cut" ? "subtract" : solidResult === "join" ? "unite" : "box"} />{solidResult === "cut" ? "Cut solid" : solidResult === "join" ? "Join solid" : "Create solid"}</button>
           {solidOp === "extrude" && <small className="make-solid-hint">{selectedProfileIds.length === 0 ? "Nothing selected: the outermost profile is used and profiles inside it become holes." : "Profiles drawn inside the outline become holes. Shift-select profiles to choose exactly which."}</small>}
         </div>
         <details className="palette-shortcuts">

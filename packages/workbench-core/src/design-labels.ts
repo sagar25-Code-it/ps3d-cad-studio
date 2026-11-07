@@ -39,7 +39,11 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
   const amount = feature.extent === "through-all" ? "through all"
     : feature.kind === "extrude"
       ? `${trimNumber(feature.valueMm)} mm${feature.direction === undefined || feature.direction === "one-side" ? "" : ` ${DIRECTION[feature.direction]}`}`
-      : `${trimNumber(feature.valueMm)}°`;
+      : feature.kind === "revolve"
+        ? `${trimNumber(feature.valueMm)}°`
+        : feature.kind === "sweep"
+          ? `${trimNumber(feature.valueMm)} mm sweep`
+          : `${trimNumber(feature.valueMm)} mm loft · top ${trimNumber(feature.loftTopScale ?? 1)}×`;
   const verb = !modifiesBody(feature) ? "" : feature.operation === "cut" ? "Cut " : "Join ";
   return `${verb}${amount} · from ${source === undefined ? "a deleted sketch" : source.name}`;
 }

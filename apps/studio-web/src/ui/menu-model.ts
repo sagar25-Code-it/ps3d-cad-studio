@@ -41,7 +41,7 @@ export interface WorkbenchMenuState {
   /** A general solid body (built from a sketch extrude or revolve) is selected. */
   readonly generalBodySelected: boolean;
   /** The timeline feature the current selection resolves to, if any. */
-  readonly selectedFeature?: { readonly name: string; readonly suppressed: boolean; readonly kind: "sketch" | "extrude" | "revolve" };
+  readonly selectedFeature?: { readonly name: string; readonly suppressed: boolean; readonly kind: "sketch" | "extrude" | "revolve" | "sweep" | "loft" };
   /** Something deletable is selected: a timeline feature, a solid body, or a preview body. */
   readonly selectionDeletable: boolean;
 }

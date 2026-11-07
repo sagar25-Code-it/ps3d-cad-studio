@@ -1,5 +1,5 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { booleanMeshes, revolveAxisRelation, tessellateRevolve, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { booleanMeshes, revolveAxisRelation, tessellateLoft, tessellateRevolve, tessellateSweep, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism, evaluateProfileRevolution, stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { profileOutlineMm, stableEntityToken, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
@@ -47,8 +47,8 @@ function rotateLocalToPlane(point: WorldPoint, plane: SketchPlane): WorldPoint {
 export interface CreateGeneralSolidRequest {
   readonly profile: SketchProfile;
   readonly plane: SketchPlane;
-  readonly operation: "extrude" | "revolve";
-  /** Extrusion height in millimetres, or revolve angle in degrees. */
+  readonly operation: "extrude" | "revolve" | "sweep" | "loft";
+  /** Extrusion height / revolve angle (deg) / sweep distance / loft height, in millimetres (angle: degrees). */
   readonly valueMm: number;
   readonly bodyId: string;
   readonly name: string;
@@ -57,6 +57,10 @@ export interface CreateGeneralSolidRequest {
   readonly edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number };
   /** Profiles that lie inside `profile` and are cut through it (extrude only). */
   readonly holes?: readonly SketchProfile[];
+  /** Sweep only: world-space direction vector (will be normalized). Builder refuses a direction with zero length. */
+  readonly sweepDirectionMm?: readonly [number, number, number];
+  /** Loft only: top scale factor (>0). */
+  readonly loftTopScale?: number;
 }
 
 /** Maps a hole profile to the kernel's hole loop; the id comes from its sketch entities so wall names survive edits. */
@@ -99,6 +103,24 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     feature: { operation: request.operation, plane: request.plane, valueMm: request.valueMm }
   };
 
+  if (request.operation === "sweep") {
+    if (request.sweepDirectionMm === undefined) return { ok: false, message: "A sweep needs a direction vector." };
+    const length = Math.hypot(request.sweepDirectionMm[0], request.sweepDirectionMm[1], request.sweepDirectionMm[2]);
+    if (length < 1e-6) return { ok: false, message: "The sweep direction must not be zero." };
+    const normal = planeNormal(request.plane);
+    const dotWithNormal = Math.abs(request.sweepDirectionMm[0] * normal[0] + request.sweepDirectionMm[1] * normal[1] + request.sweepDirectionMm[2] * normal[2]) / length;
+    if (dotWithNormal < 1e-6) return { ok: false, message: "The sweep direction is parallel to the sketch plane, which would flatten the solid. Give it a component off the plane." };
+    const mesh = tessellateSweep(polygonMm, request.sweepDirectionMm, request.valueMm, request.plane);
+    if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be converted into a swept solid." };
+    return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
+  }
+  if (request.operation === "loft") {
+    const scale = request.loftTopScale;
+    if (scale === undefined || !Number.isFinite(scale) || scale <= 0) return { ok: false, message: "Loft needs a positive top scale." };
+    const mesh = tessellateLoft(polygonMm, scale, request.valueMm, request.plane);
+    if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be converted into a lofted solid." };
+    return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
+  }
   if (request.operation === "extrude") {
     if (request.edge !== undefined) {
       if (request.profile.boundary.kind === "circle") return { ok: false, message: "Chamfer and fillet apply to polygon and rectangle profiles; a circle has no corners to treat." };

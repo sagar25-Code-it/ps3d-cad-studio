@@ -285,14 +285,14 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health"])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "loftTopScale"])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut"].includes(String(value.operation))) return false;
   if (Object.hasOwn(value, "extent")) {
     // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
     if (!["distance", "through-all"].includes(String(value.extent))) return false;
     if (value.extent === "through-all" && (value.kind !== "extrude" || value.operation !== "cut")) return false;
   }
-  if (!stable(value.id) || !shortText(value.name, 120) || (value.kind !== "extrude" && value.kind !== "revolve") || typeof value.suppressed !== "boolean") return false;
+  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
   if (typeof value.valueMm !== "number" || !Number.isFinite(value.valueMm) || value.valueMm === 0 || Math.abs(value.valueMm) > 100_000) return false;
@@ -301,6 +301,16 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
     const edge = value.edge;
     if (value.kind !== "extrude" || !isRecord(edge) || !hasOnly(edge, ["kind", "sizeMm"], []) || !["chamfer", "fillet"].includes(String(edge.kind))
       || typeof edge.sizeMm !== "number" || !Number.isFinite(edge.sizeMm) || edge.sizeMm <= 0 || edge.sizeMm > 10_000) return false;
+  }
+  if (Object.hasOwn(value, "sweepDirectionMm")) {
+    if (value.kind !== "sweep") return false;
+    const direction = value.sweepDirectionMm;
+    if (!Array.isArray(direction) || direction.length !== 3 || direction.some((component) => typeof component !== "number" || !Number.isFinite(component))) return false;
+    if (Math.hypot(direction[0], direction[1], direction[2]) < 1e-6) return false;
+  }
+  if (Object.hasOwn(value, "loftTopScale")) {
+    if (value.kind !== "loft") return false;
+    if (typeof value.loftTopScale !== "number" || !Number.isFinite(value.loftTopScale) || value.loftTopScale <= 0 || value.loftTopScale > 100) return false;
   }
   if (Object.hasOwn(value, "health") && !(isRecord(value.health) && hasOnly(value.health, ["message"], []) && shortText(value.health.message, 400))) return false;
   return true;

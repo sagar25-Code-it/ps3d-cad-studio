@@ -54,7 +54,9 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     bodyId: feature.bodyId,
     name: feature.name,
     color,
-    ...(feature.edge === undefined ? {} : { edge: feature.edge })
+    ...(feature.edge === undefined ? {} : { edge: feature.edge }),
+    ...(feature.kind === "sweep" && feature.sweepDirectionMm !== undefined ? { sweepDirectionMm: feature.sweepDirectionMm } : {}),
+    ...(feature.kind === "loft" && feature.loftTopScale !== undefined ? { loftTopScale: feature.loftTopScale } : {})
   });
   if (!built.ok) return { ok: false, message: built.message };
   return { ok: true, body: shifted(built.body, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0)) };
