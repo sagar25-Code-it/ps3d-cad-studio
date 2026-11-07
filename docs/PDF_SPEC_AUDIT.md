@@ -49,7 +49,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 
 | PDF tool | Status | Where / Gap |
 |---|---|---|
-| Sketch Fillet, Sketch Chamfer | Partial | `edit-tool` offset / fillet shipped; **chamfer missing** |
+| Sketch Fillet, Sketch Chamfer | Shipped | `edit-tool` offset, fillet and chamfer (equal-distance, two-distance and distance + angle) all wired |
 | Trim, Extend, Make Corner, Delete Curve | Partial | Trim, Extend, Corner shipped; Delete Curve (auto-heal) missing |
 | Split, Jogging | Missing | No split; no jog |
 | Offset (D-Cubed PGM) | Have | `offset` sketch edit tool |
@@ -164,7 +164,7 @@ These are the items the PDF most emphasizes that are entirely missing (not just 
 1. **Ellipse entity** - a standard sketch primitive.
 2. **Centerpoint arc and tangent arc tool modes** - reuse the existing `arc` entity; only the input flow is missing.
 3. **Straight slot mode** - two endpoints and a width; reuse the existing `slot` shape builder.
-4. **Sketch chamfer** - alongside the existing `fillet` sketch edit tool.
+4. ~~**Sketch chamfer** - alongside the existing `fillet` sketch edit tool.~~ Shipped: equal-distance, two-distance and distance + angle.
 5. **Driven (reference) dimension toggle** - a per-constraint flag so a dimension can measure without driving.
 6. **Torus primitive** - the one shape from the PDF's standard primitive list that we do not have.
 7. **Padlock icon in the model browser** when a sketch's constraint classification says "fully constrained".

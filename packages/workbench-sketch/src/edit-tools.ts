@@ -339,6 +339,67 @@ export function chamferCorners(context: SketchEditContext, ids: readonly string[
   });
 }
 
+/**
+ * Asymmetric chamfer: a different cut distance on each of the two selected lines. The first distance
+ * is measured along the first selected line, the second along the second — the chamfer becomes a
+ * straight edge between the two tangent points.
+ */
+export function chamferCornersAsymmetric(context: SketchEditContext, ids: readonly string[], firstDistanceMm: number, secondDistanceMm: number): SketchEditResult {
+  if (!Number.isFinite(firstDistanceMm) || firstDistanceMm < 0.01 || firstDistanceMm > 5000) return reject("Enter a first chamfer distance between 0.01 mm and 5000 mm.");
+  if (!Number.isFinite(secondDistanceMm) || secondDistanceMm < 0.01 || secondDistanceMm > 5000) return reject("Enter a second chamfer distance between 0.01 mm and 5000 mm.");
+  const pair = twoLines(context, ids);
+  if (typeof pair === "string") return reject(pair);
+  const geometry = cornerGeometry(pair[0], pair[1]);
+  if (typeof geometry === "string") return reject(geometry, [pair[0].id, pair[1].id]);
+  if (firstDistanceMm >= geometry.firstLength - 1e-6) return reject("The first chamfer distance is too large for the first line.", [pair[0].id, pair[1].id], "Use a smaller first distance or lengthen the line.");
+  if (secondDistanceMm >= geometry.secondLength - 1e-6) return reject("The second chamfer distance is too large for the second line.", [pair[0].id, pair[1].id], "Use a smaller second distance or lengthen the line.");
+  const first = pointAlong(geometry.corner, geometry.firstDirection, firstDistanceMm);
+  const second = pointAlong(geometry.corner, geometry.secondDirection, secondDistanceMm);
+  return plan(`Chamfer ${format(firstDistanceMm)} × ${format(secondDistanceMm)} mm`, {
+    updateEntities: [replaceNearEnd(pair[0], geometry.firstFar, first), replaceNearEnd(pair[1], geometry.secondFar, second)],
+    addEntities: [{ id: context.newId("entity"), kind: "line", start: first, end: second, construction: false }]
+  });
+}
+
+/**
+ * Distance-and-angle chamfer: cut a given distance along the first line, then run the chamfer edge
+ * off at `angleDeg` measured from the first line into the corner. The second line is trimmed to
+ * the chamfer edge's other end. 0° and the corner's own dihedral are refused.
+ */
+export function chamferCornersAngle(context: SketchEditContext, ids: readonly string[], distanceMm: number, angleDeg: number): SketchEditResult {
+  if (!Number.isFinite(distanceMm) || distanceMm < 0.01 || distanceMm > 5000) return reject("Enter a chamfer distance between 0.01 mm and 5000 mm.");
+  if (!Number.isFinite(angleDeg) || angleDeg <= 0.5 || angleDeg >= 179.5) return reject("Enter an angle between 0.5° and 179.5°.");
+  const pair = twoLines(context, ids);
+  if (typeof pair === "string") return reject(pair);
+  const geometry = cornerGeometry(pair[0], pair[1]);
+  if (typeof geometry === "string") return reject(geometry, [pair[0].id, pair[1].id]);
+  if (distanceMm >= geometry.firstLength - 1e-6) return reject("The chamfer distance is too large for the first line.", [pair[0].id, pair[1].id], "Use a smaller distance or lengthen the line.");
+  const dihedralDeg = geometry.angle * 180 / Math.PI;
+  if (Math.abs(angleDeg - dihedralDeg) < 0.5) return reject("The chamfer angle is the same as the corner's own angle; the cut would be parallel to the second line.", [pair[0].id, pair[1].id]);
+
+  // Place a point A on the first line at `distanceMm` from the corner.
+  const pointA = pointAlong(geometry.corner, geometry.firstDirection, distanceMm);
+  // Build a ray from A whose direction makes angle `angleDeg` with the first line's direction,
+  // rotated inside the corner (toward the second line). The chamfer edge is a segment along this ray.
+  // For a CCW corner (cross > 0) we need CW rotation of the back-pointing vector so the ray goes
+  // into the +side half-plane; for a CW corner, CCW.
+  const sign = (geometry.firstDirection[0] * geometry.secondDirection[1] - geometry.firstDirection[1] * geometry.secondDirection[0]) >= 0 ? -1 : 1;
+  const outward: Vec2 = [-geometry.firstDirection[0], -geometry.firstDirection[1]];
+  const theta = angleDeg * Math.PI / 180;
+  const chamferDirection: Vec2 = [outward[0] * Math.cos(theta) - sign * outward[1] * Math.sin(theta), outward[0] * Math.sin(theta) * sign + outward[1] * Math.cos(theta)];
+  // Intersect the chamfer ray with the second line (as an infinite line).
+  const other = intersectInfinite(pointA, [pointA[0] + chamferDirection[0], pointA[1] + chamferDirection[1]], geometry.corner, [geometry.corner[0] + geometry.secondDirection[0], geometry.corner[1] + geometry.secondDirection[1]]);
+  if (other === undefined) return reject("The chamfer ray does not reach the second line; try a different angle.", [pair[0].id, pair[1].id]);
+  const pointB = other;
+  const secondDistance = Math.hypot(pointB[0] - geometry.corner[0], pointB[1] - geometry.corner[1]);
+  if (secondDistance < 0.01) return reject("The chamfer collapses the corner; try a larger angle.", [pair[0].id, pair[1].id]);
+  if (secondDistance >= geometry.secondLength - 1e-6) return reject("The chamfer reaches past the second line's far end.", [pair[0].id, pair[1].id], "Use a smaller angle or shorter first distance.");
+  return plan(`Chamfer ${format(distanceMm)} mm @ ${format(angleDeg)}°`, {
+    updateEntities: [replaceNearEnd(pair[0], geometry.firstFar, pointA), replaceNearEnd(pair[1], geometry.secondFar, pointB)],
+    addEntities: [{ id: context.newId("entity"), kind: "line", start: pointA, end: pointB, construction: false }]
+  });
+}
+
 function twoLines(context: SketchEditContext, ids: readonly string[]): readonly [Line, Line] | string {
   const lines = ids.map((id) => find(context.sketch, id));
   if (lines.length !== 2 || lines.some((entity) => entity?.kind !== "line")) return "Select exactly two lines.";

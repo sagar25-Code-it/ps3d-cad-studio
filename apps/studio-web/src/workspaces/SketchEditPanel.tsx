@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import type { SketchEntity, WorkbenchSketch, WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
 import {
   chamferCorners,
+  chamferCornersAngle,
+  chamferCornersAsymmetric,
   checkSketch,
   cornerLines,
   filletCorners,
@@ -60,6 +62,9 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   const [centerY, setCenterY] = useState("0");
   const [radius, setRadius] = useState("2");
   const [bevel, setBevel] = useState("2");
+  const [bevelSecond, setBevelSecond] = useState("2");
+  const [bevelAngle, setBevelAngle] = useState("45");
+  const [chamferMode, setChamferMode] = useState<"equal" | "asymmetric" | "distance-angle">("equal");
   const interactive = props.tool !== "trim" && props.tool !== "extend";
 
   const apply = (): void => {
@@ -71,7 +76,11 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
       case "mirror": result = mirrorEntities(context, ids); break;
       case "corner": result = cornerLines(context, ids); break;
       case "fillet": result = filletCorners(context, ids, Number(radius)); break;
-      case "chamfer": result = chamferCorners(context, ids, Number(bevel)); break;
+      case "chamfer":
+        result = chamferMode === "equal" ? chamferCorners(context, ids, Number(bevel))
+          : chamferMode === "asymmetric" ? chamferCornersAsymmetric(context, ids, Number(bevel), Number(bevelSecond))
+          : chamferCornersAngle(context, ids, Number(bevel), Number(bevelAngle));
+        break;
       case "pattern":
         result = patternEntities(context, ids, layout === "rectangular"
           ? { kind: "rectangular", countX: Number(countX), countY: Number(countY), dxMm: Number(stepX), dyMm: Number(stepY) }
@@ -92,7 +101,12 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
     <p className="profile-help">{INSTRUCTIONS[props.tool]}</p>
     {props.tool === "offset" && field("Distance", offset, setOffset, "mm")}
     {props.tool === "fillet" && field("Radius", radius, setRadius, "mm")}
-    {props.tool === "chamfer" && field("Distance", bevel, setBevel, "mm")}
+    {props.tool === "chamfer" && <>
+      <label><span>Chamfer mode</span><select aria-label="Chamfer mode" value={chamferMode} onChange={(event) => setChamferMode(event.target.value as "equal" | "asymmetric" | "distance-angle")}><option value="equal">Equal distance</option><option value="asymmetric">Two distances</option><option value="distance-angle">Distance + angle</option></select></label>
+      {field(chamferMode === "equal" ? "Distance" : chamferMode === "asymmetric" ? "First distance" : "Distance", bevel, setBevel, "mm")}
+      {chamferMode === "asymmetric" && field("Second distance", bevelSecond, setBevelSecond, "mm")}
+      {chamferMode === "distance-angle" && field("Angle from first line", bevelAngle, setBevelAngle, "°")}
+    </>}
     {props.tool === "pattern" && <>
       <label><span>Layout</span><select aria-label="Pattern layout" value={layout} onChange={(event) => setLayout(event.target.value as "rectangular" | "circular")}><option value="rectangular">Rectangular</option><option value="circular">Circular</option></select></label>
       {layout === "rectangular" ? <>
