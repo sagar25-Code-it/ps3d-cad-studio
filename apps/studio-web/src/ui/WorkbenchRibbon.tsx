@@ -47,6 +47,7 @@ interface WorkbenchRibbonProps {
   readonly onPartPreviewAction: (operation: "edit-transform" | "edit-size" | "edit-appearance" | "duplicate" | "mirror-x" | "pattern-x" | "toggle-visible" | "delete", commandName: string) => void;
   readonly onPartFeatureAction: (operation: "revolve" | "pattern-feature" | "mirror-feature" | "unite" | "subtract" | "trim-body" | "edge-blend" | "chamfer" | "draft" | "shell" | "move-face" | "offset-face" | "replace-face" | "delete-face" | "resize-blend" | "update-model", commandName: string) => void;
   readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell") => void;
+  readonly onAddConstructionPlane: (mode: "offset" | "angle" | "three-points" | "midplane") => void;
   readonly onInsertComponent: (shape: "box" | "cylinder") => void;
   readonly onDeleteComponent: (componentId: string) => void;
   readonly onToggleGrounded: (componentId: string) => void;
@@ -196,6 +197,12 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="unite" label="Unite" hint="target + tool" disabled={!(analyticBodySelected && (props.project.part.previewBodies?.length ?? 0) >= 2) && !(generalBodySelected && (props.project.part.generalBodies?.length ?? 0) >= 2)} onClick={() => props.onPartFeatureAction("unite", "Unite")} />
         <RibbonButton icon="subtract" label="Subtract" hint="through cylinder" disabled={!(analyticBodySelected && (props.project.part.previewBodies?.length ?? 0) >= 2) && !(generalBodySelected && (props.project.part.generalBodies?.length ?? 0) >= 2)} onClick={() => props.onPartFeatureAction("subtract", "Subtract")} />
         <RibbonButton icon="trim" label="Trim Body" hint="keep 70%" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("trim-body", "Trim Body")} />
+      </RibbonGroup>
+      <RibbonGroup label="Construction">
+        <RibbonButton icon="projection" label="Offset Plane" hint="base + distance" onClick={() => props.onAddConstructionPlane("offset")} />
+        <RibbonButton icon="projection" label="Angle Plane" hint="base + axis + angle" onClick={() => props.onAddConstructionPlane("angle")} />
+        <RibbonButton icon="projection" label="Three-Point Plane" hint="3 points" onClick={() => props.onAddConstructionPlane("three-points")} />
+        <RibbonButton icon="projection" label="Midplane" hint="between two offsets" onClick={() => props.onAddConstructionPlane("midplane")} />
       </RibbonGroup>
       <RibbonGroup label="Solid modify">
         <RibbonButton icon="hole" label="Hole" hint="Ø 6 · through" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("hole")} />

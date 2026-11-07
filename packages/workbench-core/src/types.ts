@@ -235,9 +235,35 @@ export interface PartIntent {
    * Optional for backward compatibility with earlier documents.
    */
   readonly generalBodies?: readonly GeneralSolidBody[];
+  /**
+   * User-authored datum planes (offset, angled, three-point, midplane). Shown as translucent
+   * framed quads in the 3D viewport; not yet selectable as sketch planes (that comes with the
+   * next sketch-plane picker refresh). Optional for backward compatibility.
+   */
+  readonly construction?: readonly ConstructionPlane[];
 }
 
 export type PartPreviewBodyShape = "block" | "cylinder" | "cone" | "sphere" | "torus";
+
+/**
+ * A user-authored datum plane in the Part workspace. These sit alongside the
+ * three primary datums (XY, XZ, YZ) and are shown in the 3D viewport as a
+ * translucent framed quad. Each `definition` records how the plane was built
+ * so the renderer can recompute origin, normal and in-plane axes from scratch
+ * (a simple parametric rebuild, no persistent kernel state).
+ */
+export type ConstructionPlaneDefinition =
+  | { readonly kind: "offset"; readonly basePlane: SketchDatumPlane; readonly offsetMm: number }
+  | { readonly kind: "angle"; readonly basePlane: SketchDatumPlane; readonly axis: "x" | "y" | "z"; readonly angleDeg: number }
+  | { readonly kind: "three-points"; readonly points: readonly [Vec3, Vec3, Vec3] }
+  | { readonly kind: "midplane"; readonly basePlane: SketchDatumPlane; readonly fromMm: number; readonly toMm: number };
+
+export interface ConstructionPlane {
+  readonly id: string;
+  readonly name: string;
+  readonly visible: boolean;
+  readonly definition: ConstructionPlaneDefinition;
+}
 
 export type PartAnalyticBodyShape = PartPreviewBodyShape | "revolved";
 export type PartBodyFaceId = "x-negative" | "x-positive" | "y-negative" | "y-positive" | "z-negative" | "z-positive";
@@ -1006,6 +1032,10 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly body: GeneralSolidBody;
     }
   | { readonly kind: "toggle-general-body-visibility"; readonly bodyId: string }
+  | { readonly kind: "add-construction-plane"; readonly plane: ConstructionPlane }
+  | { readonly kind: "delete-construction-plane"; readonly planeId: string }
+  | { readonly kind: "toggle-construction-plane-visibility"; readonly planeId: string }
+  | { readonly kind: "rename-construction-plane"; readonly planeId: string; readonly name: string }
   | {
       /** Replaces the target body with the result of a mesh-level modify operation computed by the caller. */
       readonly kind: "modify-general-body";
@@ -1115,6 +1145,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "commit-design-sketch", "edit-design-sketch", "new-design-sketch", "add-design-solid", "update-design-solid", "regenerate-design",
   "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
   "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility", "modify-general-body",
+  "add-construction-plane", "delete-construction-plane", "toggle-construction-plane-visibility", "rename-construction-plane",
   "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
   "isolate-part-preview-body", "set-part-preview-bodies-visibility", "create-part-revolve", "pattern-part-feature", "mirror-part-feature",
   "boolean-part-bodies", "trim-part-body", "set-part-body-edge-treatment", "set-part-body-draft", "set-part-body-shell",

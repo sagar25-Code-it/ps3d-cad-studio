@@ -1,5 +1,6 @@
-import type { PartIntent, PartPreviewBody, Vec3 } from "../../workbench-core/src/index.js";
+import type { ConstructionPlane, PartIntent, PartPreviewBody, Vec3 } from "../../workbench-core/src/index.js";
 import { boundsFromPoints } from "./assembly.js";
+import { constructionPlaneCorners, evaluateConstructionPlane } from "./construction-geometry.js";
 import type { PreviewPrimitive, PreviewScene } from "./types.js";
 
 const RADIAL_SEGMENTS = 64;
@@ -44,12 +45,52 @@ export function buildPartPreview(part: PartIntent): PreviewScene {
     });
     points.push(...generalBodyBounds(body.positionsMm));
   }
+  for (const plane of (part.construction ?? []).filter((candidate) => candidate.visible)) {
+    const primitive = constructionPlanePrimitives(plane);
+    if (primitive !== undefined) {
+      primitives.push(...primitive.primitives);
+      points.push(...primitive.bounds);
+    }
+  }
   return {
     id: "part-scene:native-with-analytic-bodies",
     kind: "part",
     primitives,
     boundsMm: boundsFromPoints(points)
   };
+}
+
+function constructionPlanePrimitives(plane: ConstructionPlane): { readonly primitives: readonly PreviewPrimitive[]; readonly bounds: readonly Vec3[] } | undefined {
+  const frame = evaluateConstructionPlane(plane);
+  if ("error" in frame) return undefined;
+  const corners = constructionPlaneCorners(frame);
+  const positionsMm = corners.flatMap((corner) => [corner[0], corner[1], corner[2]]);
+  // Two triangles make the quad; the line primitive traces the border plus one diagonal so edge-on views still read.
+  const triangles: readonly number[] = [0, 1, 2, 0, 2, 3];
+  const borderPoints = [...corners, corners[0]!].flatMap((corner) => [corner[0], corner[1], corner[2]]);
+  const quad: PreviewPrimitive = {
+    id: `${plane.id}:fill`,
+    name: `${plane.name} · construction plane`,
+    color: "#5aa0ff",
+    opacity: 0.18,
+    selectable: true,
+    kind: "mesh",
+    positionsMm,
+    indices: triangles,
+    wireframe: false,
+    doubleSided: true
+  };
+  const border: PreviewPrimitive = {
+    id: `${plane.id}:border`,
+    name: `${plane.name} · construction plane border`,
+    color: "#2f6fcc",
+    opacity: 0.9,
+    selectable: false,
+    kind: "line",
+    pointsMm: borderPoints,
+    dashed: false
+  };
+  return { primitives: [quad, border], bounds: corners };
 }
 
 function generalBodyBounds(positionsMm: readonly number[]): readonly Vec3[] {

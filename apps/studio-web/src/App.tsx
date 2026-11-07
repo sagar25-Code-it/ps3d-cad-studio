@@ -883,6 +883,64 @@ export function App(): React.JSX.Element {
     modifier === "hole" ? "Hole" : modifier === "fillet" ? "Fillet" : modifier === "chamfer" ? "Chamfer" : "Shell"
   );
 
+  const handleAddConstructionPlane = (mode: "offset" | "angle" | "three-points" | "midplane"): void => {
+    const current = projectRef.current;
+    const existing = current.part.construction ?? [];
+    const ordinal = existing.length + 1;
+    const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
+    const parseNumber = (raw: string | null): number | undefined => raw === null ? undefined : (Number.isFinite(Number.parseFloat(raw)) ? Number.parseFloat(raw) : undefined);
+    let definition: import("../../../packages/workbench-core/src/index.js").ConstructionPlaneDefinition | undefined;
+    let labelText: string;
+    if (mode === "offset") {
+      const base = (ask("Base plane (xy, xz, yz):", "xy") ?? "").trim().toLowerCase();
+      if (!["xy", "xz", "yz"].includes(base)) { setStatus("ready"); setStatusText("Offset Plane: enter xy, xz or yz as the base plane."); return; }
+      const offset = parseNumber(ask("Offset distance along the plane normal (mm):", "10"));
+      if (offset === undefined || offset === 0) { setStatus("ready"); setStatusText("Offset Plane: enter a non-zero offset in millimetres."); return; }
+      definition = { kind: "offset", basePlane: `datum:${base}` as "datum:xy" | "datum:xz" | "datum:yz", offsetMm: offset };
+      labelText = `Offset ${offset} mm from ${base.toUpperCase()}`;
+    } else if (mode === "angle") {
+      const base = (ask("Base plane (xy, xz, yz):", "xy") ?? "").trim().toLowerCase();
+      if (!["xy", "xz", "yz"].includes(base)) { setStatus("ready"); setStatusText("Angle Plane: enter xy, xz or yz as the base plane."); return; }
+      const axis = (ask("Rotation axis (x, y, z):", "x") ?? "").trim().toLowerCase();
+      if (!["x", "y", "z"].includes(axis)) { setStatus("ready"); setStatusText("Angle Plane: enter x, y or z as the rotation axis."); return; }
+      const angle = parseNumber(ask("Rotation angle (degrees):", "30"));
+      if (angle === undefined || angle === 0) { setStatus("ready"); setStatusText("Angle Plane: enter a non-zero angle in degrees."); return; }
+      definition = { kind: "angle", basePlane: `datum:${base}` as "datum:xy" | "datum:xz" | "datum:yz", axis: axis as "x" | "y" | "z", angleDeg: angle };
+      labelText = `${base.toUpperCase()} rotated ${angle}° about ${axis.toUpperCase()}`;
+    } else if (mode === "three-points") {
+      const parsePoint = (raw: string | null): [number, number, number] | undefined => {
+        if (raw === null) return undefined;
+        const parts = raw.split(/[,\s]+/).map((part) => Number.parseFloat(part.trim())).filter((value) => Number.isFinite(value));
+        return parts.length === 3 ? [parts[0]!, parts[1]!, parts[2]!] : undefined;
+      };
+      const p0 = parsePoint(ask("Point 1 (x, y, z in mm):", "0, 0, 0"));
+      if (p0 === undefined) { setStatus("ready"); setStatusText("Three-Point Plane: each point is three numbers in millimetres, separated by commas."); return; }
+      const p1 = parsePoint(ask("Point 2 (x, y, z in mm):", "50, 0, 0"));
+      if (p1 === undefined) { setStatus("ready"); setStatusText("Three-Point Plane: point 2 is required."); return; }
+      const p2 = parsePoint(ask("Point 3 (x, y, z in mm):", "0, 50, 25"));
+      if (p2 === undefined) { setStatus("ready"); setStatusText("Three-Point Plane: point 3 is required."); return; }
+      definition = { kind: "three-points", points: [p0, p1, p2] };
+      labelText = "Three-point plane";
+    } else {
+      const base = (ask("Base plane (xy, xz, yz):", "xy") ?? "").trim().toLowerCase();
+      if (!["xy", "xz", "yz"].includes(base)) { setStatus("ready"); setStatusText("Midplane: enter xy, xz or yz as the base plane."); return; }
+      const fromMm = parseNumber(ask("Start offset (mm):", "-20"));
+      const toMm = parseNumber(ask("End offset (mm):", "20"));
+      if (fromMm === undefined || toMm === undefined || fromMm === toMm) { setStatus("ready"); setStatusText("Midplane: enter two different offsets in millimetres."); return; }
+      definition = { kind: "midplane", basePlane: `datum:${base}` as "datum:xy" | "datum:xz" | "datum:yz", fromMm, toMm };
+      labelText = `Midplane ${fromMm}..${toMm} mm of ${base.toUpperCase()}`;
+    }
+    const plane = {
+      id: `construction-plane:${crypto.randomUUID()}`,
+      name: labelText.length > 60 ? `${labelText.slice(0, 57)}…` : labelText,
+      visible: true,
+      definition
+    };
+    if (!applyProjectOperation({ kind: "add-construction-plane", plane })) { setStatus("ready"); setStatusText(`The project rejected ${labelText}.`); return; }
+    setSelectedId(plane.id);
+    setStatusText(`Created ${plane.name} (plane ${ordinal}).`);
+  };
+
   const handleModifyGeneralBody = (modifier: "hole" | "fillet" | "chamfer" | "shell"): void => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
@@ -2640,6 +2698,7 @@ export function App(): React.JSX.Element {
       onPartPreviewAction={(operation, commandName) => runSelectedPartPreviewAction(operation, commandName)}
       onPartFeatureAction={(operation, commandName) => runPartFeatureAction(operation, commandName)}
       onModifyGeneralBody={handleModifyGeneralBody}
+      onAddConstructionPlane={handleAddConstructionPlane}
       onFit={fitViewport}
       onMeasure={() => setViewportNavigation("measure")}
       onNativeDownload={() => void downloadNative()}

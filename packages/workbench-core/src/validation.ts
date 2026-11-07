@@ -284,7 +284,7 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
 
 function validatePart(value: unknown): WorkbenchResult<PartIntent> {
   const required = ["id", "name", "widthMm", "heightMm", "thicknessMm", "holeDiameterMm", "edgeTreatmentMm", "patternCount", "revolveAngleDeg"];
-  const optional = ["previewBodies", "modelUpdateSerial", "generalBodies"];
+  const optional = ["previewBodies", "modelUpdateSerial", "generalBodies", "construction"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key))
     || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || value.id !== "part:mounting-plate" || !shortText(value.name, 1, 120)
@@ -307,6 +307,14 @@ function validatePart(value: unknown): WorkbenchResult<PartIntent> {
     for (const body of value.generalBodies) {
       if (!validateGeneralSolidBody(body) || generalIds.has(body.id)) return invalid("A part general body is invalid or duplicated.");
       generalIds.add(body.id);
+    }
+  }
+  if (Object.hasOwn(value, "construction") && (!Array.isArray(value.construction) || value.construction.length > 64)) return invalid("The construction-plane collection is invalid.");
+  if (Array.isArray(value.construction)) {
+    const planeIds = new Set<string>();
+    for (const plane of value.construction) {
+      if (!validateConstructionPlane(plane) || planeIds.has(plane.id)) return invalid("A construction plane is invalid or duplicated.");
+      planeIds.add(plane.id);
     }
   }
   if ((Math.min(value.widthMm as number, value.heightMm as number) - (value.holeDiameterMm as number)) / 2 < 1) {
@@ -345,6 +353,33 @@ function validateGeneralSolidBody(value: unknown): value is GeneralSolidBody {
     if (brep.faceTriangles.some((face) => typeof face !== "number" || !Number.isInteger(face) || face < -1 || face >= faceCount)) return false;
   }
   return true;
+}
+
+function validateConstructionPlane(value: unknown): value is import("./types.js").ConstructionPlane {
+  if (!isRecord(value) || !stableId(value.id) || !shortText(value.name, 1, 120) || typeof value.visible !== "boolean"
+    || !isRecord(value.definition)) return false;
+  const def = value.definition;
+  if (def.kind === "offset") {
+    return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && typeof def.offsetMm === "number"
+      && Number.isFinite(def.offsetMm) && Math.abs(def.offsetMm) <= 10_000
+      && Object.keys(def).every((key) => ["kind", "basePlane", "offsetMm"].includes(key));
+  }
+  if (def.kind === "angle") {
+    return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && ["x", "y", "z"].includes(String(def.axis))
+      && typeof def.angleDeg === "number" && Number.isFinite(def.angleDeg) && Math.abs(def.angleDeg) <= 360
+      && Object.keys(def).every((key) => ["kind", "basePlane", "axis", "angleDeg"].includes(key));
+  }
+  if (def.kind === "three-points") {
+    return Array.isArray(def.points) && def.points.length === 3
+      && def.points.every((point: unknown) => Array.isArray(point) && point.length === 3 && point.every((value) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 100_000))
+      && Object.keys(def).every((key) => ["kind", "points"].includes(key));
+  }
+  if (def.kind === "midplane") {
+    return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && typeof def.fromMm === "number" && Number.isFinite(def.fromMm) && Math.abs(def.fromMm) <= 10_000
+      && typeof def.toMm === "number" && Number.isFinite(def.toMm) && Math.abs(def.toMm) <= 10_000 && def.fromMm !== def.toMm
+      && Object.keys(def).every((key) => ["kind", "basePlane", "fromMm", "toMm"].includes(key));
+  }
+  return false;
 }
 
 function validatePartPreviewBody(value: unknown): value is PartPreviewBody {

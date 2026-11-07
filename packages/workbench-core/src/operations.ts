@@ -279,6 +279,16 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
         || !["hole", "shell", "chamfer", "fillet"].includes(String(input.modifier)) || !shortText(input.label, 1, 120)
         || !validGeneralSolidBodyPayload(input.body)) return invalidOperation("The modify-general-body payload is invalid.");
       break;
+    case "add-construction-plane":
+      if (!keys(input, [...common, "plane"]) || !validConstructionPlanePayload(input.plane)) return invalidOperation("The construction-plane insertion is invalid.");
+      break;
+    case "delete-construction-plane":
+    case "toggle-construction-plane-visibility":
+      if (!keys(input, [...common, "planeId"]) || !stableId(input.planeId)) return invalidOperation("The construction-plane ID is invalid.");
+      break;
+    case "rename-construction-plane":
+      if (!keys(input, [...common, "planeId", "name"]) || !stableId(input.planeId) || !shortText(input.name, 1, 120)) return invalidOperation("The construction-plane rename is invalid.");
+      break;
     case "create-part-revolve":
       if (!keys(input, [...common, "bodyId", "name", "outerDiameterMm", "innerDiameterMm", "heightMm", "angleDeg", "translationMm"])
         || !stableId(input.bodyId) || !shortText(input.name, 1, 120)
@@ -694,6 +704,30 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       if (operation.body.id !== operation.targetBodyId) return invalidOperation("A modify result must keep the target body's ID.");
       const next = current.map((body) => body.id === target.id ? { ...operation.body, visible: body.visible } : body);
       return changed({ ...project, part: { ...project.part, generalBodies: next } }, [target.id], `${operation.label} on ${target.name}.`);
+    }
+    case "add-construction-plane": {
+      const current = project.part.construction ?? [];
+      if (current.length >= 64) return failure("RESOURCE_LIMIT", "The part reached its construction-plane limit.", [project.part.id], "Delete a construction plane before adding another.");
+      if (current.some((plane) => plane.id === operation.plane.id)) return invalidOperation("The construction-plane ID already exists.");
+      return changed({ ...project, part: { ...project.part, construction: [...current, operation.plane] } }, [operation.plane.id], `Created ${operation.plane.name}.`);
+    }
+    case "delete-construction-plane": {
+      const current = project.part.construction ?? [];
+      const target = current.find((plane) => plane.id === operation.planeId);
+      if (target === undefined) return broken(operation.planeId, "The construction plane does not exist.");
+      return changed({ ...project, part: { ...project.part, construction: current.filter((plane) => plane.id !== target.id) } }, [target.id], `Deleted ${target.name}.`);
+    }
+    case "toggle-construction-plane-visibility": {
+      const current = project.part.construction ?? [];
+      const target = current.find((plane) => plane.id === operation.planeId);
+      if (target === undefined) return broken(operation.planeId, "The construction plane does not exist.");
+      return changed({ ...project, part: { ...project.part, construction: current.map((plane) => plane.id === target.id ? { ...plane, visible: !plane.visible } : plane) } }, [target.id], `${target.visible ? "Hid" : "Showed"} ${target.name}.`);
+    }
+    case "rename-construction-plane": {
+      const current = project.part.construction ?? [];
+      const target = current.find((plane) => plane.id === operation.planeId);
+      if (target === undefined) return broken(operation.planeId, "The construction plane does not exist.");
+      return changed({ ...project, part: { ...project.part, construction: current.map((plane) => plane.id === target.id ? { ...plane, name: operation.name } : plane) } }, [target.id], `Renamed ${target.name} to ${operation.name}.`);
     }
     case "set-part-preview-body-transform": {
       const currentBodies = project.part.previewBodies ?? [];
@@ -1278,6 +1312,33 @@ function validPartPreviewBodyPayload(value: unknown): value is PartPreviewBody {
   if (Object.hasOwn(value, "edgeTreatment") && !validPartEdgeTreatment(value.edgeTreatment)) return false;
   if (Object.hasOwn(value, "featureTrace") && !validPartFeatureTrace(value.featureTrace)) return false;
   return validatePartFeatureStack(value as unknown as PartPreviewBody).ok;
+}
+
+function validConstructionPlanePayload(value: unknown): value is import("./types.js").ConstructionPlane {
+  if (!isRecord(value) || !stableId(value.id) || !shortText(value.name, 1, 120) || typeof value.visible !== "boolean"
+    || !isRecord(value.definition) || Object.keys(value).some((key) => !["id", "name", "visible", "definition"].includes(key))) return false;
+  const def = value.definition;
+  if (def.kind === "offset") {
+    return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && typeof def.offsetMm === "number"
+      && Number.isFinite(def.offsetMm) && Math.abs(def.offsetMm) <= 10_000
+      && Object.keys(def).every((key) => ["kind", "basePlane", "offsetMm"].includes(key));
+  }
+  if (def.kind === "angle") {
+    return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && ["x", "y", "z"].includes(String(def.axis))
+      && typeof def.angleDeg === "number" && Number.isFinite(def.angleDeg) && Math.abs(def.angleDeg) <= 360
+      && Object.keys(def).every((key) => ["kind", "basePlane", "axis", "angleDeg"].includes(key));
+  }
+  if (def.kind === "three-points") {
+    return Array.isArray(def.points) && def.points.length === 3
+      && def.points.every((point: unknown) => Array.isArray(point) && point.length === 3 && point.every((value) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 100_000))
+      && Object.keys(def).every((key) => ["kind", "points"].includes(key));
+  }
+  if (def.kind === "midplane") {
+    return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && typeof def.fromMm === "number" && Number.isFinite(def.fromMm) && Math.abs(def.fromMm) <= 10_000
+      && typeof def.toMm === "number" && Number.isFinite(def.toMm) && Math.abs(def.toMm) <= 10_000 && def.fromMm !== def.toMm
+      && Object.keys(def).every((key) => ["kind", "basePlane", "fromMm", "toMm"].includes(key));
+  }
+  return false;
 }
 
 function validGeneralSolidBodyPayload(value: unknown): value is GeneralSolidBody {
