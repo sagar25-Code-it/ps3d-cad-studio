@@ -238,6 +238,13 @@ function validateEntity(value: unknown): value is SketchEntity {
     return exactKeys(value, ["id", "kind", "center", "radiusMm", "construction", ...optionalVisibility])
       && vec2(value.center) && finiteRange(value.radiusMm, WORKBENCH_LIMITS.minGeometryMm, 10_000);
   }
+  if (value.kind === "ellipse") {
+    return exactKeys(value, ["id", "kind", "center", "majorRadiusMm", "minorRadiusMm", "rotationDeg", "construction", ...optionalVisibility])
+      && vec2(value.center) && finiteRange(value.majorRadiusMm, WORKBENCH_LIMITS.minGeometryMm, 10_000)
+      && finiteRange(value.minorRadiusMm, WORKBENCH_LIMITS.minGeometryMm, 10_000)
+      && (value.minorRadiusMm as number) <= (value.majorRadiusMm as number) + 1e-9
+      && finiteRange(value.rotationDeg, -360, 360);
+  }
   if (value.kind === "arc") {
     return exactKeys(value, ["id", "kind", "start", "mid", "end", "construction", ...optionalVisibility])
       && vec2(value.start) && vec2(value.mid) && vec2(value.end)

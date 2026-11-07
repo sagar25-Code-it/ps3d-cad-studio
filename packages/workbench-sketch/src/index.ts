@@ -23,6 +23,7 @@ export type SketchTool =
   | "circle"
   | "circle-two-point"
   | "circle-three-point"
+  | "ellipse"
   | "arc"
   | "point"
   | "spline"
@@ -48,6 +49,13 @@ export type SketchProfileBoundary =
       readonly kind: "circle";
       readonly center: Vec2;
       readonly radiusMm: number;
+    }
+  | {
+      readonly kind: "ellipse";
+      readonly center: Vec2;
+      readonly majorRadiusMm: number;
+      readonly minorRadiusMm: number;
+      readonly rotationDeg: number;
     }
   | {
       readonly kind: "line-loop";
@@ -257,6 +265,26 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
     if (circle === undefined || circle.radiusMm < 0.01) return degenerate("The three circle points must be distinct and non-collinear.");
     return { ok: true, value: { id, kind: "circle", center: circle.center, radiusMm: circle.radiusMm, construction: false } };
   }
+  if (tool === "ellipse" && points.length === 3) {
+    // The ellipse takes its centre, a point on the major axis, and a point that gives the minor radius as its perpendicular distance from the major axis.
+    const center = points[0]!;
+    const majorX = points[1]![0] - center[0];
+    const majorY = points[1]![1] - center[1];
+    const majorRadiusMm = Math.hypot(majorX, majorY);
+    if (majorRadiusMm < 0.01) return degenerate("An ellipse major radius must be at least 0.01 mm.");
+    const axisX = majorX / majorRadiusMm;
+    const axisY = majorY / majorRadiusMm;
+    const relX = points[2]![0] - center[0];
+    const relY = points[2]![1] - center[1];
+    const minorRadiusMm = Math.abs(-axisY * relX + axisX * relY);
+    if (minorRadiusMm < 0.01) return degenerate("The third ellipse point must define a non-zero minor axis.");
+    const rotationDeg = Math.atan2(axisY, axisX) * 180 / Math.PI;
+    // Keep major >= minor; swap and rotate 90° if the user picked the shorter axis first.
+    if (minorRadiusMm > majorRadiusMm) {
+      return { ok: true, value: { id, kind: "ellipse", center, majorRadiusMm: minorRadiusMm, minorRadiusMm: majorRadiusMm, rotationDeg: rotationDeg + 90, construction: false } };
+    }
+    return { ok: true, value: { id, kind: "ellipse", center, majorRadiusMm, minorRadiusMm, rotationDeg, construction: false } };
+  }
   if (tool === "arc" && points.length === 3) {
     const area2 = Math.abs(cross(points[0]!, points[1]!, points[2]!));
     if (area2 < 1e-4) return degenerate("The three arc points must not be collinear.");
@@ -276,7 +304,7 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
 
 export function requiredSketchPoints(tool: SketchTool): number {
   // A spline needs three fit points at least; the workspace lets the user keep adding points until they finish it.
-  return tool === "select" ? 0 : tool === "point" ? 1 : tool === "arc" || tool === "spline" || tool === "rectangle-three-point" || tool === "circle-three-point" || tool === "slot" ? 3 : 2;
+  return tool === "select" ? 0 : tool === "point" ? 1 : tool === "arc" || tool === "spline" || tool === "rectangle-three-point" || tool === "circle-three-point" || tool === "ellipse" || tool === "slot" ? 3 : 2;
 }
 
 export function sketchToolLabel(tool: SketchTool): string {
@@ -289,6 +317,7 @@ export function sketchToolLabel(tool: SketchTool): string {
     circle: "Center-radius circle",
     "circle-two-point": "2-point circle",
     "circle-three-point": "3-point circle",
+    ellipse: "Center ellipse",
     arc: "3-point arc",
     point: "Point",
     spline: "Fit-point spline",
@@ -327,6 +356,15 @@ export function detectSketchProfiles(sketch: WorkbenchSketch): readonly SketchPr
         centroid: entity.center
       });
     }
+    if (entity.kind === "ellipse") {
+      profiles.push({
+        id: profileId(entity.id),
+        entityIds: [entity.id],
+        boundary: { kind: "ellipse", center: entity.center, majorRadiusMm: entity.majorRadiusMm, minorRadiusMm: entity.minorRadiusMm, rotationDeg: entity.rotationDeg },
+        areaMm2: Math.PI * entity.majorRadiusMm * entity.minorRadiusMm,
+        centroid: entity.center
+      });
+    }
   }
   profiles.push(...detectCurveLoops(shown.filter((entity): entity is Extract<SketchEntity, { kind: "line" | "arc" | "spline" }> => (entity.kind === "line" || entity.kind === "arc" || entity.kind === "spline") && !entity.construction)));
   return profiles.sort((left, right) => right.areaMm2 - left.areaMm2 || left.id.localeCompare(right.id));
@@ -338,6 +376,17 @@ export function profileOutlineMm(boundary: SketchProfileBoundary): readonly Vec2
     return Array.from({ length: 72 }, (_, index): Vec2 => {
       const angle = (2 * Math.PI * index) / 72;
       return [boundary.center[0] + boundary.radiusMm * Math.cos(angle), boundary.center[1] + boundary.radiusMm * Math.sin(angle)];
+    });
+  }
+  if (boundary.kind === "ellipse") {
+    const radians = (boundary.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    return Array.from({ length: 72 }, (_, index): Vec2 => {
+      const theta = (2 * Math.PI * index) / 72;
+      const localX = boundary.majorRadiusMm * Math.cos(theta);
+      const localY = boundary.minorRadiusMm * Math.sin(theta);
+      return [boundary.center[0] + localX * cos - localY * sin, boundary.center[1] + localX * sin + localY * cos];
     });
   }
   if (boundary.kind === "rectangle") {
@@ -467,6 +516,15 @@ export function resolveQualifiedExtrusion(
 export function entityExtents(entity: SketchEntity): { readonly min: Vec2; readonly max: Vec2 } {
   let points: readonly Vec2[];
   if (entity.kind === "circle") points = [[entity.center[0] - entity.radiusMm, entity.center[1] - entity.radiusMm], [entity.center[0] + entity.radiusMm, entity.center[1] + entity.radiusMm]];
+  else if (entity.kind === "ellipse") {
+    // True rotated ellipse extents: max X = sqrt((a cos r)² + (b sin r)²), max Y = sqrt((a sin r)² + (b cos r)²).
+    const radians = (entity.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const spanX = Math.hypot(entity.majorRadiusMm * cos, entity.minorRadiusMm * sin);
+    const spanY = Math.hypot(entity.majorRadiusMm * sin, entity.minorRadiusMm * cos);
+    points = [[entity.center[0] - spanX, entity.center[1] - spanY], [entity.center[0] + spanX, entity.center[1] + spanY]];
+  }
   else if (entity.kind === "arc") points = sampleArc(entity.start, entity.mid, entity.end);
   else if (entity.kind === "spline") points = sampleSpline(entity.fitPoints);
   else points = entityPoints(entity);
@@ -516,6 +574,14 @@ export function entityPoints(entity: SketchEntity): readonly Vec2[] {
     ];
   }
   if (entity.kind === "circle") return [entity.center, [entity.center[0] + entity.radiusMm, entity.center[1]]];
+  if (entity.kind === "ellipse") {
+    const radians = (entity.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const majorEnd: Vec2 = [entity.center[0] + entity.majorRadiusMm * cos, entity.center[1] + entity.majorRadiusMm * sin];
+    const minorEnd: Vec2 = [entity.center[0] - entity.minorRadiusMm * sin, entity.center[1] + entity.minorRadiusMm * cos];
+    return [entity.center, majorEnd, minorEnd];
+  }
   if (entity.kind === "point") return [entity.point];
   if (entity.kind === "spline") return entity.fitPoints;
   return [entity.start, entity.mid, entity.end];
@@ -607,6 +673,7 @@ function baseFreedom(entity: SketchEntity): number {
   if (entity.kind === "line") return 4;
   if (entity.kind === "rectangle") return 5;
   if (entity.kind === "circle") return 3;
+  if (entity.kind === "ellipse") return 5; // centre (2), two radii (2) and orientation (1)
   if (entity.kind === "point") return 2;
   if (entity.kind === "spline") return entity.fitPoints.length * 2;
   return 6;

@@ -5,7 +5,7 @@ import { analyzeWorkbenchSketch } from "../packages/workbench-sketch/src/index.j
 import { assert, equal, type TestCase } from "./test-kit.js";
 
 type Kind = SketchEntity["kind"];
-const KINDS: readonly Kind[] = ["line", "circle", "arc", "rectangle", "point", "spline"];
+const KINDS: readonly Kind[] = ["line", "circle", "arc", "rectangle", "point", "spline", "ellipse"];
 
 function make(kind: Kind, index: number): SketchEntity {
   const id = `entity:fit-${index}`;
@@ -17,6 +17,7 @@ function make(kind: Kind, index: number): SketchEntity {
     case "rectangle": return { id, kind, center: [80, dy], widthMm: 10, heightMm: 6, rotationDeg: 0, construction: false };
     case "point": return { id, kind, point: [95, dy], construction: false };
     case "spline": return { id, kind, fitPoints: [[100, dy], [105, dy + 4], [110, dy]], construction: false };
+    case "ellipse": return { id, kind, center: [120, dy], majorRadiusMm: 8 + index, minorRadiusMm: 4 + index, rotationDeg: 0, construction: false };
   }
 }
 

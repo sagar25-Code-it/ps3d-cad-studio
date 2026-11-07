@@ -84,6 +84,8 @@ function relationPoints(entity: SketchEntity): readonly RelationPoint[] {
     if (offered.includes("mid")) found.push(make("mid", [(entity.start[0] + entity.end[0]) / 2, (entity.start[1] + entity.end[1]) / 2], "Line midpoint"));
   } else if (entity.kind === "circle") {
     found.push(make("center", entity.center, "Circle center"));
+  } else if (entity.kind === "ellipse") {
+    found.push(make("center", entity.center, "Ellipse center"));
   } else if (entity.kind === "arc") {
     const circle = sketchCircumcircle(entity.start, entity.mid, entity.end);
     if (circle !== undefined) found.push(make("center", circle.center, "Arc center"));
@@ -1344,6 +1346,7 @@ function EntityDimensions({ entity, onApply, onMessage }: { readonly entity: Ske
   if (entity.kind === "line") return <DimensionField label="Length" dimension="length" value={Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1])} onApply={onApply} onMessage={onMessage} />;
   if (entity.kind === "rectangle") return <div className="dimension-stack"><DimensionField label="Width" dimension="width" value={entity.widthMm} onApply={onApply} onMessage={onMessage} /><DimensionField label="Height" dimension="height" value={entity.heightMm} onApply={onApply} onMessage={onMessage} /></div>;
   if (entity.kind === "circle") return <><DimensionField label="Radius" dimension="radius" value={entity.radiusMm} onApply={onApply} onMessage={onMessage} /><div className="derived-dimension"><span>Diameter</span><strong>{format(entity.radiusMm * 2)} mm</strong></div></>;
+  if (entity.kind === "ellipse") return <div className="dimension-stack"><div className="derived-dimension"><span>Major radius</span><strong>{format(entity.majorRadiusMm)} mm</strong></div><div className="derived-dimension"><span>Minor radius</span><strong>{format(entity.minorRadiusMm)} mm</strong></div></div>;
   return <div className="derived-dimension"><span>{entity.kind === "arc" ? "Three-point arc" : entity.kind === "spline" ? "Fit-point spline" : "Sketch point"}</span><strong>reference only</strong></div>;
 }
 
@@ -1371,6 +1374,14 @@ function dimensionHandles(entity: SketchEntity): readonly SketchDimensionPoint[]
     ];
   }
   if (entity.kind === "circle") return [point("center", entity.center, "Circle center"), point("radius", [entity.center[0] + entity.radiusMm, entity.center[1]], "Circle radius point")];
+  if (entity.kind === "ellipse") {
+    const radians = entity.rotationDeg * Math.PI / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const majorEnd: Vec2 = [entity.center[0] + entity.majorRadiusMm * cos, entity.center[1] + entity.majorRadiusMm * sin];
+    const minorEnd: Vec2 = [entity.center[0] - entity.minorRadiusMm * sin, entity.center[1] + entity.minorRadiusMm * cos];
+    return [point("center", entity.center, "Ellipse center"), point("right", majorEnd, "Ellipse major-axis end"), point("top", minorEnd, "Ellipse minor-axis end")];
+  }
   if (entity.kind === "point") return [point("center", entity.point, "Sketch point")];
   if (entity.kind === "spline") return [point("start", entity.fitPoints[0]!, "Spline start"), point("end", entity.fitPoints[entity.fitPoints.length - 1]!, "Spline end")];
   return [point("start", entity.start, "Arc start"), point("mid", entity.mid, "Arc middle"), point("end", entity.end, "Arc end")];
@@ -1416,6 +1427,7 @@ function SketchEntityShape({ entity, px, selected, hovered, onSelect, onHover, o
     if (entity.kind === "line") return <line className={cls} x1={entity.start[0]} y1={-entity.start[1]} x2={entity.end[0]} y2={-entity.end[1]} />;
     if (entity.kind === "rectangle") return <rect className={cls} x={entity.center[0] - entity.widthMm / 2} y={-entity.center[1] - entity.heightMm / 2} width={entity.widthMm} height={entity.heightMm} transform={`rotate(${-entity.rotationDeg} ${entity.center[0]} ${-entity.center[1]})`} />;
     if (entity.kind === "circle") return <circle className={cls} cx={entity.center[0]} cy={-entity.center[1]} r={entity.radiusMm} />;
+    if (entity.kind === "ellipse") return <ellipse className={cls} cx={entity.center[0]} cy={-entity.center[1]} rx={entity.majorRadiusMm} ry={entity.minorRadiusMm} transform={`rotate(${-entity.rotationDeg} ${entity.center[0]} ${-entity.center[1]})`} />;
     if (entity.kind === "point") return <circle className={`${cls} sketch-point`} cx={entity.point[0]} cy={-entity.point[1]} r={(hit ? 9 : 3.5) * px} />;
     if (entity.kind === "spline") return <path className={cls} d={sampleSpline(entity.fitPoints).map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${-point[1]}`).join(" ")} />;
     return <path className={cls} d={arcPathData(entity.start, entity.mid, entity.end)} />;
@@ -1489,6 +1501,7 @@ function SketchProfileShape({ profile, selected, onSelect }: { readonly profile:
   };
   if (profile.boundary.kind === "rectangle") return <rect {...common} x={profile.boundary.center[0] - profile.boundary.widthMm / 2} y={-profile.boundary.center[1] - profile.boundary.heightMm / 2} width={profile.boundary.widthMm} height={profile.boundary.heightMm} transform={`rotate(${-profile.boundary.rotationDeg} ${profile.boundary.center[0]} ${-profile.boundary.center[1]})`} />;
   if (profile.boundary.kind === "circle") return <circle {...common} cx={profile.boundary.center[0]} cy={-profile.boundary.center[1]} r={profile.boundary.radiusMm} />;
+  if (profile.boundary.kind === "ellipse") return <ellipse {...common} cx={profile.boundary.center[0]} cy={-profile.boundary.center[1]} rx={profile.boundary.majorRadiusMm} ry={profile.boundary.minorRadiusMm} transform={`rotate(${-profile.boundary.rotationDeg} ${profile.boundary.center[0]} ${-profile.boundary.center[1]})`} />;
   const path = profile.boundary.points.map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${-point[1]}`).join(" ");
   return <path {...common} d={`${path} Z`} />;
 }
@@ -1520,14 +1533,14 @@ function ConstraintGlyph({ constraint, entities, px, slot }: { readonly constrai
 
 function entityAnchor(entity: SketchEntity): Vec2 {
   if (entity.kind === "line") return [(entity.start[0] + entity.end[0]) / 2, (entity.start[1] + entity.end[1]) / 2];
-  if (entity.kind === "rectangle" || entity.kind === "circle") return entity.center;
+  if (entity.kind === "rectangle" || entity.kind === "circle" || entity.kind === "ellipse") return entity.center;
   if (entity.kind === "point") return entity.point;
   if (entity.kind === "spline") return entity.fitPoints[Math.floor(entity.fitPoints.length / 2)]!;
   return entity.mid;
 }
 
 function profileLabel(profile: SketchProfile): string {
-  return profile.boundary.kind === "rectangle" ? "Rectangle region" : profile.boundary.kind === "circle" ? "Circle region" : profile.boundary.kind === "curve-loop" ? "Closed curve loop" : "Closed line loop";
+  return profile.boundary.kind === "rectangle" ? "Rectangle region" : profile.boundary.kind === "circle" ? "Circle region" : profile.boundary.kind === "ellipse" ? "Ellipse region" : profile.boundary.kind === "curve-loop" ? "Closed curve loop" : "Closed line loop";
 }
 
 function shortId(id: string): string {

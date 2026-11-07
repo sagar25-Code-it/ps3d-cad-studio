@@ -37,6 +37,18 @@ function entityPolyline(entity: SketchEntity): { readonly points: readonly Vec2[
   }
   if (entity.kind === "arc") return { points: sampleArc(entity.start, entity.mid, entity.end), closed: false };
   if (entity.kind === "spline") return { points: sampleSpline(entity.fitPoints), closed: false };
+  if (entity.kind === "ellipse") {
+    const radians = (entity.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const points = Array.from({ length: 64 }, (_, index): Vec2 => {
+      const theta = (index / 64) * Math.PI * 2;
+      const localX = entity.majorRadiusMm * Math.cos(theta);
+      const localY = entity.minorRadiusMm * Math.sin(theta);
+      return [entity.center[0] + localX * cos - localY * sin, entity.center[1] + localX * sin + localY * cos];
+    });
+    return { points, closed: true };
+  }
   return { points: [entity.point], closed: false };
 }
 

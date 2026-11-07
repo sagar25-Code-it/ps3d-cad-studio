@@ -184,5 +184,6 @@ export function grabHandlesOf(entity: SketchEntity): readonly SketchGrabHandle[]
   }
   if (entity.kind === "point") return [make("self", { kind: "point", ref: "self" }, entity.point, "Sketch point")];
   if (entity.kind === "rectangle") return entityPoints(entity).map((corner, index) => make(`corner-${index}`, { kind: "corner", index }, corner, "Rectangle corner"));
+  if (entity.kind === "ellipse") return [make("center", { kind: "point", ref: "center" } as const, entity.center, "Ellipse center")];
   return entity.fitPoints.map((point, index) => make(`fit-${index}`, { kind: "fit", index }, point, "Spline point"));
 }

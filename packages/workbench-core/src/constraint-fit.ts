@@ -20,6 +20,7 @@ const radial = (kind: SketchEntityKind | undefined): boolean => kind === "circle
 export const SOLVABLE_POINT_REFS: Readonly<Record<SketchEntityKind, readonly SketchPointRef[]>> = {
   line: ["start", "end", "mid"],
   circle: ["center"],
+  ellipse: ["center"],
   arc: ["center"],
   point: ["self"],
   rectangle: [],
@@ -30,6 +31,7 @@ function whyNotPoint(kind: SketchEntityKind, ref: SketchPointRef): string {
   if (kind === "rectangle") return "Rectangles are rigid in the solver; their corners cannot be joined yet.";
   if (kind === "spline") return "Splines cannot be joined at a point yet.";
   if (kind === "arc") return "Arc end points cannot be joined yet; an arc's center can.";
+  if (kind === "ellipse") return "Ellipses can be joined at their centre only; axis ends cannot be joined yet.";
   return `A ${kind} has no ${ref} point to join.`;
 }
 

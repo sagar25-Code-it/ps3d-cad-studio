@@ -220,6 +220,7 @@ function mapEntity(entity: SketchEntity, id: string, point: (value: Vec2) => Vec
   if (entity.kind === "arc") return { ...entity, id, start: point(entity.start), mid: point(entity.mid), end: point(entity.end) };
   if (entity.kind === "rectangle") return { ...entity, id, center: point(entity.center), rotationDeg: wrapDegrees(rotation(entity.rotationDeg)) };
   if (entity.kind === "point") return { ...entity, id, point: point(entity.point) };
+  if (entity.kind === "ellipse") return { ...entity, id, center: point(entity.center), rotationDeg: wrapDegrees(rotation(entity.rotationDeg)) };
   return { ...entity, id, fitPoints: entity.fitPoints.map(point) };
 }
 

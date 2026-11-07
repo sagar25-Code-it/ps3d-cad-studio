@@ -14,6 +14,7 @@ import { sketchAutoConstraintTests } from "./sketch-auto-constraints.test.js";
 import { sketchDragTests } from "./sketch-drag.test.js";
 import { sketchDimensionLayoutTests } from "./sketch-dimension-layout.test.js";
 import { sketchShapeTests } from "./sketch-shapes.test.js";
+import { sketchEllipseTests } from "./sketch-ellipse.test.js";
 import { designTimelineTests } from "./design-timeline.test.js";
 import { designRegenerationTests } from "./design-regeneration.test.js";
 import { solidMetricsTests } from "./solid-metrics.test.js";
@@ -63,6 +64,7 @@ const tests: readonly TestCase[] = [
   ...sketchDragTests,
   ...sketchDimensionLayoutTests,
   ...sketchShapeTests,
+  ...sketchEllipseTests,
   ...designTimelineTests,
   ...designRegenerationTests,
   ...solidMetricsTests,

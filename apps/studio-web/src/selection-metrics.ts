@@ -44,6 +44,7 @@ function sketchEntityMetrics(entity: SketchEntity): SelectionMetricsReading | un
   if (entity.kind === "line") return { title: "Line", metrics: [`Length: ${sigFigs(lineLength(entity))} mm`] };
   if (entity.kind === "rectangle") return { title: "Rectangle", metrics: [`Size: ${sigFigs(entity.widthMm)} × ${sigFigs(entity.heightMm)} mm`, `Area: ${sigFigs(entity.widthMm * entity.heightMm)} mm²`] };
   if (entity.kind === "circle") return { title: "Circle", metrics: [`Radius: ${sigFigs(entity.radiusMm)} mm · Ø ${sigFigs(entity.radiusMm * 2)} mm`, `Area: ${sigFigs(Math.PI * entity.radiusMm * entity.radiusMm)} mm²`] };
+  if (entity.kind === "ellipse") return { title: "Ellipse", metrics: [`Major: ${sigFigs(entity.majorRadiusMm)} mm · minor: ${sigFigs(entity.minorRadiusMm)} mm`, `Area: ${sigFigs(Math.PI * entity.majorRadiusMm * entity.minorRadiusMm)} mm² · tilt ${sigFigs(entity.rotationDeg)}°`] };
   if (entity.kind === "arc") { const { radius, angleDeg } = arcSweepDeg(entity); return { title: "Arc", metrics: [`Radius: ${sigFigs(radius)} mm`, `Sweep: ${sigFigs(angleDeg)}°`] }; }
   if (entity.kind === "spline") return { title: `Spline (${entity.fitPoints.length} fit points)`, metrics: [`Piecewise length: ~${sigFigs(splineLength(entity))} mm`] };
   if (entity.kind === "point") return { title: "Point", metrics: [`At: ${sigFigs(entity.point[0])}, ${sigFigs(entity.point[1])} mm`] };

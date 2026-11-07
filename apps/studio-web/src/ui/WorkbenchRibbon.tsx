@@ -85,6 +85,7 @@ const SKETCH_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; r
   { id: "circle", icon: "circle", label: "Center circle", key: "C" },
   { id: "circle-two-point", icon: "circle", label: "2-point circle", key: "C2" },
   { id: "circle-three-point", icon: "circle", label: "3-point circle", key: "C3" },
+  { id: "ellipse", icon: "ellipse", label: "Center ellipse", key: "E" },
   { id: "arc", icon: "arc", label: "3-point arc", key: "A" }
 ];
 

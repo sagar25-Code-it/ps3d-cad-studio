@@ -306,6 +306,16 @@ function pointsOfInterest(entity: SketchEntity): readonly PointOfInterest[] {
     add("center", entity.center, "center");
   } else if (entity.kind === "spline") {
     entity.fitPoints.forEach((fit, index) => add("endpoint", fit, index === 0 ? "start" : index === entity.fitPoints.length - 1 ? "end" : "point"));
+  } else if (entity.kind === "ellipse") {
+    add("center", entity.center, "center");
+    const radians = (entity.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const axisEnd = (ax: number, ay: number): Vec2 => [entity.center[0] + ax * cos - ay * sin, entity.center[1] + ax * sin + ay * cos];
+    add("quadrant", axisEnd(entity.majorRadiusMm, 0), "point");
+    add("quadrant", axisEnd(-entity.majorRadiusMm, 0), "point");
+    add("quadrant", axisEnd(0, entity.minorRadiusMm), "point");
+    add("quadrant", axisEnd(0, -entity.minorRadiusMm), "point");
   } else {
     add("endpoint", entity.point, "point");
   }

@@ -118,6 +118,17 @@ export type SketchEntity =
     }
   | {
       readonly id: string;
+      readonly kind: "ellipse";
+      readonly center: Vec2;
+      readonly majorRadiusMm: number;
+      readonly minorRadiusMm: number;
+      /** Orientation of the major axis in degrees from +X, CCW. */
+      readonly rotationDeg: number;
+      readonly construction: boolean;
+      readonly visible?: boolean;
+    }
+  | {
+      readonly id: string;
       readonly kind: "arc";
       readonly start: Vec2;
       readonly mid: Vec2;
