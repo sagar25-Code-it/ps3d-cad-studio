@@ -412,6 +412,31 @@ kbd {
 .engineering-confirmation-dialog > footer { position: sticky; z-index: 2; bottom: 0; display: flex; justify-content: flex-end; gap: 0.55rem; margin-top: 1rem; padding: 0.8rem 1rem; border-top: 1px solid #315063; background: #091722f5; backdrop-filter: blur(12px); }
 .tree-empty { margin: 0.35rem 0.42rem; color: #5c7487; font-size: 0.55rem; line-height: 1.45; }
 
+/* 4-tab Sketch Navigator inside the project tree. The tab row stays sticky to the section header; the panel below scrolls with the rest of the tree. */
+.sketch-navigator-tabs { display: flex; gap: 0.2rem; margin: 0.25rem 0.4rem 0.3rem; padding: 0.15rem; border: 1px solid #1d2f42; border-radius: 6px; background: #08131e; }
+.sketch-navigator-tab { flex: 1 1 0; padding: 0.3rem 0.35rem; border: 0; border-radius: 4px; color: #7f95a9; background: transparent; font-size: 0.55rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; }
+.sketch-navigator-tab:hover { color: #d0dce7; background: #112232; }
+.sketch-navigator-tab.active { color: #0a1824; background: #39cdb7; }
+.sketch-navigator-panel { min-height: 0.4rem; }
+.studio-app .sketch-navigator-tabs { border-color: #c6ccd2; background: #eceff2; }
+.studio-app .sketch-navigator-tab { color: #566069; }
+.studio-app .sketch-navigator-tab:hover { color: #1f2a34; background: #d5dbe1; }
+.studio-app .sketch-navigator-tab.active { color: #ffffff; background: #1f6fb6; }
+
+/* Confirmation Corner: the Fusion-style OK / Cancel chip pinned to the top-right of the sketch viewport to finish or abandon the sketch. */
+.confirmation-corner { position: absolute; top: 0.6rem; right: 0.75rem; z-index: 6; display: flex; gap: 0.35rem; padding: 0.35rem 0.4rem; border: 1px solid #315063; border-radius: 7px; background: #0a1824e6; backdrop-filter: blur(10px); box-shadow: 0 4px 10px #00000055; }
+.confirmation-corner button { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.38rem 0.62rem; border: 1px solid transparent; border-radius: 5px; color: #d0dce7; background: #112435; font-size: 0.66rem; font-weight: 600; cursor: pointer; }
+.confirmation-corner button:hover { background: #1b3651; }
+.confirmation-corner button.primary { color: #0a1824; background: #39cdb7; border-color: #2bb79d; }
+.confirmation-corner button.primary:hover { background: #45dcc5; }
+.confirmation-corner small { display: inline-flex; align-items: center; margin-right: 0.3rem; color: #96abbe; font-size: 0.56rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.studio-app .confirmation-corner { border-color: #c6ccd2; background: #ffffffee; box-shadow: 0 2px 6px #15191d2a; }
+.studio-app .confirmation-corner button { color: #2c3237; background: #ffffff; border-color: #c5ccd2; }
+.studio-app .confirmation-corner button:hover { background: #e6ebee; }
+.studio-app .confirmation-corner button.primary { color: #ffffff; background: #1f6fb6; border-color: #1a5e9c; }
+.studio-app .confirmation-corner button.primary:hover { background: #2882d3; }
+.studio-app .confirmation-corner small { color: #5e7383; }
+
 .tree-footer {
   display: grid;
   grid-template-columns: 1fr auto;

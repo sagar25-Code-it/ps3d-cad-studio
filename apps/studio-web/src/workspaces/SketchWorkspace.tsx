@@ -24,7 +24,7 @@ import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../
 import { autoConstraintsFor, dropConstraintFor, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
-import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, buildPolygon, buildSlot, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
+import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, buildPolygon, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
 import { entitiesInSelectionBox, selectionBoxMode, selectionRect, type SketchSelectionBoxMode } from "../../../../packages/workbench-sketch/src/selection.js";
 import { SketchCheckPanel, SketchEditPanel, SketchRelationList, type SketchEditToolId } from "./SketchEditPanel.js";
 import { SketchGrid } from "./sketch/SketchGrid.js";
@@ -155,6 +155,10 @@ interface SketchWorkspaceProps {
   readonly onActivateDimension: () => void;
   readonly onExitDimension: () => void;
   readonly onActivateEditTool: (tool: SketchEditToolId) => void;
+  /** OK click in the viewport Confirmation Corner: commit the sketch to the timeline and return to Design. */
+  readonly onFinishSketch: () => void;
+  /** Cancel click in the viewport Confirmation Corner: drop pending points and leave the sketch workspace. */
+  readonly onCancelSketch: () => void;
 }
 
 /** A press on a curve or one of its handles that may turn into a drag. */
@@ -318,9 +322,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [cursor, pending, props.tool]);
   const navigationPan = props.tool === "select" && props.viewportState.navigationMode === "pan";
   /** A whole polygon or slot is built from the points placed so far plus the cursor, so it can be previewed and then placed. */
-  const buildShape = (tool: "polygon" | "slot", points: readonly Vec2[]): ReturnType<typeof buildPolygon> => {
+  const buildShape = (tool: "polygon" | "slot" | "slot-straight", points: readonly Vec2[]): ReturnType<typeof buildPolygon> => {
     const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
-    return tool === "polygon" ? buildPolygon(points[0]!, points[1]!, Math.round(Number(polygonSides)), ids) : buildSlot(points[0]!, points[1]!, points[2]!, ids);
+    if (tool === "polygon") return buildPolygon(points[0]!, points[1]!, Math.round(Number(polygonSides)), ids);
+    if (tool === "slot-straight") return buildSlotOverall(points[0]!, points[1]!, points[2]!, ids);
+    return buildSlot(points[0]!, points[1]!, points[2]!, ids);
   };
   const previewShape = useMemo<SketchShape | undefined>(() => {
     if (!isShapeTool(props.tool) || pending.length !== requiredSketchPoints(props.tool) - 1) return undefined;
@@ -1154,6 +1160,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       </div>
 
       <div className="canvas-hud"><span>{planePlacement} · {planeInfo.horizontalLabel} → · {planeInfo.verticalLabel} ↑</span><span>{props.dimensionMode ? "Dimension" : sketchToolLabel(props.tool)}</span><span>Grid {props.viewportState.gridVisible ? `${format(grid.minorMm)} mm` : "off"}</span><span>Snap {snapEnabled ? `${SNAP_PIXELS} px` : "off"}</span><span>{pointerInside ? `${planeInfo.horizontalLabel} ${format(cursor[0])}  ${planeInfo.verticalLabel} ${format(cursor[1])} mm` : "Cursor outside the sketch"}</span><span>{visibleEntities.length}/{props.sketch.entities.length} entities visible</span><strong>{analysis.classification.replace("-", " ")}</strong></div>
+      <div className="confirmation-corner" role="group" aria-label="Sketch confirmation corner">
+        <small>Sketch</small>
+        <button type="button" onClick={props.onCancelSketch} title="Cancel the sketch and return to Design. Pending points are dropped."><CommandIcon name="cancel" />Cancel</button>
+        <button type="button" className="primary" onClick={props.onFinishSketch} title="Finish the sketch and commit it to the timeline."><CommandIcon name="save" />OK</button>
+      </div>
     </section>
 
     <aside className="inspector-panel" aria-label="Sketch inspector">

@@ -51,6 +51,26 @@ export function buildPolygon(center: Vec2, corner: Vec2, sides: number, ids: Sha
   return { ok: true, value: { entities, constraints } };
 }
 
+/**
+ * Straight (overall) slot: the user clicks the two OUTER endpoints (the outermost points of the two caps) and a width
+ * point. The slot's end-to-end length is the distance between the two clicks, and must be larger than the width so
+ * there is still a straight portion between the caps. The result reuses buildSlot after pulling the cap centres inward
+ * by the cap radius.
+ */
+export function buildSlotOverall(firstEnd: Vec2, secondEnd: Vec2, widthPoint: Vec2, ids: ShapeIds): WorkbenchResult<SketchShape> {
+  const axis: Vec2 = [secondEnd[0] - firstEnd[0], secondEnd[1] - firstEnd[1]];
+  const overall = Math.hypot(axis[0], axis[1]);
+  if (overall < 0.1) return bad("The slot's end-to-end length must be at least 0.1 mm.");
+  const direction: Vec2 = [axis[0] / overall, axis[1] / overall];
+  const normal: Vec2 = [-direction[1], direction[0]];
+  const half = Math.abs((widthPoint[0] - firstEnd[0]) * normal[0] + (widthPoint[1] - firstEnd[1]) * normal[1]);
+  if (half < 0.05) return bad("The slot width must be at least 0.1 mm: place the third point away from the line between the ends.");
+  if (overall < 2 * half + 0.05) return bad("The slot's end-to-end length must be more than its width: pick ends farther apart or a smaller width.");
+  const firstCenter: Vec2 = [firstEnd[0] + direction[0] * half, firstEnd[1] + direction[1] * half];
+  const secondCenter: Vec2 = [secondEnd[0] - direction[0] * half, secondEnd[1] - direction[1] * half];
+  return buildSlot(firstCenter, secondCenter, widthPoint, ids);
+}
+
 /** Center-to-center slot: the two end centres, then a point whose distance from the axis is the half-width. */
 export function buildSlot(first: Vec2, second: Vec2, widthPoint: Vec2, ids: ShapeIds): WorkbenchResult<SketchShape> {
   const axis: Vec2 = [second[0] - first[0], second[1] - first[1]];

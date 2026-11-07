@@ -33,11 +33,11 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Parallelogram, Rounded / Offset framing | Missing | No parallelogram tool, no rounded-corner rectangle option |
 | Circle by centre and point | Have | `circle` |
 | 3-point / Perimeter circle | Have | `circle-two-point`, `circle-three-point` |
-| Centerpoint arc, 3-point arc, Tangent arc | Partial | Only `arc` (3-point); centerpoint and tangent arc modes missing |
-| Straight slot, Centerpoint slot | Partial | `slot` is centerpoint; straight slot (two endpoints + width) missing |
+| Centerpoint arc, 3-point arc, Tangent arc | Have | `arc`, `arc-center` and `arc-tangent` all wired in `workbench-sketch`'s SketchTool and the ribbon |
+| Straight slot, Centerpoint slot | Have | `slot` is center-to-center; `slot-straight` (end-to-end + width) added as `buildSlotOverall` and wired in the ribbon |
 | 3-point arc slot, Centerpoint arc slot | Missing | Curved slot variants missing |
 | Regular polygon | Have | `polygon` |
-| Ellipse, Elliptical arc | **Missing** | No ellipse entity at all |
+| Ellipse, Elliptical arc | Have | `ellipse` is a first-class sketch entity (see `kind: "ellipse"` in `workbench-core`'s types and the Center ellipse ribbon tool) |
 | Parabola, Hyperbola, Conic | Missing | Not critical for mechanical modelling |
 | Interpolating / Fit-point spline | Have | `spline` with fit points |
 | Control-point spline / Style spline | Missing | No control-polygon spline |
@@ -82,7 +82,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Radius, Diameter, Half-Diameter | Have | `radius` plus `distance` |
 | Angle, Arc length, Perimeter | Partial | Angle via distance shim; true arc-length and perimeter dimensions missing |
 | Chain, Baseline, Ordinate | Missing | |
-| Driving vs Driven (Reference), Deactivate, Equations | **Missing** | No reference-dimension toggle; no `fx` expressions |
+| Driving vs Driven (Reference), Deactivate, Equations | Partial | `DimensionMode = "driving" \| "driven"` is wired on constraints; Suppress (Deactivate) is wired on every constraint; `fx` expression binding across features is still out |
 
 ## 5. Part / solid features (PDF Section 4)
 
@@ -94,7 +94,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Loft / Boundary (G0/G1/G2 continuity, rails, tangency weight) | **Missing** | |
 | Helix / Coil / Thread | Missing | |
 | Rib, Web, Emboss, Wrap | Missing | |
-| Solid primitives (Box, Cylinder, Sphere, Cone, **Torus**, Ellipsoid, Prism, Wedge, Spiral, Tube) | Partial | Box, Cylinder, Sphere, Cone shipped; **Torus missing**; the rest missing |
+| Solid primitives (Box, Cylinder, Sphere, Cone, Torus, Ellipsoid, Prism, Wedge, Spiral, Tube) | Partial | Box, Cylinder, Sphere, Cone and Torus shipped (see `PartPreviewBodyShape` and `torusMesh`); Ellipsoid / Prism / Wedge / Spiral / Tube still missing |
 | Hole / Hole Wizard (counterbore, countersink, threaded) | Missing | `set-part-parameter:holeDiameterMm` on the template plate only; no hole wizard |
 | Dome, Indent, Flex, Scale | Missing | |
 | Combine (Union, Cut, Intersect) | Have | `combine-general-bodies` with `mode: join|cut|intersect` |
@@ -128,16 +128,16 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 |---|---|---|
 | Top command bar: workspace switcher, contextual ribbon, tab bar | Have | `WorkbenchHeader`, `WorkbenchRibbon` |
 | Left docked navigator: model browser / feature tree | Have | `ProjectTree` |
-| **4-Tab NX Sketch Navigator (Curves / Relations / External refs / Issues)** | Missing | Only a flat tree; no sub-tabs |
-| **Padlock icon on a fully constrained sketch** | Missing | No glyph in the tree |
+| 4-Tab NX Sketch Navigator (Curves / Relations / External refs / Issues) | Have | `SketchNavigator` renders four tabs inside the Sketches section of the model browser when the Sketch workspace is active |
+| Padlock icon on a fully constrained sketch | Have | `TreeItem`'s `trailingIcon="lock"` is wired via `isSketchFullyConstrained` on the working sketch and on each timeline sketch feature |
 | Right / docked inspector: PropertyManager / Task panel | Have | `PartInspector`, sketch inspector |
 | **Floating sketch palette (Fusion style)** | Have | `.sketch-palette` panel |
-| **Confirmation Corner (viewport-upper OK / Cancel)** | Missing | |
-| **View Cube** | Missing | |
+| Confirmation Corner (viewport-upper OK / Cancel) | Have | `.confirmation-corner` is pinned to the top-right of the sketch viewport; OK calls `finishSketch`, Cancel drops pending points and returns to Design |
+| View Cube | Have | `ViewCube` inside `ViewportChrome` renders the six faces, edges and corners of a camera-synchronized cube with isometric Home and six face buttons |
 | Cursor-centric HUD, marking menu, S-key toolbox | Partial | S opens the command palette; no marking menu |
 | **On-view parameters (OVP) at the cursor** | Missing | Values are entered in the palette, not at the cursor |
 | Parametric history timeline | Have | `TimelineBar` |
-| **Quick-measure status bar (edge length, face area, radius)** | Missing | Status bar carries messages, not live measure |
+| Quick-measure status bar (edge length, face area, radius) | Have | `.quick-measure-bar` in `App.tsx` renders live edge / face metrics under the viewport |
 | Menubar: File / Edit / Create / Modify / View / Inspect / Tools / Help | Have | `WorkbenchHeader` menus |
 
 ## 8. Inspect / diagnostics suite
@@ -159,15 +159,24 @@ Out of this repository entirely so far; the PDF devotes a full section to it (ba
 
 ## Summary - biggest gaps to close before pending Hole / Fillet / Chamfer / Shell
 
-These are the items the PDF most emphasizes that are entirely missing (not just incomplete) in PS3D today:
+The audit entries below were re-checked against the code on 2026-11-07. Every item in the original
+eight-point list is now shipped; this summary reflects the state of the code, not of the previous audit.
 
-1. **Ellipse entity** - a standard sketch primitive.
-2. **Centerpoint arc and tangent arc tool modes** - reuse the existing `arc` entity; only the input flow is missing.
-3. **Straight slot mode** - two endpoints and a width; reuse the existing `slot` shape builder.
-4. ~~**Sketch chamfer** - alongside the existing `fillet` sketch edit tool.~~ Shipped: equal-distance, two-distance and distance + angle.
-5. **Driven (reference) dimension toggle** - a per-constraint flag so a dimension can measure without driving.
-6. **Torus primitive** - the one shape from the PDF's standard primitive list that we do not have.
-7. **Padlock icon in the model browser** when a sketch's constraint classification says "fully constrained".
-8. **Quick-measure status bar** - the selected entity's length / area / angle under the viewport.
+1. ~~Ellipse entity~~ — Shipped (`kind: "ellipse"` in `workbench-core` types; Center ellipse ribbon tool).
+2. ~~Centerpoint arc and tangent arc tool modes~~ — Shipped (`arc-center`, `arc-tangent` with full geometry in `buildSketchEntity`, three-click input flow, ribbon entries).
+3. ~~Straight slot mode~~ — Shipped (`slot-straight` in `SketchTool`, `buildSlotOverall` reuses `buildSlot` after pulling cap centres inward).
+4. ~~Sketch chamfer~~ — Shipped: equal-distance, two-distance and distance + angle.
+5. ~~Driven (reference) dimension toggle~~ — Wired as `DimensionMode = "driving" \| "driven"` on sketch constraints plus a per-constraint `suppressed` flag for Deactivate.
+6. ~~Torus primitive~~ — Shipped (`PartPreviewBodyShape` includes `"torus"`; `torusMesh` in `workbench-geometry`).
+7. ~~Padlock icon in the model browser~~ — Shipped (`TreeItem trailingIcon="lock"` driven by `isSketchFullyConstrained` on both the working sketch and every timeline sketch feature).
+8. ~~Quick-measure status bar~~ — Shipped (`.quick-measure-bar` in `App.tsx`).
 
-These eight items are what this slice ships.
+Additional UX items from Section 7 also closed in this slice:
+
+- 4-tab Sketch Navigator (Curves / Relations / External refs / Issues) renders in the Sketches section when the Sketch workspace is active.
+- Confirmation Corner (viewport-upper OK / Cancel) is pinned to the top-right of the sketch viewport.
+- The ViewCube continues to render inside `ViewportChrome` for every 3D workspace with Home, named-view buttons, and drag-to-orbit.
+
+Next audit-surface gaps (bigger, not yet in this slice): Sweep / Loft, Surface workspace beyond the bezier preview,
+3D edge-fillet and chamfer (post-op edge picking), Shell, Draft, construction axes and construction points, and the
+full 4-mode slot family (3-point arc slot and centerpoint arc slot).

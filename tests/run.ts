@@ -31,6 +31,7 @@ import { meshBooleanTests } from "./mesh-boolean.test.js";
 import { meshModifyTests } from "./mesh-modify.test.js";
 import { holeWizardTests } from "./hole-wizard.test.js";
 import { sketchChamferModeTests } from "./sketch-chamfer-modes.test.js";
+import { sketchArcAndSlotModeTests } from "./sketch-arc-and-slot-modes.test.js";
 import { constructionPlaneTests } from "./construction-planes.test.js";
 import { assemblyMeshTests } from "./assembly-mesh.test.js";
 import { assemblyMateTests } from "./assembly-mates.test.js";
@@ -84,6 +85,7 @@ const tests: readonly TestCase[] = [
   ...meshModifyTests,
   ...holeWizardTests,
   ...sketchChamferModeTests,
+  ...sketchArcAndSlotModeTests,
   ...constructionPlaneTests,
   ...assemblyMeshTests,
   ...assemblyMateTests,

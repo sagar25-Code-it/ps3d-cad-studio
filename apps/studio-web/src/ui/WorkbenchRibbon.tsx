@@ -88,7 +88,9 @@ const SKETCH_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; r
   { id: "circle-two-point", icon: "circle", label: "2-point circle", key: "C2" },
   { id: "circle-three-point", icon: "circle", label: "3-point circle", key: "C3" },
   { id: "ellipse", icon: "ellipse", label: "Center ellipse", key: "E" },
-  { id: "arc", icon: "arc", label: "3-point arc", key: "A" }
+  { id: "arc", icon: "arc", label: "3-point arc", key: "A" },
+  { id: "arc-center", icon: "arc", label: "Centerpoint arc", key: "A2" },
+  { id: "arc-tangent", icon: "arc", label: "Tangent arc", key: "A3" }
 ];
 
 const PART_FEATURES = [
@@ -129,6 +131,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         {SKETCH_TOOLS.map((tool) => <RibbonButton key={tool.id} icon={tool.icon} label={tool.label} hint={tool.key} active={props.sketchTool === tool.id} onClick={() => props.onSketchTool(tool.id)} />)}
         <RibbonButton icon="polygon" label="Polygon" hint="centre + corner" active={props.sketchTool === "polygon"} onClick={() => props.onSketchTool("polygon")} />
         <RibbonButton icon="slot" label="Slot" hint="centres + width" active={props.sketchTool === "slot"} onClick={() => props.onSketchTool("slot")} />
+        <RibbonButton icon="slot" label="Straight slot" hint="ends + width" active={props.sketchTool === "slot-straight"} onClick={() => props.onSketchTool("slot-straight")} />
         <RibbonButton icon="spline" label="Spline" hint="fit points" active={props.sketchTool === "spline"} onClick={() => props.onSketchTool("spline")} />
         <RibbonButton icon="insert" label="Point" hint="reference" active={props.sketchTool === "point"} onClick={() => props.onSketchTool("point")} />
       </RibbonGroup>

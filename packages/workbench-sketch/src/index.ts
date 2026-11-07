@@ -25,16 +25,22 @@ export type SketchTool =
   | "circle-three-point"
   | "ellipse"
   | "arc"
+  /** Centerpoint arc: pick the centre, then the start, then the end (the end snaps to the circle of radius |start−centre|). */
+  | "arc-center"
+  /** Tangent arc: pick the anchor (usually an existing curve endpoint), a tangent-direction point, then the arc end. */
+  | "arc-tangent"
   | "point"
   | "spline"
   /** A regular polygon: centre, then one corner. Placed as several entities, see shapes.ts. */
   | "polygon"
   /** A center-to-center slot: two end centres, then a width point. Placed as several entities, see shapes.ts. */
-  | "slot";
+  | "slot"
+  /** A straight (overall) slot: two outer endpoints (cap edges), then a width point. Placed as several entities, see shapes.ts. */
+  | "slot-straight";
 
 /** Tools whose result is a whole parametric shape (several entities and relations) rather than one entity. */
-export function isShapeTool(tool: SketchTool): tool is "polygon" | "slot" {
-  return tool === "polygon" || tool === "slot";
+export function isShapeTool(tool: SketchTool): tool is "polygon" | "slot" | "slot-straight" {
+  return tool === "polygon" || tool === "slot" || tool === "slot-straight";
 }
 
 export type SketchProfileBoundary =
@@ -290,6 +296,59 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
     if (area2 < 1e-4) return degenerate("The three arc points must not be collinear.");
     return { ok: true, value: { id, kind: "arc", start: points[0]!, mid: points[1]!, end: points[2]!, construction: false } };
   }
+  if (tool === "arc-center" && points.length === 3) {
+    const center = points[0]!;
+    const start = points[1]!;
+    const endClick = points[2]!;
+    const startDx = start[0] - center[0];
+    const startDy = start[1] - center[1];
+    const radiusMm = Math.hypot(startDx, startDy);
+    if (radiusMm < 0.01) return degenerate("A centerpoint arc radius must be at least 0.01 mm.");
+    const endDx = endClick[0] - center[0];
+    const endDy = endClick[1] - center[1];
+    const endMag = Math.hypot(endDx, endDy);
+    if (endMag < 0.01) return degenerate("The arc end must not coincide with the centre.");
+    const end: Vec2 = [center[0] + (endDx / endMag) * radiusMm, center[1] + (endDy / endMag) * radiusMm];
+    const startAngle = Math.atan2(startDy, startDx);
+    const endAngle = Math.atan2(end[1] - center[1], end[0] - center[0]);
+    let sweep = endAngle - startAngle;
+    while (sweep > Math.PI) sweep -= 2 * Math.PI;
+    while (sweep <= -Math.PI) sweep += 2 * Math.PI;
+    if (Math.abs(sweep) < 1e-6) return degenerate("The centerpoint arc has zero sweep: the end must sit away from the start direction.");
+    const midAngle = startAngle + sweep / 2;
+    const mid: Vec2 = [center[0] + Math.cos(midAngle) * radiusMm, center[1] + Math.sin(midAngle) * radiusMm];
+    return { ok: true, value: { id, kind: "arc", start, mid, end, construction: false } };
+  }
+  if (tool === "arc-tangent" && points.length === 3) {
+    const anchor = points[0]!;
+    const dirPoint = points[1]!;
+    const end = points[2]!;
+    const tx = dirPoint[0] - anchor[0];
+    const ty = dirPoint[1] - anchor[1];
+    const tangentLen = Math.hypot(tx, ty);
+    if (tangentLen < 0.01) return degenerate("The tangent-direction point must sit at least 0.01 mm from the anchor.");
+    const nx = -ty / tangentLen;
+    const ny = tx / tangentLen;
+    const dx = end[0] - anchor[0];
+    const dy = end[1] - anchor[1];
+    const dSq = dx * dx + dy * dy;
+    if (dSq < 1e-6) return degenerate("The arc end must sit at least 0.001 mm from the anchor.");
+    const dn = dx * nx + dy * ny;
+    if (Math.abs(dn) < 1e-6) return degenerate("The arc end is collinear with the tangent direction; the arc would be a straight line.");
+    const signedR = dSq / (2 * dn);
+    const radiusMm = Math.abs(signedR);
+    if (radiusMm < 0.01) return degenerate("The tangent arc radius is below 0.01 mm.");
+    const center: Vec2 = [anchor[0] + nx * signedR, anchor[1] + ny * signedR];
+    const direction = signedR > 0 ? 1 : -1;
+    const startAngle = Math.atan2(anchor[1] - center[1], anchor[0] - center[0]);
+    const endAngle = Math.atan2(end[1] - center[1], end[0] - center[0]);
+    let sweep = direction > 0 ? endAngle - startAngle : startAngle - endAngle;
+    while (sweep <= 0) sweep += 2 * Math.PI;
+    if (sweep < 1e-6 || sweep >= 2 * Math.PI - 1e-6) return degenerate("The tangent arc sweep is zero or a full turn.");
+    const midAngle = startAngle + direction * sweep / 2;
+    const mid: Vec2 = [center[0] + Math.cos(midAngle) * radiusMm, center[1] + Math.sin(midAngle) * radiusMm];
+    return { ok: true, value: { id, kind: "arc", start: anchor, mid, end, construction: false } };
+  }
   if (tool === "point" && points.length === 1) {
     // A sketch point is reference geometry: it snaps and anchors patterns but never bounds a profile.
     return { ok: true, value: { id, kind: "point", point: points[0]!, construction: true } };
@@ -304,7 +363,7 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
 
 export function requiredSketchPoints(tool: SketchTool): number {
   // A spline needs three fit points at least; the workspace lets the user keep adding points until they finish it.
-  return tool === "select" ? 0 : tool === "point" ? 1 : tool === "arc" || tool === "spline" || tool === "rectangle-three-point" || tool === "circle-three-point" || tool === "ellipse" || tool === "slot" ? 3 : 2;
+  return tool === "select" ? 0 : tool === "point" ? 1 : tool === "arc" || tool === "arc-center" || tool === "arc-tangent" || tool === "spline" || tool === "rectangle-three-point" || tool === "circle-three-point" || tool === "ellipse" || tool === "slot" || tool === "slot-straight" ? 3 : 2;
 }
 
 export function sketchToolLabel(tool: SketchTool): string {
@@ -319,10 +378,13 @@ export function sketchToolLabel(tool: SketchTool): string {
     "circle-three-point": "3-point circle",
     ellipse: "Center ellipse",
     arc: "3-point arc",
+    "arc-center": "Centerpoint arc",
+    "arc-tangent": "Tangent arc",
     point: "Point",
     spline: "Fit-point spline",
     polygon: "Polygon",
-    slot: "Center-to-center slot"
+    slot: "Center-to-center slot",
+    "slot-straight": "Straight slot"
   };
   return labels[tool];
 }
