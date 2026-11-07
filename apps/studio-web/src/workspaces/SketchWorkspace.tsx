@@ -149,9 +149,11 @@ interface SketchWorkspaceProps {
     advancedParams?: {
       readonly sweepDirectionMm?: readonly [number, number, number];
       readonly sweepPathEntityId?: string;
+      readonly sweepTwistDeg?: number;
       readonly loftTopScale?: number;
       readonly loftSecondaryProfileIds?: readonly string[];
       readonly loftContinuity?: "position" | "tangent" | "curvature";
+      readonly loftRailEntityId?: string;
       readonly shellThicknessMm?: number;
       readonly shellOpenFace?: "top" | "bottom" | "none";
       readonly draftAngleDeg?: number;
@@ -247,6 +249,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [loftTopScale, setLoftTopScale] = useState("0.7");
   const [loftMode, setLoftMode] = useState<"scaled" | "two-profile">("scaled");
   const [loftContinuity, setLoftContinuity] = useState<"position" | "tangent" | "curvature">("position");
+  const [loftRailEntityId, setLoftRailEntityId] = useState<string>("");
+  const [sweepTwist, setSweepTwist] = useState("0");
   const [modifierEdgeSize, setModifierEdgeSize] = useState("1");
   const [shellThickness, setShellThickness] = useState("2");
   const [shellOpenFace, setShellOpenFace] = useState<"top" | "bottom" | "none">("top");
@@ -1212,7 +1216,19 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="tangent">G1 · Tangent</option>
               <option value="curvature">G2 · Curvature</option>
             </select>
-            <small>Pick two profiles: first is the base, second is the top.</small>
+            <small>Pick two profiles: first is the base, second is the top. Mismatched vertex counts are resampled.</small>
+          </div>}
+          {solidOp === "loft" && loftMode === "two-profile" && <div className="make-solid-row" aria-label="Loft rail">
+            <small>Rail</small>
+            <select aria-label="Loft rail entity" value={loftRailEntityId} onChange={(event) => setLoftRailEntityId(event.target.value)}>
+              <option value="">(none — straight interpolation)</option>
+              {props.sketch.entities.filter((entity) => (entity.kind === "line" || entity.kind === "arc" || entity.kind === "spline") && entity.visible !== false).map((entity) => <option key={entity.id} value={entity.id}>{entity.kind} · {entity.id.slice(-8)}</option>)}
+            </select>
+          </div>}
+          {solidOp === "sweep" && <div className="make-solid-row" aria-label="Sweep twist">
+            <small>Twist</small>
+            <input aria-label="Sweep twist in degrees" type="number" min={-3600} max={3600} step={5} value={sweepTwist} onChange={(event) => setSweepTwist(event.target.value)} />
+            <small>°</small>
           </div>}
           {(solidOp === "edge-fillet" || solidOp === "edge-chamfer") && <div className="make-solid-row" aria-label="Edge treatment size">
             <small>{solidOp === "edge-fillet" ? "Radius" : "Distance"}</small>
@@ -1248,13 +1264,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             </>}
           </div>}
           <button className="palette-action primary" disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying) || (solidOp !== "extrude" && solidOp !== "revolve" && solidResult !== "new-body")} onClick={() => {
+            const sweepTwistValue = Number(sweepTwist);
             const advanced = solidOp === "sweep"
-              ? (sweepMode === "path" && sweepPathEntityId !== ""
-                ? { sweepPathEntityId }
-                : { sweepDirectionMm: [Number(sweepDx), Number(sweepDy), Number(sweepDz)] as const })
+              ? {
+                ...(sweepMode === "path" && sweepPathEntityId !== ""
+                  ? { sweepPathEntityId }
+                  : { sweepDirectionMm: [Number(sweepDx), Number(sweepDy), Number(sweepDz)] as const }),
+                ...(Number.isFinite(sweepTwistValue) && sweepTwistValue !== 0 ? { sweepTwistDeg: sweepTwistValue } : {})
+              }
               : solidOp === "loft"
                 ? (loftMode === "two-profile" && selectedProfileIds.length >= 2
-                  ? { loftSecondaryProfileIds: selectedProfileIds.slice(1), loftContinuity }
+                  ? { loftSecondaryProfileIds: selectedProfileIds.slice(1), loftContinuity, ...(loftRailEntityId !== "" ? { loftRailEntityId } : {}) }
                   : { loftTopScale: Number(loftTopScale) })
                 : solidOp === "shell"
                   ? { shellThicknessMm: Number(shellThickness), shellOpenFace }

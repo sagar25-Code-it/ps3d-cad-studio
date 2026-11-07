@@ -100,11 +100,14 @@ export const tangentLoftSweepPathTests: readonly TestCase[] = [
     }
   },
   {
-    name: "two-profile loft refuses profiles with different vertex counts",
+    name: "two-profile loft resamples when one profile has fewer vertices",
     run: () => {
       const triangle: readonly (readonly [number, number])[] = [[0, 0], [5, 0], [2.5, 5]];
       const mesh = tessellateLoftTwoProfiles(SQUARE, triangle, 10, "position", "xy");
-      assert(mesh.positionsMm.length === 0, "mismatched vertex counts yield an empty mesh");
+      // After the resampling refresh (loft-resample-rail-twist push), mismatched profiles are resampled to a common
+      // count instead of being refused. The resulting mesh must therefore be non-empty.
+      assert(mesh.positionsMm.length > 0, "resampling yields a mesh");
+      assert(mesh.indices.length > 0, "indices are present");
     }
   },
   {

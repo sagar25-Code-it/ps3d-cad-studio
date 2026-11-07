@@ -285,7 +285,7 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut"].includes(String(value.operation))) return false;
   if (Object.hasOwn(value, "extent")) {
     // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
@@ -313,6 +313,12 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   }
   if (Object.hasOwn(value, "sweepPathEntityId")) {
     if (value.kind !== "sweep" || typeof value.sweepPathEntityId !== "string" || value.sweepPathEntityId.length === 0 || value.sweepPathEntityId.length > 160) return false;
+  }
+  if (Object.hasOwn(value, "sweepTwistDeg")) {
+    if (value.kind !== "sweep" || typeof value.sweepTwistDeg !== "number" || !Number.isFinite(value.sweepTwistDeg) || Math.abs(value.sweepTwistDeg) > 3600) return false;
+  }
+  if (Object.hasOwn(value, "loftRailEntityId")) {
+    if (value.kind !== "loft" || typeof value.loftRailEntityId !== "string" || value.loftRailEntityId.length === 0 || value.loftRailEntityId.length > 160) return false;
   }
   if (Object.hasOwn(value, "loftTopScale")) {
     if (value.kind !== "loft") return false;

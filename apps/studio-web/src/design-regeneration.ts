@@ -71,6 +71,16 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
       return secondary.ok ? { loftSecondaryProfile: secondary.value.outer } : {};
     })() : {}),
     ...(feature.kind === "loft" && feature.loftContinuity !== undefined ? { loftContinuity: feature.loftContinuity } : {}),
+    ...(feature.kind === "loft" && feature.loftRailEntityId !== undefined ? (() => {
+      const railEntity = sketch.entities.find((entity) => entity.id === feature.loftRailEntityId);
+      if (railEntity === undefined) return {};
+      let samples: readonly (readonly [number, number])[] = [];
+      if (railEntity.kind === "line") samples = [railEntity.start, railEntity.end];
+      else if (railEntity.kind === "arc") samples = sampleArc(railEntity.start, railEntity.mid, railEntity.end);
+      else if (railEntity.kind === "spline") samples = sampleSpline(railEntity.fitPoints);
+      return samples.length >= 2 ? { loftRailSamplesMm: samples } : {};
+    })() : {}),
+    ...(feature.kind === "sweep" && feature.sweepTwistDeg !== undefined ? { sweepTwistDeg: feature.sweepTwistDeg } : {}),
     ...(feature.kind === "shell" && feature.shellThicknessMm !== undefined ? { shellThicknessMm: feature.shellThicknessMm } : {}),
     ...(feature.kind === "shell" && feature.shellOpenFace !== undefined ? { shellOpenFace: feature.shellOpenFace } : {}),
     ...(feature.kind === "draft" && feature.draftAngleDeg !== undefined ? { draftAngleDeg: feature.draftAngleDeg } : {}),

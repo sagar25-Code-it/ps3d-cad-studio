@@ -116,7 +116,7 @@ export function tessellateRevolve(polygonMm: readonly Point2[], degrees: number,
  * bottom ring translated by `directionWorld * distanceMm` so caps are parallel; the ribbon sides stay planar quads.
  * Caller must ensure the direction is not parallel to the sketch plane (the builder refuses that).
  */
-export function tessellateSweep(polygonMm: readonly Point2[], directionWorldMm: readonly [number, number, number], distanceMm: number, plane: TessellatePlane): TessellatedMesh {
+export function tessellateSweep(polygonMm: readonly Point2[], directionWorldMm: readonly [number, number, number], distanceMm: number, plane: TessellatePlane, twistDeg = 0): TessellatedMesh {
   const polygon = sanitizePolygon(polygonMm);
   if (polygon.length < 3) return { positionsMm: [], indices: [] };
   const length = Math.hypot(directionWorldMm[0], directionWorldMm[1], directionWorldMm[2]);
@@ -126,12 +126,18 @@ export function tessellateSweep(polygonMm: readonly Point2[], directionWorldMm: 
   const shift: readonly [number, number, number] = [unit[0] * offset, unit[1] * offset, unit[2] * offset];
   const capTriangles = triangulatePolygon(polygon);
   const count = polygon.length;
-  // Build in sketch-plane local 3D (Z = 0 for bottom, Z = ? — doesn't apply: we translate the TOP in WORLD after rotation).
-  // Because the rotation is applied uniformly to every (x, y, 0) point, we instead rotate the whole set first, then translate
-  // the top ring by the WORLD shift. That keeps caps parallel.
+  // Twist rotates the top ring about the profile's 2D centroid before placement.
+  const centroid = polygonCentroid(polygon);
+  const twistRad = (Number.isFinite(twistDeg) ? twistDeg : 0) * Math.PI / 180;
+  const sinT = Math.sin(twistRad);
+  const cosT = Math.cos(twistRad);
   const localPositions: number[] = [];
   for (const [x, y] of polygon) localPositions.push(x, y, 0);
-  for (const [x, y] of polygon) localPositions.push(x, y, 0);
+  for (const [x, y] of polygon) {
+    const dx = x - centroid[0];
+    const dy = y - centroid[1];
+    localPositions.push(centroid[0] + dx * cosT - dy * sinT, centroid[1] + dx * sinT + dy * cosT, 0);
+  }
   const rotated = rotatePositions(localPositions, PLANE_ROTATION_DEG[plane]).slice();
   // Translate the top half by the world shift.
   const positions = [...rotated];
@@ -186,20 +192,30 @@ export function tessellateLoft(polygonMm: readonly Point2[], topScale: number, t
  * For a line path this reproduces a slanted prism; for an arc or spline path it traces the curvature. The caller
  * samples the path entity into at least two points; three or more give a visible curve.
  */
-export function tessellateSweepPath(polygonMm: readonly Point2[], pathSamples: readonly Point2[], heightMm: number, plane: TessellatePlane): TessellatedMesh {
+export function tessellateSweepPath(polygonMm: readonly Point2[], pathSamples: readonly Point2[], heightMm: number, plane: TessellatePlane, twistDeg = 0): TessellatedMesh {
   const polygon = sanitizePolygon(polygonMm);
   if (polygon.length < 3 || pathSamples.length < 2) return { positionsMm: [], indices: [] };
   if (!Number.isFinite(heightMm) || heightMm === 0) return { positionsMm: [], indices: [] };
   const height = Math.abs(heightMm);
   const start = pathSamples[0]!;
   const count = polygon.length;
+  const centroid = polygonCentroid(polygon);
+  const twistRad = (Number.isFinite(twistDeg) ? twistDeg : 0) * Math.PI / 180;
   const positions: number[] = [];
   for (let s = 0; s < pathSamples.length; s += 1) {
     const sample = pathSamples[s]!;
     const dx = sample[0] - start[0];
     const dy = sample[1] - start[1];
     const z = height * (s / (pathSamples.length - 1));
-    for (const [px, py] of polygon) positions.push(px + dx, py + dy, z);
+    const t = s / (pathSamples.length - 1);
+    const theta = twistRad * t;
+    const sinT = Math.sin(theta);
+    const cosT = Math.cos(theta);
+    for (const [px, py] of polygon) {
+      const rx = px - centroid[0];
+      const ry = py - centroid[1];
+      positions.push(centroid[0] + rx * cosT - ry * sinT + dx, centroid[1] + rx * sinT + ry * cosT + dy, z);
+    }
   }
   const capTriangles = triangulatePolygon(polygon);
   const indices: number[] = [];
@@ -218,20 +234,109 @@ export function tessellateSweepPath(polygonMm: readonly Point2[], pathSamples: r
 }
 
 /**
+ * Resample an OPEN polyline (an ordered list of points, no implicit closing segment back to the first) into exactly
+ * `targetCount` points at equal arc-length intervals. The first and last resampled points match the input endpoints.
+ * Used by loft rails so one rail sample lines up with each ring height.
+ */
+export function resamplePath(path: readonly Point2[], targetCount: number): readonly Point2[] {
+  if (path.length === 0 || targetCount < 2) return path;
+  if (path.length === 1) return Array.from({ length: targetCount }, () => path[0]!);
+  const lengths: number[] = [];
+  let total = 0;
+  for (let i = 0; i < path.length - 1; i += 1) {
+    const a = path[i]!;
+    const b = path[i + 1]!;
+    const segment = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    lengths.push(segment);
+    total += segment;
+  }
+  if (total < 1e-9) return Array.from({ length: targetCount }, () => path[0]!);
+  const samples: Point2[] = [];
+  for (let step = 0; step < targetCount; step += 1) {
+    const targetDistance = (total * step) / (targetCount - 1);
+    if (step === targetCount - 1) { samples.push(path[path.length - 1]!); continue; }
+    let cumulative = 0;
+    for (let probe = 0; probe < lengths.length; probe += 1) {
+      const segmentLength = lengths[probe]!;
+      if (cumulative + segmentLength >= targetDistance - 1e-9) {
+        const a = path[probe]!;
+        const b = path[probe + 1]!;
+        const t = segmentLength < 1e-9 ? 0 : (targetDistance - cumulative) / segmentLength;
+        samples.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+        break;
+      }
+      cumulative += segmentLength;
+    }
+  }
+  return samples;
+}
+
+/**
+ * Resample a closed polygon into exactly `targetCount` points at equal arc-length intervals, keeping the polygon's
+ * centroid stable. The returned array starts at the resampled position closest to the original polygon's first
+ * vertex, so two resampled polygons that share orientation also share their start alignment. Used by the two-profile
+ * loft to accept profiles with different vertex counts, and by the rail path to produce one centroid per ring.
+ */
+export function resampleClosedPolygon(polygon: readonly Point2[], targetCount: number): readonly Point2[] {
+  const clean = sanitizePolygon(polygon);
+  if (clean.length < 2 || targetCount < 3) return clean;
+  const lengths: number[] = [];
+  let total = 0;
+  for (let i = 0; i < clean.length; i += 1) {
+    const a = clean[i]!;
+    const b = clean[(i + 1) % clean.length]!;
+    const segment = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    lengths.push(segment);
+    total += segment;
+  }
+  if (total < 1e-9) return clean;
+  const resampled: Point2[] = [];
+  let segmentIndex = 0;
+  let distanceIntoSegment = 0;
+  let segmentLength = lengths[0]!;
+  for (let step = 0; step < targetCount; step += 1) {
+    const targetDistance = (total * step) / targetCount;
+    // Advance until the segment contains targetDistance.
+    let cumulative = 0;
+    for (let probe = 0; probe < lengths.length; probe += 1) {
+      if (cumulative + lengths[probe]! >= targetDistance - 1e-9) {
+        segmentIndex = probe;
+        distanceIntoSegment = targetDistance - cumulative;
+        segmentLength = lengths[probe]!;
+        break;
+      }
+      cumulative += lengths[probe]!;
+    }
+    const a = clean[segmentIndex]!;
+    const b = clean[(segmentIndex + 1) % clean.length]!;
+    const t = segmentLength < 1e-9 ? 0 : distanceIntoSegment / segmentLength;
+    resampled.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+  }
+  return resampled;
+}
+
+/**
  * Loft between two explicit profiles on parallel sketch planes. Both polygons must have the same vertex count; the
  * caller is responsible for resampling. `continuity` selects the shape of the ribbon: "position" is a straight linear
  * interpolation between the two rings (G0), "tangent" eases with smoothstep `3t²−2t³` so the ribbon meets each cap
  * tangentially (G1), and "curvature" eases with smootherstep `6t⁵−15t⁴+10t³` so the second derivative is also zero at
  * each cap (G2). The Z coordinate stays linear with t so the caps keep their intended heights.
  */
-export function tessellateLoftTwoProfiles(bottom: readonly Point2[], top: readonly Point2[], heightMm: number, continuity: "position" | "tangent" | "curvature", plane: TessellatePlane, rings = 12): TessellatedMesh {
-  const bottomClean = sanitizePolygon(bottom);
-  const topClean = sanitizePolygon(top);
+export function tessellateLoftTwoProfiles(bottom: readonly Point2[], top: readonly Point2[], heightMm: number, continuity: "position" | "tangent" | "curvature", plane: TessellatePlane, rings = 12, railSamples?: readonly Point2[]): TessellatedMesh {
+  let bottomClean = sanitizePolygon(bottom);
+  let topClean = sanitizePolygon(top);
   if (bottomClean.length < 3 || topClean.length < 3) return { positionsMm: [], indices: [] };
-  if (bottomClean.length !== topClean.length) return { positionsMm: [], indices: [] };
   if (!Number.isFinite(heightMm) || heightMm === 0) return { positionsMm: [], indices: [] };
+  // Resample to a common count when they differ, so mismatched polygons (rectangle ↔ circle, hexagon ↔ triangle) still loft.
+  if (bottomClean.length !== topClean.length) {
+    const targetCount = Math.max(bottomClean.length, topClean.length, 12);
+    bottomClean = resampleClosedPolygon(bottomClean, targetCount);
+    topClean = resampleClosedPolygon(topClean, targetCount);
+    if (bottomClean.length !== topClean.length) return { positionsMm: [], indices: [] };
+  }
   const height = Math.abs(heightMm);
-  const sampleCount = continuity === "position" ? 2 : Math.max(2, rings);
+  // A rail forces at least `rings` ring samples so the bend is visible even in the position mode.
+  const sampleCount = (continuity === "position" && railSamples === undefined) ? 2 : Math.max(2, rings);
   const count = bottomClean.length;
   const positions: number[] = [];
   const ease = continuity === "position"
@@ -239,14 +344,27 @@ export function tessellateLoftTwoProfiles(bottom: readonly Point2[], top: readon
     : continuity === "tangent"
       ? (t: number): number => t * t * (3 - 2 * t)
       : (t: number): number => t * t * t * (t * (t * 6 - 15) + 10);
+  // The straight-line centroid interpolation is what the rail bends away from.
+  const bottomCentroid = polygonCentroid(bottomClean);
+  const topCentroid = polygonCentroid(topClean);
+  // Resample the rail to one sample per ring so offsets line up with the ring heights exactly.
+  const rail = railSamples === undefined ? undefined : resamplePath(railSamples, sampleCount);
   for (let r = 0; r < sampleCount; r += 1) {
-    const linear = r / (sampleCount - 1);
+    const linear = sampleCount === 1 ? 0 : r / (sampleCount - 1);
     const s = ease(linear);
     const z = height * linear;
+    let offsetX = 0;
+    let offsetY = 0;
+    if (rail !== undefined) {
+      const expectedX = bottomCentroid[0] + (topCentroid[0] - bottomCentroid[0]) * linear;
+      const expectedY = bottomCentroid[1] + (topCentroid[1] - bottomCentroid[1]) * linear;
+      offsetX = rail[r]![0] - expectedX;
+      offsetY = rail[r]![1] - expectedY;
+    }
     for (let i = 0; i < count; i += 1) {
       const a = bottomClean[i]!;
       const b = topClean[i]!;
-      positions.push(a[0] + (b[0] - a[0]) * s, a[1] + (b[1] - a[1]) * s, z);
+      positions.push(a[0] + (b[0] - a[0]) * s + offsetX, a[1] + (b[1] - a[1]) * s + offsetY, z);
     }
   }
   const capTrianglesBottom = triangulatePolygon(bottomClean);

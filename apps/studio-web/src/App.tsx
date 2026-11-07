@@ -1753,9 +1753,11 @@ export function App(): React.JSX.Element {
     advancedParams?: {
       readonly sweepDirectionMm?: readonly [number, number, number];
       readonly sweepPathEntityId?: string;
+      readonly sweepTwistDeg?: number;
       readonly loftTopScale?: number;
       readonly loftSecondaryProfileIds?: readonly string[];
       readonly loftContinuity?: "position" | "tangent" | "curvature";
+      readonly loftRailEntityId?: string;
       readonly shellThicknessMm?: number;
       readonly shellOpenFace?: "top" | "bottom" | "none";
       readonly draftAngleDeg?: number;
@@ -1827,6 +1829,8 @@ export function App(): React.JSX.Element {
       ...(target?.extent === "through-all" && operation === "extrude" && target.mode === "cut" ? { extent: "through-all" as const } : {}),
       ...(operation === "sweep" && advancedParams?.sweepDirectionMm !== undefined && (advancedParams.sweepPathEntityId === undefined || advancedParams.sweepPathEntityId === "") ? { sweepDirectionMm: advancedParams.sweepDirectionMm } : {}),
       ...(operation === "sweep" && advancedParams?.sweepPathEntityId !== undefined && advancedParams.sweepPathEntityId !== "" ? { sweepPathEntityId: advancedParams.sweepPathEntityId } : {}),
+      ...(operation === "sweep" && advancedParams?.sweepTwistDeg !== undefined ? { sweepTwistDeg: advancedParams.sweepTwistDeg } : {}),
+      ...(operation === "loft" && advancedParams?.loftRailEntityId !== undefined && advancedParams.loftRailEntityId !== "" ? { loftRailEntityId: advancedParams.loftRailEntityId } : {}),
       ...(operation === "loft" && advancedParams?.loftTopScale !== undefined ? { loftTopScale: advancedParams.loftTopScale } : {}),
       ...(operation === "loft" && advancedParams?.loftSecondaryProfileIds !== undefined && advancedParams.loftSecondaryProfileIds.length > 0 ? { loftSecondaryProfileIds: advancedParams.loftSecondaryProfileIds } : {}),
       ...(operation === "loft" && advancedParams?.loftContinuity !== undefined ? { loftContinuity: advancedParams.loftContinuity } : {}),

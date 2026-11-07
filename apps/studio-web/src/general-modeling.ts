@@ -94,12 +94,16 @@ export interface CreateGeneralSolidRequest {
   readonly sweepDirectionMm?: readonly [number, number, number];
   /** Sweep only: already-sampled sketch-plane path samples in local 2D mm. Taking precedence over `sweepDirectionMm` when both are present. */
   readonly sweepPathSamplesMm?: readonly (readonly [number, number])[];
+  /** Sweep only: twist in degrees across the whole sweep. */
+  readonly sweepTwistDeg?: number;
   /** Loft only: top scale factor (>0). */
   readonly loftTopScale?: number;
   /** Loft only: an explicit top profile (same sketch). When set, `loftTopScale` is ignored and two-profile loft is used. */
   readonly loftSecondaryProfile?: SketchProfile;
   /** Loft only: ribbon continuity. */
   readonly loftContinuity?: "position" | "tangent" | "curvature";
+  /** Loft only: already-sampled rail path in local 2D mm (one sample per ring). */
+  readonly loftRailSamplesMm?: readonly (readonly [number, number])[];
   /** Shell only: wall thickness in mm (the inset the inner cavity is offset by). */
   readonly shellThicknessMm?: number;
   /** Shell only: which cap face to leave open. */
@@ -209,8 +213,9 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     return createGeneralSolidBody({ ...request, operation: "extrude" });
   }
   if (request.operation === "sweep") {
+    const twist = request.sweepTwistDeg ?? 0;
     if (request.sweepPathSamplesMm !== undefined && request.sweepPathSamplesMm.length >= 2) {
-      const mesh = tessellateSweepPath(polygonMm, request.sweepPathSamplesMm, request.valueMm, request.plane);
+      const mesh = tessellateSweepPath(polygonMm, request.sweepPathSamplesMm, request.valueMm, request.plane, twist);
       if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be swept along the path." };
       return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
     }
@@ -220,7 +225,7 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     const normal = planeNormal(request.plane);
     const dotWithNormal = Math.abs(request.sweepDirectionMm[0] * normal[0] + request.sweepDirectionMm[1] * normal[1] + request.sweepDirectionMm[2] * normal[2]) / length;
     if (dotWithNormal < 1e-6) return { ok: false, message: "The sweep direction is parallel to the sketch plane, which would flatten the solid. Give it a component off the plane." };
-    const mesh = tessellateSweep(polygonMm, request.sweepDirectionMm, request.valueMm, request.plane);
+    const mesh = tessellateSweep(polygonMm, request.sweepDirectionMm, request.valueMm, request.plane, twist);
     if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be converted into a swept solid." };
     return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
@@ -228,9 +233,8 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     if (request.loftSecondaryProfile !== undefined) {
       const topPolygon = profilePolygonMm(request.loftSecondaryProfile.boundary);
       if (topPolygon.length < 3) return { ok: false, message: "The top profile does not form a closed polygon." };
-      if (topPolygon.length !== polygonMm.length) return { ok: false, message: "Two-profile loft needs both profiles to have the same number of boundary points (resampling isn't supported in this slice). Pick two profiles of the same primitive kind (two rectangles, two circles, two polygons with matching sides)." };
       const continuity = request.loftContinuity ?? "position";
-      const mesh = tessellateLoftTwoProfiles(polygonMm, topPolygon, request.valueMm, continuity, request.plane);
+      const mesh = tessellateLoftTwoProfiles(polygonMm, topPolygon, request.valueMm, continuity, request.plane, 12, request.loftRailSamplesMm);
       if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profiles could not be lofted. Check both have at least three points and a non-zero height." };
       return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
     }

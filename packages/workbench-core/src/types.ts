@@ -1015,6 +1015,17 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   readonly loftSecondaryProfileIds?: readonly string[];
   /** Loft only: how the ribbon meets the caps — G0 straight, G1 tangent-smooth, G2 curvature-smooth. */
   readonly loftContinuity?: "position" | "tangent" | "curvature";
+  /**
+   * Loft only: a sketch entity (line / arc / spline) from the same sketch that bends the loft's ring centroids
+   * away from the straight-line interpolation between the base and top centroids. The first rail sample lines up
+   * with the base ring, the last with the top ring. Only valid on a two-profile loft.
+   */
+  readonly loftRailEntityId?: string;
+  /**
+   * Sweep only: total twist in degrees applied about the profile's 2D centroid across the whole sweep. At fraction
+   * t along the sweep each ring is rotated by `t * twistDeg` before placement; 0 keeps the un-twisted behaviour.
+   */
+  readonly sweepTwistDeg?: number;
   /** Shell only: which cap face to leave open. */
   readonly shellOpenFace?: "top" | "bottom" | "none";
   /** Shell only: the wall thickness in mm (the inset the inner cavity is offset by). */
