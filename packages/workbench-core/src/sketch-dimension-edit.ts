@@ -2,7 +2,7 @@ import { constraintFit } from "./constraint-fit.js";
 import { anchorsForDimension, preserveForConstraint } from "./sketch-anchors.js";
 import { arcShape, dimensionTargetValue, ellipsePerimeterMm, measureDimensionConstraint } from "./sketch-measure.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
-import { entityKindOf } from "./sketch-translate.js";
+import { describeConstraint, entityKindOf, entityNames } from "./sketch-translate.js";
 import type { SketchDimensionName, SketchEntity, SketchPointRef, WorkbenchOperation, WorkbenchProject, WorkbenchResult, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 import { isSketchDatumEntityId, SKETCH_RELATIVE_DISTANCE_NAMES } from "./types.js";
 import { failure, WORKBENCH_LIMITS } from "./validation.js";
@@ -38,8 +38,11 @@ export function dimensionNameOf(constraint: WorkbenchSketchConstraint, firstKind
   }
 }
 
-function solveFailure(report: Extract<LiveSketchSolveReport, { readonly ok: false }>): Applied {
-  return failure("CONSTRAINT_CONFLICT", report.message, report.relatedIds, report.recovery);
+/** A refused edit names the dimension that was just entered, which the solver does not know is the new one, then what it cannot be met with. */
+function solveFailure(report: Extract<LiveSketchSolveReport, { readonly ok: false }>, sketch?: WorkbenchSketch, dimension?: WorkbenchSketchConstraint): Applied {
+  if (sketch === undefined || dimension === undefined || report.relatedIds.includes(dimension.id)) return failure("CONSTRAINT_CONFLICT", report.message, report.relatedIds, report.recovery);
+  const entered = describeConstraint(dimension, entityNames(sketch));
+  return failure("CONSTRAINT_CONFLICT", `${entered} cannot be met together with the sketch’s other relations. ${report.message}`, [...report.relatedIds, dimension.id], report.recovery);
 }
 
 export function solveSummary(report: Extract<LiveSketchSolveReport, { readonly ok: true }>): string {
@@ -127,7 +130,7 @@ export function redriveDimension(sketch: WorkbenchSketch, constraint: WorkbenchS
   // Once the curve has its new size by direct resize it is the reference and its neighbours follow; otherwise only part of it is held.
   const anchors = resized !== undefined && target !== undefined ? [{ entityId: target.id, ref: "self" as const, priority: 2 as const }] : anchorsForDimension(constraint, entityMap, sketch.constraints);
   const solved = solveLiveSketch(baseSketch, real, { anchors, preserve: preserveForConstraint(constraint, entityMap), keepChains: false });
-  if (!solved.ok) return { ok: false, applied: solveFailure(solved) as Extract<Applied, { readonly ok: false }> };
+  if (!solved.ok) return { ok: false, applied: solveFailure(solved, sketch, constraint) as Extract<Applied, { readonly ok: false }> };
   const nextSketch: WorkbenchSketch = { ...baseSketch, entities: solved.entities };
   const measured = measureDimensionConstraint(nextSketch, constraint);
   if (measured !== undefined || resized === undefined) {
