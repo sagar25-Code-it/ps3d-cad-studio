@@ -1,6 +1,8 @@
 import { analyzeWorkbenchSketch } from "../packages/workbench-sketch/src/index.js";
 import { buildEdgePolygon, buildPolygon, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES } from "../packages/workbench-sketch/src/shapes.js";
-import { buildPolygonByMode, parsePolygonMode } from "../packages/workbench-sketch/src/polygon-modes.js";
+import { buildPolygonByMode, parsePolygonMode, polygonCentreRelations } from "../packages/workbench-sketch/src/polygon-modes.js";
+import { inferSketchPoint } from "../packages/workbench-sketch/src/inference.js";
+import { applyWorkbenchOperation } from "../packages/workbench-core/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { dimension, dragAndCommit, projectWith, shapeIds, shapeProblem } from "./sketch-shape-kit.js";
 
@@ -119,6 +121,21 @@ export const sketchRegularPolygonTests: readonly TestCase[] = [
       const moved = dragged.project.sketch.entities.find((entity) => entity.id === second.id);
       assert(moved?.kind === "line", "the side is still there");
       assert(Math.hypot(moved.start[0] - second.start[0], moved.start[1] - second.start[1]) > 0.5, "the corner moved");
+    }
+  },
+  {
+    name: "Curve tools T03/T11: a polygon whose centre is snapped to the origin is located there, and keeps 2 degrees of freedom (size and turn)",
+    run: () => {
+      const shape = build(6, "inscribed", [0, 0], [10, 0]);
+      const base = projectWith({ entities: [], constraints: [] });
+      const snapped = inferSketchPoint([0.2, 0.1], base.sketch, { toleranceMm: 1 });
+      equal(snapped.primary?.kind, "origin", "the centre click snaps to the origin");
+      const relations = polygonCentreRelations(shape, "inscribed", [{ point: snapped.point, ...(snapped.primary === undefined ? {} : { primary: snapped.primary }), guides: snapped.guides }], base.sketch, (() => { let n = 0; return () => `constraint:centre-${(n += 1)}`; })());
+      equal(relations.map((relation) => `${relation.kind}:${relation.entityIds[0]}:${relation.points?.join("/")}`).join(","), `coincident:sketch:origin:self/center`, "the guide circle's centre is on the origin");
+      const added = applyWorkbenchOperation(base, { kind: "apply-sketch-edit", operationId: "operation:poly-centre", expectedRevision: base.revision, removeEntityIds: [], updateEntities: [], addEntities: shape.entities, addConstraints: [...shape.constraints, ...relations], label: "Polygon" });
+      assert(added.ok, `the polygon and its centre relation apply: ${added.ok ? "" : added.diagnostics[0]?.message}`);
+      equal(analyzeWorkbenchSketch(added.value.project.sketch).degreesOfFreedom, 2, "size and turn are left");
+      equal(polygonCentreRelations(shape, "edge", [{ point: [0, 0], primary: { kind: "origin", point: [0, 0], distanceMm: 0 } }], base.sketch, () => "constraint:x").length, 0, "edge mode has no centre click");
     }
   },
   {

@@ -102,13 +102,18 @@ export const sketchCreationFixTests: readonly TestCase[] = [
     }
   },
   {
-    name: "Sketch creation A1: a rectangle that starts on the origin closes with its first corner joined and the last side Vertical (4 degrees of freedom)",
+    name: "Sketch creation A1: a rectangle that starts on the origin closes with its first corner joined, the origin and the Y axis holding the last side upright (2 degrees of freedom, nothing redundant)",
     run: () => {
       const { project, lineIds } = drawLineChain([[0, 0], [30, 0], [30, 20], [0, 20], [0, 0]]);
       const closing = project.sketch.constraints.filter((constraint) => constraint.entityIds.includes(lineIds[3]!));
-      assert(closing.some((constraint) => constraint.kind === "vertical"), "the closing side is Vertical");
+      // Both ends of the closing side are held on the Y axis (the first corner on the origin, the third corner on the axis), which already makes it
+      // vertical: a Vertical relation as well would be redundant, so none is added.
+      assert(!closing.some((constraint) => constraint.kind === "vertical"), "no redundant Vertical on the closing side");
+      equal(analyzeWorkbenchSketch(project.sketch).redundant.length, 0, "and nothing is redundant");
       assert(closing.some((constraint) => constraint.kind === "coincident" && constraint.entityIds.includes(lineIds[0]!)), "and its end is joined to the first side");
-      equal(analyzeWorkbenchSketch(project.sketch).degreesOfFreedom, 4, "4 degrees of freedom even from the origin");
+      // The first corner is on the origin and now says so (Coincident with the sketch origin), so only the width and height are left.
+      assert(project.sketch.constraints.some((constraint) => constraint.kind === "coincident" && constraint.entityIds[0] === "sketch:origin"), "the first corner is joined to the origin");
+      equal(analyzeWorkbenchSketch(project.sketch).degreesOfFreedom, 2, "width and height are all that is left");
     }
   },
   {

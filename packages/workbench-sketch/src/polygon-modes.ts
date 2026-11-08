@@ -1,4 +1,5 @@
-import type { Vec2, WorkbenchResult } from "../../workbench-core/src/index.js";
+import type { Vec2, WorkbenchResult, WorkbenchSketch, WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
+import { autoConstraintsFor, type PlacedPointInference } from "./auto-constraints.js";
 import { POLYGON_MODES, buildEdgePolygon, buildPolygon, type PolygonMode } from "./regular-polygon.js";
 import type { ShapeIds, SketchShape } from "./shapes.js";
 
@@ -18,6 +19,17 @@ export const POLYGON_MODE_PROMPTS: Readonly<Record<PolygonMode, readonly [string
 
 export function parsePolygonMode(text: string): PolygonMode {
   return (POLYGON_MODES as readonly string[]).includes(text) ? (text as PolygonMode) : "inscribed";
+}
+
+/**
+ * The relations a regular polygon's centre click earns: placed on the origin, an end, a centre or a curve, the guide circle's centre is
+ * joined to it, which locates the whole polygon. Edge mode has no centre click, so it earns none.
+ */
+export function polygonCentreRelations(shape: SketchShape, mode: PolygonMode, placed: readonly PlacedPointInference[], sketch: WorkbenchSketch, newId: () => string): readonly WorkbenchSketchConstraint[] {
+  const guide = shape.entities.find((entity) => entity.kind === "circle" && entity.construction);
+  const first = placed[0];
+  if (mode === "edge" || guide === undefined || first === undefined) return [];
+  return autoConstraintsFor({ tool: "circle", entity: guide, placed: [first], sketch, newId });
 }
 
 /** Builds the polygon the palette's mode asks for from the two clicked points. */

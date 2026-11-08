@@ -15,6 +15,7 @@ import {
   type WorkbenchResult,
   type WorkbenchSketch
 } from "../../workbench-core/src/index.js";
+import { tidy, tidyPoint } from "./clean-numbers.js";
 import { directedSweep, type SweepDirection } from "./arc-sweep.js";
 import { sketchEntityLimitProblem, sketchPointsProblem } from "./entity-limits.js";
 import { CURVE_TOOL_LABELS, curveToolRequiredPoints, isFixedCurveTool, type CurveToolId, type FixedCurveToolId } from "./curve-tools.js";
@@ -304,7 +305,7 @@ function buildRawSketchEntity(tool: Exclude<SketchTool, "select">, points: reado
     return { ok: true, value: { id, kind: "rectangle", center, widthMm, heightMm, rotationDeg: Math.atan2(edgeY, edgeX) * 180 / Math.PI, construction: false } };
   }
   if (tool === "circle" && points.length === 2) {
-    const radiusMm = distance(points[0]!, points[1]!);
+    const radiusMm = tidy(distance(points[0]!, points[1]!));
     if (radiusMm < 0.01) return degenerate("A circle radius must be at least 0.01 mm.");
     return { ok: true, value: { id, kind: "circle", center: points[0]!, radiusMm, construction: false } };
   }
@@ -366,7 +367,7 @@ function buildRawSketchEntity(tool: Exclude<SketchTool, "select">, points: reado
     const endDy = endClick[1] - center[1];
     const endMag = Math.hypot(endDx, endDy);
     if (endMag < 0.01) return degenerate("The arc end must not coincide with the centre.");
-    const end: Vec2 = [center[0] + (endDx / endMag) * radiusMm, center[1] + (endDy / endMag) * radiusMm];
+    const end: Vec2 = tidyPoint([center[0] + (endDx / endMag) * radiusMm, center[1] + (endDy / endMag) * radiusMm]);
     const startAngle = Math.atan2(startDy, startDx);
     const endAngle = Math.atan2(end[1] - center[1], end[0] - center[0]);
     // Without a pointer path the arc takes the shorter way; with one it runs the way the pointer went, so it can pass a half turn.
@@ -380,7 +381,7 @@ function buildRawSketchEntity(tool: Exclude<SketchTool, "select">, points: reado
     }
     if (Math.abs(sweep) < 1e-6) return degenerate("The centerpoint arc has zero sweep: the end must sit away from the start direction.");
     const midAngle = startAngle + sweep / 2;
-    const mid: Vec2 = [center[0] + Math.cos(midAngle) * radiusMm, center[1] + Math.sin(midAngle) * radiusMm];
+    const mid: Vec2 = tidyPoint([center[0] + Math.cos(midAngle) * radiusMm, center[1] + Math.sin(midAngle) * radiusMm]);
     return { ok: true, value: { id, kind: "arc", start, mid, end, construction: false } };
   }
   if (tool === "arc-tangent" && points.length === 3) {
@@ -410,7 +411,7 @@ function buildRawSketchEntity(tool: Exclude<SketchTool, "select">, points: reado
     while (sweep <= 0) sweep += 2 * Math.PI;
     if (sweep < 1e-6 || sweep >= 2 * Math.PI - 1e-6) return degenerate("The tangent arc sweep is zero or a full turn.");
     const midAngle = startAngle + direction * sweep / 2;
-    const mid: Vec2 = [center[0] + Math.cos(midAngle) * radiusMm, center[1] + Math.sin(midAngle) * radiusMm];
+    const mid: Vec2 = tidyPoint([center[0] + Math.cos(midAngle) * radiusMm, center[1] + Math.sin(midAngle) * radiusMm]);
     return { ok: true, value: { id, kind: "arc", start: anchor, mid, end, construction: false } };
   }
   if (tool === "point" && points.length === 1) {

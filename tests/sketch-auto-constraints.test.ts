@@ -98,18 +98,22 @@ export const sketchAutoConstraintTests: readonly TestCase[] = [
       equal(perpendicular.constraints[0]?.entityIds.join(","), "entity:new,entity:wall", "between the new line and the wall");
 
       const ring = sketchOf([circle("entity:ring", [0, 0], 10)]);
-      const tangent = draw(ring, [20, 0], [5.2, 8.7]);
+      const tangent = draw(ring, [20, 4], [3.1, 9.5]);
       equal(kinds(tangent.constraints), "tangent", "ending at the tangent point of a circle");
     }
   },
   {
-    name: "points the solver cannot move, and hints that are not relations, produce no constraints",
+    name: "arc ends and rectangle corners are joined now that the solver moves them, and hints that are not relations produce no constraints",
     run: () => {
       const arc: SketchEntity = { id: "entity:arc", kind: "arc", start: [10, 0], mid: [7.07, 7.07], end: [0, 10], construction: false };
       const rect: SketchEntity = { id: "entity:rect", kind: "rectangle", center: [60, 60], widthMm: 20, heightMm: 10, rotationDeg: 0, construction: false };
       const sketch = sketchOf([arc, rect]);
-      equal(kinds(draw(sketch, [10, 0], [30, 30]).constraints), "", "an arc end is recorded nowhere");
-      equal(kinds(draw(sketch, [50, 55], [30, 30]).constraints), "", "a rectangle corner is recorded nowhere");
+      const onArcEnd = draw(sketch, [10, 0], [30, 30]).constraints;
+      equal(kinds(onArcEnd), "coincident", "a line starting on an arc end is joined to it");
+      equal(onArcEnd[0]?.points?.join(","), "start,start", "the arc's start meets the new line's start");
+      const onCorner = draw(sketch, [50, 55], [30, 30]).constraints;
+      equal(kinds(onCorner), "coincident", "a line starting on a rectangle corner is joined to it");
+      equal(onCorner[0]?.points?.join(","), "corner-0,start", "the rectangle's lower left corner meets the new line's start");
       equal(kinds(draw(sketchOf([]), [5, 5], [40, 25.2], 0.5).constraints), "", "empty canvas: nothing to relate to");
     }
   },
@@ -119,7 +123,7 @@ export const sketchAutoConstraintTests: readonly TestCase[] = [
       const base = createWorkbenchProject("project:test-auto-apply");
       const project: WorkbenchProject = { ...base, sketch: { ...base.sketch, entities: [line("entity:a", [0, 0], [10, 0])], constraints: [] } };
       const { entity, constraints } = draw(project.sketch, [10.2, 0.2], [20, 0.3]);
-      equal(kinds(constraints), "coincident,horizontal".split(",").sort().join(","), "the new line joins A and is level");
+      equal(kinds(constraints), "coincident,collinear", "the new line joins A and continues it (collinear, which also keeps it level with A)");
       const applied = applyWorkbenchOperation(project, { kind: "apply-sketch-edit", operationId: "operation:test-auto-line", expectedRevision: 0, removeEntityIds: [], updateEntities: [], addEntities: [entity], addConstraints: constraints, label: "Added a line" });
       assert(applied.ok, `the shape and its relations apply in one edit: ${applied.ok ? "" : applied.diagnostics[0]?.message ?? ""}`);
       equal(applied.value.project.sketch.constraints.length, constraints.length, "the relations are recorded");

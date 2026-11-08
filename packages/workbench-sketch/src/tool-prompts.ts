@@ -18,7 +18,7 @@ const OLDER_PROMPTS: Readonly<Partial<Record<SketchTool, readonly string[]>>> = 
   arc: ["the start of the arc", "a point on the arc", "the end of the arc"],
   "arc-center": ["the centre", "the start of the arc (sets the radius)", "the end of the arc (sets the sweep)"],
   "arc-tangent": ["the start of the arc (usually the end of a curve)", "a point that gives the tangent direction", "the end of the arc"],
-  polygon: ["the centre", "a corner (sets the size and the turn)"],
+  polygon: ["the centre (Edge mode: one end of the first side)", "a corner (Circumscribed: the middle of a side; Edge: the other end of the side) - it sets the size and the turn"],
   slot: ["the first end centre", "the other end centre", "a point that gives the half-width"],
   "slot-straight": ["the first outer end", "the other outer end", "a point that gives the half-width"],
   spline: ["the first fit point", "the next fit point", "the next fit point (click the last point again or press Enter to finish)"],

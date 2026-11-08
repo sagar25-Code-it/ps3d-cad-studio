@@ -1,4 +1,5 @@
 import type { Vec2 } from "../../workbench-core/src/index.js";
+import type { ArcSweepTrack } from "./arc-sweep.js";
 import type { InferenceGuide } from "./inference.js";
 import type { SketchTool } from "./index.js";
 
@@ -175,8 +176,12 @@ function signedSweepDeg(center: Vec2, from: Vec2, to: Vec2): number {
   return (sweep * 180) / Math.PI;
 }
 
-/** The field values the cursor currently implies; these are what the inputs display until the user types. */
-export function measureFromCursor(tool: SketchTool, placed: readonly Vec2[], cursor: Vec2): DynamicValues {
+/**
+ * The field values the cursor currently implies; these are what the inputs display until the user types.
+ * A centerpoint arc's sweep follows the pointer's path when its `sweepTrack` is given (the canvas keeps one), so the field reads 270 while the
+ * preview arc runs 270 degrees instead of the short way round (-90); without a track it is the shortest signed sweep.
+ */
+export function measureFromCursor(tool: SketchTool, placed: readonly Vec2[], cursor: Vec2, sweepTrack?: ArcSweepTrack): DynamicValues {
   const mode = modeFor(tool, placed.length);
   if (mode === undefined) return {};
   switch (mode.kind) {
@@ -196,7 +201,10 @@ export function measureFromCursor(tool: SketchTool, placed: readonly Vec2[], cur
       const scale = mode.centred ? 2 : 1;
       return { width: Math.abs(cursor[0] - first[0]) * scale, height: Math.abs(cursor[1] - first[1]) * scale };
     }
-    case "sweep": return { sweep: signedSweepDeg(placed[0]!, placed[1]!, cursor) };
+    case "sweep": {
+      if (sweepTrack !== undefined && Math.abs(sweepTrack.sweepRad) > 1e-9) return { sweep: cleanNumber((sweepTrack.sweepRad * 180) / Math.PI) };
+      return { sweep: signedSweepDeg(placed[0]!, placed[1]!, cursor) };
+    }
     case "circumradius": {
       const circle = circumcircleOf(placed[0]!, placed[1]!, cursor);
       return circle === undefined ? {} : { radius: circle.radius };

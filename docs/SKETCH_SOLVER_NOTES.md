@@ -131,7 +131,9 @@ The core result (`SketchSolveResult.dof`) carries the same data: `total`, `byEnt
 The shapes can now emit relations that make the whole shape edit and drag:
 
 - **Rounded rectangle and slot:** join each line end to the arc end beside it (`coincident` with `points: ["end", "start"]` between a line and an arc), keep the `tangent` pairs, and the equal radii. Editing one side then moves the arc ends with it and the profile stays closed.
-- **Polygon:** unchanged (coincident joints plus `equal` sides).
+  (Done in `shapes.ts` / `basic-curve-shapes.ts` through `joinRing`: slot, rounded rectangle and arc slot all carry the joints.)
+- **Regular polygon** (`regular-polygon.ts`): n lines joined end to end, a construction circle, every corner `coincident` with the circle's `curve`, every side `equal` to the first. Four degrees of freedom (centre, size, turn), three once the one size dimension is set; the shape also returns `sizeDimension` for it: a `radius` on the circle (inscribed, the default), a `point-line` distance from the circle's `center` to the first side (circumscribed, the apothem) or a `length` of the first side (edge mode). Editing the length of any side scales the polygon about its centre (`anchorsAfterResize` in `sketch-anchors.ts`).
+- **Joining a rectangle corner or an arc end:** the follower is carried by sliding the whole curve (only its centre is free), so a join never stretches, turns or re-radii it.
 - **Locate a shape:** `coincident` with `sketch:origin`, or `distance` dimensions with `horizontal` / `vertical` from `sketch:origin`, instead of fixing a whole curve.
 - **A rectangle drawn as lines:** four `coincident` joints, `horizontal` / `vertical` on the sides, and `lengthDim`s; with a corner on the origin it is fully constrained (0 degrees of freedom).
 - **A hole in a plate:** `coincident` between the hole's `center` and the plate's `center` (a rectangle entity), plus a radius or diameter.

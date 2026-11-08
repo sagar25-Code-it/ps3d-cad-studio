@@ -1,5 +1,5 @@
 import type { Vec2, WorkbenchSketch } from "../../workbench-core/src/index.js";
-import { inferSketchPoint, type InferenceGuide, type InferenceResult } from "./inference.js";
+import { DEFAULT_RELATION_HINTS, inferSketchPoint, type InferenceGuide, type InferenceResult } from "./inference.js";
 import type { SketchTool } from "./index.js";
 
 /**
@@ -21,9 +21,13 @@ export interface SnapAssistSettings {
   readonly polarIncrementDeg: number;
   /** Lock the next point to the horizontal or vertical through the last one. */
   readonly ortho: boolean;
+  /** Parallel, perpendicular and collinear hints for the line being drawn, and the relations they earn. */
+  readonly relationHints: boolean;
+  /** The line being drawn also snaps to the length of a nearby line and is made Equal to it. Off by default: see DEFAULT_RELATION_HINTS. */
+  readonly equalHint: boolean;
 }
 
-export const DEFAULT_SNAP_ASSIST: SnapAssistSettings = { snap: true, snapStepMm: undefined, polar: false, polarIncrementDeg: 45, ortho: false };
+export const DEFAULT_SNAP_ASSIST: SnapAssistSettings = { snap: true, snapStepMm: undefined, polar: false, polarIncrementDeg: 45, ortho: false, relationHints: true, equalHint: false };
 
 /** The increments the palette offers. Any value from 1 to 90 degrees is accepted when loaded from settings. */
 export const POLAR_INCREMENT_CHOICES: readonly number[] = [5, 10, 15, 22.5, 30, 45, 90];
@@ -49,7 +53,9 @@ export function snapAssistFromJson(value: unknown): SnapAssistSettings {
     snapStepMm: sanitizeSnapStep(record["snapStepMm"]),
     polar: record["polar"] === true,
     polarIncrementDeg: sanitizePolarIncrement(record["polarIncrementDeg"]),
-    ortho: record["ortho"] === true
+    ortho: record["ortho"] === true,
+    relationHints: typeof record["relationHints"] === "boolean" ? record["relationHints"] : DEFAULT_SNAP_ASSIST.relationHints,
+    equalHint: record["equalHint"] === true
   };
 }
 
@@ -75,6 +81,28 @@ export function anchorFor(tool: SketchTool, pending: readonly Vec2[]): Vec2 | un
 
 const SQUARE_TOOLS: ReadonlySet<SketchTool> = new Set<SketchTool>(["rectangle", "rectangle-center", "rectangle-rounded"]);
 
+/**
+ * The clicks for which a direction from the last placed point means something, so the ortho lock and Shift constrain may act on them:
+ * the end of a line (every segment), the second click of the tools whose first two clicks set an axis or an edge (a slot's two centres,
+ * an ellipse's major axis, a rectangle's corner, a polygon's corner, a centerpoint arc's start). The later clicks set a width, a minor
+ * axis, a sweep or a radius, where "level or plumb with the last point" would make the shape impossible (a slot of no width) or wrong
+ * (a 90 degree arc that can only be 45 degrees).
+ */
+const DIRECTION_LOCK: Readonly<Partial<Record<SketchTool, "every" | "second">>> = {
+  // Tools whose last click is the one that has an anchor, or where every click is a direction from the one before.
+  line: "every", profile: "every", "line-midpoint": "every", centerline: "every", polygon: "every",
+  rectangle: "every", "rectangle-center": "every", "rectangle-rounded": "every",
+  // Tools with a third click that is a width, a minor axis, a sweep or a depth.
+  parallelogram: "second", "rectangle-three-point": "second", slot: "second", "slot-straight": "second", ellipse: "second", "arc-center": "second"
+};
+
+/** Whether ortho and Shift act on the next click of the tool, given how many points it has already placed (when that is not known, only on the tools where every click is a direction). */
+export function directionLockApplies(tool: SketchTool, placedCount: number | undefined): boolean {
+  const rule = DIRECTION_LOCK[tool];
+  if (rule === undefined) return false;
+  return rule === "every" || placedCount === 1;
+}
+
 const DEGREES = 180 / Math.PI;
 
 function clean(value: number): number {
@@ -95,13 +123,15 @@ export interface AssistedInferenceInput {
   /** The visible grid step, used when the settings do not name a snap step. */
   readonly gridMm: number | undefined;
   readonly anchor?: Vec2 | undefined;
+  /** How many points the tool has placed so far; the ortho lock and Shift constrain act only on the clicks where a direction means something. */
+  readonly placedCount?: number | undefined;
   readonly settings: SnapAssistSettings;
   readonly modifiers?: SnapModifiers;
   readonly excludeEntityIds?: readonly string[];
 }
 
 /** Snap results that are named points or curves: polar tracking never overrides these. */
-const STRONG: ReadonlySet<string> = new Set(["endpoint", "center", "origin", "midpoint", "quadrant", "intersection", "perpendicular", "tangent", "on-curve"]);
+const STRONG: ReadonlySet<string> = new Set(["endpoint", "center", "origin", "midpoint", "quadrant", "intersection", "perpendicular", "tangent", "on-curve", "parallel", "equal", "collinear"]);
 
 /** Constrains `pointer` to the axis through `anchor` that it is closest to, or to a square about it. */
 function constrain(tool: SketchTool, anchor: Vec2, pointer: Vec2): { readonly point: Vec2; readonly guide?: InferenceGuide; readonly kind: "horizontal" | "vertical" | "square" } {
@@ -136,12 +166,13 @@ export function assistedInference(input: AssistedInferenceInput): InferenceResul
         toleranceMm: input.toleranceMm,
         ...(gridMm === undefined ? {} : { gridMm }),
         ...(anchor === undefined ? {} : { anchor, anchorUse: anchorUseFor(tool) }),
+        ...(anchor !== undefined && anchorUseFor(tool) === "full" ? { relations: { ...(settings.relationHints ? DEFAULT_RELATION_HINTS : {}), ...(settings.equalHint ? { equal: true } : {}) } } : {}),
         ...(input.excludeEntityIds === undefined ? {} : { excludeEntityIds: input.excludeEntityIds })
       })
     : raw;
   if (anchor === undefined) return base;
 
-  const forcing = modifiers.shift || (settings.ortho && !modifiers.ctrl);
+  const forcing = directionLockApplies(tool, input.placedCount) && (modifiers.shift || (settings.ortho && !modifiers.ctrl));
   if (forcing) {
     const locked = constrain(tool, anchor, pointer);
     const label = locked.kind === "square" ? "Square" : modifiers.shift ? "Constrained" : "Ortho";

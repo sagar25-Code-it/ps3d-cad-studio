@@ -1,6 +1,7 @@
 import type { SketchEntity, Vec2, WorkbenchSketch } from "../../workbench-core/src/index.js";
 import { ellipsePerpendicularFeet, ellipsePolyline, ellipseSegmentIntersections, ellipseTangentPointsFrom, nearestOnEllipse, type EllipseShape } from "./ellipse-geometry.js";
 import { entityPoints, sampleSpline } from "./index.js";
+import { tidyPoint } from "./clean-numbers.js";
 
 /**
  * Cursor inference for the sketch canvas: while a tool is active the pointer snaps to the most meaningful nearby geometry
@@ -20,6 +21,12 @@ export type InferenceKind =
   | "perpendicular"
   | "tangent"
   | "on-curve"
+  /** The pointer's direction from the last placed point is parallel to a nearby line. */
+  | "parallel"
+  /** The pointer's distance from the last placed point equals the length of a nearby line. */
+  | "equal"
+  /** The pointer continues a line through the last placed point (which lies on it). */
+  | "collinear"
   | "horizontal"
   | "vertical"
   /** A direction from the last placed point at a multiple of the polar increment (see snap-assist.ts). */
@@ -67,7 +74,26 @@ export interface InferenceOptions {
   readonly anchorUse?: "full" | "align";
   /** Entities to ignore, for example the ones being dragged. */
   readonly excludeEntityIds?: readonly string[];
+  /** Direction and length hints from the last placed point (parallel, perpendicular, collinear, equal length); parallel, perpendicular and collinear are on unless this names the ones to keep ({} turns them off, `equal` is opt-in). Needs an anchor used in full. */
+  readonly relations?: RelationHintOptions;
 }
+
+export interface RelationHintOptions {
+  readonly parallel?: boolean;
+  readonly perpendicular?: boolean;
+  readonly collinear?: boolean;
+  readonly equal?: boolean;
+}
+
+/**
+ * The relation hints that are on unless the caller says otherwise: parallel, perpendicular and collinear. Equal length is opt-in, because
+ * a rectangle drawn with the Line tool would then have its third side Equal to the first and its closing side Vertical would become a
+ * redundant relation; the palette's "Equal-length hint" switch turns it on.
+ */
+export const DEFAULT_RELATION_HINTS: RelationHintOptions = { parallel: true, perpendicular: true, collinear: true };
+
+/** Every relation hint on. */
+export const ALL_RELATION_HINTS: RelationHintOptions = { ...DEFAULT_RELATION_HINTS, equal: true };
 
 export const INFERENCE_LABELS: Readonly<Record<InferenceKind, string>> = {
   endpoint: "Endpoint",
@@ -79,6 +105,9 @@ export const INFERENCE_LABELS: Readonly<Record<InferenceKind, string>> = {
   perpendicular: "Perpendicular",
   tangent: "Tangent",
   "on-curve": "On curve",
+  parallel: "Parallel",
+  equal: "Equal length",
+  collinear: "Collinear",
   horizontal: "Horizontal",
   vertical: "Vertical",
   polar: "Polar",
@@ -90,11 +119,18 @@ const TIER: Readonly<Record<InferenceKind, number>> = {
   endpoint: 0, center: 0, origin: 0,
   // Within the second tier an intersection is the most informative label when several coincide.
   intersection: 1, midpoint: 1.1, quadrant: 1.2,
-  perpendicular: 2, tangent: 2,
+  collinear: 2, perpendicular: 2, tangent: 2, parallel: 2.2, equal: 2.5,
   "on-curve": 3,
   horizontal: 4, vertical: 4, polar: 4.5,
   grid: 5
 };
+
+/** A direction or length hint is weaker still: the pointer has to be this fraction of the snap reach from the exact direction or length. */
+const RELATION_REACH = 0.5;
+/** Direction hints look at lines whose nearest point is this many snap reaches from the last placed point, which keeps far-away lines from cluttering the cursor. */
+const RELATION_NEIGHBOURHOOD = 40;
+/** A direction needs the pointer at least this many snap reaches away to mean anything. */
+const RELATION_MIN_LENGTH = 4;
 
 /** A point on a curve is a weaker hint than a named point, so it needs the pointer to be closer. */
 const ON_CURVE_REACH = 0.6;
@@ -317,17 +353,16 @@ interface PointOfInterest {
 
 function pointsOfInterest(entity: SketchEntity): readonly PointOfInterest[] {
   const found: PointOfInterest[] = [];
-  const add = (kind: PointOfInterest["kind"], point: Vec2, selector: InferenceSelector): void => { found.push({ kind, point, selector }); };
+  const add = (kind: PointOfInterest["kind"], point: Vec2, selector: InferenceSelector): void => { found.push({ kind, point: tidyPoint(point), selector }); };
   if (entity.kind === "line") {
     add("endpoint", entity.start, "start");
     add("endpoint", entity.end, "end");
     add("midpoint", [(entity.start[0] + entity.end[0]) / 2, (entity.start[1] + entity.end[1]) / 2], "mid");
   } else if (entity.kind === "circle") {
     add("center", entity.center, "center");
-    for (let quarter = 0; quarter < 4; quarter += 1) {
-      const angle = (quarter * Math.PI) / 2;
-      add("quadrant", [entity.center[0] + entity.radiusMm * Math.cos(angle), entity.center[1] + entity.radiusMm * Math.sin(angle)], "point");
-    }
+    // Quadrants are exact: no cosine of a quarter turn is involved.
+    const { center, radiusMm } = entity;
+    for (const point of [[center[0] + radiusMm, center[1]], [center[0], center[1] + radiusMm], [center[0] - radiusMm, center[1]], [center[0], center[1] - radiusMm]] as const) add("quadrant", [point[0], point[1]], "point");
   } else if (entity.kind === "arc") {
     add("endpoint", entity.start, "start");
     add("endpoint", entity.end, "end");
@@ -337,7 +372,10 @@ function pointsOfInterest(entity: SketchEntity): readonly PointOfInterest[] {
       add("midpoint", pointOnRound(arc, arc.startAngle + arc.sweep / 2), "mid");
       for (let quarter = 0; quarter < 4; quarter += 1) {
         const angle = (quarter * Math.PI) / 2;
-        if (onSweep(arc, angle) && wrap(angle - arc.startAngle) > 1e-6 && wrap(angle - arc.startAngle) < arc.sweep - 1e-6) add("quadrant", pointOnRound(arc, angle), "point");
+        if (onSweep(arc, angle) && wrap(angle - arc.startAngle) > 1e-6 && wrap(angle - arc.startAngle) < arc.sweep - 1e-6) {
+          const exact: Vec2 = [arc.center[0] + (quarter === 0 ? arc.radius : quarter === 2 ? -arc.radius : 0), arc.center[1] + (quarter === 1 ? arc.radius : quarter === 3 ? -arc.radius : 0)];
+          add("quadrant", exact, "point");
+        }
       }
     }
   } else if (entity.kind === "rectangle") {
@@ -366,6 +404,53 @@ function pointsOfInterest(entity: SketchEntity): readonly PointOfInterest[] {
   return found;
 }
 
+/**
+ * Hints that read the direction or length of the segment being drawn (from the anchor to the pointer) against the lines near the anchor:
+ * parallel to one, perpendicular to one, the continuation of one (the anchor lies on it) and as long as one. Each names the line it
+ * refers to, and the snapped point is where the exact direction or length meets the pointer.
+ */
+function relationHints(pointer: Vec2, anchor: Vec2, entities: readonly SketchEntity[], tolerance: number, relations: RelationHintOptions): readonly Omit<InferenceCandidate, "distanceMm">[] {
+  const dx = pointer[0] - anchor[0];
+  const dy = pointer[1] - anchor[1];
+  const length = Math.hypot(dx, dy);
+  if (length < tolerance * RELATION_MIN_LENGTH) return [];
+  const dir: Vec2 = [dx / length, dy / length];
+  const found: Omit<InferenceCandidate, "distanceMm">[] = [];
+  for (const entity of entities) {
+    if (entity.kind !== "line") continue;
+    const rx = entity.end[0] - entity.start[0];
+    const ry = entity.end[1] - entity.start[1];
+    const refLength = Math.hypot(rx, ry);
+    if (refLength < 1e-9) continue;
+    const ref: Vec2 = [rx / refLength, ry / refLength];
+    const nearest = nearestOnPrimitive(anchor, { kind: "segment", a: entity.start, b: entity.end });
+    if (nearest === undefined || nearest.distance > tolerance * RELATION_NEIGHBOURHOOD) continue;
+    const cross = dir[0] * ref[1] - dir[1] * ref[0];
+    const along = dir[0] * ref[0] + dir[1] * ref[1];
+    const parallelLateral = Math.abs(cross) * length;
+    const perpendicularLateral = Math.abs(along) * length;
+    const reach = tolerance * RELATION_REACH;
+    const projected = (axis: Vec2): Vec2 => { const t = dx * axis[0] + dy * axis[1]; return tidyPoint([anchor[0] + axis[0] * t, anchor[1] + axis[1] * t]); };
+    const slanted = Math.abs(ref[0]) > 1e-6 && Math.abs(ref[1]) > 1e-6;
+    if (parallelLateral <= reach) {
+      // The anchor on the line itself makes the new segment a continuation of it (Collinear); anywhere else it is Parallel to it.
+      const onLine = Math.abs((anchor[0] - entity.start[0]) * ref[1] - (anchor[1] - entity.start[1]) * ref[0]) <= 1e-6;
+      if (onLine && relations.collinear === true) found.push({ kind: "collinear", point: projected(ref), entityId: entity.id });
+      // Parallel to a level or plumb line is the plain level/plumb alignment, which has its own guide.
+      else if (!onLine && relations.parallel === true && slanted) found.push({ kind: "parallel", point: projected(ref), entityId: entity.id });
+    }
+    if (perpendicularLateral <= reach && relations.perpendicular === true && slanted) found.push({ kind: "perpendicular", point: projected([-ref[1], ref[0]]), entityId: entity.id });
+    if (relations.equal === true && Math.abs(length - refLength) <= reach && refLength >= tolerance * RELATION_MIN_LENGTH) {
+      // A pointer within reach of level or plumb keeps that: the new line is as long as the other and Horizontal or Vertical.
+      const level = Math.abs(dy) <= reach;
+      const plumb = Math.abs(dx) <= reach;
+      const heading: Vec2 = level ? [Math.sign(dx), 0] : plumb ? [0, Math.sign(dy)] : dir;
+      found.push({ kind: "equal", point: tidyPoint([anchor[0] + heading[0] * refLength, anchor[1] + heading[1] * refLength]), entityId: entity.id });
+    }
+  }
+  return found;
+}
+
 function boxDistance(point: Vec2, primitive: Primitive): number {
   if (primitive.kind === "ellipse") return nearestOnEllipse(point, primitive.shape).distance;
   if (primitive.kind === "segment") {
@@ -389,6 +474,19 @@ function sameCurveNeighbours(a: { readonly entity: SketchEntity; readonly index:
   if (a.entity.kind === "circle" || a.entity.kind === "arc" || a.entity.kind === "ellipse" || a.entity.kind === "line") return true;
   const gap = Math.abs(a.index - b.index);
   return gap <= 1 || (a.entity.kind === "rectangle" && gap === a.count - 1);
+}
+
+/**
+ * An equal-length hint that lands exactly level or plumb with the last placed point is also that alignment: the guide is kept so the level
+ * or plumb relation is recorded together with the hint (the last side of a drawn rectangle is as long as the first and Horizontal).
+ */
+function alignedGuides(best: InferenceCandidate, anchor: Vec2 | undefined): readonly InferenceGuide[] {
+  if (anchor === undefined || best.kind !== "equal") return [];
+  const dx = best.point[0] - anchor[0];
+  const dy = best.point[1] - anchor[1];
+  if (Math.abs(dy) <= 1e-9 && Math.abs(dx) > 1e-9) return [{ kind: "horizontal", from: anchor, to: best.point }];
+  if (Math.abs(dx) <= 1e-9 && Math.abs(dy) > 1e-9) return [{ kind: "vertical", from: anchor, to: best.point }];
+  return [];
 }
 
 /**
@@ -428,6 +526,9 @@ export function inferSketchPoint(pointer: Vec2, sketch: WorkbenchSketch, options
       }
     }
   }
+  if (options.anchor !== undefined && options.anchorUse !== "align") {
+    for (const hint of relationHints(pointer, options.anchor, entities, tolerance, options.relations ?? DEFAULT_RELATION_HINTS)) add(hint, tolerance * RELATION_REACH);
+  }
   for (let first = 0; first < nearby.length; first += 1) {
     for (let second = first + 1; second < nearby.length; second += 1) {
       const a = nearby[first]!;
@@ -441,7 +542,7 @@ export function inferSketchPoint(pointer: Vec2, sketch: WorkbenchSketch, options
   // closed on its own first point must join that point (a Coincident relation), not just land on the origin.
   const ranked = [...candidates].sort((left, right) => TIER[left.kind] - TIER[right.kind] || (Math.abs(left.distanceMm - right.distanceMm) > 1e-12 ? left.distanceMm - right.distanceMm : Number(left.entityId === undefined) - Number(right.entityId === undefined)));
   const best = ranked[0];
-  if (best !== undefined) return { point: best.point, snapped: true, primary: best, guides: [] };
+  if (best !== undefined) return { point: best.point, snapped: true, primary: best, guides: alignedGuides(best, options.anchor) };
 
   // Nothing is under the pointer: try lining up horizontally and vertically with known points.
   let horizontal: { readonly source: Vec2; readonly gap: number } | undefined;

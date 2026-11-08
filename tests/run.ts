@@ -19,6 +19,7 @@ import { sketchShapeTests } from "./sketch-shapes.test.js";
 import { sketchShapeJointTests } from "./sketch-shape-joints.test.js";
 import { sketchRegularPolygonTests } from "./sketch-regular-polygon.test.js";
 import { sketchCornerJoinTests } from "./sketch-corner-joins.test.js";
+import { sketchDrawInferenceTests } from "./sketch-draw-inference.test.js";
 import { sketchEllipseTests } from "./sketch-ellipse.test.js";
 import { designTimelineTests } from "./design-timeline.test.js";
 import { designRegenerationTests } from "./design-regeneration.test.js";
@@ -253,7 +254,8 @@ const tests: readonly TestCase[] = [
   ...sketchCanvasHandleTests,
   ...sketchShapeJointTests,
   ...sketchRegularPolygonTests,
-  ...sketchCornerJoinTests
+  ...sketchCornerJoinTests,
+  ...sketchDrawInferenceTests
 ];
 let failures = 0;
 
