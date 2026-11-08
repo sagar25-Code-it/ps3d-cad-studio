@@ -102,6 +102,70 @@ export function dimensionLayout(entity: SketchEntity, dimension: DrivingDimensio
   return undefined;
 }
 
+/** A driven (reference) dimension kind: measured, not editable. Arc length for curves, perimeter for closed loops. */
+export type DrivenDimensionKind = "arc-length" | "perimeter";
+
+/**
+ * Measure a reference (driven) dimension for a sketch entity. Returns the measured length in millimetres plus a layout
+ * that can be rendered the same way as a driving dimension (with the label prefixed "ARC" or "PERIM" to flag it as a
+ * reference). Returns undefined when the kind does not apply to the entity (e.g. arc-length on a point).
+ */
+export function drivenDimensionLayout(entity: SketchEntity, kind: DrivenDimensionKind, pxMm: number): DimensionLayout | undefined {
+  if (kind === "arc-length") {
+    if (entity.kind === "line") {
+      const length = Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]);
+      return linear(entity.start, entity.end, upwardNormal(unit(entity.start, entity.end)), length, pxMm, "ARC ");
+    }
+    if (entity.kind === "arc") {
+      // Reconstruct the circle through start → mid → end and integrate the arc length.
+      const [sx, sy] = entity.start;
+      const [mx, my] = entity.mid;
+      const [ex, ey] = entity.end;
+      const d = 2 * ((sx) * (my - ey) + (mx) * (ey - sy) + (ex) * (sy - my));
+      if (Math.abs(d) < 1e-9) return undefined;
+      const cx = ((sx * sx + sy * sy) * (my - ey) + (mx * mx + my * my) * (ey - sy) + (ex * ex + ey * ey) * (sy - my)) / d;
+      const cy = ((sx * sx + sy * sy) * (ex - mx) + (mx * mx + my * my) * (sx - ex) + (ex * ex + ey * ey) * (mx - sx)) / d;
+      const radius = Math.hypot(sx - cx, sy - cy);
+      // Signed sweep from start → end going through mid.
+      const startAngle = Math.atan2(sy - cy, sx - cx);
+      const midAngle = Math.atan2(my - cy, mx - cx);
+      const endAngle = Math.atan2(ey - cy, ex - cx);
+      const normalize = (a: number): number => ((a - startAngle) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+      const midNorm = normalize(midAngle);
+      const endNorm = normalize(endAngle);
+      // Sweep direction: if midNorm < endNorm, the mid sits before the end going CCW, so sweep is endNorm; else the full
+      // arc goes the other way → 2π − endNorm.
+      const sweep = midNorm < endNorm ? endNorm : 2 * Math.PI - endNorm;
+      const arcLength = radius * sweep;
+      return linear(entity.start, entity.end, upwardNormal(unit(entity.start, entity.end)), arcLength, pxMm, "ARC ");
+    }
+    return undefined;
+  }
+  // perimeter
+  if (entity.kind === "rectangle") {
+    const perimeter = 2 * (entity.widthMm + entity.heightMm);
+    const radians = (entity.rotationDeg * Math.PI) / 180;
+    const axisY: Vec2 = [-Math.sin(radians), Math.cos(radians)];
+    const corners = entityPoints(entity);
+    return linear(corners[0]!, corners[1]!, [-axisY[0], -axisY[1]], perimeter, pxMm, "PERIM ");
+  }
+  if (entity.kind === "circle") {
+    const circumference = 2 * Math.PI * entity.radiusMm;
+    const angle = (55 * Math.PI) / 180;
+    const direction: Vec2 = [Math.cos(angle), Math.sin(angle)];
+    const near: Vec2 = [entity.center[0] - direction[0] * entity.radiusMm, entity.center[1] - direction[1] * entity.radiusMm];
+    const far: Vec2 = [entity.center[0] + direction[0] * entity.radiusMm, entity.center[1] + direction[1] * entity.radiusMm];
+    return {
+      extensionLines: [],
+      dimensionLine: { from: near, to: far },
+      arrows: [{ tip: near, direction: [-direction[0], -direction[1]] }, { tip: far, direction }],
+      textAt: [far[0] + direction[0] * 18 * pxMm, far[1] + direction[1] * 18 * pxMm],
+      label: `PERIM ${formatValue(circumference)}`
+    };
+  }
+  return undefined;
+}
+
 /** The three points of an arrowhead: the tip, and the two back corners. */
 export function arrowHead(arrow: DimensionArrow, pxMm: number): readonly [Vec2, Vec2, Vec2] {
   const length = 10 * pxMm;

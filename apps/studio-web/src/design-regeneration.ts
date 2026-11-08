@@ -38,8 +38,8 @@ function shifted(body: GeneralSolidBody, normal: readonly [number, number, numbe
 
 /** Builds the solid a feature describes from the sketch snapshot it is based on. For a join or cut this is the tool solid. */
 export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature, color = "#b9c2c8"): Promise<SolidRebuild> {
-  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face") {
-    return { ok: false, message: "A direct-edit step is applied during timeline replay, not through the sketch-driven builder." };
+  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent") {
+    return { ok: false, message: "A direct-edit / indent step is applied during timeline replay, not through the sketch-driven builder." };
   }
   const sketch = sketchFeature.sketch;
   const profiles = detectSketchProfiles(sketch);
@@ -90,6 +90,14 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     ...(feature.kind === "helix" && feature.helixPitchMm !== undefined ? { helixPitchMm: feature.helixPitchMm } : {}),
     ...(feature.kind === "helix" && feature.helixTurns !== undefined ? { helixTurns: feature.helixTurns } : {}),
     ...(feature.kind === "helix" && feature.helixHandedness !== undefined ? { helixHandedness: feature.helixHandedness } : {}),
+    ...(feature.kind === "thread" && feature.threadPitchMm !== undefined ? { threadPitchMm: feature.threadPitchMm } : {}),
+    ...(feature.kind === "thread" && feature.threadTurns !== undefined ? { threadTurns: feature.threadTurns } : {}),
+    ...(feature.kind === "thread" && feature.threadDepthMm !== undefined ? { threadDepthMm: feature.threadDepthMm } : {}),
+    ...(feature.kind === "thread" && feature.threadHandedness !== undefined ? { threadHandedness: feature.threadHandedness } : {}),
+    ...(feature.kind === "rib" && feature.ribThicknessMm !== undefined ? { ribThicknessMm: feature.ribThicknessMm } : {}),
+    ...(feature.kind === "rib" && feature.ribDirection !== undefined ? { ribDirection: feature.ribDirection } : {}),
+    ...(feature.kind === "dome" && feature.domeHeightMm !== undefined ? { domeHeightMm: feature.domeHeightMm } : {}),
+    ...(feature.kind === "edge-fillet" && feature.edgeEndSizeMm !== undefined ? { edgeEndSizeMm: feature.edgeEndSizeMm } : {}),
     ...(feature.kind === "shell" && feature.shellThicknessMm !== undefined ? { shellThicknessMm: feature.shellThicknessMm } : {}),
     ...(feature.kind === "shell" && feature.shellOpenFace !== undefined ? { shellOpenFace: feature.shellOpenFace } : {}),
     ...(feature.kind === "draft" && feature.draftAngleDeg !== undefined ? { draftAngleDeg: feature.draftAngleDeg } : {}),
@@ -146,10 +154,21 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
   for (const step of steps) {
     // A lone body is rebuilt whatever its state; the steps of a chain only while they are live.
     if (chained && !isFeatureActive(history, step.id)) continue;
-    // Direct-edit steps (move-body / scale-body) transform the current body in place instead of rebuilding from a sketch.
+    // Direct-edit steps (move-body / scale-body / move-face / offset-face / emboss) transform the current body in place.
     if (isDirectEditFeature(step)) {
       if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this step changes could not be built, so there is nothing to modify." }); continue; }
       current = applyDirectEdit(step, current);
+      outcomes.set(step.id, { featureId: step.id });
+      continue;
+    }
+    // Indent: boolean-cut the referenced tool body out of the current body.
+    if (step.kind === "indent") {
+      if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "Indent needs an existing body to carve out of." }); continue; }
+      const toolBody = project.part.generalBodies?.find((candidate) => candidate.id === step.indentToolBodyId);
+      if (toolBody === undefined) { outcomes.set(step.id, { featureId: step.id, message: `Indent tool body '${step.indentToolBodyId}' is not in the part.` }); continue; }
+      const combined = await combineGeneralBodies({ target: current, tool: toolBody, mode: "cut", bodyId, name: current.name });
+      if (!combined.ok) { outcomes.set(step.id, { featureId: step.id, message: combined.message }); continue; }
+      current = { ...combined.body, color: current.color };
       outcomes.set(step.id, { featureId: step.id });
       continue;
     }
@@ -202,7 +221,7 @@ export function hasModifiers(project: WorkbenchProject): boolean {
  * about the body's current centroid. Both operations leave the index buffer and face names untouched, so the step is
  * reversible: deleting the step rolls the body back to its previous shape.
  */
-export function applyDirectEdit(feature: DesignSolidFeature & { readonly kind: "move-body" | "scale-body" | "move-face" | "offset-face" }, body: GeneralSolidBody): GeneralSolidBody {
+export function applyDirectEdit(feature: DesignSolidFeature & { readonly kind: "move-body" | "scale-body" | "move-face" | "offset-face" | "emboss" }, body: GeneralSolidBody): GeneralSolidBody {
   if (feature.kind === "move-body") {
     const delta = feature.moveDeltaMm ?? [0, 0, 0];
     if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) return body;
@@ -230,7 +249,7 @@ export function applyDirectEdit(feature: DesignSolidFeature & { readonly kind: "
     });
     return { ...body, positionsMm };
   }
-  // move-face / offset-face: translate the vertices of one brep face.
+  // move-face / offset-face / emboss: translate the vertices of one brep face.
   const role = feature.targetFaceRole;
   const brep = body.brep;
   if (role === undefined || brep === undefined) return body;
@@ -246,8 +265,55 @@ export function applyDirectEdit(feature: DesignSolidFeature & { readonly kind: "
   }
   if (faceVertexIndices.size === 0) return body;
   let delta: readonly [number, number, number];
+  let embossVertexShifts: Map<number, readonly [number, number, number]> | undefined;
   if (feature.kind === "move-face") {
     delta = feature.moveFaceDeltaMm ?? [0, 0, 0];
+  } else if (feature.kind === "emboss") {
+    // Compute face centroid in world space, then shift each vertex by embossHeightMm along the face normal attenuated by a
+    // cosine falloff from the centroid (1.0 at centroid, 0.0 at the face's farthest vertex). Produces a soft raised pad.
+    let nx = 0; let ny = 0; let nz = 0;
+    let cx = 0; let cy = 0; let cz = 0;
+    for (let triangle = 0; triangle < faceTriangles.length; triangle += 1) {
+      if (faceTriangles[triangle] !== faceIndex) continue;
+      const a = body.indices[triangle * 3]! * 3;
+      const b = body.indices[triangle * 3 + 1]! * 3;
+      const c = body.indices[triangle * 3 + 2]! * 3;
+      const ux = body.positionsMm[b]! - body.positionsMm[a]!;
+      const uy = body.positionsMm[b + 1]! - body.positionsMm[a + 1]!;
+      const uz = body.positionsMm[b + 2]! - body.positionsMm[a + 2]!;
+      const vx = body.positionsMm[c]! - body.positionsMm[a]!;
+      const vy = body.positionsMm[c + 1]! - body.positionsMm[a + 1]!;
+      const vz = body.positionsMm[c + 2]! - body.positionsMm[a + 2]!;
+      nx += uy * vz - uz * vy;
+      ny += uz * vx - ux * vz;
+      nz += ux * vy - uy * vx;
+    }
+    const length = Math.hypot(nx, ny, nz);
+    if (length < 1e-9) return body;
+    const normal: readonly [number, number, number] = [nx / length, ny / length, nz / length];
+    for (const vertex of faceVertexIndices) {
+      cx += body.positionsMm[vertex * 3]!;
+      cy += body.positionsMm[vertex * 3 + 1]!;
+      cz += body.positionsMm[vertex * 3 + 2]!;
+    }
+    cx /= faceVertexIndices.size; cy /= faceVertexIndices.size; cz /= faceVertexIndices.size;
+    // Farthest-vertex distance (for falloff normalization).
+    let maxDist = 0;
+    for (const vertex of faceVertexIndices) {
+      const d = Math.hypot(body.positionsMm[vertex * 3]! - cx, body.positionsMm[vertex * 3 + 1]! - cy, body.positionsMm[vertex * 3 + 2]! - cz);
+      if (d > maxDist) maxDist = d;
+    }
+    if (maxDist < 1e-9) return body;
+    const height = feature.embossHeightMm ?? 0;
+    embossVertexShifts = new Map<number, readonly [number, number, number]>();
+    for (const vertex of faceVertexIndices) {
+      const d = Math.hypot(body.positionsMm[vertex * 3]! - cx, body.positionsMm[vertex * 3 + 1]! - cy, body.positionsMm[vertex * 3 + 2]! - cz);
+      const falloff = Math.max(0, 1 - d / maxDist);
+      // Cosine-shaped falloff (smoother than linear): 0.5 * (1 + cos(π * (1 - falloff))).
+      const shaped = 0.5 * (1 + Math.cos(Math.PI * (1 - falloff)));
+      embossVertexShifts.set(vertex, [normal[0] * height * shaped, normal[1] * height * shaped, normal[2] * height * shaped]);
+    }
+    delta = [0, 0, 0];
   } else {
     // Offset along the face's average triangle normal.
     let nx = 0; let ny = 0; let nz = 0;
@@ -271,12 +337,13 @@ export function applyDirectEdit(feature: DesignSolidFeature & { readonly kind: "
     const offset = feature.offsetFaceMm ?? 0;
     delta = [(nx / length) * offset, (ny / length) * offset, (nz / length) * offset];
   }
-  if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) return body;
+  if (embossVertexShifts === undefined && delta[0] === 0 && delta[1] === 0 && delta[2] === 0) return body;
   const positionsMm = [...body.positionsMm];
   for (const vertex of faceVertexIndices) {
-    positionsMm[vertex * 3] = positionsMm[vertex * 3]! + delta[0];
-    positionsMm[vertex * 3 + 1] = positionsMm[vertex * 3 + 1]! + delta[1];
-    positionsMm[vertex * 3 + 2] = positionsMm[vertex * 3 + 2]! + delta[2];
+    const shift = embossVertexShifts?.get(vertex) ?? delta;
+    positionsMm[vertex * 3] = positionsMm[vertex * 3]! + shift[0];
+    positionsMm[vertex * 3 + 1] = positionsMm[vertex * 3 + 1]! + shift[1];
+    positionsMm[vertex * 3 + 2] = positionsMm[vertex * 3 + 2]! + shift[2];
   }
   return { ...body, positionsMm };
 }

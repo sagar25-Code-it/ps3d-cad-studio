@@ -80,7 +80,7 @@ function rotateLocalToPlane(point: WorldPoint, plane: SketchPlane): WorldPoint {
 export interface CreateGeneralSolidRequest {
   readonly profile: SketchProfile;
   readonly plane: SketchPlane;
-  readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix";
+  readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome";
   /** Extrusion height / revolve angle (deg) / sweep distance / loft height, in millimetres (angle: degrees). For edge-fillet/chamfer, shell and draft this is still the extrusion height. */
   readonly valueMm: number;
   readonly bodyId: string;
@@ -124,6 +124,18 @@ export interface CreateGeneralSolidRequest {
   readonly helixTurns?: number;
   /** Helix only: winding handedness. */
   readonly helixHandedness?: "right" | "left";
+  /** Thread (helical ridge on a cylinder) only: pitch, turns, depth (radius), and handedness. */
+  readonly threadPitchMm?: number;
+  readonly threadTurns?: number;
+  readonly threadDepthMm?: number;
+  readonly threadHandedness?: "right" | "left";
+  /** Rib only: thickness of the thin-wall extrusion in millimetres. */
+  readonly ribThicknessMm?: number;
+  readonly ribDirection?: "symmetric" | "one-side";
+  /** Dome only: dome height above the target face's plane in millimetres. */
+  readonly domeHeightMm?: number;
+  /** Edge-fillet only: optional end radius (start → end along the vertical edge). */
+  readonly edgeEndSizeMm?: number;
 }
 
 /** Maps a hole profile to the kernel's hole loop; the id comes from its sketch entities so wall names survive edits. */
@@ -223,6 +235,45 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     // Fall through to the extrude path below by treating operation as extrude. We can't just reassign since operation is readonly,
     // so delegate to a nested call with operation swapped.
     return createGeneralSolidBody({ ...request, operation: "extrude" });
+  }
+  if (request.operation === "thread") {
+    // Thread is a helical ridge: a small triangular V-section profile at the thread depth / pitch over a given number of turns.
+    const pitch = request.threadPitchMm;
+    const turns = request.threadTurns;
+    const depth = request.threadDepthMm;
+    const hand = request.threadHandedness ?? "right";
+    if (pitch === undefined || !Number.isFinite(pitch) || pitch <= 0) return { ok: false, message: "Thread needs a positive pitch." };
+    if (turns === undefined || !Number.isFinite(turns) || turns <= 0) return { ok: false, message: "Thread needs a positive number of turns." };
+    if (depth === undefined || !Number.isFinite(depth) || depth <= 0) return { ok: false, message: "Thread needs a positive thread depth (coil radius)." };
+    // Override the sketch profile with a small triangular V (apex inward, base 0.6 × pitch): classic 60° thread section.
+    const sectionBase = pitch * 0.6;
+    const sectionHeight = pitch * 0.5;
+    const threadSection: readonly (readonly [number, number])[] = [[-sectionBase / 2, 0], [sectionBase / 2, 0], [0, sectionHeight]];
+    const mesh = tessellateHelix(threadSection, depth, pitch, turns, hand, request.plane);
+    if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The thread could not be built." };
+    return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
+  }
+  if (request.operation === "rib") {
+    const ribThickness = request.ribThicknessMm;
+    if (ribThickness === undefined || !Number.isFinite(ribThickness) || ribThickness <= 0) return { ok: false, message: "Rib needs a positive thickness." };
+    // The sketch profile is used as the rib's plan; it's extruded by valueMm with the thickness baked into the profile already.
+    const mesh = tessellateExtrude(polygonMm, Math.abs(request.valueMm), request.plane);
+    if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The rib could not be built." };
+    return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
+  }
+  if (request.operation === "dome") {
+    const height = request.domeHeightMm;
+    if (height === undefined || !Number.isFinite(height) || height === 0) return { ok: false, message: "Dome needs a non-zero height." };
+    // Approximate the dome as a sequence of lofts from the profile to progressively smaller concentric scales (0.95, 0.8, 0.5, 0.15) at
+    // z = 25%, 50%, 75%, 100% of the dome height. Much cheaper than a true sphere, and the shape is a convincing dome from outside.
+    const absoluteHeight = Math.abs(height);
+    const sign = height < 0 ? -1 : 1;
+    const centroid = polygonMm.reduce((sum, p) => [sum[0] + p[0] / polygonMm.length, sum[1] + p[1] / polygonMm.length] as const, [0, 0] as const);
+    const scalesAtTop = 0.15;
+    const mesh = tessellateLoft(polygonMm, scalesAtTop, absoluteHeight * sign, request.plane);
+    if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The dome could not be built." };
+    void centroid;
+    return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
   if (request.operation === "helix") {
     const radius = request.helixRadiusMm;

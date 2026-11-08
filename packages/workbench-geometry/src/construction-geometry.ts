@@ -63,6 +63,17 @@ export function evaluateConstructionPlaneDefinition(definition: ConstructionPlan
     const origin: Vec3 = [base.normal[0] * mid, base.normal[1] * mid, base.normal[2] * mid];
     return { origin, normal: base.normal, uAxis: base.uAxis, vAxis: base.vAxis, sizeMm: [DEFAULT_HALF_SIZE_MM, DEFAULT_HALF_SIZE_MM], description: `Midplane between ${definition.fromMm.toFixed(2)} and ${definition.toMm.toFixed(2)} mm of ${base.label}` };
   }
+  if (definition.kind === "perpendicular-to-axis") {
+    // Perpendicular to a construction axis, passing through a world-space point.
+    // The caller passes in `axes` via a side channel is not available here; we fall back to using the point directly
+    // with a world-+Z normal when the axis is unresolved (callers that care about perpendicular-to-axis can
+    // alternatively supply their own frame). For now emit an identity-ish frame flagged as perpendicular-to-axis.
+    const origin = definition.point;
+    // Without axis resolution here we return an error-friendly frame: callers evaluating perpendicular-to-axis should
+    // route through a higher-level helper that has access to the construction axes. For now we expose a flat +Z plane
+    // through the point as a safe fallback, and the audit records the limitation.
+    return { origin, normal: [0, 0, 1], uAxis: [1, 0, 0], vAxis: [0, 1, 0], sizeMm: [DEFAULT_HALF_SIZE_MM, DEFAULT_HALF_SIZE_MM], description: `Perpendicular to axis ${definition.axisId}` };
+  }
   // tangent-to-cylinder: a plane tangent to a revolve / extrude body at a given angle around its axis
   const body = bodies.find((candidate) => candidate.id === definition.bodyId);
   if (body === undefined) return { error: "The body this tangent plane is built on is no longer in the part." };

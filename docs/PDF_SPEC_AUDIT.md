@@ -80,7 +80,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Smart dimension (D key, single unified tool) | Have | Sketch dimension tool |
 | Horizontal / Vertical / Aligned distance | Have | Distance dimension |
 | Radius, Diameter, Half-Diameter | Have | `radius` plus `distance` |
-| Angle, Arc length, Perimeter | Partial | Angle via distance shim; true arc-length and perimeter dimensions missing |
+| Angle, Arc length, Perimeter | Partial | Angle via distance shim; `drivenDimensionLayout(entity, "arc-length" \| "perimeter", pxMm)` in `packages/workbench-sketch/src/dimension-layout.ts` now returns a reference-dimension layout for arc length (lines + 3-point arcs) and perimeter (rectangles + circles). A UI binding for the Sketch Dimension tool is still to come |
 | Chain, Baseline, Ordinate | Shipped | `DrawingSettings.dimensionStyle` ships `"individual"` (the legacy single-callout default), `"chain"` (two or more end-to-end linear dimensions), `"baseline"` (several dimensions from a common origin) and `"ordinate"` (coordinate readouts along both axes from the view's lower-left datum). `DrawingDimensionKind` gains `"linear-chain"`, `"linear-baseline"` and `"ordinate"` so saved plans tag the style of each dimension record |
 | Driving vs Driven (Reference), Deactivate, Equations | Partial | `DimensionMode = "driving" \| "driven"` is wired on constraints; Suppress (Deactivate) is wired on every constraint; `fx` expression binding across features is still out |
 
@@ -92,19 +92,19 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Revolve (One / Two / Symmetric / Thin, To-first / To-last) | Partial | Base revolve shipped; thin wall and "to" terminations missing |
 | Sweep (section along path with twist control) | Shipped | Linear sweep (`sweepDirectionMm`), path-guided sweep along a sketch line/arc/spline (`sweepPathEntityId`), twist control (`sweepTwistDeg`, degrees across the whole sweep about the profile centroid) and perpendicular-to-tangent frame transport (`sweepFrameTransport`, central-differenced tangent per sample so the profile sits ⟂ to the path) are all shipped |
 | Loft / Boundary (G0/G1/G2 continuity, rails, tangency weight) | Shipped | Scaled-top loft (`loftTopScale`) and two-profile loft (`loftSecondaryProfileIds`) are shipped with G0 / G1 / G2 continuity (linear / smoothstep / smootherstep), auto-resampling across mismatched vertex counts, an optional guide-curve rail (`loftRailEntityId`) that bends ring centroids away from the straight interpolation, and tangency-weight control (`loftTangencyWeight`, 0 → linear / 1 → full G1/G2 / 2 → punchy middle) |
-| Helix / Coil / Thread | Partial | `DesignSolidFeature.kind: "helix"` winds a sketch profile around the plane normal by coil radius (`helixRadiusMm`), pitch per turn (`helixPitchMm`), number of turns (`helixTurns`) and handedness (`helixHandedness: "right" \| "left"`); `tessellateHelix` produces the tessellated coil with ring-aligned caps. A separate Thread feature (helical boss / cut along an existing cylindrical face) still needs face-picking |
-| Rib, Web, Emboss, Wrap | Missing | |
+| Helix / Coil / Thread | Shipped | `DesignSolidFeature.kind: "helix"` winds a sketch profile (coil radius / pitch / turns / handedness). `DesignSolidFeature.kind: "thread"` ships a helical V-section ridge with `threadPitchMm`, `threadTurns`, `threadDepthMm` and `threadHandedness` — the builder synthesizes the triangular thread section automatically |
+| Rib, Web, Emboss, Wrap | Partial | `DesignSolidFeature.kind: "rib"` (thin-wall extrude with `ribThicknessMm` and `ribDirection`) and `DesignSolidFeature.kind: "emboss"` (direct-edit vertex transform on a target brep face, with a cosine falloff from the centroid and `embossHeightMm` controlling raise/depress along the face normal) are shipped. Web is Rib's near-identical sibling (deferred to a labeled Rib). Wrap (2D sketch wrapped around a cylindrical face) still needs the 3D-sketch stage |
 | Solid primitives (Box, Cylinder, Sphere, Cone, Torus, Ellipsoid, Prism, Wedge, Spiral, Tube) | Partial | Box, Cylinder, Sphere, Cone and Torus shipped (see `PartPreviewBodyShape` and `torusMesh`); Ellipsoid / Prism / Wedge / Spiral / Tube still missing |
 | Hole / Hole Wizard (counterbore, countersink, threaded) | Missing | `set-part-parameter:holeDiameterMm` on the template plate only; no hole wizard |
-| Dome, Indent, Flex, Scale | Missing | |
+| Dome, Indent, Flex, Scale | Partial | `DesignSolidFeature.kind: "dome"` caps a sketch profile with a lofted dome of `domeHeightMm` (positive bulges outward, negative inward). `DesignSolidFeature.kind: "indent"` boolean-subtracts the body named by `indentToolBodyId` from the target during replay. `kind: "scale-body"` (from the direct-edit push) is Scale. Flex still needs a bending kernel |
 | Combine (Union, Cut, Intersect) | Have | `combine-general-bodies` with `mode: join|cut|intersect` |
-| Fillet / Edge blend (constant radius, variable, G2) | Partial | `DesignSolidFeature.kind: "edge-fillet"` creates a solid with the fillet treatment applied through the same corner-treatment kernel path extrude already uses; true post-op edge picking (select an edge of an existing body and apply a fillet) still needs edge-selection UI |
+| Fillet / Edge blend (constant radius, variable, G2) | Partial | `DesignSolidFeature.kind: "edge-fillet"` creates a solid with the fillet treatment applied through the same corner-treatment kernel path extrude already uses; variable radius is stored via the optional `edgeEndSizeMm` field (start radius → end radius along the vertical edge). True post-op edge picking and mesh-level lerped radii still need the edge-selection UI |
 | Chamfer (symmetric, asymmetric, offset+angle) | Partial | `DesignSolidFeature.kind: "edge-chamfer"` ships; symmetric only in this slice (the sketch-side chamfer already ships the three asymmetric/distance+angle modes) |
 | Shell / Thickness | Partial | `DesignSolidFeature.kind: "shell"` hollows an extrude-class body with a wall thickness, open-top/open-bottom/fully-closed options via `shellThicknessMm` and `shellOpenFace`; only rectangular and circular profiles are supported in this slice |
 | Draft | Partial | `DesignSolidFeature.kind: "draft"` produces a tapered prism with `draftAngleDeg` and `draftNeutralFace`; per-face selection is still out — the taper applies uniformly to every side face |
 | Linear / Circular / Mirror pattern | Partial | `pattern-part-feature` and `mirror-part-feature` on the template plate; no general-body pattern |
 | Surface / Patch tools, T-Splines | Missing | Surface workspace is a bezier preview, not a full surfacing layer |
-| Synchronous direct editing (Move / Pull / Offset region / Replace face) | Partial | Move Body, Scale Body, Move Face and Offset Face direct-edit feature kinds (`kind: "move-body" \| "scale-body" \| "move-face" \| "offset-face"`, `operation: "direct-edit"`) are shipped as first-class timeline steps that replay in order against the current body. Move Face and Offset Face pick a brep face role from the target body's `brep.faces`, collect the vertex indices referenced by that face's triangles via `brep.faceTriangles`, and translate only those vertices — Offset Face uses the face's averaged triangle normal. Replace face and Delete face still need a boundary-rebuild pass |
+| Synchronous direct editing (Move / Pull / Offset region / Replace face) | Partial | Move Body, Scale Body, Move Face, Offset Face and Emboss direct-edit feature kinds (`kind: "move-body" \| "scale-body" \| "move-face" \| "offset-face" \| "emboss"`, `operation: "direct-edit"`) are shipped as first-class timeline steps that replay in order against the current body. Emboss applies a cosine-falloff raise/depress along the target face's averaged normal from the face centroid. Replace face and Delete face still need a boundary-rebuild pass |
 
 ## 6. Construction geometry (datums)
 
@@ -114,12 +114,12 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Plane at angle | Missing | |
 | Tangent plane | Have | `ConstructionPlaneDefinition.kind: "tangent-to-cylinder"` ships: the plane sits on a revolve/extrude body's maximum-radius envelope at a chosen angle around its axis; origin is at the cylinder surface, normal is outward radial, in-plane axes line up with the body axis |
 | Midplane | Missing | |
-| Perpendicular plane | Missing | |
+| Perpendicular plane | Partial | `ConstructionPlaneDefinition.kind: "perpendicular-to-axis"` ships: a plane perpendicular to a construction axis, passing through a user-picked point. The evaluator currently falls back to a world-+Z normal when an axes-side-channel is not supplied; a dedicated evaluator that resolves the axis is the follow-up |
 | Plane through two edges | Missing | |
 | Plane through three points | Missing | |
 | Plane along path | Missing | |
 | Construction axes (5 modes) | Have | `ConstructionAxis` carries all five modes: `two-points`, `point-and-direction`, `plane-intersection`, `perpendicular-to-plane`, and `cylinder-axis` (donates the axis of a revolve or extrude body). Rendered as dashed line segments in the viewport; UCS not yet modelled |
-| Construction points & UCS | Partial | `ConstructionPoint` ships `xyz`, `midpoint` and `axis-plane-intersection` modes with sphere rendering; UCS (user coordinate systems) still missing |
+| Construction points & UCS | Shipped | `ConstructionPoint` ships `xyz`, `midpoint` and `axis-plane-intersection` modes. `ConstructionUcs` ships origin + xAxis + yAxis (zAxis = xAxis × yAxis, Gram-Schmidted); add / delete / toggle-visibility / rename operations are in `WORKBENCH_OPERATION_KINDS`, with the UCS stored in `PartIntent.constructionUcses` |
 | Shape binder / Sub-shape binder | Missing | |
 
 ## 7. Work-window UX (PDF Table 7)
@@ -147,9 +147,9 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Zebra stripes (G0 / G1 / G2 / G3) | Missing | |
 | Gaussian / mean curvature map | Missing | |
 | Curvature comb | Missing | |
-| Mass-inertia integrator (BRepGProp) | Partial | Volume, surface area, centroid, triangles computed by `solidMetrics`; mass (density) and full 3x3 inertia matrix missing |
+| Mass-inertia integrator (BRepGProp) | Shipped | `solidMetrics` returns volume, surface area, centroid, triangle count AND the full 3×3 inertia tensor at the body centroid (`inertiaTensorMm5`), computed per-tetrahedron with the Tonon-2004 explicit formulas and summed against the mesh centroid. Multiply by a density in kg/mm³ to get the kg·mm² inertia the mass-properties report needs |
 | Geometry checker (BRepCheck) | Partial | Design-health report flags open / near-open profiles; full B-rep checks missing |
-| Section analysis | Missing | |
+| Section analysis | Shipped | `sectionAnalysis(positionsMm, indices, plane, offsetMm)` in `packages/workbench-core/src/solid-metrics.ts` computes a planar cross-section of any general-body mesh and returns the ordered edges (pairs of 3D endpoints) where each triangle crosses the plane; a UI binding to display the cross-section on the viewport is still to come |
 | Interference detection | Partial | Only in the Assembly workspace |
 | Draft angle / wall thickness / DFM | Missing | |
 

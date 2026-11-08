@@ -309,6 +309,16 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
     case "rename-construction-point":
       if (!keys(input, [...common, "pointId", "name"]) || !stableId(input.pointId) || !shortText(input.name, 1, 120)) return invalidOperation("The construction-point rename is invalid.");
       break;
+    case "add-construction-ucs":
+      if (!keys(input, [...common, "ucs"]) || !validConstructionUcsPayload(input.ucs)) return invalidOperation("The construction-UCS insertion is invalid.");
+      break;
+    case "delete-construction-ucs":
+    case "toggle-construction-ucs-visibility":
+      if (!keys(input, [...common, "ucsId"]) || !stableId(input.ucsId)) return invalidOperation("The construction-UCS ID is invalid.");
+      break;
+    case "rename-construction-ucs":
+      if (!keys(input, [...common, "ucsId", "name"]) || !stableId(input.ucsId) || !shortText(input.name, 1, 120)) return invalidOperation("The construction-UCS rename is invalid.");
+      break;
     case "create-part-revolve":
       if (!keys(input, [...common, "bodyId", "name", "outerDiameterMm", "innerDiameterMm", "heightMm", "angleDeg", "translationMm"])
         || !stableId(input.bodyId) || !shortText(input.name, 1, 120)
@@ -801,6 +811,29 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const target = current.find((point) => point.id === operation.pointId);
       if (target === undefined) return broken(operation.pointId, "The construction point does not exist.");
       return changed({ ...project, part: { ...project.part, constructionPoints: current.map((point) => point.id === target.id ? { ...point, name: operation.name } : point) } }, [target.id], `Renamed ${target.name} to ${operation.name}.`);
+    }
+    case "add-construction-ucs": {
+      const current = project.part.constructionUcses ?? [];
+      if (current.some((ucs) => ucs.id === operation.ucs.id)) return invalidOperation("A construction UCS with this ID already exists.");
+      return changed({ ...project, part: { ...project.part, constructionUcses: [...current, operation.ucs] } }, [operation.ucs.id], `Created ${operation.ucs.name}.`);
+    }
+    case "delete-construction-ucs": {
+      const current = project.part.constructionUcses ?? [];
+      const target = current.find((ucs) => ucs.id === operation.ucsId);
+      if (target === undefined) return broken(operation.ucsId, "The construction UCS does not exist.");
+      return changed({ ...project, part: { ...project.part, constructionUcses: current.filter((ucs) => ucs.id !== target.id) } }, [target.id], `Deleted ${target.name}.`);
+    }
+    case "toggle-construction-ucs-visibility": {
+      const current = project.part.constructionUcses ?? [];
+      const target = current.find((ucs) => ucs.id === operation.ucsId);
+      if (target === undefined) return broken(operation.ucsId, "The construction UCS does not exist.");
+      return changed({ ...project, part: { ...project.part, constructionUcses: current.map((ucs) => ucs.id === target.id ? { ...ucs, visible: !ucs.visible } : ucs) } }, [target.id], `${target.visible ? "Hid" : "Showed"} ${target.name}.`);
+    }
+    case "rename-construction-ucs": {
+      const current = project.part.constructionUcses ?? [];
+      const target = current.find((ucs) => ucs.id === operation.ucsId);
+      if (target === undefined) return broken(operation.ucsId, "The construction UCS does not exist.");
+      return changed({ ...project, part: { ...project.part, constructionUcses: current.map((ucs) => ucs.id === target.id ? { ...ucs, name: operation.name } : ucs) } }, [target.id], `Renamed ${target.name} to ${operation.name}.`);
     }
     case "set-part-preview-body-transform": {
       const currentBodies = project.part.previewBodies ?? [];
@@ -1418,6 +1451,16 @@ function validConstructionAxisPayload(value: unknown): value is import("./types.
     return stableId(def.bodyId) && Object.keys(def).every((key) => ["kind", "bodyId"].includes(key));
   }
   return false;
+}
+
+function validConstructionUcsPayload(value: unknown): value is import("./types.js").ConstructionUcs {
+  if (!isRecord(value) || !stableId(value.id) || !shortText(value.name, 1, 120) || typeof value.visible !== "boolean") return false;
+  if (!vec3Mm(value.origin) || !vec3Mm(value.xAxis) || !vec3Mm(value.yAxis)) return false;
+  if (Object.keys(value).some((key) => !["id", "name", "visible", "origin", "xAxis", "yAxis"].includes(key))) return false;
+  // Reject a zero X or Y axis — the UCS cannot build an orthonormal basis.
+  const xLength = Math.hypot((value.xAxis as readonly number[])[0]!, (value.xAxis as readonly number[])[1]!, (value.xAxis as readonly number[])[2]!);
+  const yLength = Math.hypot((value.yAxis as readonly number[])[0]!, (value.yAxis as readonly number[])[1]!, (value.yAxis as readonly number[])[2]!);
+  return xLength > 1e-9 && yLength > 1e-9;
 }
 
 function validConstructionPointPayload(value: unknown): value is import("./types.js").ConstructionPoint {

@@ -252,6 +252,12 @@ export interface PartIntent {
    * for backward compatibility.
    */
   readonly constructionPoints?: readonly ConstructionPoint[];
+  /**
+   * User-authored user coordinate systems (UCS). A UCS stores an origin and three orthonormal basis vectors;
+   * it is a named world-space frame that other features (future: a sketch plane on a UCS, a hole aligned with it)
+   * can refer to. Rendered as a small tri-axis gizmo in the 3D viewport. Optional for backward compatibility.
+   */
+  readonly constructionUcses?: readonly ConstructionUcs[];
 }
 
 export type PartPreviewBodyShape = "block" | "cylinder" | "cone" | "sphere" | "torus";
@@ -274,7 +280,13 @@ export type ConstructionPlaneDefinition =
    * angle (measured in the plane perpendicular to the axis, zero along the first perpendicular basis), and the
    * plane's normal is the outward radial direction. The plane's in-plane axes line up with the body's axis.
    */
-  | { readonly kind: "tangent-to-cylinder"; readonly bodyId: string; readonly angleDeg: number };
+  | { readonly kind: "tangent-to-cylinder"; readonly bodyId: string; readonly angleDeg: number }
+  /**
+   * Perpendicular to a construction axis, passing through a world-space point. The plane's normal is the axis's
+   * direction; its in-plane axes line up with two orthonormal vectors in the plane (one chosen along world +X when that
+   * is not parallel to the normal, else world +Y).
+   */
+  | { readonly kind: "perpendicular-to-axis"; readonly axisId: string; readonly point: Vec3 };
 
 export interface ConstructionPlane {
   readonly id: string;
@@ -316,6 +328,21 @@ export interface ConstructionPoint {
   readonly name: string;
   readonly visible: boolean;
   readonly definition: ConstructionPointDefinition;
+}
+
+/**
+ * A user-coordinate system (UCS). Stores a world-space origin plus a direction vector for the +X axis and a direction
+ * for the +Y axis (the +Z axis is their cross product). The directions do not need to be normalized; the renderer and
+ * evaluator normalize them and Gram-Schmidt the Y axis against the X axis. A degenerate definition (parallel axes, or
+ * a zero vector) renders as a flagged node in the browser.
+ */
+export interface ConstructionUcs {
+  readonly id: string;
+  readonly name: string;
+  readonly visible: boolean;
+  readonly origin: Vec3;
+  readonly xAxis: Vec3;
+  readonly yAxis: Vec3;
 }
 
 export type PartAnalyticBodyShape = PartPreviewBodyShape | "revolved";
@@ -385,7 +412,7 @@ export interface GeneralSolidBody {
   /** Flat triangle vertex indices; length is a multiple of 3. */
   readonly indices: readonly number[];
   readonly feature?: {
-    readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix";
+    readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome";
     readonly plane: "xy" | "xz" | "yz";
     /** Extrusion height / revolve angle (degrees) / sweep distance / loft height / treatment size. */
     readonly valueMm: number;
@@ -974,7 +1001,7 @@ export interface DesignSketchFeature extends DesignFeatureBase {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
@@ -1077,6 +1104,39 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   readonly draftNeutralFace?: "top" | "bottom";
   /** Draft only: taper angle in degrees. */
   readonly draftAngleDeg?: number;
+  /** Edge-fillet only: optional end radius (makes the fillet variable-radius: start radius → end radius along the vertical edge). */
+  readonly edgeEndSizeMm?: number;
+  /** Thread (helical cut on a cylinder) only: pitch per turn in millimetres. */
+  readonly threadPitchMm?: number;
+  /** Thread only: how many turns to cut. */
+  readonly threadTurns?: number;
+  /** Thread only: thread cut depth in millimetres (how deep the V-groove bites into the cylinder surface). */
+  readonly threadDepthMm?: number;
+  /** Thread only: handedness of the thread (right/left). */
+  readonly threadHandedness?: "right" | "left";
+  /**
+   * Rib only: thickness of the ribbon-wall swept down from the sketch line to the target body's base plane. The sketch
+   * provides a single line (or a short polyline); the rib builds a thin extrusion of the chosen thickness, either
+   * symmetrically about the sketch line or offset to one side.
+   */
+  readonly ribThicknessMm?: number;
+  /** Rib only: how the thickness is distributed around the sketch line. */
+  readonly ribDirection?: "symmetric" | "one-side";
+  /**
+   * Dome only: dome height above the target face's plane in millimetres (positive bulges outward, negative inward).
+   * Combined with `targetFaceRole` to pick the face to cap.
+   */
+  readonly domeHeightMm?: number;
+  /**
+   * Emboss only: raise (positive) or depress (negative) the vertices of the target face by this distance along the
+   * face's averaged normal, falling off with distance from the face centroid (a simple radial emboss pad).
+   */
+  readonly embossHeightMm?: number;
+  /**
+   * Indent only: a mesh-boolean indent of the tool body (identified by `indentToolBodyId`) into the target body.
+   * The tool body is subtracted from the target to carve the indent cavity.
+   */
+  readonly indentToolBodyId?: string;
 }
 
 export type DesignFeature = DesignSketchFeature | DesignSolidFeature;
@@ -1182,6 +1242,10 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "delete-construction-point"; readonly pointId: string }
   | { readonly kind: "toggle-construction-point-visibility"; readonly pointId: string }
   | { readonly kind: "rename-construction-point"; readonly pointId: string; readonly name: string }
+  | { readonly kind: "add-construction-ucs"; readonly ucs: ConstructionUcs }
+  | { readonly kind: "delete-construction-ucs"; readonly ucsId: string }
+  | { readonly kind: "toggle-construction-ucs-visibility"; readonly ucsId: string }
+  | { readonly kind: "rename-construction-ucs"; readonly ucsId: string; readonly name: string }
   | {
       /** Replaces the target body with the result of a mesh-level modify operation computed by the caller. */
       readonly kind: "modify-general-body";
@@ -1294,6 +1358,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "add-construction-plane", "delete-construction-plane", "toggle-construction-plane-visibility", "rename-construction-plane",
   "add-construction-axis", "delete-construction-axis", "toggle-construction-axis-visibility", "rename-construction-axis",
   "add-construction-point", "delete-construction-point", "toggle-construction-point-visibility", "rename-construction-point",
+  "add-construction-ucs", "delete-construction-ucs", "toggle-construction-ucs-visibility", "rename-construction-ucs",
   "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
   "isolate-part-preview-body", "set-part-preview-bodies-visibility", "create-part-revolve", "pattern-part-feature", "mirror-part-feature",
   "boolean-part-bodies", "trim-part-body", "set-part-body-edge-treatment", "set-part-body-draft", "set-part-body-shell",
