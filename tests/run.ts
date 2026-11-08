@@ -70,6 +70,7 @@ import { cameraLandmarkTests } from "./camera-landmarks.test.js";
 import { topologyNamingTests } from "./topology-naming.test.js";
 import { expressionTests } from "./expressions.test.js";
 import { designParameterTests } from "./design-parameters.test.js";
+import { parameterDialogTests } from "./parameter-dialogs.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -144,7 +145,8 @@ const tests: readonly TestCase[] = [
   ...publicReleaseTests,
   ...topologyNamingTests,
   ...expressionTests,
-  ...designParameterTests
+  ...designParameterTests,
+  ...parameterDialogTests
 ];
 let failures = 0;
 

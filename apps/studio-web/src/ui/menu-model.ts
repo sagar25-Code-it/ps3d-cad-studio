@@ -58,6 +58,7 @@ export interface WorkbenchMenuActions {
   readonly onMasterCart: () => void;
   readonly onRenderStudio: () => void;
   readonly onEditSelectedFeature: () => void;
+  readonly onChangeParameters: () => void;
   readonly onToggleSuppressSelected: () => void;
   readonly onDeleteSelected: () => void;
   readonly onMoveSelectedBody: () => void;
@@ -107,6 +108,7 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
   const modify: WorkbenchMenu = { id: "modify", label: "Modify", icon: "edit", items: [
     { id: "modify.edit-feature", label: feature === undefined ? "Edit feature…" : `Edit ${feature.name}…`, icon: "edit", disabled: feature === undefined,
       hint: feature === undefined ? "Select a timeline feature or a solid first" : feature.kind === "sketch" ? "Reopens the sketch for editing" : "Distance, direction and extent; the solid rebuilds", action: actions.onEditSelectedFeature },
+    { id: "modify.parameters", label: "Change parameters…", icon: "dimension", hint: "Named values like pin_r that features and sketch dimensions can use in expressions", action: actions.onChangeParameters },
     { id: "modify.suppress", label: feature?.suppressed === true ? `Unsuppress ${feature.name}` : feature === undefined ? "Suppress feature" : `Suppress ${feature.name}`, icon: "eye-off", disabled: feature === undefined,
       hint: feature === undefined ? "Select a timeline feature or a solid first" : "Skips the step without deleting it", action: actions.onToggleSuppressSelected },
     { id: "modify.delete", label: "Delete selection", icon: "trash", shortcut: "Del", disabled: !state.selectionDeletable,

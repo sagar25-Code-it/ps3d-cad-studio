@@ -30,6 +30,7 @@ interface WorkbenchRibbonProps {
   readonly onToggleSketchEntityVisibility: (entityId: string) => void;
   readonly onFinishSketch: () => void;
   readonly onNewSketch: () => void;
+  readonly onChangeParameters: () => void;
   readonly onRemoteMcp: () => void;
   readonly onCancelSketchPoints: () => void;
   readonly onSelect: (id: string | null) => void;
@@ -178,6 +179,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
     {!props.masterCartOpen && props.project.activeWorkspace === "part" && <>
       <RibbonGroup label="Sketch">
         <RibbonButton icon="sketch" label="New Sketch" hint="plane or face" onClick={props.onNewSketch} />
+        <RibbonButton icon="dimension" label="Parameters" hint="fx · named values" onClick={props.onChangeParameters} />
       </RibbonGroup>
       <RibbonGroup label="Feature tools">
         {PART_FEATURES.map((feature) => <RibbonButton key={feature.id} icon={feature.icon} label={feature.label} hint={feature.level} active={props.selectedId === feature.id} onClick={() => props.onSelect(feature.id)} />)}

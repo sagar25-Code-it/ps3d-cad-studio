@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
-import type { DesignSolidFeature } from "../../../../packages/workbench-core/src/index.js";
-import { applyParameterValues, parameterFieldsOf, parameterValuesOf } from "../feature-parameters.js";
+import type { DesignSolidFeature, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
+import { bindFeatureExpressions, designOf, previewFieldExpression } from "../../../../packages/workbench-core/src/index.js";
+import { applyParameterValues, fieldAcceptsExpression, parameterFieldsOf, parameterValuesOf } from "../feature-parameters.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { useDialogFocus } from "./useDialogFocus.js";
 
 interface FeatureEditDialogProps {
   /** The feature being edited; the dialog is open while this is defined. */
   readonly feature: DesignSolidFeature | undefined;
+  /** The project the step lives in: its parameters and the other steps' numbers are what an expression can name. */
+  readonly project: WorkbenchProject;
   readonly busy: boolean;
   readonly onApply: (next: DesignSolidFeature) => void;
   readonly onClose: () => void;
@@ -24,7 +27,7 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
 
   useEffect(() => {
     if (props.feature === undefined) return;
-    setValue(String(Number(Math.abs(props.feature.valueMm).toFixed(3))));
+    setValue(props.feature.expressions?.[props.feature.kind === "extrude" ? "distance" : "angle"] ?? String(Number(Math.abs(props.feature.valueMm).toFixed(3))));
     setDirection(props.feature.direction ?? "one-side");
     setExtent(props.feature.extent === "through-all" ? "through-all" : "distance");
     setValues(parameterValuesOf(props.feature));
@@ -39,22 +42,43 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
   // Through-all is for extruded cuts: the cutter is stretched across the body at rebuild time.
   const isCut = isExtrude && feature.operation === "cut";
   const throughAll = isCut && extent === "through-all";
+  const plainFieldId = isExtrude ? "distance" : "angle";
+  const names = [...(designOf(props.project).parameters ?? []).map((parameter) => parameter.name)];
+  /** What a non-numeric entry in a field evaluates to, or why it does not, shown under the field as the user types. */
+  const live = (fieldId: string, text: string): React.JSX.Element | null => {
+    const typed = text.trim();
+    if (typed === "" || Number.isFinite(Number(typed.replace(",", "."))) || !fieldAcceptsExpression(feature, fieldId)) return null;
+    const preview = previewFieldExpression(props.project, feature, fieldId, typed);
+    return preview.ok
+      ? <small className="feature-edit-live" role="status">= {preview.text}</small>
+      : <small className="feature-edit-live failed" role="alert">{preview.message}{preview.position === undefined ? "" : ` (character ${preview.position + 1})`}</small>;
+  };
 
   const apply = (): void => {
     if (fields !== undefined) {
-      const result = applyParameterValues(feature, values);
+      const result = applyParameterValues(feature, values, props.project);
       if (!result.ok) { setProblem(result.message); return; }
       props.onApply(result.feature);
       return;
     }
     if (!plainForm) { props.onClose(); return; }
-    const parsed = throughAll ? Math.abs(feature.valueMm) : Number(value.trim().replace(",", "."));
+    const { direction: _previous, extent: _extent, ...rest } = feature;
+    const placement = { ...(isExtrude && direction !== "one-side" && !throughAll ? { direction } : {}), ...(throughAll ? { extent: "through-all" as const } : {}) };
+    const typed = value.trim();
+    const parsed = throughAll ? Math.abs(feature.valueMm) : Number(typed.replace(",", "."));
+    // Anything that is not a plain number is an expression (pin_r * 2): it is bound to the field and evaluated now.
+    if (!throughAll && typed !== "" && !Number.isFinite(parsed)) {
+      const bound = bindFeatureExpressions(props.project, { ...rest, ...placement }, { [plainFieldId]: typed });
+      if (!bound.ok) { setProblem(`${bound.message}${bound.position === undefined ? "" : ` (character ${bound.position + 1})`}`); return; }
+      props.onApply(bound.feature);
+      return;
+    }
     if (!Number.isFinite(parsed) || parsed <= 0 || (!isExtrude && parsed > 360)) {
       setProblem(isExtrude ? "Enter a distance greater than zero." : "Enter an angle between 0 and 360 degrees.");
       return;
     }
-    const { direction: _previous, extent: _extent, ...rest } = feature;
-    props.onApply({ ...rest, valueMm: parsed, ...(isExtrude && direction !== "one-side" && !throughAll ? { direction } : {}), ...(throughAll ? { extent: "through-all" as const } : {}) });
+    const plain = bindFeatureExpressions(props.project, { ...rest, valueMm: parsed, ...placement }, {});
+    props.onApply(plain.ok ? plain.feature : { ...rest, valueMm: parsed, ...placement });
   };
 
   return <div className="dialog-backdrop save-project-backdrop" role="presentation" onMouseDown={props.onClose}>
@@ -70,7 +94,8 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
             : <div className="feature-edit-field">
               <input
                 {...(index === 0 ? { "data-dialog-initial-focus": true } : {})}
-                inputMode={field.input === "vector" ? "text" : "decimal"}
+                inputMode="text"
+                spellCheck={false}
                 aria-label={field.label}
                 value={values[field.id] ?? ""}
                 onChange={(event) => { setValues({ ...values, [field.id]: event.target.value }); setProblem(""); }}
@@ -78,6 +103,7 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
               />
               {field.unit !== "" && <small>{field.unit}</small>}
             </div>}
+          {field.input !== "select" && field.input !== "vector" && live(field.id, values[field.id] ?? "")}
           {field.hint !== undefined && <small className="feature-edit-hint">{field.hint}</small>}
         </label>)}
         {!plainForm && fields === undefined && <div className="save-project-note"><CommandIcon name="shield" /><span>This step has no numbers to edit. Delete it from the timeline, or suppress it, to change the result.</span></div>}
@@ -93,7 +119,8 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
           <div className="feature-edit-field">
             <input
               data-dialog-initial-focus
-              inputMode="decimal"
+              inputMode="text"
+              spellCheck={false}
               aria-label={isExtrude ? "Distance in millimetres" : "Angle in degrees"}
               value={throughAll ? "through all" : value}
               disabled={throughAll}
@@ -102,6 +129,7 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
             />
             <small>{isExtrude ? "mm" : "°"}</small>
           </div>
+          {!throughAll && live(plainFieldId, value)}
         </label>}
         {isExtrude && !throughAll && <label>
           <span>Direction</span>
@@ -111,6 +139,7 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
             <option value="flipped">Flipped (against the normal)</option>
           </select>
         </label>}
+        {(fields !== undefined || plainForm) && <p className="feature-edit-expression-hint">Type a number, or an expression such as <code>2 * pin_r</code> or <code>Extrude1.distance / 2</code>{names.length === 0 ? "." : `. Parameters: ${names.slice(0, 8).join(", ")}${names.length > 8 ? ", …" : ""}.`}</p>}
         {problem !== "" && <div className="inline-warning" role="alert">{problem}</div>}
         <div className="save-project-note"><CommandIcon name="shield" /><span>The solid is rebuilt from the sketch it was made from. Steps built on this one rebuild with it, and Undo restores the previous solid.</span></div>
       </div>

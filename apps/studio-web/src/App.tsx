@@ -25,6 +25,8 @@ import {
   sketchPlaneName,
   preferredElectromechanicalLayout,
   resolveWorkbenchContextCommands,
+  previewDimensionExpression,
+  usesExpressions,
   validateWorkbenchProject,
   type AssemblyTemplateId,
   type CadCommandRecord,
@@ -33,6 +35,7 @@ import {
   designOf,
   type ComponentInstance,
   type DesignFeature,
+  type DesignParameter,
   type DesignSolidFeature,
   type GeneralSolidBody,
   type ElectricalComponentKind,
@@ -77,6 +80,7 @@ import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "
 import { flatPatternForBody, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
+import { ChangeParametersDialog } from "./ui/ChangeParametersDialog.js";
 import { CombineDialog, type CombineChoice } from "./ui/CombineDialog.js";
 import type { BooleanMode } from "../../../packages/workbench-geometry/src/index.js";
 import {
@@ -282,6 +286,7 @@ export function App(): React.JSX.Element {
   /** "set" moves the working sketch to a plane; "new" finishes it and starts another on the chosen plane. */
   const [sketchPlaneDialogMode, setSketchPlaneDialogMode] = useState<"set" | "new">("set");
   const [featureEdit, setFeatureEdit] = useState<DesignSolidFeature | undefined>(undefined);
+  const [parametersOpen, setParametersOpen] = useState(false);
   const [sketchFitSerial, setSketchFitSerial] = useState(0);
   const [masterCartOpen, setMasterCartOpen] = useState(false);
   const [renderStudioOpen, setRenderStudioOpen] = useState(false);
@@ -2263,7 +2268,7 @@ export function App(): React.JSX.Element {
    * suppressing, rolling back, deleting or editing a step then changes the shape of a body, not only whether it is shown.
    * With `mustApply`, the change is refused (nothing is applied) when that feature cannot be rebuilt.
    */
-  const commitWithReplay = async (intent: OperationIntent, mustApply?: string): Promise<boolean> => {
+  const commitWithReplay = async (intent: OperationIntent, mustApply?: string, forceReplay = false): Promise<boolean> => {
     const before = projectRef.current;
     const first = applyWorkbenchOperation(before, { ...intent, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: before.revision } as WorkbenchOperation);
     if (!first.ok) {
@@ -2275,7 +2280,7 @@ export function App(): React.JSX.Element {
     }
     let next = first.value.project;
     let summary = first.value.summary;
-    if (hasModifiers(next) || hasModifiers(before)) {
+    if (hasModifiers(next) || hasModifiers(before) || forceReplay) {
       setStatus("working");
       setStatusText("Rebuilding the timeline…");
       const results = await replayAllBodies(next);
@@ -2311,14 +2316,40 @@ export function App(): React.JSX.Element {
     if (sketchFeature?.kind !== "sketch") return;
     setStatus("working");
     const existing = projectRef.current.part.generalBodies?.find((body) => body.id === next.bodyId);
-    if (hasModifiers(projectRef.current) && existing !== undefined) {
+    // With expressions in play, other steps may follow this edit (a hole depth that uses Extrude1.distance), so every body is replayed.
+    const replayAll = usesExpressions(projectRef.current) || next.expressions !== undefined;
+    if ((hasModifiers(projectRef.current) || replayAll) && existing !== undefined) {
       // The body is shaped by several steps, so the edit is applied and the whole body replayed, as one undo step.
-      if (await commitWithReplay({ kind: "update-design-solid", feature: next, body: existing }, next.id)) setFeatureEdit(undefined);
+      if (await commitWithReplay({ kind: "update-design-solid", feature: next, body: existing }, next.id, replayAll)) setFeatureEdit(undefined);
       return;
     }
     const rebuilt = await rebuildSolidFeature(next, sketchFeature, existing?.color);
     if (!rebuilt.ok) { setStatus("error"); setStatusText(rebuilt.message); return; }
     if (applyProjectOperation({ kind: "update-design-solid", feature: next, body: rebuilt.body })) setFeatureEdit(undefined);
+  };
+
+  /**
+   * Applies the Change Parameters table: the project re-evaluates every bound number, then every body is replayed and the results are
+   * applied with regenerate-design, as one undo step. Resolves to the project's refusal message, or undefined when it was applied.
+   */
+  const changeParameters = async (parameters: readonly DesignParameter[], renames: readonly { readonly from: string; readonly to: string }[]): Promise<string | undefined> => {
+    const before = projectRef.current;
+    const intent: OperationIntent = { kind: "set-design-parameters", parameters, renames };
+    const dry = applyWorkbenchOperation(before, { ...intent, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: before.revision } as WorkbenchOperation);
+    if (!dry.ok) return dry.diagnostics[0]?.message ?? "The parameter table was refused.";
+    if (await commitWithReplay(intent, undefined, true)) { setParametersOpen(false); return undefined; }
+    return "The design changed while it was rebuilding, so the parameters were not applied. Try again.";
+  };
+
+  /**
+   * A typed number sets the dimension as before. Typed text that is not a number is an expression (`plate_w / 2`): it is checked against
+   * the project's parameters first, and the dimension is bound to it, so it follows the parameters from then on.
+   */
+  const setSketchDimension = (entityId: string, dimension: "length" | "width" | "height" | "radius", valueMm: number, expression?: string): void => {
+    if (expression === undefined) { applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm }); return; }
+    const preview = previewDimensionExpression(projectRef.current, expression);
+    if (!preview.ok) { setStatus("error"); setStatusText(`That dimension expression does not work: ${preview.message}${preview.position === undefined ? "" : ` (character ${preview.position + 1})`}`); return; }
+    applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm: preview.value, expression });
   };
 
   /** A timeline sketch is reopened for editing; a solid opens its parameter dialog. */
@@ -3215,6 +3246,7 @@ export function App(): React.JSX.Element {
     onMasterCart: openMasterCart,
     onRenderStudio: openRenderStudio,
     onEditSelectedFeature: () => { if (selectedTimelineFeature !== undefined) editTimelineFeature(selectedTimelineFeature); },
+    onChangeParameters: () => setParametersOpen(true),
     onToggleSuppressSelected: () => { if (selectedTimelineFeature !== undefined) timelineOperation({ kind: "set-design-feature-suppressed", featureId: selectedTimelineFeature.id, suppressed: !selectedTimelineFeature.suppressed }); },
     onDeleteSelected: deleteSelection,
     onMoveSelectedBody: () => runSelectedPartPreviewAction("edit-transform", "Move Body"),
@@ -3313,6 +3345,7 @@ export function App(): React.JSX.Element {
       onToggleSketchEntityVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })}
       onFinishSketch={() => void finishSketch()}
       onNewSketch={() => { setSketchPlaneDialogMode("new"); setSketchPlaneDialogOpen(true); }}
+      onChangeParameters={() => setParametersOpen(true)}
       onRemoteMcp={revealRemoteMcp}
       onCancelSketchPoints={() => { setSketchCancelVersion((version) => version + 1); setStatusText("Pending sketch points cleared from the top ribbon."); }}
       onSelect={routeSelection}
@@ -3389,7 +3422,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm) => applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm })} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openContextMenu} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams)} onChangePlane={() => setSketchPlaneDialogOpen(true)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={() => { setSketchCancelVersion((version) => version + 1); switchWorkspace("part"); setStatusText("Cancelled the sketch and returned to Design. Pending points were dropped; committed geometry is kept."); }} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, expression) => setSketchDimension(entityId, dimension, valueMm, expression)} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openContextMenu} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams)} onChangePlane={() => setSketchPlaneDialogOpen(true)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={() => { setSketchCancelVersion((version) => version + 1); switchWorkspace("part"); setStatusText("Cancelled the sketch and returned to Design. Pending points were dropped; committed geometry is kept."); }} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl
@@ -3503,7 +3536,8 @@ export function App(): React.JSX.Element {
       onClose={() => setNewDialogOpen(false)}
     />
     <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} initialTilt={sketchPlaneDialogMode === "new" ? undefined : project.sketch.planeTilt} anglePlanes={anglePlaneOptions} framePlanes={framePlaneOptions} faces={sketchFaceOptions} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
-    <FeatureEditDialog feature={featureEdit} busy={status === "working"} onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />
+    <ChangeParametersDialog open={parametersOpen} project={project} busy={status === "working"} onApply={changeParameters} onClose={() => setParametersOpen(false)} />
+    <FeatureEditDialog feature={featureEdit} project={project} busy={status === "working"} onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />
   </main>;
 }
 

@@ -38,6 +38,7 @@ import {
   type ViewportViewState,
   type ViewProjection
 } from "../../../../packages/viewport-three/src/index.js";
+import { halvedExpression, unhalvedExpression } from "../dimension-expression.js";
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 import { ViewportChrome } from "../ui/ViewportChrome.js";
@@ -123,7 +124,8 @@ interface SketchWorkspaceProps {
   readonly onDeleteEntity: (id: string) => void;
   readonly onAddConstraint: (constraint: WorkbenchSketchConstraint) => void;
   readonly onDeleteConstraint: (id: string) => void;
-  readonly onSetDimension: (entityId: string, dimension: DrivingDimension, valueMm: number) => void;
+  /** With `expression`, the dimension is bound to it (`plate_w / 2`) and `valueMm` is only a placeholder the project replaces. */
+  readonly onSetDimension: (entityId: string, dimension: DrivingDimension, valueMm: number, expression?: string) => void;
   readonly onToggleConstruction: (entityId: string) => void;
   readonly onToggleVisibility: (entityId: string) => void;
   readonly viewportState: ViewportViewState;
@@ -613,7 +615,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     // Opened after the press has finished: the browser moves focus off the editor on mouse-down, which would close it again at once.
     window.setTimeout(() => {
       setDimensionEdit(next);
-      setDimensionText(String(Number(shown.toFixed(3))));
+      // A dimension bound to an expression shows the expression, so it can be edited as text; a circle shows its diameter.
+      const bound = existing?.expression === undefined ? undefined : entity.kind === "circle" ? unhalvedExpression(existing.expression) : existing.expression;
+      setDimensionText(bound ?? String(Number(shown.toFixed(3))));
     }, 0);
   };
 
@@ -621,8 +625,15 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const edit = dimensionEdit;
     if (edit === undefined) return;
     const typed = parseDynamicNumber(dimensionText);
-    if (typed === undefined || typed <= 0) { props.onMessage("Type a size greater than zero."); return; }
     const entity = props.sketch.entities.find((candidate) => candidate.id === edit.entityId);
+    // Text that is not a number is an expression (plate_w / 2): the dimension is bound to it. The project checks it and says what is wrong.
+    if (typed === undefined && dimensionText.trim() !== "" && dimensionText.trim() !== "-") {
+      const text = dimensionText.trim();
+      props.onSetDimension(edit.entityId, edit.dimension, 1, entity?.kind === "circle" ? halvedExpression(text) : text);
+      setDimensionEdit(undefined);
+      return;
+    }
+    if (typed === undefined || typed <= 0) { props.onMessage("Type a size greater than zero."); return; }
     // A circle is dimensioned by its diameter on the canvas; the model stores the radius.
     props.onSetDimension(edit.entityId, edit.dimension, entity?.kind === "circle" ? typed / 2 : typed);
     setDimensionEdit(undefined);

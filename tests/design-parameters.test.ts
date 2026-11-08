@@ -20,14 +20,14 @@ import { replayAllBodies } from "../apps/studio-web/src/design-regeneration.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 let serial = 0;
-type Op = WorkbenchOperation extends infer T ? T extends { readonly kind: infer K } ? Omit<T, "operationId" | "expectedRevision"> & { readonly kind: K } : never : never;
+export type Op = WorkbenchOperation extends infer T ? T extends { readonly kind: infer K } ? Omit<T, "operationId" | "expectedRevision"> & { readonly kind: K } : never : never;
 
 function attempt(project: WorkbenchProject, operation: Op) {
   serial += 1;
   return applyWorkbenchOperation(project, { ...operation, operationId: `operation:test-params-${serial}`, expectedRevision: project.revision } as WorkbenchOperation);
 }
 
-function run(project: WorkbenchProject, operation: Op): WorkbenchProject {
+export function run(project: WorkbenchProject, operation: Op): WorkbenchProject {
   const result = attempt(project, operation);
   assert(result.ok, `${operation.kind} is accepted: ${result.ok ? "" : result.diagnostics[0]?.message ?? ""}`);
   return result.value.project;
@@ -40,20 +40,20 @@ function refused(project: WorkbenchProject, operation: Op): string {
 }
 
 const BODY = "general-body:plate";
-const param = (name: string, expression: string, unit: DesignParameter["unit"] = "mm", comment = ""): DesignParameter => ({ name, expression, unit, comment });
+export const param = (name: string, expression: string, unit: DesignParameter["unit"] = "mm", comment = ""): DesignParameter => ({ name, expression, unit, comment });
 
 const setParameters = (project: WorkbenchProject, parameters: readonly DesignParameter[], renames?: readonly { readonly from: string; readonly to: string }[]): WorkbenchProject =>
   run(project, { kind: "set-design-parameters", parameters, ...(renames === undefined ? {} : { renames }) });
 
 /** The real replay path the app uses after every parameter change: replay each body, then apply the results with regenerate-design. */
-async function rebuilt(project: WorkbenchProject): Promise<WorkbenchProject> {
+export async function rebuilt(project: WorkbenchProject): Promise<WorkbenchProject> {
   const results = await replayAllBodies(project);
   return run(project, { kind: "regenerate-design", results });
 }
 
-const body = (project: WorkbenchProject): GeneralSolidBody => project.part.generalBodies!.find((candidate) => candidate.id === BODY)!;
-const volume = (project: WorkbenchProject): number => solidMetrics(body(project).positionsMm, body(project).indices).volumeMm3;
-const featureById = (project: WorkbenchProject, id: string): DesignSolidFeature => {
+export const body = (project: WorkbenchProject): GeneralSolidBody => project.part.generalBodies!.find((candidate) => candidate.id === BODY)!;
+export const volume = (project: WorkbenchProject): number => solidMetrics(body(project).positionsMm, body(project).indices).volumeMm3;
+export const featureById = (project: WorkbenchProject, id: string): DesignSolidFeature => {
   const found = designOf(project).features.find((feature) => feature.id === id);
   assert(found !== undefined && found.kind !== "sketch", `${id} is a solid feature`);
   return found as DesignSolidFeature;
@@ -71,13 +71,13 @@ const extent = (positions: readonly number[], axis: 0 | 1 | 2): number => {
 };
 
 const extrudeStep: DesignSolidFeature = { id: "feature:extrude-1", name: "Extrude 1", kind: "extrude", suppressed: false, sketchFeatureId: "feature:sketch-1", profileIds: [], valueMm: 10, bodyId: BODY };
-const holeStep: DesignSolidFeature = {
+export const holeStep: DesignSolidFeature = {
   id: "feature:hole-1", name: "Hole 1", kind: "hole", suppressed: false, sketchFeatureId: "feature:sketch-1", profileIds: [], valueMm: 8, bodyId: BODY,
   operation: "direct-edit", holeStyle: "simple", holePositionMm: [20, 10, 10], holeNormal: [0, 0, 1], holeDiameterMm: 8, holeDepthMm: 5
 };
 
 /** A 60 x 40 plate with a 10 mm centre bore, 10 mm thick, as a finished sketch and an extrude built through the real replay. */
-async function plate(): Promise<WorkbenchProject> {
+export async function plate(): Promise<WorkbenchProject> {
   let project = run(createWorkbenchProject("project:test-params"), { kind: "new-design-sketch", plane: "datum:xy" });
   project = run(project, { kind: "add-sketch-entity", entity: { id: "entity:outline", kind: "rectangle", center: [0, 0], widthMm: 60, heightMm: 40, rotationDeg: 0, construction: false } });
   project = run(project, { kind: "add-sketch-entity", entity: { id: "entity:bore", kind: "circle", center: [0, 0], radiusMm: 5, construction: false } });
