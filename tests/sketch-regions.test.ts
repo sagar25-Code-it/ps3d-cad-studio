@@ -1,7 +1,7 @@
 import { createGeneralSolidBody } from "../apps/studio-web/src/general-modeling.js";
 import type { SketchEntity, WorkbenchSketch } from "../packages/workbench-core/src/index.js";
 import { createWorkbenchProject } from "../packages/workbench-core/src/index.js";
-import { detectSketchProfiles, resolveProfileRegion, sampleArc, type SketchProfile } from "../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, profileBaseOf, profileOutlineMm, resolveProfileRegion, sampleArc, type SketchProfile } from "../packages/workbench-sketch/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 function sketchOf(entities: readonly SketchEntity[]): WorkbenchSketch {
@@ -135,7 +135,7 @@ export const sketchRegionTests: readonly TestCase[] = [
 
       const lone = resolveProfileRegion(profiles, [plate.id], { includeIslands: true });
       assert(lone.ok, "a lone outline resolves");
-      equal(lone.value.holes.map((hole) => hole.id).sort().join(), [holeA.id, holeB.id].sort().join(), "directly nested profiles become holes; the island inside hole-b does not");
+      equal(lone.value.holes.map((hole) => profileBaseOf(hole.id)).sort().join(), [holeA.id, holeB.id].map(profileBaseOf).sort().join(), "directly nested profiles become holes; the island inside hole-b does not (it is a region of its own, the next group)");
 
       const none = resolveProfileRegion(profiles, [plate.id], { includeIslands: false });
       assert(none.ok && none.value.holes.length === 0, "islands can be switched off");
@@ -144,15 +144,15 @@ export const sketchRegionTests: readonly TestCase[] = [
       assert(explicit.ok && explicit.value.outer.id === plate.id && explicit.value.holes.length === 1, "the largest selected profile is the outline");
 
       const outside = resolveProfileRegion([...profiles, ...detectSketchProfiles(sketchOf([circle("entity:far", [200, 0], 5)]))], [plate.id, ...detectSketchProfiles(sketchOf([circle("entity:far", [200, 0], 5)])).map((profile) => profile.id)], { includeIslands: false });
-      assert(!outside.ok, "a selected profile outside the outline is rejected");
+      assert(outside.ok && outside.value.groups.length === 2, "a selected profile outside the outline is a second, separate region (it used to be refused, so several bosses needed one feature each)");
 
       const innerIsland = profiles.find((profile) => profile.entityIds.includes("entity:island"))!;
       const nested = resolveProfileRegion(profiles, [plate.id, holeB.id, innerIsland.id], { includeIslands: false });
-      assert(!nested.ok, "a profile inside another hole is a separate island and is rejected");
+      assert(nested.ok && nested.value.groups.length === 2 && nested.value.groups[1]!.outer.id === innerIsland.id, "a profile inside another hole is an island: its own region standing in the hole (it used to be refused or dropped)");
 
       const result = await createGeneralSolidBody({ profile: plate, holes: lone.value.holes, plane: "xy", operation: "extrude", valueMm: 6, bodyId: "general-body:plate", name: "Plate", color: "#b9c2c8" });
       assert(result.ok, "a plate with two holes must extrude");
-      const holeAreas = lone.value.holes.reduce((total, hole) => total + polygonArea(hole.boundary.kind === "circle" ? Array.from({ length: 72 }, (_, step): [number, number] => [hole.boundary.kind === "circle" ? hole.boundary.center[0] + hole.boundary.radiusMm * Math.cos((2 * Math.PI * step) / 72) : 0, hole.boundary.kind === "circle" ? hole.boundary.center[1] + hole.boundary.radiusMm * Math.sin((2 * Math.PI * step) / 72) : 0]) : []), 0);
+      const holeAreas = lone.value.holes.reduce((total, hole) => total + polygonArea(profileOutlineMm(hole.boundary)), 0);
       const expected = (2400 - holeAreas) * 6;
       near(meshVolumeMm3(result.body.positionsMm, result.body.indices), expected, expected * 1e-9, "plate volume is the outline minus both holes");
       equal(result.body.brep?.faces.filter((face) => face.role.startsWith("face.hole-")).length, 2, "each hole contributes one wall");
@@ -176,7 +176,7 @@ export const sketchRegionTests: readonly TestCase[] = [
       const outer: SketchProfile = region.value.outer;
       const result = await createGeneralSolidBody({ profile: outer, holes: region.value.holes, plane: "xy", operation: "extrude", valueMm: 10, bodyId: "general-body:default-plate", name: "Plate", color: "#b9c2c8" });
       assert(result.ok, "the default plate extrudes");
-      near(meshVolumeMm3(result.body.positionsMm, result.body.indices), (60 * 40 - polygonArea(Array.from({ length: 72 }, (_, step): [number, number] => [5 * Math.cos((2 * Math.PI * step) / 72), 5 * Math.sin((2 * Math.PI * step) / 72)]))) * 10, 1e-4, "60 x 40 x 10 plate with a 10 mm bore");
+      near(meshVolumeMm3(result.body.positionsMm, result.body.indices), (60 * 40 - polygonArea(profileOutlineMm({ kind: "circle", center: [0, 0], radiusMm: 5 }))) * 10, 1e-4, "60 x 40 x 10 plate with a 10 mm bore");
     }
   }
 ];

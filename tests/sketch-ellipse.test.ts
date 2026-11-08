@@ -1,5 +1,5 @@
 import { applyWorkbenchOperation, createWorkbenchProject, type SketchEntity, type WorkbenchOperation } from "../packages/workbench-core/src/index.js";
-import { analyzeWorkbenchSketch, buildSketchEntity, detectSketchProfiles, entityExtents } from "../packages/workbench-sketch/src/index.js";
+import { analyzeWorkbenchSketch, buildSketchEntity, closedShapesOf, detectSketchProfiles, entityExtents } from "../packages/workbench-sketch/src/index.js";
 import { selectionMetrics } from "../apps/studio-web/src/selection-metrics.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
@@ -60,7 +60,8 @@ export const sketchEllipseTests: readonly TestCase[] = [
       if (!applied.ok) return;
       project = applied.value.project;
       const profiles = detectSketchProfiles(project.sketch);
-      const profile = profiles.find((candidate) => candidate.entityIds.includes("entity:ep"));
+      // The default sketch's plate and bore cross the ellipse, so the sketch has several regions; the drawn outline is the ellipse shape.
+      const profile = closedShapesOf(profiles)?.find((candidate) => candidate.entityIds.includes("entity:ep"));
       assert(profile !== undefined, "the ellipse becomes a profile");
       if (profile === undefined) return;
       near(profile.areaMm2, Math.PI * 30 * 10, 1e-9, "the profile area is π × a × b");

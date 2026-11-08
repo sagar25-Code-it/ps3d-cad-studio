@@ -4,6 +4,9 @@ import { analyzeWorkbenchSketch, detectSketchProfiles, sampleSpline } from "./in
 import { arcFrame, editPlan, type SketchEditContext, type SketchEditPlan } from "./edit-tools.js";
 import { curveEnd, isOpenCurve, jointBetween, withCurveEnd, type CurveEnd } from "./endpoint-join.js";
 import { applyPlanToSketch, planHolds } from "./sketch-clone.js";
+import { arrangeSketch } from "./profile-detect.js";
+import { diagnoseProfiles } from "./profile-diagnostics.js";
+import { profileGapToleranceOf } from "./profile-regions.js";
 
 /**
  * Interactive sketch repair (SketchXpert style) and the Validate Sketch report. `analyzeSketch` looks for real problems, each with the
@@ -20,7 +23,7 @@ import { applyPlanToSketch, planHolds } from "./sketch-clone.js";
  *  - geometry that does not satisfy its relations yet. Fix: apply the solve.
  */
 
-export type RepairCategory = "conflict" | "redundant" | "gap" | "duplicate" | "degenerate" | "open-chain" | "unsolved-geometry" | "note";
+export type RepairCategory = "conflict" | "redundant" | "gap" | "duplicate" | "degenerate" | "open-chain" | "unsolved-geometry" | "note" | "region";
 
 export type RepairFix =
   | { readonly kind: "edit"; readonly label: string; readonly plan: SketchEditPlan }
@@ -288,6 +291,7 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
   const issues: RepairIssue[] = [];
   const snap = Math.max(sketch.snapToleranceMm, 1e-6);
   const gapLimit = Math.max(snap * 2, 1.5);
+  const profileTolerance = profileGapToleranceOf(sketch);
   const verified = (plan: SketchEditPlan): boolean => planHolds(sketch, plan).ok;
 
   // Relations that do not reference any curve still in the sketch.
@@ -416,17 +420,21 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
   }
 
   // Gaps between curve ends that almost meet.
+  // Only ends that really are free count: one that sits on another curve (a rib on an edge), that an overlap covers, or that joins its own
+  // curve (a closed spline) is part of a region and needs no gap fix.
+  const freeVertexPoints = arrangeSketch(sketch).vertices.filter((vertex) => vertex.degree === 1).map((vertex) => vertex.point);
+  const isFreeEnd = (point: Vec2): boolean => freeVertexPoints.some((free) => dist(free, point) <= Math.max(profileTolerance * 2, 1e-6));
   const ends = endsOfSketch(sketch).filter((end) => !duplicated.has(end.entity.id) && (measureOf(end.entity) ?? 1) >= ZERO_MM);
   const partnersWithin = (end: EndRef, limit: number): EndRef[] => ends.filter((other) => other.entity.id !== end.entity.id && dist(other.point, end.point) <= limit);
   const gapPairs = new Set<string>();
   const gapJoins: { readonly a: string; readonly b: string }[] = [];
   const gapEnds = new Set<EndRef>();
   for (const end of ends) {
-    if (partnersWithin(end, COINCIDENT_MM).length > 0) continue;
-    const candidates = partnersWithin(end, gapLimit).filter((other) => partnersWithin(other, COINCIDENT_MM).length === 0).sort((a, b) => dist(a.point, end.point) - dist(b.point, end.point));
+    if (!isFreeEnd(end.point) || partnersWithin(end, COINCIDENT_MM).length > 0) continue;
+    const candidates = partnersWithin(end, gapLimit).filter((other) => isFreeEnd(other.point) && partnersWithin(other, COINCIDENT_MM).length === 0).sort((a, b) => dist(a.point, end.point) - dist(b.point, end.point));
     const partner = candidates[0];
     if (partner === undefined) continue;
-    const mutual = ends.filter((other) => other.entity.id !== partner.entity.id && dist(other.point, partner.point) <= gapLimit && partnersWithin(other, COINCIDENT_MM).length === 0).sort((a, b) => dist(a.point, partner.point) - dist(b.point, partner.point))[0];
+    const mutual = ends.filter((other) => other.entity.id !== partner.entity.id && dist(other.point, partner.point) <= gapLimit && isFreeEnd(other.point) && partnersWithin(other, COINCIDENT_MM).length === 0).sort((a, b) => dist(a.point, partner.point) - dist(b.point, partner.point))[0];
     if (mutual !== end) continue;
     const key = [end.entity.id + end.which, partner.entity.id + partner.which].sort().join("|");
     if (gapPairs.has(key)) continue;
@@ -464,7 +472,7 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
     }
     issues.push({
       id: `gap:${key}`, category: "gap", severity: "warning", title: `Gap of ${fmt(gap)} mm between ${short(end.entity.id)} and ${short(partner.entity.id)}`,
-      detail: `The ends at (${fmt(end.point[0])}, ${fmt(end.point[1])}) and (${fmt(partner.point[0])}, ${fmt(partner.point[1])}) almost meet but do not touch${gap <= snap ? " (close enough that profiles still join, but the geometry is not exact)" : ", so the chain is not closed"}.`,
+      detail: `The ends at (${fmt(end.point[0])}, ${fmt(end.point[1])}) and (${fmt(partner.point[0])}, ${fmt(partner.point[1])}) almost meet but do not touch${gap <= profileTolerance ? ` (within the ${fmt(profileTolerance)} mm that profiles close by themselves, so the profile still joins, but the geometry is not exact)` : `, so the chain is not closed (profiles join only across gaps up to ${fmt(profileTolerance)} mm)`}.`,
       entityIds: [end.entity.id, partner.entity.id], constraintIds: [], fixes: fixes.slice(0, 3),
       ...(fixes.length === 0 ? { noFixReason: `Relations stop either end from moving${blocked === undefined ? "" : `: ${blocked}`} Relax them first.` } : {})
     });
@@ -479,9 +487,10 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
   for (const pair of gapJoins) join(pair.a, pair.b);
   const groups = new Map<string, EndRef[]>();
   for (const end of ends) { const key = root(end.entity.id); groups.set(key, [...(groups.get(key) ?? []), end]); }
+  const detectedNow = detectSketchProfiles(sketch);
   for (const members of groups.values()) {
     const curveIds = [...new Set(members.map((end) => end.entity.id))];
-    const freeEnds = members.filter((end) => !gapEnds.has(end) && partnersWithin(end, snap).length === 0);
+    const freeEnds = members.filter((end) => !gapEnds.has(end) && partnersWithin(end, snap).length === 0 && isFreeEnd(end.point));
     if (freeEnds.length === 0) continue;
     const lone = curveIds.length === 1 && members[0]!.entity.kind === "line";
     if (lone) continue;
@@ -505,12 +514,29 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
         ...(fix === undefined ? { noFixReason: "A closing line between the two ends would not make a valid closed profile (it would cross other curves)." } : {})
       });
     } else {
+      // A chain that already bounds a region and only has a stub left over is not a broken loop; it is worth a note, not a warning.
+      const stub = detectedNow.some((profile) => profile.entityIds.some((id) => curveIds.includes(id)));
       issues.push({
-        id: `open-chain:${curveIds.slice().sort().join("|")}`, category: "open-chain", severity: "warning", title: `Open chain of ${curveIds.length} curve${curveIds.length === 1 ? "" : "s"} with ${freeEnds.length} free end${freeEnds.length === 1 ? "" : "s"}`,
-        detail: `Free ends at ${freeEnds.map((end) => `(${fmt(end.point[0])}, ${fmt(end.point[1])})`).join(", ")}. A branching or single-ended chain cannot be closed automatically.`,
+        detail: `Free ends at ${freeEnds.map((end) => `(${fmt(end.point[0])}, ${fmt(end.point[1])})`).join(", ")}. ${stub ? "They bound no region of their own; trim them if they are leftovers." : "A branching or single-ended chain cannot be closed automatically."}`,
+        id: `open-chain:${curveIds.slice().sort().join("|")}`, category: "open-chain", severity: stub ? "info" : "warning", title: stub ? `Free end on a closed outline (${freeEnds.length})` : `Open chain of ${curveIds.length} curve${curveIds.length === 1 ? "" : "s"} with ${freeEnds.length} free end${freeEnds.length === 1 ? "" : "s"}`,
         entityIds: curveIds, constraintIds: [], fixes: [], noFixReason: "Join or trim the free ends by hand (Extend, Trim or Corner)."
       });
     }
+  }
+
+  // Regions: what the curves split into, what stops them closing, and what is doubled or crossed.
+  const diagnosis = diagnoseProfiles(sketch);
+  for (const problem of diagnosis.problems) {
+    if (problem.code === "gap" || problem.code === "open-end") continue; // the gap and open-chain checks above already say it, with fixes
+    issues.push({
+      id: `region:${problem.code}:${[...problem.entityIds].sort().join("|")}:${problem.at === undefined ? "" : `${fmt(problem.at[0])},${fmt(problem.at[1])}`}`,
+      category: "region", severity: problem.severity, title: problem.code === "crossing" ? "Curves cross: the regions are split" : problem.code === "junction" ? "Curves meet at a junction" : problem.code === "overlap" ? "Curves overlap" : problem.code === "self-crossing" ? "A curve crosses itself" : problem.code === "short" ? "A curve stops short of another" : "A curve is ignored",
+      detail: problem.message, entityIds: problem.entityIds, constraintIds: [], fixes: []
+    });
+  }
+  const noRegionExplained = issues.some((issue) => issue.category === "gap" || issue.category === "open-chain" || issue.category === "region" && issue.severity === "warning");
+  if (diagnosis.profileCount === 0 && diagnosis.noProfileReasons.length > 0 && !noRegionExplained) {
+    issues.push({ id: "region:none", category: "region", severity: "warning", title: "No closed region", detail: diagnosis.noProfileReasons.join(" "), entityIds: [], constraintIds: [], fixes: [] });
   }
 
   const rank = { error: 0, warning: 1, info: 2 } as const;
@@ -525,7 +551,7 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
   const summary = [
     valid ? "No errors." : `${errors} error${errors === 1 ? "" : "s"} to fix before this sketch is dependable.`,
     warnings === 0 ? "No warnings." : `${warnings} warning${warnings === 1 ? "" : "s"}: ${fixable} with a one-click fix.`,
-    `${profiles.length} closed profile${profiles.length === 1 ? "" : "s"} ${usableForSolid ? "ready for a solid feature" : profiles.length === 0 ? "(a solid feature needs at least one closed profile)" : "(resolve the errors first)"}.`,
+    `${profiles.length} closed profile${profiles.length === 1 ? "" : "s"} ${usableForSolid ? "ready for a solid feature" : profiles.length === 0 ? `(a solid feature needs at least one closed profile)${diagnosis.noProfileReasons.length === 0 ? "" : `: ${diagnosis.noProfileReasons.join(" ")}`}` : "(resolve the errors first)"}.`,
     `${analysis.degreesOfFreedom} degree${analysis.degreesOfFreedom === 1 ? "" : "s"} of freedom left (${analysis.classification}).`,
     solves ? "All recorded relations solve together." : "The recorded relations cannot all be solved together."
   ];

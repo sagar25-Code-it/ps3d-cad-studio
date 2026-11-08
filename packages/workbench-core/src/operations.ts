@@ -128,6 +128,7 @@ export function applyWorkbenchOperation(
       kind: operation.kind,
       intentKey,
       summary: fitAuditSummary(changed.value.summary),
+      // The audit keeps the first ids of a big edit (a paste, a pattern, a break); the operation result still carries them all.
       changedIds: changed.value.changedIds.slice(0, WORKBENCH_LIMITS.maxMates + 1)
     }]
   };
@@ -244,10 +245,14 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       if (!keys(input, [...common, "entityId"]) || !stableId(input.entityId)) return invalidOperation("The sketch entity ID is invalid.");
       break;
     case "apply-sketch-edit":
+      for (const [field, limit, what] of [["removeEntityIds", WORKBENCH_LIMITS.maxEntities, "curves to remove"], ["updateEntities", WORKBENCH_LIMITS.maxEntities, "curves to change"], ["addEntities", WORKBENCH_LIMITS.maxEntities, "curves to add"], ["addConstraints", WORKBENCH_LIMITS.maxConstraints, "relations to add"], ["removeConstraintIds", WORKBENCH_LIMITS.maxConstraints, "relations to remove"]] as const) {
+        const list = input[field];
+        if (Array.isArray(list) && list.length > limit) return invalidOperation(`One sketch edit can carry at most ${limit} ${what}; this one has ${list.length}. A sketch holds at most ${WORKBENCH_LIMITS.maxEntities} curves, so split the paste, pattern or import into smaller steps.`);
+      }
       if (!keys(input, [...common, "removeEntityIds", "updateEntities", "addEntities", "addConstraints", "label", ...(Object.hasOwn(input, "removeConstraintIds") ? ["removeConstraintIds"] : [])])
-        || (Object.hasOwn(input, "removeConstraintIds") && !boundedList(input.removeConstraintIds, 400, stableId))
-        || !boundedList(input.removeEntityIds, 200, stableId) || !boundedList(input.updateEntities, 200, isRecord)
-        || !boundedList(input.addEntities, 200, isRecord) || !boundedList(input.addConstraints, 400, isRecord)
+        || (Object.hasOwn(input, "removeConstraintIds") && !boundedList(input.removeConstraintIds, WORKBENCH_LIMITS.maxConstraints, stableId))
+        || !boundedList(input.removeEntityIds, WORKBENCH_LIMITS.maxEntities, stableId) || !boundedList(input.updateEntities, WORKBENCH_LIMITS.maxEntities, isRecord)
+        || !boundedList(input.addEntities, WORKBENCH_LIMITS.maxEntities, isRecord) || !boundedList(input.addConstraints, WORKBENCH_LIMITS.maxConstraints, isRecord)
         || typeof input.label !== "string" || input.label.length < 1 || input.label.length > 80) return invalidOperation("The sketch edit payload is invalid.");
       break;
     case "set-sketch-constraints-suppressed":

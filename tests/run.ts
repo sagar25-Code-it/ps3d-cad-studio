@@ -4,6 +4,7 @@ import { modelAndCommandTests } from "./model-and-commands.test.js";
 import { revisionBoundaryTests } from "./revision-boundaries.test.js";
 import { sketchTests } from "./sketch.test.js";
 import { sketchRegionTests } from "./sketch-regions.test.js";
+import { sketchArrangementTests } from "./sketch-arrangement.test.js";
 import { sketchCameraTests } from "./sketch-camera.test.js";
 import { sketchInteractionTests } from "./sketch-interaction.test.js";
 import { sketchConstraintFitTests } from "./sketch-constraint-fit.test.js";
@@ -111,6 +112,7 @@ const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
   ...sketchTests,
   ...sketchRegionTests,
+  ...sketchArrangementTests,
   ...sketchCameraTests,
   ...sketchInteractionTests,
   ...sketchConstraintFitTests,

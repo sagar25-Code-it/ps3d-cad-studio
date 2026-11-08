@@ -20,10 +20,12 @@ export interface SplineDerivatives {
 /** The smallest gap between consecutive fit points a sketch accepts (kept in step with the sketch validation). */
 export const MIN_SPLINE_FIT_GAP_MM = 0.01;
 
-/** The four control points of one span, with the end points standing in for the missing outer neighbours. */
-function spanPoints(fit: readonly SplinePoint[], span: number): readonly [SplinePoint, SplinePoint, SplinePoint, SplinePoint] {
-  const last = fit.length - 1;
-  return [fit[Math.max(0, span - 1)]!, fit[span]!, fit[span + 1]!, fit[Math.min(last, span + 2)]!];
+/** A fit-point spline whose last point is its first closes on itself into a smooth periodic curve. */
+export function isPeriodicSpline(fit: readonly SplinePoint[], toleranceMm = 1e-9): boolean {
+  if (fit.length < 4) return false;
+  const first = fit[0]!;
+  const last = fit[fit.length - 1]!;
+  return Math.hypot(last[0] - first[0], last[1] - first[1]) <= toleranceMm;
 }
 
 /** Number of spans of a fit-point spline (one fewer than the fit points). */
@@ -31,22 +33,76 @@ export function splineSpanCount(fit: readonly SplinePoint[]): number {
   return Math.max(0, fit.length - 1);
 }
 
+/**
+ * How far the knot spacing departs from uniform: 0 for evenly spaced fit points, up to 0.75 (between centripetal and chordal) when
+ * neighbouring chords differ by a factor of eight or more. A uniform Catmull-Rom curve loops or backtracks when the gaps differ much;
+ * centripetal to chordal parameterisations do not. Between a factor of four and eight the exponent ramps, so the curve changes smoothly
+ * with the points and evenly spaced splines keep the exact uniform curve (and the curvature formulas that go with it).
+ */
+function knotExponent(ring: readonly SplinePoint[], closed: boolean): number {
+  let ratio = 1;
+  const count = ring.length;
+  const chord = (index: number): number => {
+    const a = ring[index % count]!;
+    const b = ring[(index + 1) % count]!;
+    return Math.hypot(b[0] - a[0], b[1] - a[1]);
+  };
+  const chords = closed ? count : count - 1;
+  for (let index = 0; index + 1 < chords; index += 1) {
+    const left = chord(index);
+    const right = chord(index + 1);
+    if (left > 1e-12 && right > 1e-12) ratio = Math.max(ratio, left / right, right / left);
+  }
+  if (closed && chords > 1) {
+    const left = chord(chords - 1);
+    const right = chord(0);
+    if (left > 1e-12 && right > 1e-12) ratio = Math.max(ratio, left / right, right / left);
+  }
+  return 0.75 * Math.min(1, Math.max(0, (ratio - 4) / 4));
+}
+
+/**
+ * One span as a cubic Hermite segment: its end points and the end tangents with respect to the span parameter s in [0, 1].
+ * The tangents are the non-uniform Catmull-Rom ones; with even spacing they are (P2 - P0) / 2 and (P3 - P1) / 2. The ends of an
+ * open spline repeat the end point as the missing neighbour, with the knot gap mirrored from the next span.
+ */
+export function splineSpanHermite(fit: readonly SplinePoint[], span: number): { readonly p1: SplinePoint; readonly p2: SplinePoint; readonly m1: SplinePoint; readonly m2: SplinePoint } {
+  const closed = isPeriodicSpline(fit);
+  const ring = closed ? fit.slice(0, -1) : fit;
+  const count = ring.length;
+  const at = (index: number): SplinePoint => (closed ? ring[((index % count) + count) % count]! : ring[Math.min(count - 1, Math.max(0, index))]!);
+  const q0 = at(span - 1);
+  const q1 = at(span);
+  const q2 = at(span + 1);
+  const q3 = at(span + 2);
+  const exponent = knotExponent(ring, closed);
+  const gap = (a: SplinePoint, b: SplinePoint): number => Math.max(Math.pow(Math.hypot(b[0] - a[0], b[1] - a[1]), exponent), 1e-9);
+  const d12 = gap(q1, q2);
+  const d01 = !closed && span === 0 ? d12 : gap(q0, q1);
+  const d23 = !closed && span === count - 2 ? d12 : gap(q2, q3);
+  const tangent = (axis: 0 | 1, a: SplinePoint, b: SplinePoint, c: SplinePoint, dLeft: number, dRight: number): number =>
+    d12 * ((b[axis] - a[axis]) / dLeft - (c[axis] - a[axis]) / (dLeft + dRight) + (c[axis] - b[axis]) / dRight);
+  const m1: SplinePoint = [tangent(0, q0, q1, q2, d01, d12), tangent(1, q0, q1, q2, d01, d12)];
+  // The far tangent uses the same pattern shifted by one: (q2 - q1) / d12 - (q3 - q1) / (d12 + d23) + (q3 - q2) / d23.
+  const far = (axis: 0 | 1): number => d12 * ((q2[axis] - q1[axis]) / d12 - (q3[axis] - q1[axis]) / (d12 + d23) + (q3[axis] - q2[axis]) / d23);
+  const m2: SplinePoint = [far(0), far(1)];
+  return { p1: q1, p2: q2, m1, m2 };
+}
+
 /** Position and derivatives inside one span, at parameter t in [0, 1]. */
 export function splineDerivativesAt(fit: readonly SplinePoint[], span: number, t: number): SplineDerivatives {
-  const [p0, p1, p2, p3] = spanPoints(fit, span);
+  const { p1, p2, m1, m2 } = splineSpanHermite(fit, span);
   const t2 = t * t;
+  const t3 = t2 * t;
   const component = (axis: 0 | 1): { readonly value: number; readonly d1: number; readonly d2: number } => {
-    const a = p0[axis];
-    const b = p1[axis];
-    const c = p2[axis];
-    const d = p3[axis];
-    const k1 = -a + c;
-    const k2 = 2 * a - 5 * b + 4 * c - d;
-    const k3 = -a + 3 * b - 3 * c + d;
+    const a = p1[axis];
+    const b = p2[axis];
+    const u = m1[axis];
+    const v = m2[axis];
     return {
-      value: 0.5 * (2 * b + k1 * t + k2 * t2 + k3 * t2 * t),
-      d1: 0.5 * (k1 + 2 * k2 * t + 3 * k3 * t2),
-      d2: k2 + 3 * k3 * t
+      value: (2 * t3 - 3 * t2 + 1) * a + (t3 - 2 * t2 + t) * u + (-2 * t3 + 3 * t2) * b + (t3 - t2) * v,
+      d1: (6 * t2 - 6 * t) * a + (3 * t2 - 4 * t + 1) * u + (-6 * t2 + 6 * t) * b + (3 * t2 - 2 * t) * v,
+      d2: (12 * t - 6) * a + (6 * t - 4) * u + (-12 * t + 6) * b + (6 * t - 2) * v
     };
   };
   const x = component(0);

@@ -122,9 +122,9 @@ export const sketchRepairTests: readonly TestCase[] = [
   {
     name: "a gap between ends that almost meet is reported with the distance, and joining it closes the profile",
     run: () => {
-      const entities = [line("s0", [0, 0], [10, 0]), line("s1", [10, 0], [10, 10]), line("s2", [10, 10], [0, 10]), line("s3", [0, 10.9], [0, 0])];
+      const entities = [line("s0", [0, 0], [10, 0]), line("s1", [10, 0], [10, 10]), line("s2", [10, 10], [0, 10]), line("s3", [0, 9.1], [0, 0])];
       const project = projectWith(entities);
-      equal(detectSketchProfiles(project.sketch).length, 0, "the 0.9 mm gap leaves the square open");
+      equal(detectSketchProfiles(project.sketch).length, 0, "the 0.9 mm gap leaves the square open (a side that overshoots the corner would close it instead, see the arrangement tests)");
       const gaps = issuesOf(project, "gap");
       equal(gaps.length, 1, "one gap");
       assert(gaps[0]!.title.includes("0.9"), `the gap size is in the title (${gaps[0]!.title})`);

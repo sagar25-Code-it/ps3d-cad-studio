@@ -17,12 +17,13 @@ import {
   type SketchEditResult
 } from "../../../../packages/workbench-sketch/src/edit-tools.js";
 import { resolveMirrorAxis } from "../../../../packages/workbench-sketch/src/dynamic-mirror.js";
+import { breakAtIntersections } from "../../../../packages/workbench-sketch/src/break-intersections.js";
 import { describePath, healPathGaps, makePath, pathToSpline } from "../../../../packages/workbench-sketch/src/make-path.js";
 import { offsetMoveEntities } from "../../../../packages/workbench-sketch/src/offset-move.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 
 export type SketchEditToolId = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "stretch" | "corner" | "fillet" | "chamfer" | "trim" | "extend"
-  | "split" | "jog" | "delete-curve" | "offset-move" | "make-path" | "dynamic-mirror";
+  | "split" | "break" | "jog" | "delete-curve" | "offset-move" | "make-path" | "dynamic-mirror";
 
 /** The tools that act on a click on a curve rather than on the selection, so the canvas must not start a selection box for them. */
 export function isClickEditTool(tool: SketchEditToolId | null): tool is "trim" | "extend" | "split" | "jog" | "delete-curve" {
@@ -51,6 +52,7 @@ export const SKETCH_EDIT_TOOL_LABELS: Readonly<Record<SketchEditToolId, string>>
   trim: "Trim",
   extend: "Extend",
   split: "Split",
+  break: "Break at intersections",
   jog: "Jog",
   "delete-curve": "Delete Curve",
   "offset-move": "Offset Move",
@@ -72,6 +74,7 @@ const INSTRUCTIONS: Readonly<Record<SketchEditToolId, string>> = {
   trim: "Click a curve where you want it cut: the part between its neighbouring crossings is removed. A circle becomes the arc that remains.",
   extend: "Click a line near the end you want to lengthen. It runs on to the first curve it reaches.",
   split: "Click a curve where you want it cut in two. Near a crossing with another curve it snaps to the crossing. A circle becomes two arcs; a rectangle becomes five lines.",
+  break: "Select the curves to break (or select nothing to break all of them), then Apply. Every curve is cut where it crosses, touches or overlaps another, so a rectangle with a diagonal becomes lines you can delete one by one, and crossing lines meet in corners. Regions are found without this step; use it when you want the pieces as separate curves.",
   jog: "Set the step and its width, then click a line. The line steps out and back by the offset over the width (centred on your click); a width of 0 makes a single step and shifts the rest of the line.",
   "delete-curve": "Click a curve to delete it and heal the gap: the two curves that met it are extended or trimmed to meet each other.",
   "offset-move": "Select a chain or a closed region, then Apply. Offset mode moves each curve along its normal (positive is left of the first line's direction; a closed region grows) and stretches the lines attached to it. Vector mode moves the selection by X and Y and the attached curves follow.",
@@ -156,6 +159,7 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
     switch (props.tool) {
       case "offset": result = offsetEntities(context, ids, Number(offset)); break;
       case "mirror": result = mirrorEntities(context, ids); break;
+      case "break": result = breakAtIntersections(context, ids); break;
       case "corner": result = cornerLines(context, ids); break;
       case "fillet": result = filletCorners(context, ids, Number(radius)); break;
       case "chamfer":

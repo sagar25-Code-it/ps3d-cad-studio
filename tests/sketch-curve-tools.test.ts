@@ -51,7 +51,10 @@ function meshVolumeMm3(positions: readonly number[], indices: readonly number[])
   return total / 6;
 }
 
-/** Extrudes the (single) profile of a sketch through the real extrude path and returns the mesh volume. */
+/**
+ * Extrudes the (single) profile of a sketch through the real extrude path and returns the mesh volume. The profile area is exact
+ * (arcs are integrated, not faceted) while the mesh is the facet polygon, so the volume sits a chord-error bound (0.2 percent) below area x height.
+ */
 async function extrudedVolume(entities: readonly SketchEntity[], heightMm: number): Promise<{ readonly volume: number; readonly area: number }> {
   const profile = detectSketchProfiles(sketchOf(entities));
   equal(profile.length, 1, "exactly one closed profile to extrude");
@@ -158,7 +161,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       near(box.max[0] - box.min[0], 40, 1e-9, "overall width");
       near(box.max[1] - box.min[1], 25, 1e-9, "overall height");
       const solid = await extrudedVolume(project.sketch.entities, 4);
-      near(solid.volume, solid.area * 4, solid.area * 4 * 1e-9, "extrudes to profile area times height");
+      near(solid.volume, solid.area * 4, solid.area * 4 * 2e-3, "extrudes to profile area times height");
       near(maxRoundedCornerRadius(40, 25), 12.48, 1e-9, "the limit is just under half the short side");
       const tooBig = buildRoundedRectangle([0, 0], [40, 25], 13, ids);
       assert(!tooBig.ok, "a radius that leaves no straight side is refused");
@@ -190,7 +193,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       const expected = (Math.PI / 2) * ((R + h) ** 2 - (R - h) ** 2) / 2 + Math.PI * h * h;
       near(profiles[0]!.areaMm2, expected, expected * 0.004, "annular sector plus two half discs");
       const solid = await extrudedVolume(project.sketch.entities, 5);
-      near(solid.volume, solid.area * 5, solid.area * 5 * 1e-9, "extrudes cleanly");
+      near(solid.volume, solid.area * 5, solid.area * 5 * 2e-3, "extrudes cleanly");
       // The same slot drawn the other way round (clockwise) still closes and has the same area.
       const clockwise = must(buildThreePointArcSlot([0, 30], [30 * Math.SQRT1_2, 30 * Math.SQRT1_2], [30, 0], [0, 26], ids));
       near(detectSketchProfiles(sketchOf(clockwise.entities))[0]!.areaMm2, expected, expected * 0.004, "direction does not change the slot");
@@ -260,7 +263,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       const kink = (left: Vec2, right: Vec2): number => (Math.acos(Math.max(-1, Math.min(1, -(left[0] * right[0] + left[1] * right[1])))) * 180) / Math.PI;
       assert(kink(halves[0]![1]!.outward, halves[1]![0]!.outward) < 6 && kink(halves[1]![1]!.outward, halves[0]![0]!.outward) < 6, "the two joints between the halves are smooth to within 6 degrees");
       const solid = await extrudedVolume(project.sketch.entities, 6);
-      near(solid.volume, solid.area * 6, solid.area * 6 * 1e-9, "extrudes to profile area times height");
+      near(solid.volume, solid.area * 6, solid.area * 6 * 2e-3, "extrudes to profile area times height");
     }
   },
   {
@@ -437,7 +440,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       const loop = [...entities, ...left.entities, ...rightBlend.entities];
       const solid = await extrudedVolume(loop, 3);
       assert(solid.area > 800, `the bean has an area of ${solid.area.toFixed(1)} mm2 (bars alone enclose 800)`);
-      near(solid.volume, solid.area * 3, solid.area * 3 * 1e-9, "and extrudes to profile area times height");
+      near(solid.volume, solid.area * 3, solid.area * 3 * 2e-3, "and extrudes to profile area times height");
     }
   },
   {
@@ -473,7 +476,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       equal(project.sketch.constraints.filter((constraint) => constraint.kind === "coincident").length, 3, "line-to-line joints, including the one that closes the loop (an arc's own ends cannot be joined)");
       equal(detectSketchProfiles(project.sketch).length, 1, "closes into a single profile");
       const solid = await extrudedVolume(project.sketch.entities, 2);
-      near(solid.volume, solid.area * 2, solid.area * 2 * 1e-9, "extrudes to profile area times height");
+      near(solid.volume, solid.area * 2, solid.area * 2 * 2e-3, "extrudes to profile area times height");
       assert(solid.area > 2000, "with the area of the box plus the arc bulge");
     }
   },
@@ -553,7 +556,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       const profiles = detectSketchProfiles(sketchOf(o.entities));
       equal(profiles.length, 1, "which close into one profile");
       const solid = await extrudedVolume(o.entities, 2);
-      near(solid.volume, solid.area * 2, solid.area * 2 * 1e-9, "that extrudes");
+      near(solid.volume, solid.area * 2, solid.area * 2 * 2e-3, "that extrudes");
       const d = must(buildSketchText([0, 0], "D", { heightMm: 30 }, ids));
       equal(detectSketchProfiles(sketchOf(d.entities)).length, 1, "a D closes too");
       equal(detectSketchProfiles(sketchOf(must(buildSketchText([0, 0], "L", { heightMm: 30 }, ids)).entities)).length, 0, "an L is only a path");
@@ -645,7 +648,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       const area = 40 * 20 - (4 - Math.PI) * 16;
       near(detectSketchProfiles(sketchOf(copyOnly))[0]!.areaMm2, area * 4, area * 4 * 0.003, "doubling the size quadruples the area");
       const solid = await extrudedVolume(copyOnly, 3);
-      near(solid.volume, solid.area * 3, solid.area * 3 * 1e-9, "the copy extrudes");
+      near(solid.volume, solid.area * 3, solid.area * 3 * 2e-3, "the copy extrudes");
     }
   },
   {

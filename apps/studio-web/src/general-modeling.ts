@@ -52,7 +52,7 @@ function insetPolygon(polygonMm: readonly PolygonPoint[], insetMm: number, kind:
 /** One kernel side face per sketch entity of a curve loop, so arcs stay single cylindrical walls with stable names. */
 function curveEdgeGroups(boundary: SketchProfile["boundary"], rolePrefix: string): readonly ProfileEdgeGroup[] | undefined {
   if (boundary.kind !== "curve-loop") return undefined;
-  return boundary.segments.map((segment) => ({ role: `${rolePrefix}-${stableEntityToken([segment.entityId])}`, edgeCount: segment.edgeCount, curved: segment.kind !== "line" }));
+  return boundary.segments.map((segment) => ({ role: `${rolePrefix}-${stableEntityToken([segment.key ?? segment.entityId])}`, edgeCount: segment.edgeCount, curved: segment.kind !== "line" }));
 }
 
 /** Place a 2D sketch point (millimetres) onto its datum plane in world metres, matching the analytic tessellator's orientation. */
@@ -89,6 +89,8 @@ export interface CreateGeneralSolidRequest {
   readonly color: string;
   /** Optional chamfer or fillet of the extruded prism's vertical edges (extrude / edge-fillet / edge-chamfer). */
   readonly edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number };
+  /** Further separate regions built in the same feature (extrude and revolve): disjoint bosses, or an island in a hole. */
+  readonly extraGroups?: readonly { readonly profile: SketchProfile; readonly holes?: readonly SketchProfile[] }[];
   /** Profiles that lie inside `profile` and are cut through it (extrude only). */
   readonly holes?: readonly SketchProfile[];
   /** Sweep only: world-space direction vector (will be normalized). Builder refuses a direction with zero length. */
@@ -162,6 +164,58 @@ export type CreateGeneralSolidResult =
   | { readonly ok: true; readonly body: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[] }
   | { readonly ok: false; readonly message: string };
 
+/** Joins solids that do not touch into one body: their meshes side by side, their faces named per region. */
+function mergeRegionBodies(bodies: readonly GeneralSolidBody[], base: { readonly id: string; readonly name: string; readonly color: string }): GeneralSolidBody {
+  const positionsMm: number[] = [];
+  const indices: number[] = [];
+  const faces: { role: string; key: string; areaMm2: number }[] = [];
+  const faceTriangles: number[] = [];
+  let vertices = 0;
+  let edges = 0;
+  let faceCount = 0;
+  let withBrep = true;
+  bodies.forEach((body, index) => {
+    const offset = positionsMm.length / 3;
+    for (const value of body.positionsMm) positionsMm.push(value);
+    for (const value of body.indices) indices.push(value + offset);
+    const brep = body.brep;
+    if (brep === undefined) { withBrep = false; return; }
+    vertices += brep.topology.vertices;
+    edges += brep.topology.edges;
+    const before = faces.length;
+    for (const face of brep.faces) faces.push({ role: index === 0 ? face.role : `region${index + 1}.${face.role}`, key: face.key, areaMm2: face.areaMm2 });
+    for (const face of brep.faceTriangles) faceTriangles.push(face + before);
+    faceCount += brep.topology.faces;
+  });
+  const first = bodies[0]!;
+  const merged: GeneralSolidBody = { ...first, id: base.id, name: base.name, color: base.color, positionsMm, indices };
+  if (!withBrep) {
+    const { brep: _dropped, ...withoutBrep } = merged;
+    void _dropped;
+    return withoutBrep;
+  }
+  return { ...merged, brep: { ...first.brep!, topology: { vertices, edges, faces: faceCount }, faces, faceTriangles } };
+}
+
+/**
+ * Builds a feature from several regions at once (separate bosses, or an island standing in a hole): each region is built on its own
+ * and the solids that result are one body. The regions come from one sketch arrangement, so they never overlap.
+ */
+async function createRegionGroups(request: CreateGeneralSolidRequest): Promise<CreateGeneralSolidResult> {
+  const groups = [{ profile: request.profile, holes: request.holes ?? [] }, ...(request.extraGroups ?? [])];
+  if (request.operation !== "extrude" && request.operation !== "revolve") return { ok: false, message: `A ${request.operation} is built from one region; several regions are selected. Select a single region.` };
+  if (request.edge !== undefined) return { ok: false, message: "Chamfer and fillet are not available when several regions are selected. Treat the edges after the extrusion, or select one region." };
+  const built: GeneralSolidBody[] = [];
+  for (const [index, group] of groups.entries()) {
+    const { extraGroups: _extra, holes: _holes, ...single } = request;
+    void _extra; void _holes;
+    const part = await createGeneralSolidBody({ ...single, profile: group.profile, ...((group.holes ?? []).length === 0 ? {} : { holes: group.holes }), bodyId: index === 0 ? request.bodyId : `${request.bodyId}.region-${index + 1}` });
+    if (!part.ok) return { ok: false, message: groups.length > 1 ? `Region ${index + 1} of ${groups.length}: ${part.message}` : part.message };
+    built.push(part.body);
+  }
+  return { ok: true, body: mergeRegionBodies(built, { id: request.bodyId, name: request.name, color: request.color }) };
+}
+
 /**
  * Build a general mesh-solid body from a sketch profile.
  *
@@ -171,6 +225,7 @@ export type CreateGeneralSolidResult =
  * tessellator because the reference kernel does not yet evaluate revolves.
  */
 export async function createGeneralSolidBody(request: CreateGeneralSolidRequest): Promise<CreateGeneralSolidResult> {
+  if (request.extraGroups !== undefined && request.extraGroups.length > 0) return createRegionGroups(request);
   const polygonMm = profilePolygonMm(request.profile.boundary);
   if (polygonMm.length < 3) return { ok: false, message: "The selected profile does not form a closed polygon." };
   if (!Number.isFinite(request.valueMm) || request.valueMm === 0) {

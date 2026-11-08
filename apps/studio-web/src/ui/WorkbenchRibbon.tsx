@@ -208,6 +208,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
       <RibbonGroup label="Split, path & repair">
         <RibbonButton icon="trim" label="Split" hint="click a curve" active={props.sketchEditTool === "split"} onClick={() => props.onSketchEditTool("split")} />
+        <RibbonButton icon="trim" label="Break" hint="at intersections" active={props.sketchEditTool === "break"} onClick={() => props.onSketchEditTool("break")} />
         <RibbonButton icon="line" label="Jog" hint="step · width" active={props.sketchEditTool === "jog"} onClick={() => props.onSketchEditTool("jog")} />
         <RibbonButton icon="trash" label="Delete Curve" hint="heals the gap" active={props.sketchEditTool === "delete-curve"} onClick={() => props.onSketchEditTool("delete-curve")} />
         <RibbonButton icon="move" label="Offset Move" hint="chain / region" active={props.sketchEditTool === "offset-move"} onClick={() => props.onSketchEditTool("offset-move")} />

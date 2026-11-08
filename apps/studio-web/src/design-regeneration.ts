@@ -1,6 +1,6 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
-import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, lostProfileRefs, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
 import { attachEdgeFlange, attachMiterFlange, booleanMeshes, cutReliefNotch, developBend, flangeReliefs, holeCutter, jogSheetMesh, reliefCorners, snapToAxis, splitMeshPieces, threadBoreWall, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BendRecord, type BentStripSpec, type FlatLayout, type HoleSpec } from "../../../packages/workbench-geometry/src/index.js";
 import { flangeEdgesOf } from "../../../packages/workbench-core/src/index.js";
 import { bendResolverOfStep, loftedBendBody, loftedBendFlat, plateFlangesOf, plateJogsOf } from "./sheet-metal-features.js";
@@ -16,7 +16,7 @@ import { applyBodyEdit } from "./body-edit-replay.js";
  * are applied to the project afterwards with the synchronous `regenerate-design` operation.
  */
 export type SolidRebuild =
-  | { readonly ok: true; readonly body: GeneralSolidBody }
+  | { readonly ok: true; readonly body: GeneralSolidBody; readonly warnings?: readonly string[] }
   | { readonly ok: false; readonly message: string };
 
 export interface RebuildResult {
@@ -63,10 +63,16 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   }
   const sketch = sketchFeature.sketch;
   const profiles = detectSketchProfiles(sketch);
-  const missing = feature.profileIds.find((id) => !profiles.some((profile) => profile.id === id));
-  if (missing !== undefined) return { ok: false, message: "A profile this feature was built on no longer exists in its sketch. Edit the sketch to close it again, or delete the feature." };
+  const lost = lostProfileRefs(profiles, feature.profileIds);
+  if (lost.length > 0) return { ok: false, message: `${feature.name}: a profile this feature was built on no longer exists in its sketch (${lost.join("; ")}). Edit the sketch to close it again, or delete the feature.` };
   const region = resolveProfileRegion(profiles, feature.profileIds, { includeIslands: feature.kind === "extrude" && feature.edge === undefined });
-  if (!region.ok) return { ok: false, message: region.diagnostics[0]?.message ?? "The sketch has no closed profile for this feature." };
+  if (!region.ok) return { ok: false, message: `${feature.name}: ${region.diagnostics[0]?.message ?? "The sketch has no closed profile for this feature."}` };
+  const groups = region.value.groups;
+  if (groups.length > 1 && feature.kind !== "extrude" && feature.kind !== "revolve") {
+    return { ok: false, message: `${feature.name}: a ${feature.kind} is built from one region, but ${groups.length} separate regions are selected. Select a single region, or use an extrude or revolve for several.` };
+  }
+  if (groups.length > 1 && feature.kind === "revolve" && feature.thinWallMm !== undefined) return { ok: false, message: `${feature.name}: a thin revolve follows one outline. Select a single region.` };
+  const warnings = region.value.warnings;
   const plane = planeKeyOf(sketch.plane);
   if (feature.kind === "sheet-lofted-bend") {
     const lofted = loftedBendBody(feature, profiles, region.value.outer, plane, color);
@@ -91,6 +97,7 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     operation: feature.kind,
     valueMm: reach,
     ...(region.value.holes.length === 0 ? {} : { holes: region.value.holes }),
+    ...(groups.length > 1 ? { extraGroups: groups.slice(1).map((group) => ({ profile: group.outer, holes: group.holes })) } : {}),
     bodyId: feature.bodyId,
     name: feature.name,
     color,
@@ -145,11 +152,11 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     ...(feature.kind === "draft" && feature.draftAngleDeg !== undefined ? { draftAngleDeg: feature.draftAngleDeg } : {}),
     ...(feature.kind === "draft" && feature.draftNeutralFace !== undefined ? { draftNeutralFace: feature.draftNeutralFace } : {})
   });
-  if (!built.ok) return { ok: false, message: built.message };
+  if (!built.ok) return { ok: false, message: warnings.length === 0 ? built.message : `${built.message} ${warnings.join(" ")}` };
   const started = sweep === undefined || sweep.startDeg === 0 ? built.body : { ...built.body, positionsMm: startRevolveAt(built.body.positionsMm, plane, sweep.startDeg) };
   const placed = shifted(started, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0));
   // A sketch on an angle or three-point plane is built on its datum plane and then moved onto that plane, which keeps the face names.
-  return { ok: true, body: isPlaced(sketch) ? { ...placed, positionsMm: placePositions(placed.positionsMm, sketch) } : placed };
+  return { ok: true, body: isPlaced(sketch) ? { ...placed, positionsMm: placePositions(placed.positionsMm, sketch) } : placed, ...(warnings.length === 0 ? {} : { warnings }) };
 }
 
 /** The direction a sketch's solids rise in: its datum plane's normal, moved onto the sketch's tilt or three-point plane. */

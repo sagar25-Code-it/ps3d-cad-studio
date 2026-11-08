@@ -187,7 +187,7 @@ export const sheetMetalCommandTests: readonly TestCase[] = [
     name: "Lofted Bend: a selected Loft becomes a sheet-metal transition body of the chosen thickness next to it",
     run: async () => {
       const { project, sketch } = await sheetProject();
-      const circle = detectSketchProfiles(sketch.sketch).find((profile) => profile.id === "profile:centered-bore-profile")!;
+      const circle = detectSketchProfiles(sketch.sketch).find((profile) => profile.entityIds.includes("entity:centered-bore-profile"))!;
       const loft = step(sketch, "loft", "loft1", { profileIds: [circle.id], valueMm: 20, loftTopScale: 3, bodyId: "general-body:loft1" });
       const built = await rebuildSolidFeature(loft, sketch as DesignSketchFeature);
       assert(built.ok, "the loft builds");

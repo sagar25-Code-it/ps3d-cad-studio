@@ -85,7 +85,7 @@ import {
   type ExchangeImportResult,
   type ExchangeUnit
 } from "../../../packages/exchange-3d/src/index.js";
-import { detectSketchProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, explainNoProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 import { edgesToPick, isSketchProjectCommand, needsPick, pickedEdgeRun, planSketchProject, sourceBodyOf, type SketchProjectCommand, type SketchProjectPick } from "./sketch-project-command.js";
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
@@ -2483,7 +2483,7 @@ export function App(): React.JSX.Element {
     if ((operation === "edge-fillet" || operation === "edge-chamfer") && (edge === undefined || edge.sizeMm <= 0)) {
       setStatus("error"); setStatusText(`Enter a positive ${operation === "edge-fillet" ? "fillet radius" : "chamfer distance"}.`); return;
     }
-    if (detectSketchProfiles(projectRef.current.sketch).length === 0) { setStatus("error"); setStatusText("Draw or select a closed profile before creating a solid."); return; }
+    if (detectSketchProfiles(projectRef.current.sketch).length === 0) { setStatus("error"); setStatusText(`There is no closed region to build a solid from. ${explainNoProfiles(projectRef.current.sketch).join(" ")}`.trim()); return; }
     setStatus("working");
     setStatusText(`Building ${operation === "extrude" ? "extruded" : operation === "revolve" ? "revolved" : operation === "sweep" ? "swept" : operation === "loft" ? "lofted" : operation === "edge-fillet" ? "filleted" : operation === "edge-chamfer" ? "chamfered" : operation === "shell" ? "shelled" : operation === "helix" ? "helical" : operation === "thread" ? "threaded" : operation === "rib" ? "ribbed" : operation === "dome" ? "domed" : operation === "sheet-base" ? "sheet-metal base" : operation === "sheet-flange" ? "sheet-metal flange" : operation === "sheet-hem" ? "hemmed" : "drafted"} solid…`);
     const sketchId = await commitWorkingSketch();
