@@ -107,6 +107,7 @@ export const bodyAnalysisTests: readonly TestCase[] = [
       project = withGeneral.value.project;
 
       const bodies = partAnalysisBodies(project.part);
+      assert(partAnalysisBodies(project.part)[0]!.positionsMm === bodies[0]!.positionsMm, "a preview body's mesh is generated once per record, so per-mesh results can be cached");
       equal(bodies.map((entry) => entry.id).join(","), "part-body:block,part-body:pin,general-body:key", "hidden bodies are left out, preview bodies come first");
       equal(partAnalysisBodies(project.part, { includeHidden: true }).length, 4, "unless asked");
       for (const entry of bodies) equal(checkMesh(entry.positionsMm, entry.indices).status, "pass", `${entry.id} is a clean closed mesh`);
