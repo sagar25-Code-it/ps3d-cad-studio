@@ -12,3 +12,5 @@ export * from "./hole.js";
 export * from "./plane-tilt.js";
 export * from "./sketch-placement.js";
 export * from "./flat-pattern.js";
+export * from "./face-edits.js";
+export { analyzeFaces, resolveFace, type FaceAnalysis, type FaceRegion, type FaceRefLike, type MeshLike } from "./face-analysis.js";

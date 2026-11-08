@@ -41,7 +41,7 @@ export interface WorkbenchMenuState {
   /** A general solid body (built from a sketch extrude or revolve) is selected. */
   readonly generalBodySelected: boolean;
   /** The timeline feature the current selection resolves to, if any. */
-  readonly selectedFeature?: { readonly name: string; readonly suppressed: boolean; readonly kind: "sketch" | "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" };
+  readonly selectedFeature?: { readonly name: string; readonly suppressed: boolean; readonly kind: "sketch" | "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "offset-region" | "replace-face" | "web" | "wrap" | "flex" };
   /** Something deletable is selected: a timeline feature, a solid body, or a preview body. */
   readonly selectionDeletable: boolean;
 }

@@ -1,3 +1,4 @@
+import { describeBodyEdit } from "./body-edit.js";
 import { isFeatureActive, modifiesBody } from "./design.js";
 import { planeWorldCoordinate } from "./planar-faces.js";
 import type { DesignFeature, DesignHistory, DesignSolidFeature } from "./types.js";
@@ -37,6 +38,7 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
     if (feature.sketch.planeFrame !== undefined) return `Plane through 3 points · ${curves} ${curves === 1 ? "curve" : "curves"}`;
     return `${sketchPlaneName(feature.sketch.plane)} plane${offset}${tilt} · ${curves} ${curves === 1 ? "curve" : "curves"}`;
   }
+  if (feature.bodyEdit !== undefined) return describeBodyEdit(feature.bodyEdit);
   const source = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
   const amount = feature.extent === "through-all" ? "through all"
     : feature.kind === "extrude"
