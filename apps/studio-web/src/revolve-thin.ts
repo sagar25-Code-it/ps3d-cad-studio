@@ -1,6 +1,7 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
 import { offsetPolygon, rotateAboutAxis } from "../../../packages/workbench-geometry/src/index.js";
 import type { SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
+import { stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { combineGeneralBodies, createGeneralSolidBody, type CreateGeneralSolidResult, type SketchPlane } from "./general-modeling.js";
 
 type Point2 = readonly [number, number];
@@ -45,6 +46,28 @@ export interface ThinRevolveRequest {
 }
 
 /**
+ * A full turn of wall is a hollow shell: an outer surface and, inside it, an inner surface facing the other way. The Boolean cannot cut a
+ * cavity that is completely enclosed, so the two revolved surfaces are put in one body directly, the inner one turned inside out.
+ */
+async function hollowShell(outer: GeneralSolidBody, inner: GeneralSolidBody, bodyId: string, name: string): Promise<GeneralSolidBody> {
+  const outerVertices = outer.positionsMm.length / 3;
+  const turned: number[] = [];
+  for (let index = 0; index + 2 < inner.indices.length; index += 3) turned.push(inner.indices[index]! + outerVertices, inner.indices[index + 2]! + outerVertices, inner.indices[index + 1]! + outerVertices);
+  const positionsMm = [...outer.positionsMm, ...inner.positionsMm];
+  const indices = [...outer.indices, ...turned];
+  const edges = new Set<string>();
+  for (let corner = 0; corner < indices.length; corner += 3) {
+    for (const [from, to] of [[indices[corner]!, indices[corner + 1]!], [indices[corner + 1]!, indices[corner + 2]!], [indices[corner + 2]!, indices[corner]!]] as const) edges.add(from < to ? `${from},${to}` : `${to},${from}`);
+  }
+  const base = { id: bodyId, name, visible: true, color: outer.color, positionsMm, indices } as const;
+  if (outer.brep === undefined || inner.brep === undefined) return base;
+  const roles = [...outer.brep.faces.map((face) => ({ role: `wall-outer.${face.role}`, area: face.areaMm2 })), ...inner.brep.faces.map((face) => ({ role: `wall-inner.${face.role}`, area: face.areaMm2 }))];
+  const faces = await Promise.all(roles.map(async ({ role, area }) => ({ role, key: await stableFaceKey(bodyId, role), areaMm2: area })));
+  const faceTriangles = [...outer.brep.faceTriangles, ...inner.brep.faceTriangles.map((face) => face + outer.brep!.faces.length)];
+  return { ...base, brep: { topology: { vertices: positionsMm.length / 3, edges: edges.size, faces: faces.length }, faces, faceTriangles, origin: "mesh-boolean" } };
+}
+
+/**
  * A revolve with a wall: the outline offset by the wall is revolved twice, an outer and an inner solid, and the inner one is cut out of the
  * outer. The inner solid is revolved a little past both ends of a partial sweep, so the cut opens the ends and leaves the wall's own cross
  * section there. A full turn leaves a closed hollow shell.
@@ -70,6 +93,10 @@ export async function createThinRevolveBody(request: ThinRevolveRequest): Promis
     bodyId: `${request.bodyId}:inner`, name: request.name, color: request.color
   });
   if (!innerSolid.ok) return innerSolid;
+  if (full) {
+    const shell = await hollowShell(outerSolid.body, innerSolid.body, request.bodyId, request.name);
+    return { ok: true, body: { ...shell, color: request.color, feature: { operation: "revolve", plane: request.plane, valueMm: request.angleDeg } } };
+  }
   const innerPlaced: GeneralSolidBody = { ...innerSolid.body, positionsMm: startRevolveAt(innerSolid.body.positionsMm, request.plane, -overshoot) };
   const walled = await combineGeneralBodies({ target: outerSolid.body, tool: innerPlaced, mode: "cut", bodyId: request.bodyId, name: request.name });
   if (!walled.ok) return { ok: false, message: `Thin revolve could not hollow the solid: ${walled.message}` };
