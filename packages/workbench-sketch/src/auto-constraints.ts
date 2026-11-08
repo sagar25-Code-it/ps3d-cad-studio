@@ -23,13 +23,15 @@ export interface AutoConstraintInput {
 }
 
 const SAME = 1e-7;
+/** Snaps onto an exact point of other geometry: a line that ends there and is level or plumb with its start is Horizontal or Vertical. */
+const POINT_SNAPS: ReadonlySet<InferenceCandidate["kind"]> = new Set(["endpoint", "center", "origin", "midpoint", "quadrant", "intersection"]);
 const near = (a: Vec2, b: Vec2): boolean => Math.abs(a[0] - b[0]) <= SAME && Math.abs(a[1] - b[1]) <= SAME;
 
 /** The defining point an inference selector names on an existing entity, if the live solver can move it. */
 function pointRefOf(entity: SketchEntity, selector: InferenceSelector | undefined): SketchPointRef | undefined {
   let ref: SketchPointRef | undefined;
   if (entity.kind === "line") ref = selector === "start" ? "start" : selector === "end" ? "end" : selector === "mid" ? "mid" : undefined;
-  else if (entity.kind === "circle" || entity.kind === "arc") ref = selector === "center" ? "center" : undefined;
+  else if (entity.kind === "circle" || entity.kind === "arc" || entity.kind === "ellipse") ref = selector === "center" ? "center" : undefined;
   else if (entity.kind === "point") ref = "self";
   return ref !== undefined && SOLVABLE_POINT_REFS[entity.kind].includes(ref) ? ref : undefined;
 }
@@ -47,7 +49,12 @@ export function autoConstraintsFor(input: AutoConstraintInput): readonly Workben
   const existing = (id: string | undefined): SketchEntity | undefined => id === undefined ? undefined : sketch.entities.find((candidate) => candidate.id === id);
 
   /** Which defining point of the new shape each placed point became. */
-  const ownRefs: readonly (SketchPointRef | undefined)[] = entity.kind === "line" ? ["start", "end"] : entity.kind === "circle" && input.tool === "circle" ? ["center"] : entity.kind === "point" ? ["self"] : [];
+  // The centre of a centerpoint arc and of an ellipse is the first point placed, so it can land on another centre or end.
+  const ownRefs: readonly (SketchPointRef | undefined)[] = entity.kind === "line" ? ["start", "end"]
+    : entity.kind === "circle" && input.tool === "circle" ? ["center"]
+      : entity.kind === "arc" && input.tool === "arc-center" ? ["center"]
+        : entity.kind === "ellipse" && input.tool === "ellipse" ? ["center"]
+          : entity.kind === "point" ? ["self"] : [];
 
   ownRefs.forEach((ownRef, index) => {
     const inference = placed[index];
@@ -72,6 +79,16 @@ export function autoConstraintsFor(input: AutoConstraintInput): readonly Workben
     const fromStart = (guide: InferenceGuide): boolean => near(guide.from, start);
     if (last.guides?.some((guide) => guide.kind === "horizontal" && fromStart(guide)) === true) found.push({ id: input.newId(), kind: "horizontal", entityIds: [entity.id] });
     if (last.guides?.some((guide) => guide.kind === "vertical" && fromStart(guide)) === true) found.push({ id: input.newId(), kind: "vertical", entityIds: [entity.id] });
+    // A segment that lands on an existing point (the chain closing on its first point, a bridge between two ends) follows no
+    // guide, because a snapped point has none, yet it can be exactly level or plumb. That is a relation too; without it the
+    // last side of a drawn rectangle was free and the whole shape could skew.
+    if (primary !== undefined && POINT_SNAPS.has(primary.kind) && !found.some((constraint) => constraint.kind === "horizontal" || constraint.kind === "vertical")) {
+      const end = entity.end;
+      const dx = Math.abs(end[0] - entity.start[0]);
+      const dy = Math.abs(end[1] - entity.start[1]);
+      if (dy <= SAME && dx > SAME) found.push({ id: input.newId(), kind: "horizontal", entityIds: [entity.id] });
+      else if (dx <= SAME && dy > SAME) found.push({ id: input.newId(), kind: "vertical", entityIds: [entity.id] });
+    }
     const target = existing(primary?.entityId);
     if (primary?.kind === "perpendicular" && target?.kind === "line") found.push({ id: input.newId(), kind: "perpendicular", entityIds: [entity.id, target.id] });
     if (primary?.kind === "tangent" && target !== undefined && (target.kind === "circle" || target.kind === "arc")) found.push({ id: input.newId(), kind: "tangent", entityIds: [entity.id, target.id] });

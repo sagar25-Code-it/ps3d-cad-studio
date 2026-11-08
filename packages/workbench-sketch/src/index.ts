@@ -1,11 +1,17 @@
 import {
+  SPLINE_MAX_FIT_POINTS,
+  SPLINE_MIN_FIT_POINTS,
+  circleThroughThreePoints,
   constraintFit,
   failure,
+  threePointArcProblem,
   type SketchEntity,
   type Vec2,
   type WorkbenchResult,
   type WorkbenchSketch
 } from "../../workbench-core/src/index.js";
+import { directedSweep, type SweepDirection } from "./arc-sweep.js";
+import { sketchEntityLimitProblem, sketchPointsProblem } from "./entity-limits.js";
 import { CURVE_TOOL_LABELS, curveToolRequiredPoints, isFixedCurveTool, type CurveToolId, type FixedCurveToolId } from "./curve-tools.js";
 
 /**
@@ -259,20 +265,42 @@ export function snapSketchPoint(point: Vec2, sketch: WorkbenchSketch, options: S
     : { point, snapped: false, kind: "none" };
 }
 
-export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: readonly Vec2[], id: string): WorkbenchResult<SketchEntity> {
+/** Extra input a tool can take besides its clicks. */
+export interface SketchBuildOptions {
+  /**
+   * Centerpoint arc only: which way round the centre the arc runs, from the way the pointer travelled after the start
+   * click (see arc-sweep.ts). Without it the arc takes the shorter way, which can never exceed 180 degrees.
+   */
+  readonly sweepDirection?: SweepDirection;
+}
+
+/**
+ * Builds the entity a tool places from its clicks. A click that is not a finite number, or lies beyond the sketch limit,
+ * and a result that would exceed a size limit are refused here with a message that names the limit.
+ */
+export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: readonly Vec2[], id: string, options: SketchBuildOptions = {}): WorkbenchResult<SketchEntity> {
+  const badPoint = sketchPointsProblem(points);
+  if (badPoint !== undefined) return degenerate(badPoint);
+  const built = buildRawSketchEntity(tool, points, id, options);
+  if (!built.ok) return built;
+  const tooBig = sketchEntityLimitProblem(built.value);
+  return tooBig === undefined ? built : degenerate(tooBig);
+}
+
+function buildRawSketchEntity(tool: Exclude<SketchTool, "select">, points: readonly Vec2[], id: string, options: SketchBuildOptions): WorkbenchResult<SketchEntity> {
   if (tool === "line" && points.length === 2) {
     if (distance(points[0]!, points[1]!) < 0.01) return degenerate("A line must be at least 0.01 mm long.");
     return { ok: true, value: { id, kind: "line", start: points[0]!, end: points[1]!, construction: false } };
   }
   if (tool === "rectangle" && points.length === 2) {
-    const widthMm = Math.abs(points[1]![0] - points[0]![0]);
-    const heightMm = Math.abs(points[1]![1] - points[0]![1]);
+    const widthMm = clean(Math.abs(points[1]![0] - points[0]![0]));
+    const heightMm = clean(Math.abs(points[1]![1] - points[0]![1]));
     if (widthMm < 0.01 || heightMm < 0.01) return degenerate("A rectangle needs non-zero width and height.");
-    return { ok: true, value: { id, kind: "rectangle", center: [(points[0]![0] + points[1]![0]) / 2, (points[0]![1] + points[1]![1]) / 2], widthMm, heightMm, rotationDeg: 0, construction: false } };
+    return { ok: true, value: { id, kind: "rectangle", center: [clean((points[0]![0] + points[1]![0]) / 2), clean((points[0]![1] + points[1]![1]) / 2)], widthMm, heightMm, rotationDeg: 0, construction: false } };
   }
   if (tool === "rectangle-center" && points.length === 2) {
-    const widthMm = Math.abs(points[1]![0] - points[0]![0]) * 2;
-    const heightMm = Math.abs(points[1]![1] - points[0]![1]) * 2;
+    const widthMm = clean(Math.abs(points[1]![0] - points[0]![0]) * 2);
+    const heightMm = clean(Math.abs(points[1]![1] - points[0]![1]) * 2);
     if (widthMm < 0.01 || heightMm < 0.01) return degenerate("A center rectangle needs a center and a non-zero corner offset.");
     return { ok: true, value: { id, kind: "rectangle", center: points[0]!, widthMm, heightMm, rotationDeg: 0, construction: false } };
   }
@@ -302,15 +330,16 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
       value: {
         id,
         kind: "circle",
-        center: [(points[0]![0] + points[1]![0]) / 2, (points[0]![1] + points[1]![1]) / 2],
-        radiusMm: diameterMm / 2,
+        center: [clean((points[0]![0] + points[1]![0]) / 2), clean((points[0]![1] + points[1]![1]) / 2)],
+        radiusMm: clean(diameterMm / 2),
         construction: false
       }
     };
   }
   if (tool === "circle-three-point" && points.length === 3) {
-    const circle = circumcircle(points[0]!, points[1]!, points[2]!);
-    if (circle === undefined || circle.radiusMm < 0.01) return degenerate("The three circle points must be distinct and non-collinear.");
+    const problem = threePointArcProblem(points[0]!, points[1]!, points[2]!);
+    if (problem !== undefined) return degenerate(problem);
+    const circle = circumcircle(points[0]!, points[1]!, points[2]!)!;
     return { ok: true, value: { id, kind: "circle", center: circle.center, radiusMm: circle.radiusMm, construction: false } };
   }
   if (tool === "ellipse" && points.length === 3) {
@@ -327,15 +356,16 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
     const minorRadiusMm = Math.abs(-axisY * relX + axisX * relY);
     if (minorRadiusMm < 0.01) return degenerate("The third ellipse point must define a non-zero minor axis.");
     const rotationDeg = Math.atan2(axisY, axisX) * 180 / Math.PI;
-    // Keep major >= minor; swap and rotate 90° if the user picked the shorter axis first.
+    // Keep major >= minor; swap and rotate 90° if the user picked the shorter axis first. An ellipse looks the same turned
+    // half a revolution, so the stored rotation always uses one convention, (-90, 90], like the five-point conic does.
     if (minorRadiusMm > majorRadiusMm) {
-      return { ok: true, value: { id, kind: "ellipse", center, majorRadiusMm: minorRadiusMm, minorRadiusMm: majorRadiusMm, rotationDeg: rotationDeg + 90, construction: false } };
+      return { ok: true, value: { id, kind: "ellipse", center, majorRadiusMm: minorRadiusMm, minorRadiusMm: majorRadiusMm, rotationDeg: normalizeEllipseRotation(rotationDeg + 90), construction: false } };
     }
-    return { ok: true, value: { id, kind: "ellipse", center, majorRadiusMm, minorRadiusMm, rotationDeg, construction: false } };
+    return { ok: true, value: { id, kind: "ellipse", center, majorRadiusMm, minorRadiusMm, rotationDeg: normalizeEllipseRotation(rotationDeg), construction: false } };
   }
   if (tool === "arc" && points.length === 3) {
-    const area2 = Math.abs(cross(points[0]!, points[1]!, points[2]!));
-    if (area2 < 1e-4) return degenerate("The three arc points must not be collinear.");
+    const problem = threePointArcProblem(points[0]!, points[1]!, points[2]!);
+    if (problem !== undefined) return degenerate(problem);
     return { ok: true, value: { id, kind: "arc", start: points[0]!, mid: points[1]!, end: points[2]!, construction: false } };
   }
   if (tool === "arc-center" && points.length === 3) {
@@ -353,9 +383,15 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
     const end: Vec2 = [center[0] + (endDx / endMag) * radiusMm, center[1] + (endDy / endMag) * radiusMm];
     const startAngle = Math.atan2(startDy, startDx);
     const endAngle = Math.atan2(end[1] - center[1], end[0] - center[0]);
+    // Without a pointer path the arc takes the shorter way; with one it runs the way the pointer went, so it can pass a half turn.
     let sweep = endAngle - startAngle;
-    while (sweep > Math.PI) sweep -= 2 * Math.PI;
-    while (sweep <= -Math.PI) sweep += 2 * Math.PI;
+    if (options.sweepDirection !== undefined) {
+      sweep = directedSweep(startAngle, endAngle, options.sweepDirection);
+      if (Math.abs(sweep) < 1e-6 || Math.abs(sweep) > 2 * Math.PI - 1e-6) return degenerate("The centerpoint arc has zero sweep: the end must sit away from the start direction.");
+    } else {
+      while (sweep > Math.PI) sweep -= 2 * Math.PI;
+      while (sweep <= -Math.PI) sweep += 2 * Math.PI;
+    }
     if (Math.abs(sweep) < 1e-6) return degenerate("The centerpoint arc has zero sweep: the end must sit away from the start direction.");
     const midAngle = startAngle + sweep / 2;
     const mid: Vec2 = [center[0] + Math.cos(midAngle) * radiusMm, center[1] + Math.sin(midAngle) * radiusMm];
@@ -395,9 +431,11 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
     // A sketch point is reference geometry: it snaps and anchors patterns but never bounds a profile.
     return { ok: true, value: { id, kind: "point", point: points[0]!, construction: true } };
   }
-  if (tool === "spline" && points.length >= 3) {
-    if (points.length > 24) return degenerate("A spline takes at most 24 fit points.");
+  if (tool === "spline" && points.length >= SPLINE_MIN_FIT_POINTS) {
+    if (points.length > SPLINE_MAX_FIT_POINTS) return degenerate(`A spline takes at most ${SPLINE_MAX_FIT_POINTS} fit points.`);
     if (points.some((point, index) => index > 0 && distance(points[index - 1]!, point) < 0.01)) return degenerate("Consecutive spline fit points must be at least 0.01 mm apart.");
+    const repeated = repeatedSplinePoint(points);
+    if (repeated !== undefined) return degenerate(`Fit points ${repeated[0] + 1} and ${repeated[1] + 1} are on top of each other: a spline that doubles back onto a point it already passed has no smooth shape. Move one of them, or draw the closed loop with at least four points ending on the first.`);
     return { ok: true, value: { id, kind: "spline", fitPoints: points, construction: false } };
   }
   return failure("INVALID_OPERATION", `${sketchToolLabel(tool)} requires ${requiredSketchPoints(tool)} points.`, [], "Complete the required points or cancel the sketch tool.");
@@ -809,17 +847,32 @@ function curveEndTangents(entity: SketchEntity): readonly { readonly point: Vec2
     return [{ point: entity.start, tangent }, { point: entity.end, tangent }];
   }
   if (entity.kind === "arc") {
-    return [
-      { point: entity.start, tangent: normalize2([entity.mid[0] - entity.start[0], entity.mid[1] - entity.start[1]]) },
-      { point: entity.end, tangent: normalize2([entity.end[0] - entity.mid[0], entity.end[1] - entity.mid[1]]) }
-    ];
+    const circle = circumcircle(entity.start, entity.mid, entity.end);
+    if (circle === undefined) {
+      return [
+        { point: entity.start, tangent: normalize2([entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]]) },
+        { point: entity.end, tangent: normalize2([entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]]) }
+      ];
+    }
+    // The tangent of a circle at a point is perpendicular to the radius there. (The old code used the start-to-mid and
+    // mid-to-end chords, which are off by a quarter of the sweep and failed the 2 degree test beyond about 4 degrees.)
+    const counterClockwise = cross(entity.start, entity.mid, entity.end) > 0;
+    const tangentAt = (point: Vec2): Vec2 => {
+      const radialX = point[0] - circle.center[0];
+      const radialY = point[1] - circle.center[1];
+      return normalize2(counterClockwise ? [-radialY, radialX] : [radialY, -radialX]);
+    };
+    return [{ point: entity.start, tangent: tangentAt(entity.start) }, { point: entity.end, tangent: tangentAt(entity.end) }];
   }
   if (entity.kind === "spline") {
     const fit = entity.fitPoints;
-    const last = fit.length - 1;
+    // The true end tangent of the sampled curve, read from its first and last short steps (each end span depends only on
+    // the three nearest fit points, so the span is sampled finely on its own).
+    const head = sampleSpline(fit.slice(0, 3), 64);
+    const tail = sampleSpline(fit.slice(-3), 64);
     return [
-      { point: fit[0]!, tangent: normalize2([fit[1]![0] - fit[0]![0], fit[1]![1] - fit[0]![1]]) },
-      { point: fit[last]!, tangent: normalize2([fit[last]![0] - fit[last - 1]![0], fit[last]![1] - fit[last - 1]![1]]) }
+      { point: fit[0]!, tangent: normalize2([head[1]![0] - head[0]![0], head[1]![1] - head[0]![1]]) },
+      { point: fit[fit.length - 1]!, tangent: normalize2([tail[tail.length - 1]![0] - tail[tail.length - 2]![0], tail[tail.length - 1]![1] - tail[tail.length - 2]![1]]) }
     ];
   }
   return [];
@@ -860,8 +913,14 @@ function reduce(freedom: Map<string, number>, ids: readonly string[], amount: nu
   }
 }
 
+/** Rounds to a multiple of `increment` and cleans the binary-float tail (0.1 * 3 is 0.30000000000000004, not 0.3). */
 function roundTo(value: number, increment: number): number {
-  return Math.round(value / increment) * increment;
+  return clean(Math.round(value / increment) * increment);
+}
+
+/** Drops float noise from a derived coordinate or size: twelve significant digits keep every real input exactly and lose 0.7000000000000001. */
+function clean(value: number): number {
+  return Number.isFinite(value) ? Number(value.toPrecision(12)) : value;
 }
 
 function distance(left: Vec2, right: Vec2): number {
@@ -872,17 +931,28 @@ function cross(a: Vec2, b: Vec2, c: Vec2): number {
   return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
 }
 
+/** The circle through three points, judged relative to their own size (see workbench-core arc-geometry.ts). */
 function circumcircle(a: Vec2, b: Vec2, c: Vec2): { readonly center: Vec2; readonly radiusMm: number } | undefined {
-  const determinant = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
-  if (Math.abs(determinant) < 1e-9) return undefined;
-  const a2 = a[0] ** 2 + a[1] ** 2;
-  const b2 = b[0] ** 2 + b[1] ** 2;
-  const c2 = c[0] ** 2 + c[1] ** 2;
-  const center: Vec2 = [
-    (a2 * (b[1] - c[1]) + b2 * (c[1] - a[1]) + c2 * (a[1] - b[1])) / determinant,
-    (a2 * (c[0] - b[0]) + b2 * (a[0] - c[0]) + c2 * (b[0] - a[0])) / determinant
-  ];
-  return { center, radiusMm: distance(center, a) };
+  return circleThroughThreePoints(a, b, c);
+}
+
+/** An ellipse looks the same turned half a revolution, so its rotation is stored in (-90, 90]. */
+function normalizeEllipseRotation(rotationDeg: number): number {
+  const wrapped = ((rotationDeg % 180) + 180) % 180;
+  const normalized = wrapped > 90 ? wrapped - 180 : wrapped;
+  // Clean the float noise that the modulo of a value like 225 leaves behind.
+  return Math.abs(normalized - Math.round(normalized)) < 1e-9 ? Math.round(normalized) : normalized;
+}
+
+/** The first pair of fit points that coincide although they are not neighbours, other than the first and last of a closed loop of four or more. */
+function repeatedSplinePoint(points: readonly Vec2[]): readonly [number, number] | undefined {
+  for (let first = 0; first < points.length; first += 1) {
+    for (let second = first + 2; second < points.length; second += 1) {
+      if (first === 0 && second === points.length - 1 && points.length >= 4) continue;
+      if (distance(points[first]!, points[second]!) < 0.01) return [first, second];
+    }
+  }
+  return undefined;
 }
 
 type LoopEdgeEntity = Extract<SketchEntity, { kind: "line" | "arc" | "spline" }>;
@@ -909,7 +979,7 @@ const ARC_FACET_RADIANS = Math.PI / 32;
  * Points along a 3-point arc from `start` to `end` through `mid`, including both ends. Falls back to
  * the chord when the three points are collinear.
  */
-export function sampleArc(start: Vec2, mid: Vec2, end: Vec2): readonly Vec2[] {
+export function sampleArc(start: Vec2, mid: Vec2, end: Vec2, facetRadians = ARC_FACET_RADIANS): readonly Vec2[] {
   const circle = circumcircle(start, mid, end);
   if (circle === undefined) return [start, end];
   const startAngle = Math.atan2(start[1] - circle.center[1], start[0] - circle.center[0]);
@@ -918,7 +988,8 @@ export function sampleArc(start: Vec2, mid: Vec2, end: Vec2): readonly Vec2[] {
   const full = Math.PI * 2;
   let sweep = counterClockwise ? endAngle - startAngle : startAngle - endAngle;
   sweep = ((sweep % full) + full) % full;
-  const steps = Math.min(128, Math.max(2, Math.ceil(sweep / ARC_FACET_RADIANS)));
+  // The default facet angle is the profile-outline one, capped at 128 facets; a caller that asks for finer facets (selection hit tests) is allowed more.
+  const steps = Math.min(facetRadians === ARC_FACET_RADIANS ? 128 : 4096, Math.max(2, Math.ceil(sweep / facetRadians)));
   const points: Vec2[] = [start];
   for (let step = 1; step < steps; step += 1) {
     const angle = startAngle + (counterClockwise ? 1 : -1) * (sweep * step) / steps;

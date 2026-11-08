@@ -1,3 +1,5 @@
+import { circleThroughThreePoints } from "./arc-geometry.js";
+import { SPLINE_MAX_FIT_POINTS, SPLINE_MIN_FIT_POINTS } from "./spline-limits.js";
 import { NEW_PRIMITIVE_SHAPES, validPrimitiveBody } from "./primitive-bodies.js";
 import { validConstructionBinder, validNewPlaneDefinition } from "./construction-refs.js";
 import {
@@ -275,14 +277,14 @@ function validateEntity(value: unknown): value is SketchEntity {
   if (value.kind === "arc") {
     return exactKeys(value, ["id", "kind", "start", "mid", "end", "construction", ...optionalVisibility])
       && vec2(value.start) && vec2(value.mid) && vec2(value.end)
-      && Math.abs(cross2(value.start, value.mid, value.end)) >= 1e-4;
+      && circleThroughThreePoints(value.start, value.mid, value.end) !== undefined;
   }
   if (value.kind === "point") {
     return exactKeys(value, ["id", "kind", "point", "construction", ...optionalVisibility]) && vec2(value.point);
   }
   if (value.kind === "spline") {
     return exactKeys(value, ["id", "kind", "fitPoints", "construction", ...optionalVisibility])
-      && Array.isArray(value.fitPoints) && value.fitPoints.length >= 3 && value.fitPoints.length <= 24
+      && Array.isArray(value.fitPoints) && value.fitPoints.length >= SPLINE_MIN_FIT_POINTS && value.fitPoints.length <= SPLINE_MAX_FIT_POINTS
       && value.fitPoints.every((point, index, all) => vec2(point) && (index === 0 || distance(all[index - 1] as readonly [number, number], point) >= WORKBENCH_LIMITS.minGeometryMm));
   }
   return false;
@@ -1050,6 +1052,3 @@ function distance(left: readonly [number, number], right: readonly [number, numb
   return Math.hypot(right[0] - left[0], right[1] - left[1]);
 }
 
-function cross2(a: readonly [number, number], b: readonly [number, number], c: readonly [number, number]): number {
-  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-}
