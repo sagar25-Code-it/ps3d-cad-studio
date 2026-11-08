@@ -270,6 +270,14 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="export" label="Export STL" hint="all shown" onClick={props.onExportStl} />
         <RibbonButton icon="exchange" label="3D Exchange" hint="14 in · 6 out" onClick={props.onExchange} />
       </RibbonGroup>
+      <RibbonGroup label="Analysis">
+        <RibbonButton icon="inspect" label="Geometry check" hint="open · non-manifold" onClick={() => props.onSelect("analysis:geometry-check")} />
+        <RibbonButton icon="interference" label="Interference" hint="shared volume" onClick={() => props.onSelect("analysis:interference")} />
+        <RibbonButton icon="draft" label="Draft angle" hint="pull direction" onClick={() => props.onSelect("analysis:draft")} />
+        <RibbonButton icon="section" label="Wall thickness" hint="thin walls" onClick={() => props.onSelect("analysis:wall-thickness")} />
+        <RibbonButton icon="bezier" label="Curvature" hint="Gaussian · mean" onClick={() => props.onSelect("analysis:gaussian-curvature")} />
+        <RibbonButton icon="spline" label="Curvature comb" hint="section curve" onClick={() => props.onSelect("analysis:section-comb")} />
+      </RibbonGroup>
       <RibbonGroup label="Downstream">
         <RibbonButton icon="assemble" label="Insert to assembly" hint="snapshot" onClick={props.onInsertPartIntoAssembly} />
       </RibbonGroup>

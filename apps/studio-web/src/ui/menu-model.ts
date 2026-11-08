@@ -44,6 +44,8 @@ export interface WorkbenchMenuState {
   readonly selectedFeature?: { readonly name: string; readonly suppressed: boolean; readonly kind: "sketch" | "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" };
   /** Something deletable is selected: a timeline feature, a solid body, or a preview body. */
   readonly selectionDeletable: boolean;
+  /** Solid bodies the Part analyses can look at (general solids and analytic bodies); defaults to the general solid count. */
+  readonly analysisBodyCount?: number;
 }
 
 export interface WorkbenchMenuActions {
@@ -76,6 +78,8 @@ export interface WorkbenchMenuActions {
   readonly onPlateJson: () => void;
   readonly onLearning: () => void;
   readonly onShortcuts: () => void;
+  /** Opens a Part analysis (geometry check, interference, draft, wall thickness, curvature, section comb). Absent: the entries are not listed. */
+  readonly onAnalysis?: (mode: "geometry-check" | "interference" | "draft" | "wall-thickness" | "gaussian-curvature" | "section-comb") => void;
 }
 
 /** Builds the menubar for the current state. Pure: same state and actions, same menus. */
@@ -145,6 +149,7 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
     { id: "inspect.health", label: "Design Health Center", icon: "inspect", action: actions.onDesignHealth },
     { id: "inspect.measure", label: "Measure points", icon: "measure", shortcut: "M", disabled: !is3d, hint: is3d ? undefined : "Open a 3D workspace first", action: actions.onMeasure },
     { id: "inspect.fit", label: "Fit current model", icon: "fit", disabled: !is3d, action: actions.onFit },
+    ...analysisItems(state, actions, overlayOpen),
     { id: "inspect.catalog", label: "Capability catalog", icon: "command", shortcut: "S", action: actions.onCommandPalette }
   ] };
 
@@ -165,4 +170,29 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
   ] };
 
   return [edit, create, modify, view, inspect, tools, help];
+}
+
+const ANALYSIS_ENTRIES = [
+  { mode: "geometry-check", label: "Geometry check", icon: "inspect", hint: "Open edges, non-manifold edges, flipped faces, self-intersection" },
+  { mode: "interference", label: "Interference", icon: "interference", hint: "Shared volume between every pair of solids" },
+  { mode: "draft", label: "Draft analysis", icon: "draft", hint: "Colour faces by draft angle against a pull direction" },
+  { mode: "wall-thickness", label: "Wall thickness", icon: "section", hint: "Thinnest wall, coloured by thickness" },
+  { mode: "gaussian-curvature", label: "Curvature map", icon: "bezier", hint: "Gaussian and mean curvature, coloured" },
+  { mode: "section-comb", label: "Section curvature comb", icon: "spline", hint: "Comb on the cut of a body" }
+] as const;
+
+function analysisItems(state: WorkbenchMenuState, actions: WorkbenchMenuActions, overlayOpen: boolean): readonly WorkbenchMenuItem[] {
+  const open = actions.onAnalysis;
+  if (open === undefined) return [];
+  const bodies = state.analysisBodyCount ?? state.generalBodyCount;
+  const reason = overlayOpen || state.workspace !== "part" ? "Open the Part workspace first" : bodies === 0 ? "Create a solid body first" : undefined;
+  return ANALYSIS_ENTRIES.map((entry, index): WorkbenchMenuItem => ({
+    id: `inspect.analysis.${entry.mode}`,
+    label: entry.label,
+    icon: entry.icon,
+    disabled: reason !== undefined,
+    hint: reason ?? entry.hint,
+    ...(index === 0 ? { divider: true } : {}),
+    action: () => open(entry.mode)
+  }));
 }

@@ -14,5 +14,6 @@
 @import "./styles/file-studio.css";
 @import "./styles/sketch.css";
 @import "./styles/timeline.css";
+@import "./styles/analysis.css";
 /* Responsive policy must load last so workspace-specific fixed dimensions cannot override it. */
 @import "./styles/responsive.css";

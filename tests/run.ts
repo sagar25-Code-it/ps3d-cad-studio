@@ -33,6 +33,7 @@ import { meshCheckTests } from "./mesh-check.test.js";
 import { bodyAnalysisTests } from "./body-analysis.test.js";
 import { viewportAnalysisTests } from "./viewport-analysis.test.js";
 import { analysisSessionTests } from "./analysis-session.test.js";
+import { onViewAndMarkingTests } from "./on-view-and-marking.test.js";
 import { holeWizardTests } from "./hole-wizard.test.js";
 import { sketchChamferModeTests } from "./sketch-chamfer-modes.test.js";
 import { sketchArcAndSlotModeTests } from "./sketch-arc-and-slot-modes.test.js";
@@ -107,6 +108,7 @@ const tests: readonly TestCase[] = [
   ...bodyAnalysisTests,
   ...viewportAnalysisTests,
   ...analysisSessionTests,
+  ...onViewAndMarkingTests,
   ...holeWizardTests,
   ...sketchChamferModeTests,
   ...sketchArcAndSlotModeTests,
