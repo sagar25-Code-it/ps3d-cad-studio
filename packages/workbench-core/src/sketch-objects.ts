@@ -285,6 +285,8 @@ export interface SketchPathPolyline {
   /** Cumulative length at each point. */
   readonly lengths: readonly number[];
   readonly totalMm: number;
+  /** The direction of the curve at each point (radians) for curved paths; absent for straight pieces, which use the heading of the piece. */
+  readonly vertexAngles?: readonly number[];
 }
 
 function circumcenter(a: Vec2, b: Vec2, c: Vec2): { readonly center: Vec2; readonly radius: number } | undefined {
@@ -321,11 +323,16 @@ function catmullRom(fit: readonly Vec2[], samplesPerSpan: number): readonly Vec2
 export function sketchPathPolyline(entity: SketchEntity): SketchPathPolyline | undefined {
   let points: Vec2[];
   let closed = false;
+  let vertexAngles: number[] | undefined;
   if (entity.kind === "line") points = [entity.start, entity.end];
   else if (entity.kind === "spline") points = [...catmullRom(entity.fitPoints, 32)];
   else if (entity.kind === "circle") {
     points = [];
-    for (let step = 0; step < 360; step += 1) points.push([entity.center[0] + entity.radiusMm * Math.cos((step * Math.PI) / 180), entity.center[1] + entity.radiusMm * Math.sin((step * Math.PI) / 180)]);
+    vertexAngles = [];
+    for (let step = 0; step < 360; step += 1) {
+      points.push([entity.center[0] + entity.radiusMm * Math.cos((step * Math.PI) / 180), entity.center[1] + entity.radiusMm * Math.sin((step * Math.PI) / 180)]);
+      vertexAngles.push((step * Math.PI) / 180 + Math.PI / 2);
+    }
     closed = true;
   } else if (entity.kind === "ellipse") {
     const rot = (entity.rotationDeg * Math.PI) / 180;
@@ -353,7 +360,7 @@ export function sketchPathPolyline(entity: SketchEntity): SketchPathPolyline | u
       const angleOf = (point: Vec2): number => Math.atan2(point[1] - circle.center[1], point[0] - circle.center[0]);
       const a0 = angleOf(entity.start);
       const cross = (entity.mid[0] - entity.start[0]) * (entity.end[1] - entity.start[1]) - (entity.mid[1] - entity.start[1]) * (entity.end[0] - entity.start[0]);
-      const counterClockwise = cross < 0;
+      const counterClockwise = cross > 0;
       const raw = angleOf(entity.end) - a0;
       const sweep = counterClockwise ? ((raw % TWO_PI) + TWO_PI) % TWO_PI : -(((-raw % TWO_PI) + TWO_PI) % TWO_PI);
       const steps = Math.max(8, Math.min(720, Math.ceil((Math.abs(sweep) * 180) / Math.PI)));
@@ -364,8 +371,16 @@ export function sketchPathPolyline(entity: SketchEntity): SketchPathPolyline | u
       }
       points[0] = entity.start;
       points[points.length - 1] = entity.end;
+      vertexAngles = points.map((_, step) => a0 + (sweep * step) / steps + (counterClockwise ? Math.PI / 2 : -Math.PI / 2));
     }
   } else return undefined;
+  if (vertexAngles === undefined && (entity.kind === "spline" || entity.kind === "ellipse")) {
+    vertexAngles = points.map((point, index) => {
+      const before = closed ? points[(index + points.length - 1) % points.length]! : points[Math.max(0, index - 1)]!;
+      const after = closed ? points[(index + 1) % points.length]! : points[Math.min(points.length - 1, index + 1)]!;
+      return Math.atan2(after[1] - before[1], after[0] - before[0]);
+    });
+  }
   const lengths: number[] = [0];
   const count = closed ? points.length : points.length - 1;
   for (let index = 0; index < count; index += 1) {
@@ -374,7 +389,7 @@ export function sketchPathPolyline(entity: SketchEntity): SketchPathPolyline | u
     lengths.push(lengths[index]! + Math.hypot(b[0] - a[0], b[1] - a[1]));
   }
   const totalMm = lengths[lengths.length - 1]!;
-  return totalMm < 1e-9 ? undefined : { points, closed, lengths, totalMm };
+  return totalMm < 1e-9 ? undefined : { points, closed, lengths, totalMm, ...(vertexAngles === undefined ? {} : { vertexAngles }) };
 }
 
 /** The point and the direction (radians) of the path at `distanceMm` from its start. */
@@ -392,7 +407,16 @@ export function sketchPathPointAt(path: SketchPathPolyline, distanceMm: number):
   const b = path.points[(low + 1) % path.points.length]!;
   const span = path.lengths[low + 1]! - path.lengths[low]!;
   const t = span < 1e-12 ? 0 : (s - path.lengths[low]!) / span;
-  return { point: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], angle: Math.atan2(b[1] - a[1], b[0] - a[0]) };
+  let angle = Math.atan2(b[1] - a[1], b[0] - a[0]);
+  if (path.vertexAngles !== undefined) {
+    const from = path.vertexAngles[low]!;
+    const to = path.vertexAngles[(low + 1) % path.points.length]!;
+    let difference = to - from;
+    while (difference > Math.PI) difference -= TWO_PI;
+    while (difference < -Math.PI) difference += TWO_PI;
+    angle = from + difference * t;
+  }
+  return { point: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], angle };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
