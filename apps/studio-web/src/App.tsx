@@ -74,6 +74,7 @@ import {
 } from "../../../packages/exchange-3d/src/index.js";
 import { detectSketchProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
+import { edgesToPick, isSketchProjectCommand, needsPick, pickedEdgeRun, planSketchProject, sourceBodyOf, type SketchProjectCommand, type SketchProjectPick } from "./sketch-project-command.js";
 import { flatPatternForBody, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
@@ -308,6 +309,7 @@ export function App(): React.JSX.Element {
   const [zebra, setZebraState] = useState<{ readonly axis: "x" | "y" | "z"; readonly frequency: number } | null>(null);
   const [sketchShowMovable, setSketchShowMovable] = useState(false);
   const [sketchCheckOpen, setSketchCheckOpen] = useState(false);
+  const [sketchProjectReference, setSketchProjectReference] = useState(false);
   const [sketchRequest, setSketchRequest] = useState<{ readonly command: "fix-curve" | "relax-relations" | "relax-dimensions"; readonly serial: number } | null>(null);
   const [sketchDimensionMode, setSketchDimensionMode] = useState(false);
   const [viewportState, setViewportState] = useState<ViewportViewState>(DEFAULT_VIEWPORT_STATE);
@@ -2848,8 +2850,48 @@ export function App(): React.JSX.Element {
     setStatusText(`${SKETCH_EDIT_TOOL_LABELS[tool]} active ${source}: ${how}.`);
   };
 
-  const runSketchCommand = (command: "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check", source: string): void => {
+  /**
+   * Project, Intersect, Silhouette and Convert: brings the curves of the selected solid body (or of a picked edge run or face) into the
+   * working sketch as a snapshot. The sketch workspace has no 3D view, so a pick happens in the Part view and the sketch comes back after.
+   */
+  const handleSketchProject = async (command: SketchProjectCommand, source: string): Promise<void> => {
+    const name = command === "project-body" ? "Project" : command === "project-edge" ? "Project edge" : command === "intersect-body" ? "Intersect" : command === "silhouette-body" ? "Silhouette" : "Convert face";
+    const choice = sourceBodyOf(projectRef.current, selectedId);
+    if (!choice.ok) { setStatus("ready"); setStatusText(`${name}: ${choice.message}`); return; }
+    let body = choice.body;
+    let pick: SketchProjectPick | undefined;
+    if (needsPick(command)) {
+      const edges = command === "project-edge" ? edgesToPick(body) : [];
+      if (typeof edges === "string") { setStatus("ready"); setStatusText(`${name}: ${edges}`); return; }
+      if (command === "project-edge" && edges.length === 0) { setStatus("ready"); setStatusText(`${name}: ${body.name} has no sharp convex edge to pick.`); return; }
+      switchWorkspace("part");
+      let viewport = viewportRef.current;
+      for (let attempt = 0; viewport === undefined && attempt < 60; attempt += 1) { await new Promise<void>((resolve) => window.setTimeout(resolve, 50)); viewport = viewportRef.current; }
+      if (viewport === undefined) { switchWorkspace("sketch"); setStatus("error"); setStatusText(`${name}: the 3D view did not open, so nothing could be picked.`); return; }
+      const picked = await requestViewportPick(command === "project-edge" ? `${name}: click an edge of ${body.name}` : `${name}: click a face of ${body.name}`, edges.map((edge): ViewportGuideSegment => [edge.a, edge.b]));
+      switchWorkspace("sketch");
+      if (picked === null) { setStatus("ready"); setStatusText(`${name} cancelled.`); return; }
+      body = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === picked.semanticId) ?? body;
+      if (command === "project-edge") {
+        const run = pickedEdgeRun(body, picked.pointMm);
+        if (typeof run === "string") { setStatus("ready"); setStatusText(`${name}: ${run}`); return; }
+        pick = { pointMm: picked.pointMm, edges: run.segments };
+      } else pick = { pointMm: picked.pointMm, faceIndex: picked.faceIndex ?? null };
+    }
+    const planned = planSketchProject(projectRef.current, body, command, { construction: sketchProjectReference, ...(pick === undefined ? {} : { pick }), newId: () => `entity:proj-${crypto.randomUUID()}` });
+    if (!planned.ok) { setStatus("ready"); setStatusText(`${name}: ${planned.message}`); return; }
+    if (!applyProjectOperation(planned.operation)) return;
+    setStatusText(`${planned.summary} (${source})`);
+  };
+
+  const runSketchCommand = (command: "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check" | SketchProjectCommand | "project-reference", source: string): void => {
     if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
+    if (command === "project-reference") {
+      setSketchProjectReference((current) => !current);
+      setStatusText(sketchProjectReference ? "Projected curves will be real curves that can bound profiles." : "Projected curves will be construction (reference) geometry: they never bound a profile.");
+      return;
+    }
+    if (isSketchProjectCommand(command)) { void handleSketchProject(command, source); return; }
     if (command === "show-movable") {
       setSketchShowMovable((current) => !current);
       setStatusText(sketchShowMovable ? "Movable geometry highlight off." : `Movable geometry highlighted ${source}: entities with estimated degrees of freedom are shown in amber.`);
@@ -3307,6 +3349,7 @@ export function App(): React.JSX.Element {
       sketchEditTool={sketchEditTool}
       sketchShowMovable={sketchShowMovable}
       sketchCheckOpen={sketchCheckOpen}
+      sketchProjectReference={sketchProjectReference}
       onSketchEditTool={(tool) => activateSketchEdit(tool, "in the top ribbon")}
       onSketchCommand={(command) => runSketchCommand(command, "in the top ribbon")}
       onOpenSketchOptions={openSketchCreateSolid}

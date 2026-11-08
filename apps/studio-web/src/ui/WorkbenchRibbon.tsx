@@ -6,7 +6,7 @@ import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, iconTone } from "./CommandIcon.js";
 import type { SketchEditToolId } from "../workspaces/SketchEditPanel.js";
 
-type SketchRibbonCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check";
+type SketchRibbonCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check" | "project-body" | "project-edge" | "intersect-body" | "silhouette-body" | "convert-face" | "project-reference";
 type SurfaceParameter = "widthMm" | "depthMm" | "crownMm" | "twistDeg" | "uSegments" | "vSegments";
 
 interface WorkbenchRibbonProps {
@@ -24,6 +24,8 @@ interface WorkbenchRibbonProps {
   readonly sketchEditTool: SketchEditToolId | null;
   readonly sketchShowMovable: boolean;
   readonly sketchCheckOpen: boolean;
+  /** New projected curves are made as construction (reference) geometry. */
+  readonly sketchProjectReference: boolean;
   readonly onSketchEditTool: (tool: SketchEditToolId) => void;
   readonly onSketchCommand: (command: SketchRibbonCommand) => void;
   readonly onOpenSketchOptions: () => void;
@@ -165,8 +167,15 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="scale" label="Scale" hint="factor · centre" active={props.sketchEditTool === "scale"} onClick={() => props.onSketchEditTool("scale")} />
         <RibbonButton icon="mirror" label="Mirror" hint="about a line" active={props.sketchEditTool === "mirror"} onClick={() => props.onSketchEditTool("mirror")} />
       </RibbonGroup>
+      <RibbonGroup label="Project">
+        <RibbonButton icon="projection" label="Project" hint="body edges" onClick={() => props.onSketchCommand("project-body")} />
+        <RibbonButton icon="edge" label="Project edge" hint="pick a run" onClick={() => props.onSketchCommand("project-edge")} />
+        <RibbonButton icon="section" label="Intersect" hint="plane cuts body" onClick={() => props.onSketchCommand("intersect-body")} />
+        <RibbonButton icon="shaded" label="Silhouette" hint="outline" onClick={() => props.onSketchCommand("silhouette-body")} />
+        <RibbonButton icon="rectangle" label="Convert face" hint="pick a face" onClick={() => props.onSketchCommand("convert-face")} />
+        <RibbonButton icon="construction" label="As reference" hint="construction" active={props.sketchProjectReference} onClick={() => props.onSketchCommand("project-reference")} />
+      </RibbonGroup>
       <RibbonGroup label="Include & solve">
-        <RibbonButton icon="projection" label="Include" hint="topology req." disabled />
         <RibbonButton icon="fixed" label="Fix Curve" hint="pin selection" onClick={() => props.onSketchCommand("fix-curve")} />
         <RibbonButton icon="inspect" label="Show Movable" hint="free geometry" active={props.sketchShowMovable} onClick={() => props.onSketchCommand("show-movable")} />
         <RibbonButton icon="dimension" label="Relax Dimensions" hint="toggle selection" onClick={() => props.onSketchCommand("relax-dimensions")} />

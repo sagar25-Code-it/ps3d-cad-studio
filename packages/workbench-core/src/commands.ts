@@ -5,7 +5,7 @@ export type CadSketchTool = "select" | "line" | "rectangle" | "rectangle-center"
 /** Selection-driven or click-driven sketch edit tools (each applies one atomic `apply-sketch-edit`). */
 export type CadSketchEditTool = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "stretch" | "corner" | "fillet" | "chamfer" | "trim" | "extend";
 /** One-shot sketch commands that act on the current selection or toggle a display mode. */
-export type CadSketchCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check";
+export type CadSketchCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check" | "project-body" | "project-edge" | "intersect-body" | "silhouette-body" | "convert-face" | "project-reference";
 
 export type CadCommandAction =
   | { readonly kind: "open-workspace" }
@@ -115,7 +115,7 @@ export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   command("command:sketch-polygon", "sketch", "create", "Polygon", "Regular polygon: click the centre, then a corner. The side count is set in the Sketch palette (3 to 64); the sides are joined end to end with equal-length relations.", "preview", { kind: "activate-sketch-tool", tool: "polygon" }, ["hexagon", "profile", "regular"]),
   command("command:sketch-trim", "sketch", "modify", "Trim", "Click a line, arc or circle to remove the part between its neighbouring crossings with other curves.", "preview", { kind: "activate-sketch-edit", tool: "trim" }, ["extend", "split"]),
   command("command:sketch-offset", "sketch", "modify", "Offset", "Offset selected lines, arcs, circles or rectangles by a distance; connected lines are re-joined with mitred corners.", "preview", { kind: "activate-sketch-edit", tool: "offset" }, ["parallel", "distance"]),
-  unavailable("command:sketch-project", "sketch", "construct", "Project geometry", "Requires persistent topology references from a qualified solid kernel.", ["include", "reference"]),
+  command("command:sketch-project", "sketch", "construct", "Project geometry", "Project the edges of the selected solid body onto the sketch plane along its normal. The Project group in the Sketch ribbon also picks one edge, cuts the sketch plane through the body (Intersect), draws its outline (Silhouette) and converts the outline of a picked face. The curves are a snapshot of the body and do not follow later edits.", "preview", { kind: "sketch-command", command: "project-body" }, ["include", "reference", "intersect", "silhouette", "convert"]),
   command("command:sketch-dimension", "sketch", "construct", "Driving dimension", "Activate Dimension mode, then select a line, rectangle, or circle to edit its driving value.", "preview", { kind: "activate-sketch-dimension" }, ["constraint", "measure"]),
   command("command:sketch-pair-constraints", "sketch", "construct", "Pair constraints", "Shift-select two entities for parallel, perpendicular, collinear, concentric, equal, or tangent intent.", "preview", { kind: "open-workspace" }, ["horizontal", "vertical", "parallel", "perpendicular", "concentric"]),
   command("command:sketch-palette", "sketch", "inspect", "Sketch palette", "Control grid, snap, profile shading, dimensions, constraints, and construction geometry.", "preview", { kind: "open-workspace" }, ["grid", "snap", "show", "hide"]),
