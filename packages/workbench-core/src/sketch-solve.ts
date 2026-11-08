@@ -141,6 +141,11 @@ function runAnalyticSolve(sketch: WorkbenchSketch, focusEntityIds: readonly stri
   }
 
   const solvedById = new Map(result.document.geometry.map((solved) => [solved.id, solved]));
+  if (drag === undefined) {
+    // A tangent relation between geometry that is far apart must not quietly change the size of a hole or boss: report it instead.
+    const resize = excessiveTangentResize(constraints, entities, solvedById);
+    if (resize !== undefined) return { ok: false, message: resize.message, relatedIds: resize.relatedIds, recovery: "Move the circle (or the line) close to where it should touch first, or dimension the radius so it is held and the other geometry moves instead." };
+  }
   const notes: string[] = [];
   const movedIds: string[] = [];
   const nextEntities = sketch.entities.map((entity) => {
@@ -153,6 +158,43 @@ function runAnalyticSolve(sketch: WorkbenchSketch, focusEntityIds: readonly stri
     return replacement;
   });
   return { ok: true, entities: nextEntities, movedIds, notes, unsolved };
+}
+
+/** A tangent relation may change a circle or arc by this much (the larger of the two limits: 10 mm, or twice its radius) before it counts as a surprise resize. A smaller change is reported in the status line, as before. */
+const TANGENT_RESIZE_ABSOLUTE_MM = 10;
+const TANGENT_RESIZE_RELATIVE = 2;
+
+/**
+ * Finds a circle or arc whose radius a tangent relation would change by a lot although nothing holds that radius (no radius dimension,
+ * no equal relation). Small adjustments are the normal way a tangent closes a tiny gap; a jump from 5 mm to 30 mm is the circle being
+ * stretched to reach geometry that was far away, which a designer would never want to happen silently.
+ */
+function excessiveTangentResize(
+  constraints: readonly WorkbenchSketchConstraint[],
+  entities: readonly SketchEntity[],
+  solvedById: ReadonlyMap<string, SketchGeometry>
+): { readonly message: string; readonly relatedIds: readonly string[] } | undefined {
+  for (const entity of entities) {
+    if (entity.kind !== "circle" && entity.kind !== "arc") continue;
+    const solved = solvedById.get(entity.id);
+    if (solved === undefined || (solved.kind !== "circle" && solved.kind !== "arc")) continue;
+    const before = entity.kind === "circle" ? entity.radiusMm : circumcircle(entity.start, entity.mid, entity.end)?.radiusMm;
+    if (before === undefined) continue;
+    const change = Math.abs(solved.radiusMm - before);
+    if (change <= Math.max(TANGENT_RESIZE_ABSOLUTE_MM, before * TANGENT_RESIZE_RELATIVE)) continue;
+    const mine = constraints.filter((candidate) => candidate.entityIds.includes(entity.id));
+    const tangents = mine.filter((candidate) => candidate.kind === "tangent");
+    if (tangents.length === 0) continue;
+    const holdsRadius = mine.some((candidate) => (candidate.kind === "radius" && candidate.driven !== true) || candidate.kind === "equal");
+    if (holdsRadius) continue;
+    const label = entity.id.replace(/^entity:/u, "");
+    const others = [...new Set(tangents.flatMap((candidate) => candidate.entityIds).filter((id) => id !== entity.id))].map((id) => id.replace(/^entity:/u, ""));
+    return {
+      message: `Making ${label} tangent to ${others.join(" and ")} would resize ${entity.kind} ${label} from radius ${format(before)} mm to ${format(solved.radiusMm)} mm, because they are far apart and nothing holds its radius.`,
+      relatedIds: [entity.id, ...tangents.map((candidate) => candidate.id)]
+    };
+  }
+  return undefined;
 }
 
 /** Entities reachable from the focus through constraints; every entity when there is no focus. */

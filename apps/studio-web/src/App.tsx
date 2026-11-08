@@ -23,6 +23,7 @@ import {
   planarFacesOfBody,
   planeOffsetForCoordinate,
   type SketchPlaneFaceRef,
+  type RevolveAxisRef,
   featureOfBody,
   isElectricalSheetPositionAvailable,
   parseWorkbenchProjectText,
@@ -98,7 +99,7 @@ import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
 import { facesOfBody } from "./edge-blend-step.js";
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
-import { flatPatternForBody, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
+import { flatPatternForBody, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
 import { ChangeParametersDialog } from "./ui/ChangeParametersDialog.js";
@@ -1427,7 +1428,7 @@ export function App(): React.JSX.Element {
     const base = baseFeatureOf(history, body.id);
     const sketchFeature = base === undefined ? undefined : history.features.find((candidate) => candidate.id === base.sketchFeatureId && candidate.kind === "sketch");
     if (base === undefined || sketchFeature?.kind !== "sketch") { setStatus("ready"); setStatusText("Edge flange: this body is not in the timeline, so a flange cannot be recorded."); return; }
-    const rebuilt = await rebuildSolidFeature(base, sketchFeature, body.color);
+    const rebuilt = await rebuildSolidFeature(base, sketchFeature, body.color, sketchLookupOf(designOf(projectRef.current)));
     if (!rebuilt.ok) { setStatus("error"); setStatusText(`Edge flange: ${rebuilt.message}`); return; }
     const frame = sheetFrameOf(rebuilt.body, sketchNormal(sketchFeature));
     if (frame === undefined || frame.edges.length === 0) { setStatus("ready"); setStatusText("Edge flange: this body has no flat top face with straight edges to bend from."); return; }
@@ -1685,7 +1686,7 @@ export function App(): React.JSX.Element {
     }
     if (found === undefined) { setStatus("error"); setStatusText(`${lead}: ${failure}`); return; }
     const { feature, reached } = found;
-    const built = await rebuildSolidFeature(targetBody === undefined ? reached.step : { ...reached.step, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color);
+    const built = await rebuildSolidFeature(targetBody === undefined ? reached.step : { ...reached.step, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color, sketchLookupOf(designOf(projectRef.current)));
     const tool = built.ok && reached.trim !== undefined ? await trimToFace(built.body, reached.trim) : built;
     if (!tool.ok) { setStatus("error"); setStatusText(tool.message); return; }
     let resultBody = tool.body;
@@ -2439,6 +2440,8 @@ export function App(): React.JSX.Element {
       readonly extentTarget?: DesignExtentTarget;
       readonly thinWallMm?: number;
       readonly thinSide?: "inside" | "outside" | "center";
+      /** Revolve: the axis it turns about (absent: the sketch Y axis). */
+      readonly revolveAxis?: RevolveAxisRef;
       readonly sweepDirectionMm?: readonly [number, number, number];
       readonly sweepPathEntityId?: string;
       readonly sweepTwistDeg?: number;
@@ -2538,6 +2541,7 @@ export function App(): React.JSX.Element {
       bodyId,
       ...((operation === "extrude" || operation === "revolve") && direction !== "one-side" ? { direction } : {}),
       ...((operation === "extrude" || operation === "revolve") && direction === "two-side" && advancedParams?.secondValueMm !== undefined ? { secondValueMm: advancedParams.secondValueMm } : {}),
+      ...(operation === "revolve" && advancedParams?.revolveAxis !== undefined ? { revolveAxis: advancedParams.revolveAxis } : {}),
       ...(operation === "revolve" && advancedParams?.thinWallMm !== undefined ? { thinWallMm: advancedParams.thinWallMm, thinSide: advancedParams.thinSide ?? "inside" } : {}),
       ...((operation === "extrude" || operation === "revolve") && advancedParams?.extent !== undefined && advancedParams.extentTarget !== undefined ? { extent: advancedParams.extent, extentTarget: advancedParams.extentTarget } : {}),
       ...(edge === undefined ? {} : { edge }),
@@ -2582,7 +2586,7 @@ export function App(): React.JSX.Element {
     if (reached !== undefined && !reached.ok) { setStatus("error"); setStatusText(reached.message); return; }
     const sized = reached?.ok === true ? reached.step : feature.extent === "through-all" && targetBody !== undefined ? throughAllOverride(feature, sketchFeature, targetBody) : feature;
     const stored: DesignSolidFeature = reached?.ok === true ? { ...feature, valueMm: reached.step.valueMm } : feature;
-    const built = await rebuildSolidFeature(target === undefined ? sized : { ...sized, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color);
+    const built = await rebuildSolidFeature(target === undefined ? sized : { ...sized, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color, sketchLookupOf(designOf(projectRef.current)));
     const rebuilt = built.ok && reached?.ok === true && reached.trim !== undefined ? await trimToFace(built.body, reached.trim) : built;
     if (!rebuilt.ok) { setStatus("error"); setStatusText(rebuilt.message); return; }
     let resultBody = rebuilt.body;
@@ -2688,7 +2692,7 @@ export function App(): React.JSX.Element {
       if (await commitWithReplay({ kind: "update-design-solid", feature: next, body: existing }, next.id, replayAll)) setFeatureEdit(undefined);
       return;
     }
-    const rebuilt = await rebuildSolidFeature(next, sketchFeature, existing?.color);
+    const rebuilt = await rebuildSolidFeature(next, sketchFeature, existing?.color, sketchLookupOf(designOf(projectRef.current)));
     if (!rebuilt.ok) { setStatus("error"); setStatusText(rebuilt.message); return; }
     if (applyProjectOperation({ kind: "update-design-solid", feature: next, body: rebuilt.body })) setFeatureEdit(undefined);
   };

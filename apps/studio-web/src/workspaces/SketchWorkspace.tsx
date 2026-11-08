@@ -53,7 +53,9 @@ import {
 } from "../../../../packages/viewport-three/src/index.js";
 import { halvedExpression, unhalvedExpression } from "../dimension-expression.js";
 import { SketchUnitContext, readSketchLength, sketchLength, useSketchUnit } from "./sketch-unit.js";
-import type { LengthUnit } from "../../../../packages/workbench-core/src/index.js";
+import { describeSketchAxes } from "../sketch-world.js";
+import { SectionPropertiesPanel } from "./SectionPropertiesPanel.js";
+import type { LengthUnit, RevolveAxisRef } from "../../../../packages/workbench-core/src/index.js";
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 import { ViewportChrome } from "../ui/ViewportChrome.js";
@@ -169,6 +171,7 @@ interface SketchWorkspaceProps {
     direction?: "one-side" | "symmetric" | "flipped" | "two-side",
     target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" },
     advancedParams?: {
+      readonly revolveAxis?: RevolveAxisRef;
       readonly secondValueMm?: number;
       readonly extent?: "to-face" | "to-body" | "to-vertex" | "to-first" | "to-last";
       readonly extentTarget?: DesignExtentTarget;
@@ -355,6 +358,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [showComb, setShowComb] = useState(false);
   const [combScale, setCombScale] = useState(1);
   const [selectedProfileIds, setSelectedProfileIds] = useState<readonly string[]>([]);
+  // What a revolve turns about: "" is the sketch Y axis, "x" the sketch X axis, otherwise the ID of a line of this sketch (a centerline or construction line).
+  const [revolveAxisChoice, setRevolveAxisChoice] = useState("");
   const boxGesture = useRef<BoxGesture | undefined>(undefined);
   // Direct manipulation: the gesture, and the live (uncommitted) result shown while it runs.
   const dragGesture = useRef<DragGesture | undefined>(undefined);
@@ -1476,6 +1481,15 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
                 {props.solidBodies.map((body) => <option key={body.id} value={body.id}>{body.name}</option>)}
               </select>}
           </div>}
+          {solidOp === "revolve" && <div className="make-solid-row" aria-label="Revolve axis">
+            <small>Axis</small>
+            <select aria-label="Revolve axis" value={props.sketch.entities.some((entity) => entity.id === revolveAxisChoice) || revolveAxisChoice === "x" ? revolveAxisChoice : ""} onChange={(event) => setRevolveAxisChoice(event.target.value)}>
+              <option value="">Sketch Y axis</option>
+              <option value="x">Sketch X axis</option>
+              {props.sketch.entities.filter((entity) => entity.kind === "line").map((entity, index) => <option key={entity.id} value={entity.id}>{entity.construction ? "Construction line" : "Line"} {index + 1} ({shortId(entity.id)})</option>)}
+            </select>
+            <small>{describeSketchAxes(props.sketch)}</small>
+          </div>}
           {(solidOp === "extrude" || solidOp === "revolve") && <ReachOptions operation={solidOp} settings={reach} onChange={setReach} bodies={props.targetBodies} selectedId={props.selectedId} cutting={solidResult === "cut" && props.solidBodies.length > 0} />}
           {solidOp === "sweep" && <div className="make-solid-row" aria-label="Sweep mode">
             <select aria-label="Sweep mode" value={sweepMode} onChange={(event) => setSweepMode(event.target.value as "direction" | "path")}>
@@ -1659,6 +1673,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
                                 : solidOp === "sheet-hem"
                                   ? { sheetThicknessMm: Number(sheetThickness), sheetBendRadiusMm: Number(sheetBendRadius), flangeLengthMm: Number(flangeLength), hemStyle }
                                   : reachResult?.ok === true ? reachResult.params : undefined;
+            const revolveAxis = solidOp === "revolve" && revolveAxisChoice !== ""
+              ? (revolveAxisChoice === "x" ? { kind: "sketch-axis" as const, axis: "x" as const } : { kind: "sketch-line" as const, entityId: revolveAxisChoice })
+              : undefined;
             const effectiveProfileIds = solidOp === "loft" && loftMode === "two-profile" && selectedProfileIds.length >= 2
               ? selectedProfileIds.slice(0, 1)
               : selectedProfileIds;
@@ -1677,7 +1694,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               edgeForOp,
               reachResult?.ok === true ? reachResult.direction : undefined,
               modifying ? { mode: solidResult, bodyId: effectiveTarget, ...(cutThroughAll ? { extent: "through-all" as const } : {}) } : undefined,
-              advanced
+              revolveAxis === undefined ? advanced : { ...(advanced ?? {}), revolveAxis }
             );
           }}><CommandIcon name={solidResult === "cut" ? "subtract" : solidResult === "join" ? "unite" : "box"} />{solidResult === "cut" ? "Cut solid" : solidResult === "join" ? "Join solid" : "Create solid"}</button>
           {solidOp === "extrude" && <small className="make-solid-hint">{selectedProfileIds.length === 0 ? "Nothing selected: the outermost profile is used and profiles inside it become holes." : "Profiles drawn inside the outline become holes. Shift-select profiles to choose exactly which."}</small>}
@@ -1759,6 +1776,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
       <section className="inspector-section profile-controller"><header><strong>Closed profiles</strong><span>{profiles.length} found</span></header>
         <p className="profile-help">Profile selects a shaded region; Curve, Connected and Tangent intents use the shared top selection controller. Use Create solid in the palette to extrude or revolve the selected profiles into a new body.</p>
+        <SectionPropertiesPanel profiles={profiles} selectedProfileIds={selectedProfileIds} />
         <div className="profile-list">{profiles.map((profile, index) => <button key={profile.id} className={selectedProfileIds.includes(profile.id) ? "selected" : ""} onClick={(event) => selectProfile(profile, event.shiftKey || event.ctrlKey || event.metaKey)}><span><b>P{index + 1}</b>{profileLabel(profile)}</span><small>{format(profile.areaMm2)} mm²</small></button>)}</div>
       </section>
 

@@ -22,6 +22,7 @@ import {
 import { analyzeWorkbenchSketch } from "../../workbench-sketch/src/index.js";
 import { createElectricalSchematic } from "../../workbench-electrical/src/index.js";
 import { analyzeDesignHealth } from "../../workbench-health/src/index.js";
+import { buildDesignSolidOperation } from "./design-solid.js";
 
 export interface McpToolDefinition {
   readonly name: string;
@@ -72,7 +73,8 @@ const PROJECT_SCHEMA = {
     id: { type: "string" }, name: { type: "string" }, revision: { type: "integer", minimum: 0 }, unit: { const: "mm" },
     activeWorkspace: { enum: ["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"] },
     sketch: { type: "object" }, part: { type: "object" }, assembly: { type: "object" }, surface: { type: "object" },
-    drawing: { type: "object" }, electrical: { type: "object" }, vehicle: { type: "object" }, audit: { type: "array", maxItems: 1000 }
+    drawing: { type: "object" }, electrical: { type: "object" }, vehicle: { type: "object" }, audit: { type: "array", maxItems: 1000 },
+    design: { type: "object", description: "The parametric timeline: finished sketches and the solids built from them. Absent until the first sketch is finished." }
   }
 } as const;
 const OPERATION_SCHEMA = {
@@ -141,6 +143,12 @@ export const PS3D_AI_COMMAND_RECIPES: readonly Ps3dAiCommandRecipe[] = [
   recipe("inspect", "any", "Understand the current project", "Validate and summarize a caller-supplied project without changing it.", ["inspect project", "understand model", "summarize cad", "read project"], "read-only", "ps3d_inspect_project", { project: "<complete ps3d-workbench-project/1>" }, "The open browser project is not exposed automatically."),
   recipe("design-health", "any", "Review design health and dependencies", "Analyze every workspace, actual associativity, rebuild order, evidence gaps, and release boundaries without changing the project.", ["design health", "rebuild all", "dependency", "associativity", "quality check", "model readiness", "professional review"], "read-only", "ps3d_design_health", { project: "<complete ps3d-workbench-project/1>" }, "Findings are deterministic assistance, not a manufacturing or regulatory release."),
   recipe("sketch-geometry", "sketch", "Create bounded sketch geometry", "Prepare a revision-checked line, rectangle, circle, or three-point arc entity on the supported datum plane.", ["draw line", "create rectangle", "make circle", "three point arc", "sketch geometry", "add sketch entity"], "generic-preview", "ps3d_preview_operation", operationEnvelope("add-sketch-entity", { entity: { id: "sketch-entity:<caller-unique-id>", kind: "line", start: [0, 0], end: [40, 0], construction: false, visible: true } }), "Use a unique stable entity ID, millimetres, and only the supported entity fields; preview before apply."),
+  recipe("sketch-new-plane", "sketch", "Start a sketch on a chosen plane", "Prepare a new sketch on a datum plane (datum:xy, datum:xz, datum:yz) with an optional offset in mm, a tilt about a world axis, a three-point frame, or a face of a solid (the sketch then follows the face when the solid changes). The previous working sketch should be finished first with commit-design-sketch.", ["new sketch", "sketch on plane", "sketch on face", "offset plane", "tilted plane", "start sketch"], "generic-preview", "ps3d_preview_operation", operationEnvelope("new-design-sketch", { plane: "datum:xz", offsetMm: 25 }), "Plane choices: datum:xy faces +Z, datum:xz faces -Y, datum:yz faces +X (its sketch X runs along world -Z). Add tilt: { axis, angleDeg } or frame, but not both; face: { bodyId, faceKey, faceRole, axis, outwardPositive, coordinateMm, areaMm2 } comes from a planar face of an existing solid."),
+  recipe("sketch-edit-batch", "sketch", "Draw many curves and relations in one edit", "Prepare one atomic sketch edit that removes, updates and adds up to 500 entities (line, rectangle, circle, ellipse, arc, point, spline) and up to 1000 constraints, for example a whole profile with its relations.", ["draw profile", "batch sketch", "apply sketch edit", "many lines", "sketch polyline", "add entities and constraints"], "generic-preview", "ps3d_preview_operation", operationEnvelope("apply-sketch-edit", { removeEntityIds: [], updateEntities: [], addEntities: [{ id: "entity:<unique>", kind: "rectangle", center: [0, 0], widthMm: 60, heightMm: 40, rotationDeg: 0, construction: false }], addConstraints: [], label: "Draw base profile" }), "Entities must stay within 0.01 mm and +/-100000 mm; a refused entity is named in the diagnostic with the field and limit."),
+  recipe("sketch-commit", "sketch", "Finish the sketch into the timeline", "Prepare commit-design-sketch, which turns the working sketch into a named timeline feature that solids can be built on.", ["finish sketch", "commit sketch", "exit sketch", "save sketch to timeline"], "generic-preview", "ps3d_preview_operation", operationEnvelope("commit-design-sketch", { featureId: "feature:<unique-sketch-id>", name: "Base profile" }), "Names are kept unique automatically; a blank name is refused."),
+  recipe("design-solid", "part", "Extrude, revolve, sweep or loft a finished sketch", "Build a solid from a finished sketch of the supplied project (distance or angle, join or cut an existing solid, revolve about a sketch line or edge, sweep along a chained path from another sketch, loft to a profile on another plane) and return the ready add-design-solid operation with its preview.", ["extrude sketch", "revolve sketch", "sweep along path", "loft between sketches", "make solid from sketch", "cut from sketch", "boss from sketch"], "generic-preview", "ps3d_prepare_design_solid", { project: "<complete project with the finished sketch>", solid: { kind: "extrude", sketchFeatureId: "feature:<finished sketch>", valueMm: 20 }, guideAcknowledgement: { manifestSha256: "<current ps3d_guide manifestSha256>", understood: true } }, "Returns the add-design-solid operation, receipt and candidate project; confirm and apply with ps3d_apply_preview. The built solid must fit one 1 MB call."),
+  recipe("design-parameters", "part", "Set named parameters and expressions", "Prepare set-design-parameters: a table of named lengths and angles (with units such as 1/2 in) that sketch dimensions and feature values can use in expressions.", ["parameter", "change parameters", "named dimension", "formula", "driving dimension expression"], "generic-preview", "ps3d_preview_operation", operationEnvelope("set-design-parameters", { parameters: [{ name: "plate_w", expression: "60 mm", unit: "mm", comment: "plate width" }] }), "Bind a dimension to a parameter with set-sketch-dimension and its expression field; rebuild the solids afterwards with regenerate-design."),
+  recipe("design-timeline", "part", "Edit the timeline", "Prepare a timeline edit: reopen a sketch (edit-design-sketch), rename, suppress, delete (with the features built on it), or roll back the history.", ["timeline", "edit history", "suppress feature", "rename feature", "roll back", "delete feature", "edit sketch"], "generic-preview", "ps3d_preview_operation", operationEnvelope("set-design-feature-suppressed", { featureId: "<existing feature ID>", suppressed: true }), "Use edit-design-sketch, rename-design-feature, delete-design-feature, set-design-rollback or regenerate-design the same way; read the featureId values from ps3d_inspect_project."),
   recipe("sketch-dimension", "sketch", "Set a selected sketch dimension", "Prepare a direct length, width, height, radius, arc-length or perimeter edit for one existing sketch entity ID, or an angle between two lines (add secondEntityId; the value is in degrees, counter-clockwise from the first line to the second). Add driven: true for a reference dimension that measures and never moves geometry.", ["sketch dimension", "dimension line", "dimension circle", "set radius", "edit sketch size", "direct dimension"], "generic-preview", "ps3d_preview_operation", operationEnvelope("set-sketch-dimension", { entityId: "<existing sketch entity ID from ps3d_inspect_project>", dimension: "length", valueMm: 40 }), "The entity and dimension type must be compatible; use the exact inspected ID and retry only after resolving diagnostics."),
   recipe("sketch-constraint", "sketch", "Constrain selected sketch entities", "Prepare a supported horizontal, vertical, parallel, perpendicular, tangent, collinear, midpoint, symmetry, coincident, concentric, equal, radius, distance, or fixed constraint.", ["sketch constraint", "make horizontal", "make tangent", "make concentric", "coincident points", "fix sketch"], "generic-preview", "ps3d_preview_operation", operationEnvelope("add-sketch-constraint", { constraint: { id: "sketch-constraint:<caller-unique-id>", kind: "horizontal", entityIds: ["<existing sketch entity ID>"] } }), "Inspect first, supply exactly the required compatible entity IDs, and treat constraint-conflict diagnostics as a correction request. Coincident and midpoint also take a points list naming each entity defining point in the same order: for coincident one of start, end, mid (lines), center (circles and arcs) or self (sketch points) per entity, for example entityIds [a, b] with points ['end', 'start'] moves the second point onto the first; for midpoint the first entity is the point owner (points ['center']) and the second is the line."),
   recipe("part-parameter", "part", "Change a part parameter", "Prepare a revision-checked width, height, thickness, bore, edge, pattern, or revolve change.", ["resize part", "change thickness", "change hole", "make bore", "part dimension"], "generic-preview", "ps3d_preview_operation", operationEnvelope("set-part-parameter", { parameter: "thicknessMm", value: 12 }), "Preview first, show the candidate project, then request confirmation."),
@@ -256,6 +264,28 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
     inputSchema: { type: "object", additionalProperties: false, required: ["project", "guideAcknowledgement"], properties: { project: PROJECT_SCHEMA, guideAcknowledgement: GUIDE_ACKNOWLEDGEMENT_SCHEMA } },
     outputSchema: STRUCTURED_OUTPUT_SCHEMA,
     annotations: { title: "Preview wired mounting plate", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  },
+  {
+    name: "ps3d_prepare_design_solid",
+    title: "Build a solid from a finished sketch",
+    description: "Build an extrude, revolve, sweep or loft from a finished sketch of the supplied project and return the ready add-design-solid operation with its diff summary, receipt and candidate project, without mutating anything. Confirm and apply with ps3d_apply_preview.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["project", "solid", "guideAcknowledgement"],
+      properties: {
+        project: PROJECT_SCHEMA,
+        solid: {
+          type: "object",
+          description: "kind (extrude, revolve, sweep, loft), sketchFeatureId of a finished sketch, valueMm (distance in mm, or degrees for a revolve), and optionally profileIds, name, operation (new-body, join or cut) with targetBodyId, direction, revolveAxis, sweepPath, loftSecondaryProfileIds and loftSecondarySketchFeatureId.",
+          required: ["kind", "sketchFeatureId", "valueMm"],
+          properties: { kind: { enum: ["extrude", "revolve", "sweep", "loft"] }, sketchFeatureId: { type: "string" }, valueMm: { type: "number" } }
+        },
+        guideAcknowledgement: GUIDE_ACKNOWLEDGEMENT_SCHEMA
+      }
+    },
+    outputSchema: STRUCTURED_OUTPUT_SCHEMA,
+    annotations: { title: "Build a solid from a finished sketch", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   },
   {
     name: "ps3d_preview_operation",
@@ -466,6 +496,20 @@ export async function handleWorkbenchMcpTool(name: string, args: unknown): Promi
       return error("DEDICATED_PREVIEW_REQUIRED", "Use ps3d_preview_electromechanical so the exact replacement candidate, ERC issues, generic-catalog boundary, and confirmation disclosure are returned together.");
     }
     return preview(args.project, args.operation);
+  }
+  if (name === "ps3d_prepare_design_solid") {
+    if (!exactKeys(args, ["project", "solid", "guideAcknowledgement"])) return error("INSTRUCTION_ACKNOWLEDGEMENT_REQUIRED", "Read ps3d_guide and provide project, solid, and its current guideAcknowledgement.");
+    const guideError = await requireGuideAcknowledgement(args.guideAcknowledgement);
+    if (guideError !== undefined) return guideError;
+    const project = validateWorkbenchProject(args.project);
+    if (!project.ok) return diagnostics(project.diagnostics);
+    const built = await buildDesignSolidOperation(project.value, args.solid);
+    if (!built.ok) return error(built.code, built.message);
+    const bytes = encodedSize(built.operation);
+    if (bytes > WORKBENCH_LIMITS.maxMcpInputBytes * 0.7) return error("RESOURCE_LIMIT", `The built solid is ${Math.round(bytes / 1000)} kB, too large to send back to ps3d_apply_preview in one call (the limit is ${Math.round(WORKBENCH_LIMITS.maxMcpInputBytes / 1000)} kB). Use a simpler profile or a smaller solid.`);
+    const previewed = await preview(project.value, built.operation);
+    if (previewed.isError === true) return previewed;
+    return success(`Built ${String(built.solid["kind"])} (${String(built.solid["volumeMm3"])} mm3); ${String(previewed.structuredContent["summary"])} No state was modified.`, { ...previewed.structuredContent, schema: "ps3d-design-solid-preview/1", operation: built.operation, solid: built.solid });
   }
   if (name === "ps3d_preview_electromechanical") {
     if (!exactKeys(args, ["project", "guideAcknowledgement"])) return error("INSTRUCTION_ACKNOWLEDGEMENT_REQUIRED", "Read ps3d_guide and provide the project plus its current guideAcknowledgement.");

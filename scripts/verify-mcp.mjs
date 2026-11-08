@@ -5,11 +5,11 @@ import { resolve } from "node:path";
 import { createWorkbenchProject } from "../apps/mcp-server/dist/packages/workbench-core/src/index.js";
 
 const serverPath = resolve("apps/mcp-server/dist/apps/mcp-server/src/server.js");
-const expectedTools = "ps3d_guide,ps3d_agent_handshake,ps3d_plan_engineering_intent,ps3d_find_commands,ps3d_capabilities,ps3d_inspect_project,ps3d_design_health,ps3d_analyze_vehicle,ps3d_electromechanical_catalog,ps3d_preview_electromechanical,ps3d_preview_operation,ps3d_apply_preview";
+const expectedTools = "ps3d_guide,ps3d_agent_handshake,ps3d_plan_engineering_intent,ps3d_find_commands,ps3d_capabilities,ps3d_inspect_project,ps3d_design_health,ps3d_analyze_vehicle,ps3d_electromechanical_catalog,ps3d_preview_electromechanical,ps3d_prepare_design_solid,ps3d_preview_operation,ps3d_apply_preview";
 
 await verifyModernDiscovery();
 await verifyLegacyLifecycle();
-process.stdout.write("Verified direct-Node MCP stdio launch, modern discovery, legacy initialization, twelve schemas, collaboration-agent correction, engineering-intent decomposition, design health, guide/resource/prompt discovery, command matching, candidate disclosure, receipt rejection, exact retry, and confirmed apply.\n");
+process.stdout.write("Verified direct-Node MCP stdio launch, modern discovery, legacy initialization, thirteen schemas, collaboration-agent correction, engineering-intent decomposition, design health, guide/resource/prompt discovery, command matching, candidate disclosure, receipt rejection, exact retry, and confirmed apply.\n");
 
 async function verifyModernDiscovery() {
   const session = createSession();
@@ -178,7 +178,7 @@ function modernMeta() {
 }
 
 function assertToolCatalog(tools) {
-  assert(Array.isArray(tools) && tools.length === 12, "MCP server must list exactly twelve bounded tools.");
+  assert(Array.isArray(tools) && tools.length === 13, "MCP server must list exactly thirteen bounded tools.");
   assert(tools.map((tool) => tool.name).join(",") === expectedTools, "MCP tool ordering or names changed.");
   assert(tools.every((tool) => tool.inputSchema?.type === "object" && tool.outputSchema?.type === "object"), "Every MCP tool must advertise object input and output schemas.");
   const inspect = tools.find((tool) => tool.name === "ps3d_inspect_project");
