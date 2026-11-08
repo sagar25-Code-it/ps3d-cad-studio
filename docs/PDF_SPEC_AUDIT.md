@@ -111,12 +111,12 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | PDF requirement | Status | Where / Gap |
 |---|---|---|
 | Offset plane | Have | Sketch-plane dialog carries `planeOffsetMm` |
-| Plane at angle | Missing | |
+| Plane at angle | Shipped | `ConstructionPlaneDefinition.kind: "angle"` (a datum plane turned about a world axis) is a datum you can create from the Part ribbon, and a sketch can now sit on it: the Sketch plane dialog has a Tilt control (axis and angle, applied after the offset) and lists the part's angle planes as ready-made choices. The tilt is stored on the sketch (`planeTilt`, validated and saved with it, shown in the step description). `rebuildSolidFeature` builds the solid on the datum plane as before and then turns the mesh about the axis (`tiltPositions`), which keeps the face names; through-all cuts measure in the plane's own frame, and edge flanges and the flat pattern use the tilted normal or turn the plate back flat first. The sketch canvas still shows the plane face-on in its own 2D frame, and the tilt is about a world axis through the origin, not a chosen edge or an arbitrary axis |
 | Tangent plane | Have | `ConstructionPlaneDefinition.kind: "tangent-to-cylinder"` ships: the plane sits on a revolve/extrude body's maximum-radius envelope at a chosen angle around its axis; origin is at the cylinder surface, normal is outward radial, in-plane axes line up with the body axis |
-| Midplane | Missing | |
+| Midplane | Have | `ConstructionPlaneDefinition.kind: "midplane"` sits halfway between two offsets of a datum plane (Part ribbon Midplane); a sketch can use the offset form of the plane |
 | Perpendicular plane | Shipped | `ConstructionPlaneDefinition.kind: "perpendicular-to-axis"` is a plane through a chosen point whose normal is a construction axis's direction. `evaluateConstructionPlane(plane, bodies, axes)` resolves the axis (and reports a missing or unevaluable one); the Construction ribbon has a "Plane ⟂ axis" button that asks for the axis and the point |
 | Plane through two edges | Missing | |
-| Plane through three points | Missing | |
+| Plane through three points | Have | `ConstructionPlaneDefinition.kind: "three-points"` (Part ribbon Three-Point Plane) is evaluated and drawn; sketching on it is not supported, because a sketch tilt is about a world axis only |
 | Plane along path | Missing | |
 | Construction axes (5 modes) | Have | `ConstructionAxis` carries all five modes: `two-points`, `point-and-direction`, `plane-intersection`, `perpendicular-to-plane`, and `cylinder-axis` (donates the axis of a revolve or extrude body). Rendered as dashed line segments in the viewport; UCS not yet modelled |
 | Construction points & UCS | Shipped | `ConstructionPoint` ships `xyz`, `midpoint` and `axis-plane-intersection` modes. `ConstructionUcs` ships origin + xAxis + yAxis (zAxis = xAxis × yAxis, Gram-Schmidted); add / delete / toggle-visibility / rename operations are in `WORKBENCH_OPERATION_KINDS`, with the UCS stored in `PartIntent.constructionUcses` |

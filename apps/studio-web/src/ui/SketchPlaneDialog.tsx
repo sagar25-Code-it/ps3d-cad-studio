@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { SketchPlaneTilt } from "../../../../packages/workbench-core/src/index.js";
 import type { SketchPlane } from "../general-modeling.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { useDialogFocus } from "./useDialogFocus.js";
@@ -28,13 +29,23 @@ export interface SketchFaceOption {
   readonly hint: string;
 }
 
+/** An angle construction plane of the part: a datum plane turned about a world axis. Picking it starts a tilted sketch. */
+export interface SketchAngleOption {
+  readonly plane: SketchPlane;
+  readonly tilt: SketchPlaneTilt;
+  readonly label: string;
+}
+
 interface SketchPlaneDialogProps {
   readonly open: boolean;
   readonly initialPlane: SketchPlane;
   readonly initialOffsetMm: number;
+  readonly initialTilt?: SketchPlaneTilt | undefined;
+  /** The part's angle construction planes, offered as ready-made tilted sketch planes. */
+  readonly anglePlanes?: readonly SketchAngleOption[];
   /** Axis-aligned planar faces of the shown solids; picking one starts the sketch on that face. */
   readonly faces: readonly SketchFaceOption[];
-  readonly onConfirm: (plane: SketchPlane, offsetMm: number) => void;
+  readonly onConfirm: (plane: SketchPlane, offsetMm: number, tilt?: SketchPlaneTilt) => void;
   readonly onClose: () => void;
 }
 
@@ -42,6 +53,8 @@ interface SketchPlaneDialogProps {
 export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Element | null {
   const [plane, setPlane] = useState<SketchPlane>(props.initialPlane);
   const [offsetText, setOffsetText] = useState("0");
+  const [tiltAxis, setTiltAxis] = useState<"none" | "x" | "y" | "z">("none");
+  const [tiltText, setTiltText] = useState("45");
   const [problem, setProblem] = useState("");
   const dialogRef = useDialogFocus<HTMLElement>(props.open, props.onClose);
 
@@ -49,8 +62,10 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
     if (!props.open) return;
     setPlane(props.initialPlane);
     setOffsetText(String(Number(props.initialOffsetMm.toFixed(3))));
+    setTiltAxis(props.initialTilt?.axis ?? "none");
+    setTiltText(String(props.initialTilt?.angleDeg ?? 45));
     setProblem("");
-  }, [props.open, props.initialPlane, props.initialOffsetMm]);
+  }, [props.open, props.initialPlane, props.initialOffsetMm, props.initialTilt]);
 
   if (!props.open) return null;
   const selected = SKETCH_PLANES.find((option) => option.plane === plane) ?? SKETCH_PLANES[0]!;
@@ -58,7 +73,10 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
   const confirm = (chosenPlane: SketchPlane, rawOffset: string): void => {
     const parsed = rawOffset.trim() === "" ? 0 : Number(rawOffset.trim().replace(",", "."));
     if (!Number.isFinite(parsed) || Math.abs(parsed) > 100_000) { setProblem("Enter an offset in millimetres (up to ±100000)."); return; }
-    props.onConfirm(chosenPlane, parsed);
+    if (tiltAxis === "none") { props.onConfirm(chosenPlane, parsed); return; }
+    const angle = Number(tiltText.trim().replace(",", "."));
+    if (!Number.isFinite(angle) || angle === 0 || Math.abs(angle) > 180) { setProblem("Enter a tilt angle from -180° to 180°, other than 0."); return; }
+    props.onConfirm(chosenPlane, parsed, { axis: tiltAxis, angleDeg: angle });
   };
 
   return <div className="dialog-backdrop save-project-backdrop" role="presentation" onMouseDown={props.onClose}>
@@ -97,6 +115,35 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
             <small>mm along the plane normal · 0 is the plane itself</small>
           </div>
         </label>
+        <label className="sketch-plane-offset">
+          <span>Tilt the plane</span>
+          <div className="feature-edit-field">
+            <select aria-label="Tilt axis" value={tiltAxis} onChange={(event) => { setTiltAxis(event.target.value as "none" | "x" | "y" | "z"); setProblem(""); }}>
+              <option value="none">Not tilted</option>
+              <option value="x">About the X axis</option>
+              <option value="y">About the Y axis</option>
+              <option value="z">About the Z axis</option>
+            </select>
+            <input
+              inputMode="decimal"
+              aria-label="Tilt angle in degrees"
+              disabled={tiltAxis === "none"}
+              value={tiltText}
+              onChange={(event) => { setTiltText(event.target.value); setProblem(""); }}
+              onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); confirm(plane, offsetText); } }}
+            />
+            <small>degrees, right-handed about the world axis, applied after the offset</small>
+          </div>
+        </label>
+        {(props.anglePlanes?.length ?? 0) > 0 && <div className="sketch-plane-faces">
+          <small className="sketch-plane-faces-title">Or sketch on an angle plane of this part</small>
+          {props.anglePlanes!.map((option, index) => <button
+            key={`${option.label}:${index}`}
+            type="button"
+            className="sketch-plane-face"
+            onClick={() => props.onConfirm(option.plane, 0, option.tilt)}
+          ><CommandIcon name="projection" /><span><strong>{option.label}</strong><small>{option.plane.toUpperCase()} turned {option.tilt.angleDeg}° about {option.tilt.axis.toUpperCase()}</small></span></button>)}
+        </div>}
         {props.faces.length > 0 && <div className="sketch-plane-faces">
           <small className="sketch-plane-faces-title">Or sketch on a face of a solid</small>
           {props.faces.map((face, index) => <button

@@ -53,7 +53,7 @@ import {
   validatePartFeatureStack,
   type PartFeatureResult
 } from "./part-features.js";
-import { failure, validateWorkbenchProject, WORKBENCH_LIMITS } from "./validation.js";
+import { failure, validateWorkbenchProject, validSketchPlaneTilt, WORKBENCH_LIMITS } from "./validation.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/iu;
@@ -212,8 +212,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
         || typeof input.suppressed !== "boolean") return invalidOperation("The constraint relax payload is invalid.");
       break;
     case "set-sketch-plane":
-      if (!keys(input, [...common, "plane", ...(Object.hasOwn(input, "offsetMm") ? ["offsetMm"] : [])]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)
-        || (Object.hasOwn(input, "offsetMm") && !(typeof input.offsetMm === "number" && Number.isFinite(input.offsetMm) && Math.abs(input.offsetMm) <= 100_000))) return invalidOperation("The sketch plane must be datum:xy, datum:xz or datum:yz, with a finite offset up to 100000 mm.");
+      if (!keys(input, [...common, "plane", ...(Object.hasOwn(input, "offsetMm") ? ["offsetMm"] : []), ...(Object.hasOwn(input, "tilt") ? ["tilt"] : [])]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)
+        || (Object.hasOwn(input, "offsetMm") && !(typeof input.offsetMm === "number" && Number.isFinite(input.offsetMm) && Math.abs(input.offsetMm) <= 100_000))
+        || (Object.hasOwn(input, "tilt") && !validSketchPlaneTilt(input.tilt))) return invalidOperation("The sketch plane must be datum:xy, datum:xz or datum:yz, with a finite offset up to 100000 mm and, if tilted, an x, y or z axis and an angle up to 180°.");
       break;
     case "commit-design-sketch":
       if (!keys(input, [...common, "featureId", "name"]) || !stableId(input.featureId) || !shortText(input.name, 1, 120)) return invalidOperation("The sketch feature payload is invalid.");
@@ -223,8 +224,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       if (!keys(input, [...common, "featureId"]) || !stableId(input.featureId)) return invalidOperation("The timeline feature ID is invalid.");
       break;
     case "new-design-sketch":
-      if (!keys(input, [...common, "plane", ...(Object.hasOwn(input, "offsetMm") ? ["offsetMm"] : [])]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)
-        || (Object.hasOwn(input, "offsetMm") && !(typeof input.offsetMm === "number" && Number.isFinite(input.offsetMm) && Math.abs(input.offsetMm) <= 100_000))) return invalidOperation("The sketch plane must be datum:xy, datum:xz or datum:yz, with a finite offset up to 100000 mm.");
+      if (!keys(input, [...common, "plane", ...(Object.hasOwn(input, "offsetMm") ? ["offsetMm"] : []), ...(Object.hasOwn(input, "tilt") ? ["tilt"] : [])]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)
+        || (Object.hasOwn(input, "offsetMm") && !(typeof input.offsetMm === "number" && Number.isFinite(input.offsetMm) && Math.abs(input.offsetMm) <= 100_000))
+        || (Object.hasOwn(input, "tilt") && !validSketchPlaneTilt(input.tilt))) return invalidOperation("The sketch plane must be datum:xy, datum:xz or datum:yz, with a finite offset up to 100000 mm and, if tilted, an x, y or z axis and an angle up to 180°.");
       break;
     case "add-design-solid":
     case "update-design-solid":
@@ -636,17 +638,17 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       );
     }
     case "set-sketch-plane": {
-      const { planeOffsetMm: _previousOffset, ...rest } = project.sketch;
+      const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, ...rest } = project.sketch;
       const offset = operation.offsetMm ?? 0;
       return changed(
-        { ...project, sketch: { ...rest, plane: operation.plane, ...(offset === 0 ? {} : { planeOffsetMm: offset }) } },
+        { ...project, sketch: { ...rest, plane: operation.plane, ...(offset === 0 ? {} : { planeOffsetMm: offset }), ...(operation.tilt === undefined ? {} : { planeTilt: operation.tilt }) } },
         [project.sketch.id],
-        `Placed the sketch on the ${operation.plane.replace("datum:", "").toUpperCase()} plane${offset === 0 ? "" : ` offset ${offset} mm`}.`
+        `Placed the sketch on the ${operation.plane.replace("datum:", "").toUpperCase()} plane${offset === 0 ? "" : ` offset ${offset} mm`}${operation.tilt === undefined ? "" : ` tilted ${operation.tilt.angleDeg}° about ${operation.tilt.axis.toUpperCase()}`}.`
       );
     }
     case "commit-design-sketch": return commitDesignSketch(project, operation.featureId, operation.name);
     case "edit-design-sketch": return editDesignSketch(project, operation.featureId);
-    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0);
+    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt);
     case "add-design-solid": return addDesignSolid(project, operation.feature, operation.body);
     case "update-design-solid": return updateDesignSolid(project, operation.feature, operation.body);
     case "regenerate-design": return regenerateDesign(project, operation.results);

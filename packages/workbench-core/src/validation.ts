@@ -197,9 +197,17 @@ export function failure(
   return { ok: false, diagnostics: [{ code, message, relatedIds, recovery }] };
 }
 
+/** A tilt is a world axis and a non-zero angle up to a half turn either way. */
+export function validSketchPlaneTilt(value: unknown): boolean {
+  return isRecord(value) && exactKeys(value, ["axis", "angleDeg"]) && ["x", "y", "z"].includes(String(value.axis))
+    && typeof value.angleDeg === "number" && Number.isFinite(value.angleDeg) && value.angleDeg !== 0 && Math.abs(value.angleDeg) <= 180;
+}
+
 function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   const optionalOffset = isRecord(value) && Object.hasOwn(value, "planeOffsetMm") ? ["planeOffsetMm"] : [];
-  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset])
+  const optionalTilt = isRecord(value) && Object.hasOwn(value, "planeTilt") ? ["planeTilt"] : [];
+  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt])
+    || (optionalTilt.length > 0 && !validSketchPlaneTilt(value.planeTilt))
     || value.id !== "sketch:primary-profile" || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(value.plane) || !shortText(value.name, 1, 120)
     || (optionalOffset.length > 0 && !finiteRange(value.planeOffsetMm, -100_000, 100_000))
     || !finiteRange(value.gridMm, 0.1, 100) || !finiteRange(value.snapToleranceMm, 0.01, 10)

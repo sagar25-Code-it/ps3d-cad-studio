@@ -33,7 +33,8 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
     const curves = feature.sketch.entities.filter((entity) => !entity.construction).length;
     const where = planeWorldCoordinate(feature.sketch.plane, feature.sketch.planeOffsetMm ?? 0);
     const offset = where.valueMm === 0 ? "" : ` at ${where.axisName} = ${trimNumber(where.valueMm)} mm`;
-    return `${sketchPlaneName(feature.sketch.plane)} plane${offset} · ${curves} ${curves === 1 ? "curve" : "curves"}`;
+    const tilt = feature.sketch.planeTilt === undefined ? "" : `, tilted ${trimNumber(feature.sketch.planeTilt.angleDeg)}° about ${feature.sketch.planeTilt.axis.toUpperCase()}`;
+    return `${sketchPlaneName(feature.sketch.plane)} plane${offset}${tilt} · ${curves} ${curves === 1 ? "curve" : "curves"}`;
   }
   const source = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
   const amount = feature.extent === "through-all" ? "through all"
