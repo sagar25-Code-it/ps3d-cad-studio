@@ -3,6 +3,7 @@ import { dependentsOf, designOf, isDirectEditFeature, isFeatureActive, modifiesB
 import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
 import { attachEdgeFlange, booleanMeshes, flangeReliefs, holeCutter, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
+import { applyPatternStep } from "./pattern-replay.js";
 
 /**
  * Rebuilds the solids of the parametric timeline. The kernel is asynchronous, so the work happens here and its results
@@ -39,7 +40,7 @@ function shifted(body: GeneralSolidBody, normal: readonly [number, number, numbe
 
 /** Builds the solid a feature describes from the sketch snapshot it is based on. For a join or cut this is the tool solid. */
 export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature, color = "#b9c2c8"): Promise<SolidRebuild> {
-  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole") {
+  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "pattern") {
     return { ok: false, message: "A direct-edit / indent step is applied during timeline replay, not through the sketch-driven builder." };
   }
   const sketch = sketchFeature.sketch;
@@ -158,12 +159,34 @@ function stepsOfBody(history: ReturnType<typeof designOf>, bodyId: string): read
  * joins or cuts is only replayed while its own step is live.
  */
 export async function replayBody(project: WorkbenchProject, bodyId: string): Promise<readonly RebuildResult[]> {
+  return (await replayBodyState(project, bodyId)).results;
+}
+
+/** The finished shapes of bodies replayed up to a timeline position, shared by the copies of one pattern so the source is only replayed once. */
+const SNAPSHOTS = new WeakMap<WorkbenchProject, Map<string, Promise<GeneralSolidBody | undefined>>>();
+const MAX_PATTERN_DEPTH = 8;
+
+/** The shape of a body just before a timeline position (a pattern copies it as it was at that step, not as later steps leave it). */
+function bodyBefore(project: WorkbenchProject, bodyId: string, limitIndex: number, depth: number): Promise<GeneralSolidBody | undefined> {
+  let cache = SNAPSHOTS.get(project);
+  if (cache === undefined) { cache = new Map(); SNAPSHOTS.set(project, cache); }
+  const key = `${bodyId}@${limitIndex}`;
+  let found = cache.get(key);
+  if (found === undefined) {
+    found = depth > MAX_PATTERN_DEPTH ? Promise.resolve(undefined) : replayBodyState(project, bodyId, limitIndex, depth + 1).then((state) => state.current);
+    cache.set(key, found);
+  }
+  return found;
+}
+
+/** Replays one body and also returns its finished shape. With `limitIndex`, the replay stops before the timeline step at that position. */
+export async function replayBodyState(project: WorkbenchProject, bodyId: string, limitIndex = Infinity, depth = 0): Promise<{ readonly results: readonly RebuildResult[]; readonly current?: GeneralSolidBody }> {
   const history = designOf(project);
   const steps = stepsOfBody(history, bodyId);
   const base = steps.find((step) => !modifiesBody(step));
-  if (base === undefined) return [];
+  if (base === undefined) return { results: [] };
   const chained = steps.some(modifiesBody);
-  if (chained && !isFeatureActive(history, base.id)) return [];
+  if (chained && !isFeatureActive(history, base.id)) return { results: [] };
   const existing = project.part.generalBodies?.find((body) => body.id === bodyId);
   const outcomes = new Map<string, RebuildResult>();
   let current: GeneralSolidBody | undefined;
@@ -171,6 +194,26 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
   for (const step of steps) {
     // A lone body is rebuilt whatever its state; the steps of a chain only while they are live.
     if (chained && !isFeatureActive(history, step.id)) continue;
+    if (history.features.indexOf(step) >= limitIndex) break;
+    // Pattern: copy this body (or repeat some of its features) at the positions the pattern lays out.
+    if (step.kind === "pattern") {
+      const pattern = step.pattern;
+      const groupStart = pattern === undefined ? -1 : history.features.findIndex((other) => other.kind !== "sketch" && other.pattern?.groupId === pattern.groupId);
+      const applied = await applyPatternStep(step, current, {
+        project,
+        existing,
+        sourceSnapshot: (sourceId) => bodyBefore(project, sourceId, groupStart < 0 ? history.features.indexOf(step) : groupStart, depth),
+        stepOf: (id) => { const found = history.features.find((candidate): candidate is DesignSolidFeature => candidate.id === id && candidate.kind !== "sketch"); return found !== undefined && isFeatureActive(history, id) ? found : undefined; },
+        sketchOf: (id) => history.features.find((candidate): candidate is DesignSketchFeature => candidate.id === id && candidate.kind === "sketch"),
+        rebuildTool: rebuildSolidFeature,
+        sizeThroughAll: throughAllOverride,
+        holeTool
+      });
+      if (!applied.ok) { outcomes.set(step.id, { featureId: step.id, message: applied.message }); continue; }
+      current = applied.body;
+      outcomes.set(step.id, { featureId: step.id, ...(applied.note === undefined ? {} : { message: applied.note }) });
+      continue;
+    }
     // Edge flange: bend a flange up from a named top-face edge of the sheet this body started as.
     if (step.kind === "sheet-edge-flange") {
       if (current === undefined || baseBody === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sheet this flange bends from could not be built." }); continue; }
@@ -233,7 +276,8 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
   }
   // The final shape travels on the step that made the body; the other steps only report whether they applied.
   if (current !== undefined) outcomes.set(base.id, { ...(outcomes.get(base.id) ?? { featureId: base.id }), body: current });
-  return steps.flatMap((step) => { const outcome = outcomes.get(step.id); return outcome === undefined ? [] : [outcome]; });
+  const results = steps.flatMap((step) => { const outcome = outcomes.get(step.id); return outcome === undefined ? [] : [outcome]; });
+  return current === undefined ? { results } : { results, current };
 }
 
 /** Replays every body of the timeline. */
@@ -257,7 +301,7 @@ export async function rebuildDependents(project: WorkbenchProject, sketchFeature
 
 /** Whether any step of the design joins or cuts, which is when a change to the timeline has to be replayed rather than just shown or hidden. */
 export function hasModifiers(project: WorkbenchProject): boolean {
-  return designOf(project).features.some((feature: DesignFeature) => modifiesBody(feature));
+  return designOf(project).features.some((feature: DesignFeature) => modifiesBody(feature) || feature.kind === "pattern");
 }
 
 /**
@@ -453,6 +497,15 @@ export type HoleDrilling =
  * other way; a depth of 0 (or none) drills through everything the axis meets.
  */
 export function drillHole(step: DesignSolidFeature, body: { readonly positionsMm: readonly number[]; readonly indices: readonly number[] }): HoleDrilling {
+  const tool = holeTool(step, body);
+  if (!tool.ok) return tool;
+  const cut = booleanMeshes({ positionsMm: body.positionsMm, indices: body.indices }, { positionsMm: tool.positionsMm, indices: tool.indices }, "cut");
+  if (!cut.ok) return { ok: false, message: `The hole could not be cut: ${cut.message}` };
+  return { ok: true, positionsMm: cut.value.positionsMm, indices: cut.value.indices };
+}
+
+/** The solid a hole step removes from a body, before it is cut: the cutter placed at the step's point and direction, sized to reach through if asked. */
+export function holeTool(step: DesignSolidFeature, body: { readonly positionsMm: readonly number[]; readonly indices: readonly number[] }): HoleDrilling {
   if (step.holePositionMm === undefined || step.holeNormal === undefined || step.holeDiameterMm === undefined || step.holeStyle === undefined) return { ok: false, message: "This hole has no position, direction or diameter recorded." };
   const normal = snapToAxis(step.holeNormal);
   const origin = step.holePositionMm;
@@ -473,7 +526,5 @@ export function drillHole(step: DesignSolidFeature, body: { readonly positionsMm
     ...(step.holeSinkAngleDeg === undefined ? {} : { sinkAngleDeg: step.holeSinkAngleDeg })
   });
   if (!cutter.ok) return { ok: false, message: cutter.message };
-  const cut = booleanMeshes({ positionsMm: body.positionsMm, indices: body.indices }, { positionsMm: cutter.positionsMm, indices: cutter.indices }, "cut");
-  if (!cut.ok) return { ok: false, message: `The hole could not be cut: ${cut.message}` };
-  return { ok: true, positionsMm: cut.value.positionsMm, indices: cut.value.indices };
+  return { ok: true, positionsMm: cutter.positionsMm, indices: cutter.indices };
 }

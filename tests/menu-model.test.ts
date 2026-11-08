@@ -11,7 +11,7 @@ function recordingActions(): { readonly actions: WorkbenchMenuActions; readonly 
     onCombine: record("combine"), onInsertToAssembly: record("insert-assembly"),
     onMasterCart: record("master-cart"), onRenderStudio: record("render-studio"),
     onEditSelectedFeature: record("edit-feature"), onToggleSuppressSelected: record("suppress"),
-    onDeleteSelected: record("delete"), onMoveSelectedBody: record("move"), onResizeSelectedBody: record("resize"), onModifyGeneralBody: (modifier: string) => record(`modify-${modifier}`)(),
+    onDeleteSelected: record("delete"), onMoveSelectedBody: record("move"), onResizeSelectedBody: record("resize"), onModifyGeneralBody: (modifier: string) => record(`modify-${modifier}`)(), onPattern: (kind) => { calls.push(`pattern:${kind}`); },
     onFit: record("fit"), onHome: record("home"), onToggleGrid: record("grid"),
     onWorkspace: (workspace) => { calls.push(`workspace:${workspace}`); },
     onDesignHealth: record("health"), onMeasure: record("measure"), onExchange: record("exchange"),
@@ -66,6 +66,22 @@ export const menuModelTests: readonly TestCase[] = [
       assert(item(ready, "edit.undo").disabled !== true, "undo enabled with history");
       assert(item(ready, "modify.combine").disabled !== true, "combine enabled with two bodies");
       assert(item(ready, "modify.move").disabled !== true, "move enabled with a preview body");
+    }
+  },
+  {
+    name: "the Modify menu offers rectangular pattern, circular pattern and mirror for a selected solid, and says why not otherwise",
+    run: () => {
+      const { actions, calls } = recordingActions();
+      const none = buildWorkbenchMenus(BASE, actions);
+      for (const id of ["modify.pattern-rectangular", "modify.pattern-circular", "modify.mirror"]) {
+        assert(item(none, id).disabled === true && (item(none, id).hint ?? "").includes("Select a solid"), `${id} is disabled with a reason when no solid is selected`);
+      }
+      const solid = buildWorkbenchMenus({ ...BASE, generalBodyCount: 1, generalBodySelected: true }, actions);
+      for (const id of ["modify.pattern-rectangular", "modify.pattern-circular", "modify.mirror"]) {
+        assert(item(solid, id).disabled !== true, `${id} is enabled for a selected solid`);
+        item(solid, id).action();
+      }
+      equal(calls.join(","), "pattern:rectangular,pattern:circular,pattern:mirror", "each item opens the matching pattern dialog");
     }
   },
   {

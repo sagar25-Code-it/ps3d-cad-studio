@@ -14,3 +14,4 @@ export * from "./sketch-placement.js";
 export * from "./flat-pattern.js";
 export * from "./curve-fit.js";
 export * from "./sketch-project.js";
+export * from "./pattern.js";

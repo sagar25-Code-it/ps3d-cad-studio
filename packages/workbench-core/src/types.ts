@@ -1,3 +1,5 @@
+import type { PatternDefinition } from "./pattern.js";
+
 export const WORKBENCH_FORMAT = "ps3d-workbench-project" as const;
 export const WORKBENCH_SCHEMA_VERSION = 1 as const;
 export const WORKBENCH_APPLICATION_VERSION = "0.2.0-preview.1" as const;
@@ -1031,7 +1033,7 @@ export interface DesignSketchFeature extends DesignFeatureBase {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "pattern";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
@@ -1196,6 +1198,8 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   /** Countersink hole only: the diameter at the face and the included cone angle. */
   readonly holeSinkDiameterMm?: number;
   readonly holeSinkAngleDeg?: number;
+  /** Pattern only: the layout (rectangular, circular or mirror), what it copies and how the copies are kept. */
+  readonly pattern?: PatternDefinition;
   /** Sheet-flange only: length of the flange in millimetres (how far the flange extends from the edge). */
   readonly flangeLengthMm?: number;
   /** Sheet-flange only: bend angle in degrees (90 is a right-angle flange). */

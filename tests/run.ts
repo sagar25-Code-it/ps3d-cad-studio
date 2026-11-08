@@ -47,6 +47,7 @@ import { solidOperationsIntegrationTests } from "./solid-operations-integration.
 import { domeParamsStretchFlatTests } from "./dome-params-stretch-flat.test.js";
 import { reliefPickHoleDragTests } from "./relief-pick-hole-drag.test.js";
 import { holeTests } from "./hole.test.js";
+import { patternTests } from "./pattern.test.js";
 import { planeTiltTests } from "./plane-tilt.test.js";
 import { planeFrameTests } from "./plane-frame.test.js";
 import { sketchProjectTests } from "./sketch-project.test.js";
@@ -117,6 +118,7 @@ const tests: readonly TestCase[] = [
   ...inspectTransformEdgeFlangeTests,
   ...reliefPickHoleDragTests,
   ...holeTests,
+  ...patternTests,
   ...planeTiltTests,
   ...planeFrameTests,
   ...sketchProjectTests,
