@@ -114,7 +114,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Plane at angle | Missing | |
 | Tangent plane | Have | `ConstructionPlaneDefinition.kind: "tangent-to-cylinder"` ships: the plane sits on a revolve/extrude body's maximum-radius envelope at a chosen angle around its axis; origin is at the cylinder surface, normal is outward radial, in-plane axes line up with the body axis |
 | Midplane | Missing | |
-| Perpendicular plane | Partial | `ConstructionPlaneDefinition.kind: "perpendicular-to-axis"` ships: a plane perpendicular to a construction axis, passing through a user-picked point. The evaluator currently falls back to a world-+Z normal when an axes-side-channel is not supplied; a dedicated evaluator that resolves the axis is the follow-up |
+| Perpendicular plane | Shipped | `ConstructionPlaneDefinition.kind: "perpendicular-to-axis"` is a plane through a chosen point whose normal is a construction axis's direction. `evaluateConstructionPlane(plane, bodies, axes)` resolves the axis (and reports a missing or unevaluable one); the Construction ribbon has a "Plane ⟂ axis" button that asks for the axis and the point |
 | Plane through two edges | Missing | |
 | Plane through three points | Missing | |
 | Plane along path | Missing | |

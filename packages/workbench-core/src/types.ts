@@ -402,6 +402,12 @@ export interface PartPreviewBody {
  * triangle mesh is stored for deterministic rendering; `feature` records the generating
  * definition for future parametric rebuild.
  */
+/** Every operation that can build a general solid body from a sketch profile; the body validators accept exactly these. */
+export const GENERAL_BODY_OPERATIONS = [
+  "extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft",
+  "helix", "thread", "rib", "dome", "sheet-base", "sheet-flange", "sheet-hem"
+] as const;
+
 export interface GeneralSolidBody {
   readonly id: string;
   readonly name: string;
@@ -412,7 +418,7 @@ export interface GeneralSolidBody {
   /** Flat triangle vertex indices; length is a multiple of 3. */
   readonly indices: readonly number[];
   readonly feature?: {
-    readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem";
+    readonly operation: (typeof GENERAL_BODY_OPERATIONS)[number];
     readonly plane: "xy" | "xz" | "yz";
     /** Extrusion height / revolve angle (degrees) / sweep distance / loft height / treatment size. */
     readonly valueMm: number;

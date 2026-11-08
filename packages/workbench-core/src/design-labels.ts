@@ -52,7 +52,7 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
                 : feature.kind === "shell"
                   ? `${trimNumber(feature.valueMm)} mm · wall ${trimNumber(feature.shellThicknessMm ?? 0)} mm${feature.shellOpenFace === "none" ? "" : ` · ${feature.shellOpenFace ?? "top"} open`}`
                   : `${trimNumber(feature.valueMm)} mm · ${trimNumber(feature.draftAngleDeg ?? 0)}° draft · ${feature.draftNeutralFace ?? "bottom"} neutral`;
-  const verb = !modifiesBody(feature) ? "" : feature.operation === "cut" ? "Cut " : "Join ";
+  const verb = !modifiesBody(feature) ? "" : feature.operation === "cut" ? "Cut " : feature.operation === "join" ? "Join " : "";
   return `${verb}${amount} · from ${source === undefined ? "a deleted sketch" : source.name}`;
 }
 

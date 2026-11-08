@@ -444,7 +444,7 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
     if (!Object.hasOwn(value, "ribThicknessMm")) return false;
   }
   if (value.kind === "dome") {
-    if (!Object.hasOwn(value, "domeHeightMm") || !Object.hasOwn(value, "targetFaceRole")) return false;
+    if (!Object.hasOwn(value, "domeHeightMm")) return false;
   }
   if (value.kind === "emboss") {
     if (!Object.hasOwn(value, "embossHeightMm") || !Object.hasOwn(value, "targetFaceRole")) return false;
@@ -500,7 +500,7 @@ export function validateDesignHistory(value: unknown, validSketch: (sketch: unkn
       sketchIds.add(feature.id);
     } else {
       if (!validSolidFeaturePayload(feature) || !sketchIds.has(feature.sketchFeatureId)) return false;
-      if (feature.operation === "join" || feature.operation === "cut") {
+      if (modifiesBody(feature)) {
         // A join or cut modifies a body an earlier step made.
         if (!bodyIds.has(feature.bodyId)) return false;
       } else {

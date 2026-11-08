@@ -17,7 +17,7 @@ import type {
   WorkbenchResult,
   WorkspaceId
 } from "./types.js";
-import { ELECTRICAL_SHEET_BOUNDS, ELECTROMECHANICAL_CATALOG_REVISION, SKETCH_DATUM_PLANES } from "./types.js";
+import { ELECTRICAL_SHEET_BOUNDS, ELECTROMECHANICAL_CATALOG_REVISION, GENERAL_BODY_OPERATIONS, SKETCH_DATUM_PLANES } from "./types.js";
 import { createBessContainerAssembly, createCargoContainerAssembly, createElectricalTemplate } from "./templates.js";
 import { createElectromechanicalAssembly, electricalSignature } from "./electromechanical.js";
 import { createVehicleTemplate, vehicleHardPoints, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
@@ -1508,6 +1508,9 @@ function validConstructionPlanePayload(value: unknown): value is import("./types
     return stableId(def.bodyId) && typeof def.angleDeg === "number" && Number.isFinite(def.angleDeg) && Math.abs(def.angleDeg) <= 360
       && Object.keys(def).every((key) => ["kind", "bodyId", "angleDeg"].includes(key));
   }
+  if (def.kind === "perpendicular-to-axis") {
+    return stableId(def.axisId) && vec3Mm(def.point) && Object.keys(def).every((key) => ["kind", "axisId", "point"].includes(key));
+  }
   return false;
 }
 
@@ -1527,7 +1530,7 @@ function validGeneralSolidBodyPayload(value: unknown): value is GeneralSolidBody
     || indices.some((entry) => typeof entry !== "number" || !Number.isInteger(entry) || entry < 0 || entry >= vertexCount)) return false;
   if (Object.hasOwn(value, "feature")) {
     const feature = value.feature;
-    if (!isRecord(feature) || !["extrude", "revolve"].includes(String(feature.operation)) || !["xy", "xz", "yz"].includes(String(feature.plane))
+    if (!isRecord(feature) || !(GENERAL_BODY_OPERATIONS as readonly string[]).includes(String(feature.operation)) || !["xy", "xz", "yz"].includes(String(feature.plane))
       || typeof feature.valueMm !== "number" || !Number.isFinite(feature.valueMm)) return false;
   }
   if (Object.hasOwn(value, "brep")) {

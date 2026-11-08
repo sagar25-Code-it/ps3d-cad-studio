@@ -26,11 +26,11 @@ const DATUM_FRAMES: Readonly<Record<SketchDatumPlane, { readonly normal: Vec3; r
 
 const DEFAULT_HALF_SIZE_MM = 60;
 
-export function evaluateConstructionPlane(plane: ConstructionPlane, bodies: readonly GeneralSolidBody[] = []): ConstructionPlaneFrame | { readonly error: string } {
-  return evaluateConstructionPlaneDefinition(plane.definition, bodies);
+export function evaluateConstructionPlane(plane: ConstructionPlane, bodies: readonly GeneralSolidBody[] = [], axes: readonly ConstructionAxis[] = []): ConstructionPlaneFrame | { readonly error: string } {
+  return evaluateConstructionPlaneDefinition(plane.definition, bodies, axes);
 }
 
-export function evaluateConstructionPlaneDefinition(definition: ConstructionPlaneDefinition, bodies: readonly GeneralSolidBody[] = []): ConstructionPlaneFrame | { readonly error: string } {
+export function evaluateConstructionPlaneDefinition(definition: ConstructionPlaneDefinition, bodies: readonly GeneralSolidBody[] = [], axes: readonly ConstructionAxis[] = []): ConstructionPlaneFrame | { readonly error: string } {
   if (definition.kind === "offset") {
     const base = DATUM_FRAMES[definition.basePlane];
     const origin: Vec3 = [base.normal[0] * definition.offsetMm, base.normal[1] * definition.offsetMm, base.normal[2] * definition.offsetMm];
@@ -64,15 +64,16 @@ export function evaluateConstructionPlaneDefinition(definition: ConstructionPlan
     return { origin, normal: base.normal, uAxis: base.uAxis, vAxis: base.vAxis, sizeMm: [DEFAULT_HALF_SIZE_MM, DEFAULT_HALF_SIZE_MM], description: `Midplane between ${definition.fromMm.toFixed(2)} and ${definition.toMm.toFixed(2)} mm of ${base.label}` };
   }
   if (definition.kind === "perpendicular-to-axis") {
-    // Perpendicular to a construction axis, passing through a world-space point.
-    // The caller passes in `axes` via a side channel is not available here; we fall back to using the point directly
-    // with a world-+Z normal when the axis is unresolved (callers that care about perpendicular-to-axis can
-    // alternatively supply their own frame). For now emit an identity-ish frame flagged as perpendicular-to-axis.
-    const origin = definition.point;
-    // Without axis resolution here we return an error-friendly frame: callers evaluating perpendicular-to-axis should
-    // route through a higher-level helper that has access to the construction axes. For now we expose a flat +Z plane
-    // through the point as a safe fallback, and the audit records the limitation.
-    return { origin, normal: [0, 0, 1], uAxis: [1, 0, 0], vAxis: [0, 1, 0], sizeMm: [DEFAULT_HALF_SIZE_MM, DEFAULT_HALF_SIZE_MM], description: `Perpendicular to axis ${definition.axisId}` };
+    const axis = axes.find((candidate) => candidate.id === definition.axisId);
+    if (axis === undefined) return { error: "The axis this plane is perpendicular to is no longer in the part." };
+    const axisFrame = evaluateConstructionAxis(axis, bodies);
+    if ("error" in axisFrame) return { error: `The axis this plane is perpendicular to cannot be evaluated: ${axisFrame.error}` };
+    const normal = axisFrame.direction;
+    // Pick a reference that is not parallel to the axis so the in-plane directions are well defined.
+    const reference: Vec3 = Math.abs(normal[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const uAxis = normalize(cross(reference, normal)) ?? [0, 1, 0];
+    const vAxis = normalize(cross(normal, uAxis)) ?? [0, 0, 1];
+    return { origin: definition.point, normal, uAxis, vAxis, sizeMm: [DEFAULT_HALF_SIZE_MM, DEFAULT_HALF_SIZE_MM], description: `Perpendicular to ${axis.name}` };
   }
   // tangent-to-cylinder: a plane tangent to a revolve / extrude body at a given angle around its axis
   const body = bodies.find((candidate) => candidate.id === definition.bodyId);

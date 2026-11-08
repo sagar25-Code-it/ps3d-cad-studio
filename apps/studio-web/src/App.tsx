@@ -932,7 +932,7 @@ export function App(): React.JSX.Element {
     setStatusText(`Applied ${label} to ${body.name}.`);
   };
 
-  const handleAddConstructionPlane = (mode: "offset" | "angle" | "three-points" | "midplane" | "tangent-to-cylinder"): void => {
+  const handleAddConstructionPlane = (mode: "offset" | "angle" | "three-points" | "midplane" | "tangent-to-cylinder" | "perpendicular-to-axis"): void => {
     const current = projectRef.current;
     const existing = current.part.construction ?? [];
     const ordinal = existing.length + 1;
@@ -978,6 +978,17 @@ export function App(): React.JSX.Element {
       if (fromMm === undefined || toMm === undefined || fromMm === toMm) { setStatus("ready"); setStatusText("Midplane: enter two different offsets in millimetres."); return; }
       definition = { kind: "midplane", basePlane: `datum:${base}` as "datum:xy" | "datum:xz" | "datum:yz", fromMm, toMm };
       labelText = `Midplane ${fromMm}..${toMm} mm of ${base.toUpperCase()}`;
+    } else if (mode === "perpendicular-to-axis") {
+      const axes = current.part.constructionAxes ?? [];
+      if (axes.length === 0) { setStatus("ready"); setStatusText("Plane perpendicular to an axis: create a construction axis first."); return; }
+      const nameOrId = (ask(`Axis name or id (available: ${axes.map((axis) => axis.name).join(", ")}):`, axes[0]!.name) ?? "").trim();
+      const axis = axes.find((candidate) => candidate.name === nameOrId || candidate.id === nameOrId);
+      if (axis === undefined) { setStatus("ready"); setStatusText("Plane perpendicular to an axis: no axis matched that name or id."); return; }
+      const rawPoint = ask("Point the plane passes through (x, y, z in mm):", "0, 0, 0");
+      const parts = (rawPoint ?? "").split(/[,\s]+/).map((part) => Number.parseFloat(part.trim())).filter((value) => Number.isFinite(value));
+      if (parts.length !== 3) { setStatus("ready"); setStatusText("Plane perpendicular to an axis: enter the point as three numbers in millimetres."); return; }
+      definition = { kind: "perpendicular-to-axis", axisId: axis.id, point: [parts[0]!, parts[1]!, parts[2]!] };
+      labelText = `Perpendicular to ${axis.name}`;
     } else {
       // tangent-to-cylinder
       const bodies = current.part.generalBodies ?? [];

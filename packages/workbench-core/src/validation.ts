@@ -2,6 +2,7 @@ import {
   WORKBENCH_FORMAT,
   WORKBENCH_SCHEMA_VERSION,
   ELECTROMECHANICAL_CATALOG_REVISION,
+  GENERAL_BODY_OPERATIONS,
   SKETCH_DATUM_PLANES,
   SKETCH_POINT_REFS,
   isElectricalSheetPositionAvailable,
@@ -284,7 +285,7 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
 
 function validatePart(value: unknown): WorkbenchResult<PartIntent> {
   const required = ["id", "name", "widthMm", "heightMm", "thicknessMm", "holeDiameterMm", "edgeTreatmentMm", "patternCount", "revolveAngleDeg"];
-  const optional = ["previewBodies", "modelUpdateSerial", "generalBodies", "construction", "constructionAxes", "constructionPoints"];
+  const optional = ["previewBodies", "modelUpdateSerial", "generalBodies", "construction", "constructionAxes", "constructionPoints", "constructionUcses"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key))
     || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || value.id !== "part:mounting-plate" || !shortText(value.name, 1, 120)
@@ -333,6 +334,14 @@ function validatePart(value: unknown): WorkbenchResult<PartIntent> {
       pointIds.add(point.id);
     }
   }
+  if (Object.hasOwn(value, "constructionUcses") && (!Array.isArray(value.constructionUcses) || value.constructionUcses.length > 64)) return invalid("The construction-UCS collection is invalid.");
+  if (Array.isArray(value.constructionUcses)) {
+    const ucsIds = new Set<string>();
+    for (const ucs of value.constructionUcses) {
+      if (!validateConstructionUcs(ucs) || ucsIds.has(ucs.id)) return invalid("A construction UCS is invalid or duplicated.");
+      ucsIds.add(ucs.id);
+    }
+  }
   if ((Math.min(value.widthMm as number, value.heightMm as number) - (value.holeDiameterMm as number)) / 2 < 1) {
     return failure("DEGENERATE_GEOMETRY", "The bore leaves less than the 1 mm wall allowance.", ["part:mounting-plate"], "Reduce the bore or enlarge the plate.");
   }
@@ -354,7 +363,7 @@ function validateGeneralSolidBody(value: unknown): value is GeneralSolidBody {
     || indices.some((entry) => typeof entry !== "number" || !Number.isInteger(entry) || entry < 0 || entry >= vertexCount)) return false;
   if (Object.hasOwn(value, "feature")) {
     const feature = value.feature;
-    if (!isRecord(feature) || !["extrude", "revolve"].includes(String(feature.operation)) || !["xy", "xz", "yz"].includes(String(feature.plane))
+    if (!isRecord(feature) || !(GENERAL_BODY_OPERATIONS as readonly string[]).includes(String(feature.operation)) || !["xy", "xz", "yz"].includes(String(feature.plane))
       || typeof feature.valueMm !== "number" || !Number.isFinite(feature.valueMm)) return false;
   }
   if (Object.hasOwn(value, "brep")) {
@@ -440,7 +449,17 @@ function validateConstructionPlane(value: unknown): value is import("./types.js"
     return stableId(def.bodyId) && typeof def.angleDeg === "number" && Number.isFinite(def.angleDeg) && Math.abs(def.angleDeg) <= 360
       && Object.keys(def).every((key) => ["kind", "bodyId", "angleDeg"].includes(key));
   }
+  if (def.kind === "perpendicular-to-axis") {
+    return stableId(def.axisId) && validateVec3Mm(def.point) && Object.keys(def).every((key) => ["kind", "axisId", "point"].includes(key));
+  }
   return false;
+}
+
+function validateConstructionUcs(value: unknown): value is import("./types.js").ConstructionUcs {
+  if (!isRecord(value) || !stableId(value.id) || !shortText(value.name, 1, 120) || typeof value.visible !== "boolean") return false;
+  if (Object.keys(value).some((key) => !["id", "name", "visible", "origin", "xAxis", "yAxis"].includes(key))) return false;
+  if (!validateVec3Mm(value.origin) || !validateVec3Mm(value.xAxis) || !validateVec3Mm(value.yAxis)) return false;
+  return Math.hypot(value.xAxis[0], value.xAxis[1], value.xAxis[2]) > 1e-9 && Math.hypot(value.yAxis[0], value.yAxis[1], value.yAxis[2]) > 1e-9;
 }
 
 function validatePartPreviewBody(value: unknown): value is PartPreviewBody {
