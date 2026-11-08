@@ -5,6 +5,7 @@ import { describeFeature, featureOfBody, featureStatus, featureStatusText, isNew
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 import { PartAppearanceControls } from "../ui/PartAppearanceControls.js";
+import { ConstructionReferenceCard } from "./ConstructionReferenceCard.js";
 
 type PartParameter = "widthMm" | "heightMm" | "thicknessMm" | "holeDiameterMm" | "edgeTreatmentMm" | "patternCount" | "revolveAngleDeg";
 
@@ -44,6 +45,8 @@ interface PartInspectorProps {
   readonly onPreviewBodyColor: (bodyId: string, color: string) => void;
   readonly onPreviewBodyVisibility: (bodyId: string) => void;
   readonly onPreviewBodyDelete: (bodyId: string) => void;
+  /** Hide / show, delete, or start a sketch from a selected construction plane or binder. */
+  readonly onConstructionReference?: (id: string, action: "toggle" | "delete" | "sketch") => void;
 }
 
 export function PartInspector(props: PartInspectorProps): React.JSX.Element {
@@ -57,6 +60,7 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
     {selectedGeneralBody === undefined
       ? <div className="inspector-title"><div><p>Part intent</p><h2>{props.part.name}</h2></div><CapabilityBadge level="qualified" /></div>
       : <div className="inspector-title"><div><p>Selected solid</p><h2>{selectedGeneralBody.name}</h2></div></div>}
+    {props.onConstructionReference !== undefined && <ConstructionReferenceCard part={props.part} selectedId={props.selectedId} onAction={props.onConstructionReference} />}
     {selectedGeneralBody !== undefined && <SolidCard
       body={selectedGeneralBody}
       history={props.design}
