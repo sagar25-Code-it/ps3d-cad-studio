@@ -7,6 +7,7 @@ import { buildBlendCurve, curveEnds, extendProfileChain, startProfileChain, tang
 import { buildConicByRho, buildConicFromFivePoints, buildControlPointSpline, buildHyperbola, buildParabola, conicArcPoint, controlPointCurve, fitConicThroughFivePoints } from "../packages/workbench-sketch/src/conic-curves.js";
 import { buildCurveTool, CURVE_TOOL_LABELS, DEFAULT_CURVE_TOOL_OPTIONS, curveToolRequiredPoints, isCurveTool, isFixedCurveTool, type CurveToolId, type FixedCurveToolId } from "../packages/workbench-sketch/src/curve-tools.js";
 import type { ShapeIds, SketchShape } from "../packages/workbench-sketch/src/shapes.js";
+import { resolveSketchHotkey, type SketchHotkeyContext } from "../packages/workbench-sketch/src/hotkeys.js";
 import { createBlockLibrary, insertSketchBlock, makeSketchBlock, type BlockStorage } from "../packages/workbench-sketch/src/sketch-blocks.js";
 import { buildSketchText, glyphWidthUnits, STROKE_FONT_CHARACTERS, unsupportedTextCharacters } from "../packages/workbench-sketch/src/stroke-text.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
@@ -255,6 +256,9 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       const trueArea = Math.abs(twice) / 2;
       near(profiles[0]!.areaMm2, trueArea, trueArea * 0.01, "profile area matches the closed B-spline within 1 percent");
       assert(trueArea < 1200 && trueArea > 600, "and is a rounded shape inside the control polygon (1200 mm2)");
+      const halves = project.sketch.entities.map((entity) => curveEnds(entity));
+      const kink = (left: Vec2, right: Vec2): number => (Math.acos(Math.max(-1, Math.min(1, -(left[0] * right[0] + left[1] * right[1])))) * 180) / Math.PI;
+      assert(kink(halves[0]![1]!.outward, halves[1]![0]!.outward) < 6 && kink(halves[1]![1]!.outward, halves[0]![0]!.outward) < 6, "the two joints between the halves are smooth to within 6 degrees");
       const solid = await extrudedVolume(project.sketch.entities, 6);
       near(solid.volume, solid.area * 6, solid.area * 6 * 1e-9, "extrudes to profile area times height");
     }
@@ -601,6 +605,18 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       equal(Object.keys(CURVE_TOOL_LABELS).length, 15, "fifteen curve tools (fourteen shapes and the block insert)");
       assert(!buildCurveTool("block", [[0, 0]], DEFAULT_CURVE_TOOL_OPTIONS, ids).ok, "inserting a block that was never saved is refused");
       assert(project.sketch.entities.length > 30, `${project.sketch.entities.length} entities from one of each tool are valid together`);
+    }
+  },
+  {
+    name: "Enter finishes a control-point spline (three or more points) and a profile chain, and nothing else changes",
+    run: () => {
+      const idle: SketchHotkeyContext = { tool: "select", pendingPoints: 0, selectionCount: 0, curveSelectionCount: 0, dimensionMode: false, editToolActive: false, pickingRelation: false, dragging: false, dynamicFieldCount: 0 };
+      const enter = { key: "Enter", ctrl: false, meta: false, alt: false, shift: false };
+      equal(resolveSketchHotkey(enter, { ...idle, tool: "spline-control", pendingPoints: 3 })?.kind, "finish", "a control polygon of three points can be finished");
+      equal(resolveSketchHotkey(enter, { ...idle, tool: "spline-control", pendingPoints: 2 }), undefined, "two points are not enough");
+      equal(resolveSketchHotkey(enter, { ...idle, tool: "profile", pendingPoints: 1 })?.kind, "finish", "a started profile can be ended");
+      equal(resolveSketchHotkey(enter, { ...idle, tool: "profile", pendingPoints: 0 }), undefined, "an unstarted profile has nothing to end");
+      equal(resolveSketchHotkey(enter, { ...idle, tool: "blend", pendingPoints: 1 }), undefined, "other tools are left alone");
     }
   },
   // ------------------------------------------------------------------ reusable blocks

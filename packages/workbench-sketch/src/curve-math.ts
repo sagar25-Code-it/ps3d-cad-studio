@@ -41,10 +41,24 @@ export function polylineLength(points: readonly Vec2[]): number {
 }
 
 /**
+ * Where along a curve (0 to 1) the interior point number `step` of `count` falls: equally spaced, except that with an
+ * `endLead` (a fraction of the regular spacing, 0.25 is typical) the first and last interior points sit that much closer
+ * to the ends, so the chord leaving each end of a spline through them lies nearer the curve's tangent there. The fit-point
+ * spline is a uniform Catmull-Rom curve, which loops if neighbouring gaps differ too much, so the lead stays above 0.2.
+ */
+function stepFraction(step: number, count: number, endLead: number): number {
+  const spacing = 1 / (count - 1);
+  const lead = endLead > 0 && count >= 6 ? spacing * Math.min(1, Math.max(0.2, endLead)) : 0;
+  const interior = count - 2;
+  if (lead === 0) return step * spacing;
+  return step === 1 ? lead : step === interior ? 1 - lead : lead + ((1 - 2 * lead) * (step - 1)) / (interior - 1);
+}
+
+/**
  * Picks `count` points spaced equally by path length along a dense polyline. The first and last points are the
  * polyline's own ends, exactly, so a curve built from them still joins what it was meant to join.
  */
-export function resampleByLength(dense: readonly Vec2[], count: number): readonly Vec2[] {
+export function resampleByLength(dense: readonly Vec2[], count: number, endLead = 0): readonly Vec2[] {
   if (dense.length < 2 || count < 2) return dense;
   const cumulative: number[] = [0];
   for (let index = 1; index < dense.length; index += 1) cumulative.push(cumulative[index - 1]! + dist(dense[index - 1]!, dense[index]!));
@@ -53,7 +67,7 @@ export function resampleByLength(dense: readonly Vec2[], count: number): readonl
   const out: Vec2[] = [dense[0]!];
   let segment = 1;
   for (let step = 1; step < count - 1; step += 1) {
-    const target = (total * step) / (count - 1);
+    const target = total * stepFraction(step, count, endLead);
     while (segment < cumulative.length - 1 && cumulative[segment]! < target) segment += 1;
     const lo = cumulative[segment - 1]!;
     const span = cumulative[segment]! - lo;
@@ -66,8 +80,8 @@ export function resampleByLength(dense: readonly Vec2[], count: number): readonl
 /**
  * Samples a parametric curve densely to measure its length, then returns `count` points equally spaced along it. Each point
  * is evaluated on the curve itself (not interpolated on a chord), and the first and last are the curve at t0 and t1.
- * With `endLead` (a fraction of the length, e.g. 0.01) the second and second-to-last points sit that close to the ends, so
- * the chord leaving each end of the resulting spline lies along the curve's own tangent there.
+ * With `endLead` (a fraction of the regular spacing, see stepFraction) the second and second-to-last points sit closer to the
+ * ends, so the chord leaving each end of the resulting spline lies nearer the curve's own tangent there.
  */
 export function sampleCurveToFitPoints(curve: (t: number) => Vec2, t0: number, t1: number, count = 24, dense = 480, endLead = 0): readonly Vec2[] {
   const params: number[] = [];
@@ -83,12 +97,8 @@ export function sampleCurveToFitPoints(curve: (t: number) => Vec2, t0: number, t
   if (total < 1e-12 || count < 2) return [samples[0]!, samples[samples.length - 1]!];
   const out: Vec2[] = [curve(t0)];
   let segment = 1;
-  const lead = endLead > 0 && count >= 6 ? Math.min(endLead, 0.2) : 0;
-  const interior = count - 2;
   for (let step = 1; step < count - 1; step += 1) {
-    // Without a lead the points are equally spaced; with one, the first and last interior points sit `lead` from the ends.
-    const fraction0 = lead === 0 ? step / (count - 1) : step === 1 ? lead : step === interior ? 1 - lead : lead + ((1 - 2 * lead) * (step - 1)) / (interior - 1);
-    const target = total * fraction0;
+    const target = total * stepFraction(step, count, endLead);
     while (segment < cumulative.length - 1 && cumulative[segment]! < target) segment += 1;
     const lo = cumulative[segment - 1]!;
     const span = cumulative[segment]! - lo;

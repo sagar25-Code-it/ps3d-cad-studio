@@ -97,7 +97,7 @@ export function buildBlendCurve(entities: readonly SketchEntity[], firstClick: V
   if (first.entityId === second.entityId && first.which === second.which) return badShape("Pick two different curve ends to bridge.");
   if (dist(first.point, second.point) < 0.2) return badShape("The two curve ends are already together: there is no gap to bridge.");
   const bezier = blendBezier(first, second, tension);
-  const fit = sampleCurveToFitPoints((t) => blendPoint(bezier, t), 0, 1, 24, 480, 0.01);
+  const fit = sampleCurveToFitPoints((t) => blendPoint(bezier, t), 0, 1, 24, 480, 0.25);
   const spline = splineFromPoints(fit, ids.entity());
   return spline.ok ? { ok: true, value: { entities: [spline.value], constraints: [] } } : spline;
 }

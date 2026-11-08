@@ -85,7 +85,7 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
     if (context.pendingPoints > 0) return { kind: "cancel-points" };
     return context.curveSelectionCount > 0 ? { kind: "delete-selection" } : undefined;
   }
-  if (key === "Enter") return context.tool === "spline" && context.pendingPoints >= 3 ? { kind: "finish" } : undefined;
+  if (key === "Enter") return ((context.tool === "spline" || context.tool === "spline-control") && context.pendingPoints >= 3) || (context.tool === "profile" && context.pendingPoints >= 1) ? { kind: "finish" } : undefined;
   if (key === "Tab") return context.dynamicFieldCount > 0 && !input.shift ? { kind: "focus-dynamic" } : undefined;
   if (context.dynamicFieldCount > 0 && /^[0-9.,-]$/.test(input.key)) return { kind: "type-value", key: input.key };
 

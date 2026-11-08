@@ -79,7 +79,7 @@ export function buildControlPointSpline(controls: readonly Vec2[], closed: boole
   const entities: SketchEntity[] = [];
   const fitCount = Math.min(24, Math.max(10, 4 * controls.length));
   if (!closed) {
-    const spline = splineFromPoints(resampleByLength(dense, fitCount), ids.entity());
+    const spline = splineFromPoints(resampleByLength(dense, fitCount, 0.25), ids.entity());
     if (!spline.ok) return spline;
     entities.push(spline.value);
   } else {
@@ -95,7 +95,7 @@ export function buildControlPointSpline(controls: readonly Vec2[], closed: boole
     const firstHalf = dense.slice(0, half + 1);
     const secondHalf = [...dense.slice(half, dense.length - 1), dense[0]!];
     for (const run of [firstHalf, secondHalf]) {
-      const spline = splineFromPoints(resampleByLength(run, Math.min(24, Math.max(12, 2 * controls.length))), ids.entity());
+      const spline = splineFromPoints(resampleByLength(run, Math.min(24, Math.max(12, 2 * controls.length)), 0.25), ids.entity());
       if (!spline.ok) return spline;
       entities.push(spline.value);
     }
