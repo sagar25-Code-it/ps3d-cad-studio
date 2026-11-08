@@ -1,5 +1,5 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
-import { dependentsOf, designOf, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
+import { dependentsOf, designOf, HEALTH_NOTE_PREFIX, isHealthNote, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, lostProfileRefs, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
 import { attachEdgeFlange, attachMiterFlange, booleanMeshes, cutReliefNotch, developBend, flangeReliefs, holeCutter, jogSheetMesh, reliefCorners, snapToAxis, splitMeshPieces, threadBoreWall, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BendRecord, type BentStripSpec, type FlatLayout, type HoleSpec } from "../../../packages/workbench-geometry/src/index.js";
 import { flangeEdgesOf } from "../../../packages/workbench-core/src/index.js";
@@ -184,10 +184,10 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
  * Begins a rebuild message that is a note about a step that WAS applied (a hole of the region was left out, a circle crossing its outline
  * did not become a hole), as opposed to the reason a step could not be rebuilt. Both are stored as the feature's health message.
  */
-export const REBUILD_NOTE_PREFIX = "Note: ";
+export const REBUILD_NOTE_PREFIX = HEALTH_NOTE_PREFIX;
 
 export function isRebuildNote(message: string | undefined): boolean {
-  return message?.startsWith(REBUILD_NOTE_PREFIX) === true;
+  return isHealthNote(message);
 }
 
 /** Whether a rebuild result says its step could not be applied (a note alone does not). */

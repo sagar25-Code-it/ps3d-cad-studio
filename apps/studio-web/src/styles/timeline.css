@@ -22,6 +22,8 @@
 .timeline-chip.rolled-back { opacity: 0.45; }
 .timeline-chip.error { border-color: #c0392b; background: #fdeceb; }
 .timeline-chip.error .command-icon { color: #c0392b; }
+.timeline-chip.note { border-color: #b7791f; }
+.timeline-chip.note .command-icon { color: #b7791f; }
 .timeline-chip.inactive { opacity: 0.7; }
 .timeline-badge { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; color: #fff; background: #c0392b; font-size: 0.7rem; }
 .timeline-marker { display: inline-block; flex: none; width: 9px; height: 30px; margin: 0 1px; border-radius: 3px; cursor: pointer; }
@@ -42,6 +44,7 @@
 .studio-app .plate-parameters > summary span { color: #5d6a73; font-size: 12px; }
 .studio-app .plate-parameters[open] > summary { border-bottom: 1px solid #e0e4e8; }
 .studio-app .solid-card .solid-source { margin: 0.1rem 0 0.55rem; color: #4a545c; font-size: 12.5px; line-height: 1.45; }
+.studio-app .solid-card .solid-warning.note { border-color: #b7791f; color: #6b4a12; background: #fdf6e3; }
 .studio-app .solid-card .solid-warning { margin: 0 0 0.55rem; padding: 0.4rem 0.55rem; border: 1px solid #c0392b; border-radius: 5px; color: #8f2a1f; background: #fdeceb; font-size: 12.5px; }
 .studio-app .solid-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.65rem; }
 .studio-app .solid-actions button { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.65rem; font-size: 12.5px; }

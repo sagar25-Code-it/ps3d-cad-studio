@@ -43,16 +43,19 @@ interface Ring {
   readonly points: readonly Vec2[];
   readonly box: readonly [number, number, number, number];
   readonly area: number;
+  /** Filled in the first time the ring is searched (see `locate`). */
+  index?: RingIndex;
 }
 
-const ringCache = new WeakMap<SketchProfile, Ring>();
+// The ring of a profile is kept on the profile itself: a WeakMap of thousands of profiles makes every garbage collection slow.
+const RING = Symbol("ps3d.profileRing");
 
 function ringOf(profile: SketchProfile): Ring {
-  const cached = ringCache.get(profile);
+  const holder = profile as unknown as Record<symbol, Ring | undefined>;
+  const cached = holder[RING];
   if (cached !== undefined) return cached;
-  const points = profileOutlineMm(profile.boundary);
-  const ring = makeRing(points);
-  ringCache.set(profile, ring);
+  const ring = makeRing(profileOutlineMm(profile.boundary));
+  Object.defineProperty(profile, RING, { value: ring, enumerable: false, configurable: true });
   return ring;
 }
 
@@ -74,14 +77,10 @@ function makeRing(points: readonly Vec2[]): Ring {
   return { points, box: [minX, minY, maxX, maxY], area: Math.abs(twice) / 2 };
 }
 
-const indexCache = new WeakMap<Ring, RingIndex>();
-
 /** Where a point sits against a ring: within a margin of its edge, and inside it. Rings with many edges are indexed; small ones are scanned. */
 function locate(ring: Ring): { readonly near: (point: Vec2, margin: number) => boolean; readonly inside: (point: Vec2) => boolean } {
   if (ring.points.length < 96) return { near: (point, margin) => distanceToRing(point, ring.points) <= margin, inside: (point) => pointInRing(point, ring.points) };
-  let index = indexCache.get(ring);
-  if (index === undefined) { index = new RingIndex(ring.points); indexCache.set(ring, index); }
-  const found = index;
+  const found = (ring.index ??= new RingIndex(ring.points));
   return { near: (point, margin) => found.within(point, margin), inside: (point) => found.contains(point) };
 }
 

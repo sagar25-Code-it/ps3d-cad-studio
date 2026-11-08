@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { DesignFeature, DesignHistory } from "../../../../packages/workbench-core/src/index.js";
-import { isFeatureActive } from "../../../../packages/workbench-core/src/index.js";
+import { isFeatureActive, isHealthNote } from "../../../../packages/workbench-core/src/index.js";
 import { CommandIcon } from "./CommandIcon.js";
 
 interface TimelineBarProps {
@@ -81,7 +81,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
             const active = isFeatureActive(history, feature.id);
             const selected = props.selectedId === feature.id || (feature.kind !== "sketch" && props.selectedId === feature.bodyId);
             const rolledBack = index >= history.rollbackIndex;
-            const classes = ["timeline-chip", selected ? "selected" : "", feature.suppressed ? "suppressed" : "", rolledBack ? "rolled-back" : "", feature.health !== undefined ? "error" : "", !active && !rolledBack && !feature.suppressed ? "inactive" : ""].filter(Boolean).join(" ");
+            const classes = ["timeline-chip", selected ? "selected" : "", feature.suppressed ? "suppressed" : "", rolledBack ? "rolled-back" : "", feature.health !== undefined ? (isHealthNote(feature.health.message) ? "note" : "error") : "", !active && !rolledBack && !feature.suppressed ? "inactive" : ""].filter(Boolean).join(" ");
             return <span key={feature.id} className="timeline-slot" role="listitem">
               {marker(index)}
               {renaming === feature.id
@@ -101,7 +101,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
                   className={classes}
                   disabled={props.busy}
                   title={`${feature.name}${feature.suppressed ? " (suppressed)" : ""}${rolledBack ? " (rolled back)" : ""}${feature.health === undefined ? "" : ` - ${feature.health.message}`}\nDouble-click to edit, right-click for more.`}
-                  aria-label={`${feature.name}${feature.health === undefined ? "" : `, needs attention: ${feature.health.message}`}`}
+                  aria-label={`${feature.name}${feature.health === undefined ? "" : `, ${isHealthNote(feature.health.message) ? "" : "needs attention: "}${feature.health.message}`}`}
                   aria-pressed={selected}
                   onClick={() => props.onSelect(feature)}
                   onDoubleClick={() => props.onEdit(feature)}
@@ -114,7 +114,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
                 >
                   <CommandIcon name={ICONS[feature.kind]} />
                   <span className="timeline-label">{feature.name}</span>
-                  {feature.health !== undefined && <b className="timeline-badge" aria-hidden="true">!</b>}
+                  {feature.health !== undefined && <b className="timeline-badge" aria-hidden="true">{isHealthNote(feature.health.message) ? "i" : "!"}</b>}
                 </button>}
             </span>;
           })}
