@@ -69,6 +69,7 @@ import { fileWorkspaceTests } from "./file-workspace.test.js";
 import { cameraLandmarkTests } from "./camera-landmarks.test.js";
 import { topologyNamingTests } from "./topology-naming.test.js";
 import { expressionTests } from "./expressions.test.js";
+import { designParameterTests } from "./design-parameters.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -142,7 +143,8 @@ const tests: readonly TestCase[] = [
   ...fileWorkspaceTests,
   ...publicReleaseTests,
   ...topologyNamingTests,
-  ...expressionTests
+  ...expressionTests,
+  ...designParameterTests
 ];
 let failures = 0;
 

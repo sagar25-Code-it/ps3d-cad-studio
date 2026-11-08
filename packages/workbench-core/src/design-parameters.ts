@@ -142,8 +142,39 @@ export function applyDesignExpressions(project: WorkbenchProject, resize: Sketch
     issues.push(...applied.issues);
     if (applied.updated > 0) { sketch = applied.sketch; updated += applied.updated; changedIds.push(project.sketch.id); }
   }
-  if (changedIds.length === 0) return { project, changedIds, issues: dedupe(issues), updated };
-  return { project: { ...project, sketch, design: { ...history, features } }, changedIds, issues: dedupe(issues), updated };
+  const unique = dedupe(issues);
+  const flagged = flagExpressionHealth(features, unique);
+  if (changedIds.length === 0 && flagged === features) return { project, changedIds, issues: unique, updated };
+  return { project: { ...project, sketch, design: { ...history, features: flagged } }, changedIds, issues: unique, updated };
+}
+
+/** Every health message this module writes starts with this, so it can be told from a rebuild failure and cleared when the expression is fixed. */
+export const EXPRESSION_HEALTH_PREFIX = "Expression: ";
+
+/**
+ * Marks the steps and sketches whose expressions cannot be used, with the reason, in the same `health` field a failed rebuild uses, so the
+ * timeline, the model tree and the inspector flag them with no extra wiring. A mark from an earlier run that no longer applies is removed.
+ * Returns the same array when nothing changes.
+ */
+function flagExpressionHealth(features: readonly DesignFeature[], issues: readonly BindingResult[]): readonly DesignFeature[] {
+  let changed = false;
+  const next = features.map((feature): DesignFeature => {
+    const issue = issues.find((candidate) => (candidate.source === "feature" || candidate.source === "sketch") && candidate.ownerId === feature.id);
+    if (issue !== undefined) {
+      const message = `${EXPRESSION_HEALTH_PREFIX}${describeBindingIssue(issue)}`.slice(0, 400);
+      if (feature.health?.message === message) return feature;
+      changed = true;
+      return { ...feature, health: { message } };
+    }
+    if (feature.health?.message.startsWith(EXPRESSION_HEALTH_PREFIX) === true) {
+      changed = true;
+      const { health: _cleared, ...rest } = feature;
+      void _cleared;
+      return rest as DesignFeature;
+    }
+    return feature;
+  });
+  return changed ? next : features;
 }
 
 function dedupe(issues: readonly BindingResult[]): readonly BindingResult[] {
@@ -282,7 +313,8 @@ export function setDesignParameters(project: WorkbenchProject, parameters: reado
   const applied = applyDesignExpressions(renamed, resize);
   const finalHistory = designOf(applied.project);
   const withoutEmpty = withoutEmptyTable(finalHistory);
-  const changedIds = [...new Set([...parameters.map((parameter) => parameter.name), ...applied.changedIds])];
+  // Audit IDs must be stable IDs, which a parameter name is not, so the table's rows are named by position.
+  const changedIds = [...new Set([...parameters.map((_parameter, index) => `parameter:row-${index + 1}`), ...applied.changedIds])];
   const rewritten = renameMap.size === 0 ? "" : ` Renamed ${[...renameMap].map(([from, to]) => `${from} to ${to}`).join(", ")} in every expression.`;
   const trouble = applied.issues.filter((issue) => issue.source !== "parameter");
   return {
@@ -299,7 +331,7 @@ export function setDesignParameters(project: WorkbenchProject, parameters: reado
 // Settling other operations
 // ---------------------------------------------------------------------------------------------
 
-const SETTLING_KINDS: ReadonlySet<WorkbenchOperation["kind"]> = new Set(["add-design-solid", "update-design-solid", "commit-design-sketch", "set-sketch-dimension", "delete-design-feature", "rename-design-feature"]);
+const SETTLING_KINDS: ReadonlySet<WorkbenchOperation["kind"]> = new Set(["add-design-solid", "update-design-solid", "commit-design-sketch", "set-sketch-dimension", "delete-design-feature", "rename-design-feature", "regenerate-design"]);
 
 /**
  * Runs after an operation that can change what an expression refers to or what it drives: a step was added or edited, a sketch was
