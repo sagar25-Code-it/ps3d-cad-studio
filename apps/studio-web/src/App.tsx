@@ -34,6 +34,7 @@ import {
   type ComponentInstance,
   type DesignFeature,
   type DesignSolidFeature,
+  type SheetBendTable,
   type GeneralSolidBody,
   type ElectricalComponentKind,
   type ElectricalNet,
@@ -54,7 +55,7 @@ import {
   type Vec3,
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
-import { flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, nearestPickableEdge, pickableEdges, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
+import { bendTableRowsCsv, flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, nearestPickableEdge, pickableEdges, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
 import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
@@ -77,6 +78,8 @@ import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "
 import { flatPatternForBody, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
+import { BendTableDialog } from "./ui/BendTableDialog.js";
+import { bendTableUpdate, runSheetMetalCommand, type SheetMetalCommand } from "./sheet-metal-commands.js";
 import { CombineDialog, type CombineChoice } from "./ui/CombineDialog.js";
 import type { BooleanMode } from "../../../packages/workbench-geometry/src/index.js";
 import {
@@ -282,6 +285,7 @@ export function App(): React.JSX.Element {
   /** "set" moves the working sketch to a plane; "new" finishes it and starts another on the chosen plane. */
   const [sketchPlaneDialogMode, setSketchPlaneDialogMode] = useState<"set" | "new">("set");
   const [featureEdit, setFeatureEdit] = useState<DesignSolidFeature | undefined>(undefined);
+  const [bendTableBodyId, setBendTableBodyId] = useState<string | undefined>(undefined);
   const [sketchFitSerial, setSketchFitSerial] = useState(0);
   const [masterCartOpen, setMasterCartOpen] = useState(false);
   const [renderStudioOpen, setRenderStudioOpen] = useState(false);
@@ -1254,6 +1258,33 @@ export function App(): React.JSX.Element {
       ...(relief > 0 ? { flangeReliefMm: relief } : {})
     };
     void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
+  };
+
+  /** Miter flange, jog, lofted bend and the bend table: the commands live in sheet-metal-commands.ts. */
+  const handleSheetMetal = (command: SheetMetalCommand): void => {
+    const current = projectRef.current;
+    void runSheetMetalCommand(command, {
+      project: current,
+      selectedId,
+      ask: (label, defaultValue) => (typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue)),
+      pick: (instruction, guides) => requestViewportPick(instruction, guides),
+      highlight: (guides, active) => { viewportRef.current?.setGuideSegments(guides, active); window.setTimeout(() => viewportRef.current?.setGuideSegments([]), 1500); },
+      commit: (feature, body) => commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(feature.bodyId); return ok; }),
+      say: (text, tone) => { setStatus(tone === "error" ? "error" : "ready"); setStatusText(text); },
+      download: (text, fileName, mime) => downloadBlob(new Blob([text], { type: mime }), fileName),
+      openBendTable: (bodyId) => setBendTableBodyId(bodyId)
+    });
+  };
+
+  /** Stores the edited bend table on the step that made the body (or clears it) and replays the timeline. */
+  const applyBendTable = async (table: SheetBendTable | undefined): Promise<void> => {
+    if (bendTableBodyId === undefined) return;
+    const update = bendTableUpdate(projectRef.current, bendTableBodyId, table);
+    if (!update.ok) { setStatus("error"); setStatusText(update.message); return; }
+    if (await commitWithReplay({ kind: "update-design-solid", feature: update.feature, body: update.body }, update.feature.id)) {
+      setBendTableBodyId(undefined);
+      setStatusText(table === undefined ? "Cleared the bend table; bends use the default K-factor." : `Stored a bend table with ${table.rows.length} row${table.rows.length === 1 ? "" : "s"}. Flat patterns now read their K-factors from it.`);
+    }
   };
 
   const handleFlatPattern = async (format: "svg" | "dxf"): Promise<void> => {
@@ -3331,6 +3362,7 @@ export function App(): React.JSX.Element {
         setStatusText(next === null ? "Zebra stripes off." : `Zebra stripes on (${next.axis.toUpperCase()} axis, ×${next.frequency}). Orbit the model: stripes that run straight across a seam mean tangent (G1) continuity; stripes that kink there mean a tangent break.`);
       }}
       onEdgeFlange={() => void handleEdgeFlange()}
+      onSheetMetal={handleSheetMetal}
       onIndent={handleIndent}
       onFlatPattern={(format) => void handleFlatPattern(format)}
       onDirectEdit={handleDirectEdit}
@@ -3504,6 +3536,14 @@ export function App(): React.JSX.Element {
     />
     <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} initialTilt={sketchPlaneDialogMode === "new" ? undefined : project.sketch.planeTilt} anglePlanes={anglePlaneOptions} framePlanes={framePlaneOptions} faces={sketchFaceOptions} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
     <FeatureEditDialog feature={featureEdit} busy={status === "working"} onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />
+    <BendTableDialog
+      open={bendTableBodyId !== undefined}
+      bodyName={project.part.generalBodies?.find((body) => body.id === bendTableBodyId)?.name ?? "Sheet metal"}
+      table={bendTableBodyId === undefined ? undefined : baseFeatureOf(designOf(project), bendTableBodyId)?.sheetBendTable}
+      onApply={(table) => void applyBendTable(table)}
+      onExportRows={(table) => downloadBlob(new Blob([bendTableRowsCsv(table)], { type: "text/csv" }), exportFileName(project.name, "bend-table-rows", "csv"))}
+      onClose={() => setBendTableBodyId(undefined)}
+    />
   </main>;
 }
 

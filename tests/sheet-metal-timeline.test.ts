@@ -1,5 +1,5 @@
 import type { DesignSketchFeature, DesignSolidFeature, WorkbenchOperation, WorkbenchProject } from "../packages/workbench-core/src/index.js";
-import { applyWorkbenchOperation, createWorkbenchProject, designOf, flangeEdgesOf, validSolidFeaturePayload, validateWorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { applyWorkbenchOperation, createWorkbenchProject, describeFeature, designOf, flangeEdgesOf, validSolidFeaturePayload, validateWorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { solidMetrics } from "../packages/workbench-core/src/solid-metrics.js";
 import { detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
 import { bentStripSection, DEFAULT_K_FACTOR, sheetBendAllowanceMm } from "../packages/workbench-geometry/src/sheet-metal.js";
@@ -15,21 +15,21 @@ import { assert, near, type TestCase } from "./test-kit.js";
 let serial = 0;
 type Op = WorkbenchOperation extends infer T ? T extends { readonly kind: infer K } ? Omit<T, "operationId" | "expectedRevision"> & { readonly kind: K } : never : never;
 
-function run(project: WorkbenchProject, operation: Op): WorkbenchProject {
+export function run(project: WorkbenchProject, operation: Op): WorkbenchProject {
   serial += 1;
   const result = applyWorkbenchOperation(project, { ...operation, operationId: `operation:test-smt-${serial}`, expectedRevision: project.revision } as WorkbenchOperation);
   assert(result.ok, `${operation.kind} is accepted: ${result.ok ? "" : result.diagnostics[0]?.message ?? ""}`);
   return result.value.project;
 }
 
-const BODY = "general-body:sheet";
+export const BODY = "general-body:sheet";
 
-function step(sketch: DesignSketchFeature, kind: DesignSolidFeature["kind"], id: string, extra: Partial<DesignSolidFeature> = {}): DesignSolidFeature {
+export function step(sketch: DesignSketchFeature, kind: DesignSolidFeature["kind"], id: string, extra: Partial<DesignSolidFeature> = {}): DesignSolidFeature {
   return { id: `feature:${id}`, name: id, kind, suppressed: false, sketchFeatureId: sketch.id, profileIds: [], valueMm: 10, bodyId: `general-body:${id}`, ...extra };
 }
 
 /** A project holding one 60 x 40 mm, 2 mm sheet (the default plate outline, edges 0 to 3 around it). */
-async function sheetProject(extra: Partial<DesignSolidFeature> = {}): Promise<{ readonly project: WorkbenchProject; readonly sketch: DesignSketchFeature; readonly base: DesignSolidFeature }> {
+export async function sheetProject(extra: Partial<DesignSolidFeature> = {}): Promise<{ readonly project: WorkbenchProject; readonly sketch: DesignSketchFeature; readonly base: DesignSolidFeature }> {
   const started = run(createWorkbenchProject("project:test-smt"), { kind: "commit-design-sketch", featureId: "feature:sketch-1", name: "Sketch 1" });
   const sketch = designOf(started).features[0] as DesignSketchFeature;
   const base = step(sketch, "sheet-base", "sheet", { sheetThicknessMm: 2, valueMm: 2, bodyId: BODY, ...extra });
@@ -39,23 +39,23 @@ async function sheetProject(extra: Partial<DesignSolidFeature> = {}): Promise<{ 
   return { project: run(started, { kind: "add-design-solid", feature: base, body: built.body }), sketch, base };
 }
 
-function bodyOf(project: WorkbenchProject): NonNullable<WorkbenchProject["part"]["generalBodies"]>[number] {
+export function bodyOf(project: WorkbenchProject): NonNullable<WorkbenchProject["part"]["generalBodies"]>[number] {
   const found = project.part.generalBodies?.find((body) => body.id === BODY);
   assert(found !== undefined, "the sheet body exists");
   return found;
 }
 
 /** Adds a modifying step and replays the whole timeline, the way the app's commitWithReplay does. */
-async function addAndReplay(project: WorkbenchProject, feature: DesignSolidFeature): Promise<{ readonly project: WorkbenchProject; readonly message: string | undefined }> {
+export async function addAndReplay(project: WorkbenchProject, feature: DesignSolidFeature): Promise<{ readonly project: WorkbenchProject; readonly message: string | undefined }> {
   const added = run(project, { kind: "add-design-solid", feature, body: bodyOf(project) });
   return { project: await replay(added), message: (await replayAllBodies(added)).find((result) => result.featureId === feature.id)?.message };
 }
 
-async function replay(project: WorkbenchProject): Promise<WorkbenchProject> {
+export async function replay(project: WorkbenchProject): Promise<WorkbenchProject> {
   return run(project, { kind: "regenerate-design", results: await replayAllBodies(project) });
 }
 
-function areaAndMoment(radius: number, thickness: number, length: number, angle: number): { readonly area: number; readonly moment: number } {
+export function areaAndMoment(radius: number, thickness: number, length: number, angle: number): { readonly area: number; readonly moment: number } {
   const polygon = bentStripSection({ legMm: 0, flangeLengthMm: length, angleDeg: angle, innerRadiusMm: radius, thicknessMm: thickness, widthMm: 1 });
   let twice = 0;
   let momentSix = 0;
@@ -455,6 +455,45 @@ export const sheetMetalTimelineTests: readonly TestCase[] = [
       const withBox = await replay(run(started, { kind: "add-design-solid", feature: boxed, body: boxBuilt.body }));
       const refused = await flatPatternForBody(withBox, "general-body:boxed");
       assert(!refused.ok && /cone or a cylinder/u.test(refused.message), `a non-circular transition is not unfolded: ${refused.ok ? "unfolded" : refused.message}`);
+    }
+  },
+  {
+    name: "suppressing a miter flange or a jog puts the sheet back, and a jog follows an edit of the sheet's thickness",
+    run: async () => {
+      const { project, sketch, base } = await sheetProject();
+      const miter = step(sketch, "sheet-edge-flange", "miter", { ...MITER_ALL, valueMm: 12 });
+      const flanged = (await addAndReplay(project, miter)).project;
+      const flatVolume = 60 * 40 * 2;
+      const gone = await replay(run(flanged, { kind: "set-design-feature-suppressed", featureId: miter.id, suppressed: true }));
+      near(solidMetrics(bodyOf(gone).positionsMm, bodyOf(gone).indices).volumeMm3, flatVolume, 1e-6, "with the miter flange suppressed the sheet is plain");
+      const back = await replay(run(gone, { kind: "set-design-feature-suppressed", featureId: miter.id, suppressed: false }));
+      assert(solidMetrics(bodyOf(back).positionsMm, bodyOf(back).indices).volumeMm3 > flatVolume + 1000, "and the flange returns when it is switched on again");
+      const jog = step(sketch, "sheet-jog", "jog", { operation: "direct-edit", bodyId: BODY, jogEdgeIndex: 0, jogPositionMm: 15, jogOffsetMm: 8, jogAngleDeg: 45, sheetBendRadiusMm: 2, valueMm: 8 });
+      const jogged = (await addAndReplay(project, jog)).project;
+      const flat = await replay(run(jogged, { kind: "set-design-feature-suppressed", featureId: jog.id, suppressed: true }));
+      near(solidMetrics(bodyOf(flat).positionsMm, bodyOf(flat).indices).boundsMm.max[2], 2, 1e-6, "with the jog suppressed the sheet is flat");
+      const flatPattern = await flatPatternForBody(flat, BODY);
+      assert(flatPattern.ok && flatPattern.bends.length === 0, "and its flat pattern has no jog bends");
+      const thicker = await replay(run(jogged, { kind: "update-design-solid", feature: { ...base, sheetThicknessMm: 3, valueMm: 3 }, body: bodyOf(jogged) }));
+      const thickMetrics = solidMetrics(bodyOf(thicker).positionsMm, bodyOf(thicker).indices);
+      assert(isClosedAndOriented(bodyOf(thicker).indices), "closed after the edit");
+      near(thickMetrics.boundsMm.max[2], 3 + 8, 1e-6, "the jog is rebuilt on the 3 mm sheet and still steps 8 mm");
+      near(thickMetrics.volumeMm3, 60 * 40 * 3, 60 * 40 * 3 * 0.006, "with the same volume as the thicker plate");
+    }
+  },
+  {
+    name: "the timeline describes jogs, miter flanges and lofted bends in words",
+    run: async () => {
+      const { project, sketch } = await sheetProject();
+      const history = designOf(project);
+      const jog = step(sketch, "sheet-jog", "jog", { operation: "direct-edit", bodyId: BODY, jogEdgeIndex: 1, jogPositionMm: 12, jogOffsetMm: -6, jogAngleDeg: 30, sheetBendRadiusMm: 2, valueMm: 6 });
+      assert(describeFeature(history, jog).startsWith("-6 mm step at 30° · 12 mm from edge 1"), describeFeature(history, jog));
+      const miter = step(sketch, "sheet-edge-flange", "miter", { ...MITER_ALL });
+      assert(describeFeature(history, miter).includes("mitred along edges 0, 1, 2, 3"), describeFeature(history, miter));
+      const plain = step(sketch, "sheet-edge-flange", "plain", { operation: "direct-edit", bodyId: BODY, flangeEdgeIndex: 2, sheetBendRadiusMm: 1, flangeLengthMm: 9, flangeAngleDeg: 45 });
+      assert(describeFeature(history, plain).startsWith("45° flange, 9 mm · edge 2"), describeFeature(history, plain));
+      const lofted = step(sketch, "sheet-lofted-bend", "lofted", { profileIds: [], valueMm: 20, sheetThicknessMm: 1.5, loftTopScale: 2 });
+      assert(describeFeature(history, lofted).startsWith("20 mm lofted bend · 1.5 mm sheet"), describeFeature(history, lofted));
     }
   }
 ];

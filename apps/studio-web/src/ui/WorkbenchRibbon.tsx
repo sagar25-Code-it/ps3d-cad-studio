@@ -51,6 +51,7 @@ interface WorkbenchRibbonProps {
   readonly onAddConstructionAxis: (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis") => void;
   readonly onAddConstructionPoint: (mode: "xyz" | "midpoint" | "axis-plane-intersection") => void;
   readonly onEdgeFlange: () => void;
+  readonly onSheetMetal: (command: "miter-flange" | "jog" | "lofted-bend" | "bend-table" | "bend-table-csv") => void;
   readonly onFlatPattern: (format: "svg" | "dxf") => void;
   readonly zebra: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null;
   readonly onZebra: (next: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null) => void;
@@ -241,6 +242,11 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
       <RibbonGroup label="Sheet metal">
         <RibbonButton icon="bore" label="Edge Flange" hint="pick edge · bend" disabled={!generalBodySelected} onClick={props.onEdgeFlange} />
+        <RibbonButton icon="bore" label="Miter Flange" hint="edge chain · mitred" disabled={!generalBodySelected} onClick={() => props.onSheetMetal("miter-flange")} />
+        <RibbonButton icon="move" label="Jog" hint="step · two bends" disabled={!generalBodySelected} onClick={() => props.onSheetMetal("jog")} />
+        <RibbonButton icon="extrude" label="Lofted Bend" hint="from a Loft" disabled={!generalBodySelected} onClick={() => props.onSheetMetal("lofted-bend")} />
+        <RibbonButton icon="export" label="Bend Table" hint="K · allowance · deduction" disabled={!generalBodySelected} onClick={() => props.onSheetMetal("bend-table")} />
+        <RibbonButton icon="export" label="Bend Table CSV" hint="bends of the part" disabled={!generalBodySelected} onClick={() => props.onSheetMetal("bend-table-csv")} />
         <RibbonButton icon="export" label="Flat Pattern SVG" hint="unfold · all bends" disabled={!generalBodySelected} onClick={() => props.onFlatPattern("svg")} />
         <RibbonButton icon="export" label="Flat Pattern DXF" hint="unfold · laser / CNC" disabled={!generalBodySelected} onClick={() => props.onFlatPattern("dxf")} />
       </RibbonGroup>

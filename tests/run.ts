@@ -43,6 +43,7 @@ import { bigPushTests } from "./big-push.test.js";
 import { sheetMetalTests } from "./sheet-metal.test.js";
 import { sheetMetalAdvancedTests } from "./sheet-metal-advanced.test.js";
 import { sheetMetalTimelineTests } from "./sheet-metal-timeline.test.js";
+import { sheetMetalCommandTests } from "./sheet-metal-commands.test.js";
 import { inspectTransformEdgeFlangeTests } from "./inspect-transform-edge-flange.test.js";
 import { solidOperationsIntegrationTests } from "./solid-operations-integration.test.js";
 import { domeParamsStretchFlatTests } from "./dome-params-stretch-flat.test.js";
@@ -115,6 +116,7 @@ const tests: readonly TestCase[] = [
   ...sheetMetalTests,
   ...sheetMetalAdvancedTests,
   ...sheetMetalTimelineTests,
+  ...sheetMetalCommandTests,
   ...inspectTransformEdgeFlangeTests,
   ...reliefPickHoleDragTests,
   ...holeTests,
