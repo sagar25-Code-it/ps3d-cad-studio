@@ -485,7 +485,7 @@ export function jogLine(context: SketchEditContext, lineId: string, pick: Vec2, 
 // Delete Curve with auto-heal
 // ---------------------------------------------------------------------------------------------
 
-type Healable = Line | Arc;
+export type Healable = Line | Arc;
 
 interface Neighbour {
   readonly entity: Healable;
@@ -514,7 +514,7 @@ function neighboursAt(sketch: WorkbenchSketch, target: Healable, point: Vec2, to
 }
 
 /** `entity` with the named end moved to `to`, or undefined if that would flip, collapse or wrap the curve. */
-function movedEnd(entity: Healable, end: "start" | "end", to: Vec2): Healable | undefined {
+export function movedEnd(entity: Healable, end: "start" | "end", to: Vec2): Healable | undefined {
   if (entity.kind === "line") {
     const far = end === "start" ? entity.end : entity.start;
     const old = endOf(entity, end);

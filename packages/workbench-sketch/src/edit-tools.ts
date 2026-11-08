@@ -984,5 +984,5 @@ function circumcircle(a: Vec2, b: Vec2, c: Vec2): { readonly center: Vec2; reado
 }
 
 // Geometry helpers shared with the other sketch-edit modules (split, jog, path, clipboard, repair).
-export { arcEntity, arcFrame, circleHits, circumcircle, curvesOf, distanceToCurve, intersectInfinite, lineHits, mapEntity, plan as editPlan, wrapTwoPi };
-export type { ArcFrame, Curve };
+export { arcEntity, arcFrame, buildLineChains, circleHits, circumcircle, curvesOf, distanceToCurve, intersectInfinite, lineHits, mapEntity, offsetChain, plan as editPlan, reflectAcross, wrapTwoPi };
+export type { ArcFrame, Curve, LineChain };
