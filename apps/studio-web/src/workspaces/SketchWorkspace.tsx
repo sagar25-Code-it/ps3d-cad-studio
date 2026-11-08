@@ -55,6 +55,7 @@ import { halvedExpression, unhalvedExpression } from "../dimension-expression.js
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 import { ViewportChrome } from "../ui/ViewportChrome.js";
+import { PointDistanceField } from "./sketch/SolverRelations.js";
 
 type DrivingDimension = "length" | "width" | "height" | "radius" | "angle" | "arc-length" | "perimeter";
 type SketchDimensionHandle = "start" | "mid" | "end" | "left" | "right" | "top" | "bottom" | "center" | "radius";
@@ -75,6 +76,8 @@ interface DirectSketchDimension {
   readonly first: SketchDimensionPoint;
   readonly second: SketchDimensionPoint;
   readonly driving?: { readonly entityId: string; readonly dimension: DrivingDimension };
+  /** Two defining points of the solver's curves: a distance between them can be driven (aligned, horizontal or vertical). */
+  readonly between?: { readonly entityId: string; readonly secondEntityId: string; readonly points: readonly [SketchPointRef, SketchPointRef] };
 }
 
 type PlaneKey = "xy" | "xz" | "yz";
@@ -1748,8 +1751,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {dimensionPoints.length === 1 && <div className="dimension-pick-state"><b>1</b><span>{dimensionPoints[0]!.label}</span><small>Pick the second point.</small></div>}
         {directDimension !== undefined && <>
           <dl className="compact-facts"><div><dt>Selection</dt><dd>{directDimension.first.label} → {directDimension.second.label}</dd></div><div><dt>Distance</dt><dd>{format(directDimension.valueMm)} mm</dd></div><div><dt>ΔX</dt><dd>{format(directDimension.delta[0])} mm</dd></div><div><dt>ΔY</dt><dd>{format(directDimension.delta[1])} mm</dd></div></dl>
-          {directDimension.driving === undefined
-            ? <div className="inline-warning">This is a reference measurement. Editing arbitrary cross-entity point pairs requires the nonlinear constraint solver.</div>
+          {directDimension.driving === undefined && directDimension.between !== undefined
+            ? <PointDistanceField key={directDimension.first.id + directDimension.second.id} between={directDimension.between} measured={directDimension.valueMm} delta={directDimension.delta} onSetDimension={props.onSetDimension} onMessage={props.onMessage} />
+            : directDimension.driving === undefined
+            ? <div className="inline-warning">This is a reference measurement: the solver cannot move one of these points (a rectangle's edge middle, a circle's rim). Pick line ends, centres, points or arc ends to drive a distance.</div>
             : <DimensionField label={directDimension.label} dimension={directDimension.driving.dimension} value={directDimension.valueMm} onApply={(dimension, value) => props.onSetDimension(directDimension.driving!.entityId, dimension, value)} onMessage={props.onMessage} />}
         </>}
       </section>}
@@ -1957,7 +1962,23 @@ function resolveDirectSketchDimension(points: readonly SketchDimensionPoint[]): 
     else if (first.entityKind === "rectangle" && handles.has("top") && handles.has("bottom")) { driving = { entityId: first.entityId, dimension: "height" }; label = "Rectangle height"; }
     else if (first.entityKind === "circle" && handles.has("center") && handles.has("radius")) { driving = { entityId: first.entityId, dimension: "radius" }; label = "Circle radius"; }
   }
-  return { label, valueMm, delta, first, second, ...(driving === undefined ? {} : { driving }) };
+  // Any two defining points the solver can move: the distance between them can be driven.
+  const firstRef = driving === undefined ? solverPointRef(first) : undefined;
+  const secondRef = driving === undefined ? solverPointRef(second) : undefined;
+  const between = firstRef !== undefined && secondRef !== undefined ? { entityId: first.entityId, secondEntityId: second.entityId, points: [firstRef, secondRef] as const } : undefined;
+  return { label, valueMm, delta, first, second, ...(driving === undefined ? {} : { driving }), ...(between === undefined ? {} : { between }) };
+}
+
+/** The solver's name for a canvas dimension point, or undefined when the solver cannot move that point (a rectangle's edge middle, a circle's rim). */
+function solverPointRef(point: SketchDimensionPoint): SketchPointRef | undefined {
+  switch (point.entityKind) {
+    case "line": return point.handle === "start" || point.handle === "end" ? point.handle : point.handle === "mid" ? "mid" : undefined;
+    case "arc": return point.handle === "start" || point.handle === "end" ? point.handle : point.handle === "mid" ? "mid" : undefined;
+    case "circle":
+    case "ellipse": return point.handle === "center" ? "center" : undefined;
+    case "point": return "self";
+    default: return undefined;
+  }
 }
 
 function DirectDimensionPreview({ dimension, px }: { readonly dimension: DirectSketchDimension; readonly px: number }): React.JSX.Element {

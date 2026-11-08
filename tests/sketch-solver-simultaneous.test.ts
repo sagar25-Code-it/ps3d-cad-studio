@@ -150,19 +150,15 @@ export const sketchSolverSimultaneousTests: readonly TestCase[] = [
         near(Math.abs(a.start[1] - c.center[1]), radius, 1e-6, "the upper line still touches the circle");
         near(Math.abs(b.start[1] - c.center[1]), radius, 1e-6, "and so does the lower one");
       }
-      // Adding the second tangent to a circle that already touches one line: the circle (free radius) and its centre find a place between them.
-      let wedge = projectWith([circle("c", [0, 0], 5), line("a", [-20, 5], [20, 5]), line("b", [-20, -20], [20, 20])]);
-      wedge = addConstraint(wedge, rel("tangent", ["a", "c"]));
-      const result = (() => {
-        try { return run(wedge, { kind: "add-sketch-constraint", constraint: rel("tangent", ["b", "c"]) }); } catch (error) { return error as Error; }
-      })();
-      if (result instanceof Error) {
-        assert(/Tangent/.test(result.message), `if it cannot be done the conflict names the tangents: ${result.message}`);
-      } else {
-        const c = get(result, "c", "circle");
+      // Adding a tangent to a second line, at 60 degrees, to a circle that already touches the first.
+      for (const through of [[8, 0], [3, -2], [12, -3]] as const) {
+        let wedge = projectWith([circle("c", [0, 0], 5), line("a", [-20, 5], [20, 5]), line("b", [through[0], through[1]], [through[0] + 10, through[1] + 17.320508075688775])]);
+        wedge = addConstraint(wedge, rel("tangent", ["a", "c"]));
+        wedge = addConstraint(wedge, rel("tangent", ["b", "c"]));
+        const c = get(wedge, "c", "circle");
         const distance = (l: Line): number => Math.abs((l.end[0] - l.start[0]) * (c.center[1] - l.start[1]) - (l.end[1] - l.start[1]) * (c.center[0] - l.start[0])) / lengthOf(l);
-        near(distance(get(result, "a", "line")), c.radiusMm, 1e-6, "tangent to the first line");
-        near(distance(get(result, "b", "line")), c.radiusMm, 1e-6, "and to the second");
+        near(distance(get(wedge, "a", "line")), c.radiusMm, 1e-6, `tangent to the first line (second line through ${through.join(",")})`);
+        near(distance(get(wedge, "b", "line")), c.radiusMm, 1e-6, "and to the second");
       }
     }
   },

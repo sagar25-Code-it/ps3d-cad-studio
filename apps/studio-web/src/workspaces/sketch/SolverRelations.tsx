@@ -146,6 +146,29 @@ export function SolverRelations(props: SolverRelationsProps): React.JSX.Element 
   </section>;
 }
 
+/** The canvas Dimension tool's two-point pick: the distance between the two points (aligned, or its horizontal or vertical part) can be driven. */
+export function PointDistanceField(props: { readonly between: { readonly entityId: string; readonly secondEntityId: string; readonly points: readonly [SketchPointRef, SketchPointRef] }; readonly measured: number; readonly delta: readonly [number, number]; readonly onSetDimension: SolverSetDimension; readonly onMessage: (message: string) => void }): React.JSX.Element {
+  const [direction, setDirection] = useState<"aligned" | "horizontal" | "vertical">("aligned");
+  const shown = direction === "horizontal" ? Math.abs(props.delta[0]) : direction === "vertical" ? Math.abs(props.delta[1]) : props.measured;
+  const [draft, setDraft] = useState(format(shown));
+  useEffect(() => { setDraft(format(shown)); }, [shown, direction]);
+  return <form className="dimension-field" onSubmit={(event) => {
+    event.preventDefault();
+    const value = Number(draft.trim());
+    if (!Number.isFinite(value) || value < 0) { props.onMessage("Type a distance of zero or more."); return; }
+    props.onSetDimension(props.between.entityId, direction, value, { secondEntityId: props.between.secondEntityId, points: props.between.points });
+  }}>
+    <label className="extra-row"><span>Direction</span>
+      <select aria-label="Distance direction" value={direction} onChange={(event) => setDirection(event.target.value as "aligned" | "horizontal" | "vertical")}>
+        <option value="aligned">Aligned</option><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option>
+      </select></label>
+    <label><span>Distance between the two points</span><div>
+      <input aria-label="Distance in millimetres" inputMode="decimal" value={draft} onChange={(event) => setDraft(event.target.value)} />
+      <button type="submit" title="Drive the second curve so the points are this far apart; the first stays">Drive</button>
+    </div></label>
+  </form>;
+}
+
 function SizeField(props: { readonly entityId: string; readonly size: { readonly label: string; readonly dimension: SketchDimensionName; readonly value: number }; readonly sketch: WorkbenchSketch; readonly onSetDimension: SolverSetDimension }): React.JSX.Element {
   const [draft, setDraft] = useState(format(props.size.value));
   useEffect(() => { setDraft(format(props.size.value)); }, [props.size.value, props.entityId]);

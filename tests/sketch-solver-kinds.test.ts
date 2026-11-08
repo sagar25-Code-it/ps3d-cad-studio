@@ -310,6 +310,11 @@ export const sketchSolverKindsTests: readonly TestCase[] = [
       assert(refuseDimension(projectWith([ellipse("e", [0, 0], 10, 5, 0)]), "e", "minor-radius", 12).length > 0, "a minor radius larger than the major radius is refused with a reason");
 
       let twins = projectWith([ellipse("e1", [0, 0], 10, 5, 0), ellipse("e2", [30, 0], 8, 3, 20)]);
+      // An ellipse centre can be joined (the solver used to leave ellipses out): it comes to the point it is joined to.
+      const centred = addConstraint(projectWith([point("pt", [4, 5]), ellipse("e", [30, 30], 10, 5, 15)]), rel("coincident", ["pt", "e"], { points: ["self", "center"] }));
+      near(get(centred, "e", "ellipse").center[0], 4, 1e-9, "the ellipse centre joins the point (x)");
+      near(get(centred, "e", "ellipse").center[1], 5, 1e-9, "(y)");
+      near(get(centred, "e", "ellipse").rotationDeg, 15, 1e-9, "and the ellipse keeps its turn");
       twins = addConstraint(twins, rel("equal", ["e1", "e2"]));
       near(get(twins, "e2", "ellipse").majorRadiusMm, 10, 1e-9, "equal ellipses share a major radius");
       near(get(twins, "e2", "ellipse").minorRadiusMm, 5, 1e-9, "and a minor radius");
