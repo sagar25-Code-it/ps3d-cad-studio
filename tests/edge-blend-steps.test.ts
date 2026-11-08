@@ -304,4 +304,31 @@ export const edgeBlendStepTests: readonly TestCase[] = [
       assert(designOf(applied).features.find((feature) => feature.id === "feature:fillet-huge")?.health !== undefined, "the step is flagged");
     }
   }
+,
+  {
+    name: "On the default plate with its three bores, a bore's round rim is one picked run: the rim picked is the one rounded, and the three holes share one face so position tells them apart",
+    run: async () => {
+      let project = createWorkbenchProject("project:test-edge-blend-plate");
+      project = run(project, { kind: "commit-design-sketch", featureId: "feature:sketch-1", name: "Sketch 1" });
+      const sketch = designOf(project).features[0] as DesignSketchFeature;
+      const extrude: DesignSolidFeature = { id: "feature:extrude-1", name: "Extrude 1", kind: "extrude", suppressed: false, sketchFeatureId: sketch.id, profileIds: [], valueMm: 10, bodyId: BODY };
+      const built = await rebuildSolidFeature(extrude, sketch);
+      assert(built.ok, "the plate builds");
+      if (!built.ok) return;
+      project = run(project, { kind: "add-design-solid", feature: extrude, body: built.body });
+      const solid = volumeOf(bodyOf(project));
+      const group = pickedGroup(project, [5, 0, 10]);
+      assert(group.segments.length >= 24, `the bore's rim is one run of many facets: ${group.segments.length}`);
+      const rounded = await addAndReplay(project, blendStep(sketch, "bore-rim", [group], { valueMm: 1, name: "Fillet R 1 mm" }));
+      const body = bodyOf(rounded);
+      assert(isClosedAndOriented(body.indices) && solidMetrics(body.positionsMm, body.indices).outward, "the plate with a rounded bore is closed and outward");
+      const removed = solid - volumeOf(body);
+      const expected = CORNER * 2 * Math.PI * 5.3;
+      near(removed, expected, expected * 0.12, `about the corner section swept round the 5 mm bore: ${removed.toFixed(2)} mm³`);
+      // Only the centre bore's rim moved: the top face now reaches 6 mm from the centre there and still 4 mm from the mounts' centres.
+      const topRadii = (cx: number): number[] => { const radii: number[] = []; for (let i = 0; i < body.positionsMm.length; i += 3) if (Math.abs(body.positionsMm[i + 2]! - 10) < 1e-6) radii.push(Math.hypot(body.positionsMm[i]! - cx, body.positionsMm[i + 1]!)); return radii; };
+      assert(topRadii(0).some((radius) => Math.abs(radius - 6) < 0.05), "the centre bore's rim is rounded: its top face stops 6 mm out");
+      assert(!topRadii(27).some((radius) => radius > 4.05 && radius < 4.95), "the mounting holes are left sharp");
+    }
+  }
 ];
