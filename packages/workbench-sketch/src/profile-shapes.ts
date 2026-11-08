@@ -61,7 +61,8 @@ export function detectShapes(entities: readonly SketchEntity[], toleranceMm: num
     if (arrangement.faces.length !== 1) continue;
     const profiles = profilesOfArrangement(arrangement, set);
     const profile = profiles[0];
-    if (profile !== undefined && profile.holes === undefined) shapes.push(profile);
+    // A drawn outline says nothing about what lies inside it, so its id carries no hole list: it always takes the outlines inside it as holes.
+    if (profile !== undefined && profile.holes === undefined) shapes.push({ ...profile, id: profile.id.replace(/_h[0-9a-f.]*$/u, ""), ref: profile.id.replace(/_h[0-9a-f.]*$/u, "") + "_e" });
   }
   return shapes.sort((left, right) => right.areaMm2 - left.areaMm2 || left.id.localeCompare(right.id));
 }

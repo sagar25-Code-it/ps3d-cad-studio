@@ -1,7 +1,7 @@
 import { createGeneralSolidBody } from "../apps/studio-web/src/general-modeling.js";
 import type { SketchEntity, WorkbenchSketch } from "../packages/workbench-core/src/index.js";
 import { createWorkbenchProject } from "../packages/workbench-core/src/index.js";
-import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc, type SketchProfile } from "../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, profileBaseOf, profileOutlineMm, resolveProfileRegion, sampleArc, type SketchProfile } from "../packages/workbench-sketch/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 function sketchOf(entities: readonly SketchEntity[]): WorkbenchSketch {
@@ -135,7 +135,7 @@ export const sketchRegionTests: readonly TestCase[] = [
 
       const lone = resolveProfileRegion(profiles, [plate.id], { includeIslands: true });
       assert(lone.ok, "a lone outline resolves");
-      equal(lone.value.holes.map((hole) => hole.id).sort().join(), [holeA.id, holeB.id].sort().join(), "directly nested profiles become holes; the island inside hole-b does not");
+      equal(lone.value.holes.map((hole) => profileBaseOf(hole.id)).sort().join(), [holeA.id, holeB.id].map(profileBaseOf).sort().join(), "directly nested profiles become holes; the island inside hole-b does not (it is a region of its own, the next group)");
 
       const none = resolveProfileRegion(profiles, [plate.id], { includeIslands: false });
       assert(none.ok && none.value.holes.length === 0, "islands can be switched off");

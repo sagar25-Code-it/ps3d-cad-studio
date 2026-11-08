@@ -221,35 +221,37 @@ export function resolveProfileRegion(
   const unique = [...new Set(selectedIds)];
   const shapes = shapesOf(profiles);
   const exact: ExactPick[] = [];
-  const legacy: SketchProfile[] = [];
+  const outlines: SketchProfile[] = [];
+  const pins = new Map<SketchProfile, readonly string[] | "all">();
   for (const id of unique) {
     const parsed = parseProfileRef(id);
-    if (parsed.holeKeys !== undefined) {
-      const match = matchProfileRef(id, profiles);
-      if (match === undefined) return missing(id);
-      const holes = match.profile.holes ?? [];
+    // The profile the id names: the region of that name, else (for a plain id) the drawn shape of that name -- a rectangle a circle crosses
+    // is one shape but several regions -- else the region whose outline is closest to the signature in the id.
+    const found = matchProfileRef(id, profiles, false)
+      ?? (parsed.exact || shapes === undefined ? undefined : matchProfileRef(id, shapes, false))
+      ?? matchProfileRef(id, profiles);
+    if (found === undefined) return missing(id);
+    if (parsed.exact) {
+      const holes = found.profile.holes ?? [];
       let keep: "all" | Set<string>;
-      if (parsed.holeKeys === "all") keep = "all";
+      if (parsed.holeKeys === "all" || parsed.holeKeys === undefined) keep = "all";
       else {
         const keys = new Set(parsed.holeKeys);
         // A region found again by geometry may have had its hole redrawn; as many holes as before are the same holes.
-        keep = match.how === "geometry" && holes.length === keys.size ? "all" : new Set(holes.map((hole) => holeKeyOf(hole.id)).filter((key) => keys.has(key)));
+        keep = found.how === "geometry" && holes.length === keys.size ? "all" : new Set(holes.map((hole) => holeKeyOf(hole.id)).filter((key) => keys.has(key)));
       }
-      exact.push({ profile: match.profile, keep });
-      continue;
+      exact.push({ profile: found.profile, keep });
+    } else {
+      outlines.push(found.profile);
+      if (parsed.holeKeys !== undefined) pins.set(found.profile, parsed.holeKeys);
     }
-    // A bare or signed id means the outline as drawn: the region of that name, else the drawn shape of that name (a rectangle a circle
-    // crosses is one shape but several regions), else the region closest to its signature.
-    const found = matchProfileRef(id, profiles, false)?.profile ?? (shapes === undefined ? undefined : matchProfileRef(id, shapes, false)?.profile) ?? matchProfileRef(id, profiles)?.profile;
-    if (found === undefined) return missing(id);
-    legacy.push(found);
   }
   if (exact.length > 0) {
-    // Bare ids mixed into a reference selection are regions with all their holes.
-    for (const profile of legacy) exact.push({ profile, keep: "all" });
+    // Plain ids mixed into a reference selection are regions with all their holes.
+    for (const profile of outlines) exact.push({ profile, keep: "all" });
     return unionRegion(profiles, exact, options.includeIslands);
   }
-  return outlineRegion(profiles, shapes ?? profiles, legacy, options.includeIslands);
+  return outlineRegion(profiles, shapes ?? profiles, outlines, options.includeIslands, pins);
 }
 
 function missing(id: string): WorkbenchResult<never> {
@@ -260,7 +262,7 @@ function missing(id: string): WorkbenchResult<never> {
 // Outline mode: bare ids and the empty selection
 // ---------------------------------------------------------------------------------------------
 
-function outlineRegion(profiles: readonly SketchProfile[], universe: readonly SketchProfile[], picked: readonly SketchProfile[], includeIslands: boolean): WorkbenchResult<ProfileRegion> {
+function outlineRegion(profiles: readonly SketchProfile[], universe: readonly SketchProfile[], picked: readonly SketchProfile[], includeIslands: boolean, pins: ReadonlyMap<SketchProfile, readonly string[] | "all"> = new Map()): WorkbenchResult<ProfileRegion> {
   const warnings: string[] = [];
   const roots = picked.length > 0 ? [...picked].sort((left, right) => grossArea(right) - grossArea(left)) : [pickLargest(universe.length > 0 ? universe : profiles)];
   const rootRings = roots.map((root) => ringOf(root));
@@ -342,6 +344,19 @@ function outlineRegion(profiles: readonly SketchProfile[], universe: readonly Sk
       if (related.relation === "inside" && (best === undefined || other.ring.area < best.area)) best = { profile: other.profile, area: other.ring.area };
     }
     parentOf.set(item.profile, best?.profile);
+  }
+  // An id pins the holes the region had when it was made; outlines drawn inside it since are left out (they are for a later feature).
+  const pin = pins.get(root);
+  if (pin !== undefined && pin !== "all") {
+    const allowed = new Set(pin);
+    const topOf = (profile: SketchProfile): SketchProfile => {
+      let current = profile;
+      for (let next = parentOf.get(current); next !== undefined; next = parentOf.get(current)) current = next;
+      return current;
+    };
+    for (let index = inside.length - 1; index >= 0; index -= 1) {
+      if (!allowed.has(holeKeyOf(topOf(inside[index]!.profile).id))) inside.splice(index, 1);
+    }
   }
   const place = (outer: SketchProfile, depth: number): void => {
     const group = { outer, holes: [] as SketchProfile[] };
@@ -630,7 +645,7 @@ function regionFromFaces(faces: readonly SketchProfile[], outlines: readonly Ske
       if (item.outline.id === root.id || !pointInRing(point, item.ring.points)) continue;
       deepest = Math.max(deepest, depthOf.get(item.outline) ?? 0);
     }
-    if ((deepest - rootDepth) % 2 === 0) solid.push({ profile: face, keep: "all" });
+    if ((deepest - rootDepth) % 2 === 0) solid.push({ profile: face, keep: "all"});
   }
   if (solid.length === 0) return undefined;
   return unionRegion(faces, solid, true);
