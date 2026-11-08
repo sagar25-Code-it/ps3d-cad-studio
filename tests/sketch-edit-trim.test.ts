@@ -133,7 +133,8 @@ export const sketchEditTrimTests: readonly TestCase[] = [
       clean(broken);
       const horizontals = ofKind(broken, "line").filter((candidate) => candidate.start[1] === 0 && candidate.end[1] === 0);
       equal(horizontals.length, 5, "the horizontal line is cut at x = 30, 60, 70 and 90 into five pieces");
-      equal(relationsOf(broken, "horizontal").length, horizontals.length, "each piece is horizontal");
+      equal(relationsOf(broken, "horizontal").length, 1, "the horizontal relation stays on the first piece");
+      assert(relationsOf(broken, "collinear").length >= 4, "and the pieces are chained by collinear joints, so all stay on one horizontal line");
       assert(ofKind(broken, "circle").length === 0 && ofKind(broken, "arc").length === 2, "the circle, crossed twice by the line, became two arcs");
       assert(!breakAtCrossings(ctx(projectWith([line("a", [0, 0], [10, 0]), line("b", [0, 5], [10, 5])]))).ok, "curves that never cross have nothing to break");
     }
