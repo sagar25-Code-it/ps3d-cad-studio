@@ -16,6 +16,8 @@ export interface SketchEditPlan {
   readonly updateEntities: readonly SketchEntity[];
   readonly addEntities: readonly SketchEntity[];
   readonly addConstraints: readonly WorkbenchSketchConstraint[];
+  /** Relations to delete by ID (re-pointed or no longer true after the edit). Absent means none. */
+  readonly removeConstraintIds?: readonly string[];
 }
 
 export type SketchEditResult = WorkbenchResult<SketchEditPlan>;
@@ -50,7 +52,8 @@ function plan(label: string, parts: Partial<Omit<SketchEditPlan, "label">>): Ske
       removeEntityIds: parts.removeEntityIds ?? [],
       updateEntities: parts.updateEntities ?? [],
       addEntities: parts.addEntities ?? [],
-      addConstraints: parts.addConstraints ?? []
+      addConstraints: parts.addConstraints ?? [],
+      ...(parts.removeConstraintIds === undefined || parts.removeConstraintIds.length === 0 ? {} : { removeConstraintIds: parts.removeConstraintIds })
     }
   };
 }
@@ -979,3 +982,7 @@ function circumcircle(a: Vec2, b: Vec2, c: Vec2): { readonly center: Vec2; reado
   ];
   return { center, radiusMm: distance(center, a) };
 }
+
+// Geometry helpers shared with the other sketch-edit modules (split, jog, path, clipboard, repair).
+export { arcEntity, arcFrame, circleHits, circumcircle, curvesOf, distanceToCurve, intersectInfinite, lineHits, mapEntity, plan as editPlan, wrapTwoPi };
+export type { ArcFrame, Curve };

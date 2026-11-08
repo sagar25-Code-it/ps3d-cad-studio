@@ -68,6 +68,7 @@ import { publicReleaseTests } from "./public-release.test.js";
 import { fileWorkspaceTests } from "./file-workspace.test.js";
 import { cameraLandmarkTests } from "./camera-landmarks.test.js";
 import { topologyNamingTests } from "./topology-naming.test.js";
+import { sketchSplitJogTests } from "./sketch-split-jog.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -97,6 +98,7 @@ const tests: readonly TestCase[] = [
   ...selectionMetricTests,
   ...sketchSolverTests,
   ...sketchEditToolTests,
+  ...sketchSplitJogTests,
   ...meshBooleanTests,
   ...meshModifyTests,
   ...holeWizardTests,
