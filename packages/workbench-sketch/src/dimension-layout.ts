@@ -1,4 +1,5 @@
 import type { SketchEntity, Vec2 } from "../../workbench-core/src/index.js";
+import { arcShape } from "../../workbench-core/src/sketch-measure.js";
 import { entityPoints } from "./index.js";
 
 /**
@@ -6,7 +7,7 @@ import { entityPoints } from "./index.js";
  * line stands off the geometry, arrow size) are passed in as `pxMm`, the number of millimetres one screen pixel covers, so
  * a dimension keeps its look at every zoom level.
  */
-export type DrivingDimensionKind = "length" | "width" | "height" | "radius";
+export type DrivingDimensionKind = "length" | "width" | "height" | "radius" | "angle" | "arc-length" | "perimeter";
 
 export interface DimensionSegment {
   readonly from: Vec2;
@@ -20,7 +21,19 @@ export interface DimensionArrow {
   readonly direction: Vec2;
 }
 
+/** A curved dimension line: the arc of a circle swept counter-clockwise from `fromRad` by `sweepRad`. An angle or arc-length dimension uses one. */
+export interface DimensionArc {
+  readonly center: Vec2;
+  readonly radiusMm: number;
+  readonly fromRad: number;
+  readonly sweepRad: number;
+}
+
 export interface DimensionLayout {
+  /** Present when the dimension line is curved; `dimensionLine` is then the chord between the arc's ends. */
+  readonly arc?: DimensionArc;
+  /** True for a driven (reference) dimension, drawn in brackets. */
+  readonly reference?: boolean;
   readonly extensionLines: readonly DimensionSegment[];
   readonly dimensionLine: DimensionSegment;
   readonly arrows: readonly DimensionArrow[];
@@ -99,6 +112,8 @@ export function dimensionLayout(entity: SketchEntity, dimension: DrivingDimensio
       label: `Ø${formatValue(valueMm * 2)}`
     };
   }
+  if (entity.kind === "arc" && dimension === "arc-length") return arcLengthDimensionLayout(entity, valueMm, pxMm);
+  if (dimension === "perimeter") return perimeterDimensionLayout(entity, valueMm, pxMm);
   return undefined;
 }
 
@@ -164,6 +179,112 @@ export function drivenDimensionLayout(entity: SketchEntity, kind: DrivenDimensio
     };
   }
   return undefined;
+}
+
+const ANGLE_RADIUS_PX = 52;
+
+type SketchLine = Extract<SketchEntity, { kind: "line" }>;
+
+function wrapLabel(text: string, reference: boolean): string {
+  return reference ? `(${text})` : text;
+}
+
+function arcPoint(center: Vec2, radius: number, angle: number): Vec2 {
+  return [center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle)];
+}
+
+/** Where two infinite lines cross, or undefined when they are parallel. */
+function lineCrossing(first: SketchLine, second: SketchLine): Vec2 | undefined {
+  const d1: Vec2 = [first.end[0] - first.start[0], first.end[1] - first.start[1]];
+  const d2: Vec2 = [second.end[0] - second.start[0], second.end[1] - second.start[1]];
+  const denominator = d1[0] * d2[1] - d1[1] * d2[0];
+  if (Math.abs(denominator) < 1e-9 * Math.max(1, Math.hypot(d1[0], d1[1]) * Math.hypot(d2[0], d2[1]))) return undefined;
+  const t = ((second.start[0] - first.start[0]) * d2[1] - (second.start[1] - first.start[1]) * d2[0]) / denominator;
+  return [first.start[0] + d1[0] * t, first.start[1] + d1[1] * t];
+}
+
+/** A dimension drawn along an arc of a circle: curved dimension line, arrows pointing outward along it at both ends. */
+function arcDimension(center: Vec2, radius: number, fromRad: number, sweepRad: number, extensionLines: readonly DimensionSegment[], label: string, textPush: number, reference: boolean): DimensionLayout {
+  const start = arcPoint(center, radius, fromRad);
+  const end = arcPoint(center, radius, fromRad + sweepRad);
+  const middle = fromRad + sweepRad / 2;
+  const along = (angle: number): Vec2 => [-Math.sin(angle), Math.cos(angle)];
+  const backwards = along(fromRad);
+  return {
+    arc: { center, radiusMm: radius, fromRad, sweepRad },
+    reference,
+    extensionLines,
+    dimensionLine: { from: start, to: end },
+    arrows: [{ tip: start, direction: [-backwards[0], -backwards[1]] }, { tip: end, direction: along(fromRad + sweepRad) }],
+    textAt: arcPoint(center, radius + textPush, middle),
+    label: wrapLabel(label, reference)
+  };
+}
+
+/**
+ * The angle dimension between two lines: an arc about the point where the lines cross (the middle between them when they are
+ * parallel), swept counter-clockwise from the direction of `first` to the direction of `second`, with the value in degrees.
+ * Lines that stop short of the crossing get a thin extension line out to it. `reference` draws a driven dimension in brackets.
+ */
+export function angleDimensionLayout(first: SketchLine, second: SketchLine, valueDeg: number, pxMm: number, reference = false): DimensionLayout | undefined {
+  const firstDirection = unit(first.start, first.end);
+  const crossing = lineCrossing(first, second);
+  const middleOf = (line: SketchLine): Vec2 => [(line.start[0] + line.end[0]) / 2, (line.start[1] + line.end[1]) / 2];
+  const vertex: Vec2 = crossing ?? [(middleOf(first)[0] + middleOf(second)[0]) / 2, (middleOf(first)[1] + middleOf(second)[1]) / 2];
+  const radius = ANGLE_RADIUS_PX * pxMm;
+  const extensions: DimensionSegment[] = [];
+  if (crossing !== undefined) {
+    for (const line of [first, second]) {
+      const nearest = Math.hypot(line.start[0] - vertex[0], line.start[1] - vertex[1]) <= Math.hypot(line.end[0] - vertex[0], line.end[1] - vertex[1]) ? line.start : line.end;
+      const gap = Math.hypot(nearest[0] - vertex[0], nearest[1] - vertex[1]);
+      if (gap > 3 * pxMm) extensions.push({ from: nearest, to: vertex });
+    }
+  }
+  return arcDimension(vertex, radius, Math.atan2(firstDirection[1], firstDirection[0]), (valueDeg * Math.PI) / 180, extensions, `${formatValue(valueDeg)}°`, 14 * pxMm, reference);
+}
+
+/** The arc-length dimension of a 3-point arc: a dimension arc standing off the arc, concentric with it. */
+export function arcLengthDimensionLayout(arc: Extract<SketchEntity, { kind: "arc" }>, valueMm: number, pxMm: number, reference = false): DimensionLayout | undefined {
+  const shape = arcShape(arc.start, arc.mid, arc.end);
+  if (shape === undefined) return undefined;
+  const first = shape.counterClockwise ? arc.start : arc.end;
+  const from = Math.atan2(first[1] - shape.center[1], first[0] - shape.center[0]);
+  const standOff = shape.radiusMm + DIMENSION_OFFSET_PX * pxMm;
+  const reach = shape.radiusMm + (DIMENSION_OFFSET_PX + DIMENSION_OVERSHOOT_PX) * pxMm;
+  const gapRadius = shape.radiusMm + DIMENSION_GAP_PX * pxMm;
+  const extensions: DimensionSegment[] = [from, from + shape.sweepRad].map((angle) => ({ from: arcPoint(shape.center, gapRadius, angle), to: arcPoint(shape.center, reach, angle) }));
+  return arcDimension(shape.center, standOff, from, shape.sweepRad, extensions, `⌒${formatValue(valueMm)}`, 10 * pxMm, reference);
+}
+
+/** A perimeter dimension: a leader from the outline to a text label, since a closed outline has no two ends to dimension between. */
+export function perimeterDimensionLayout(entity: SketchEntity, valueMm: number, pxMm: number, reference = false): DimensionLayout | undefined {
+  let from: Vec2 | undefined;
+  let outward: Vec2 = [1, 1];
+  if (entity.kind === "circle") {
+    outward = [Math.SQRT1_2, Math.SQRT1_2];
+    from = [entity.center[0] + entity.radiusMm * outward[0], entity.center[1] + entity.radiusMm * outward[1]];
+  } else if (entity.kind === "rectangle") {
+    from = entityPoints(entity)[2];
+    const radians = (entity.rotationDeg * Math.PI) / 180;
+    const x: Vec2 = [Math.cos(radians), Math.sin(radians)];
+    const y: Vec2 = [-Math.sin(radians), Math.cos(radians)];
+    outward = [(x[0] + y[0]) * Math.SQRT1_2, (x[1] + y[1]) * Math.SQRT1_2];
+  } else if (entity.kind === "ellipse") {
+    const radians = (entity.rotationDeg * Math.PI) / 180;
+    outward = [Math.cos(radians), Math.sin(radians)];
+    from = [entity.center[0] + entity.majorRadiusMm * outward[0], entity.center[1] + entity.majorRadiusMm * outward[1]];
+  }
+  if (from === undefined) return undefined;
+  const reach = 36 * pxMm;
+  const to: Vec2 = [from[0] + outward[0] * reach, from[1] + outward[1] * reach];
+  return {
+    reference,
+    extensionLines: [],
+    dimensionLine: { from, to },
+    arrows: [{ tip: from, direction: [-outward[0], -outward[1]] }],
+    textAt: [to[0] + outward[0] * 18 * pxMm, to[1] + outward[1] * 18 * pxMm],
+    label: wrapLabel(`P ${formatValue(valueMm)}`, reference)
+  };
 }
 
 /** The three points of an arrowhead: the tip, and the two back corners. */

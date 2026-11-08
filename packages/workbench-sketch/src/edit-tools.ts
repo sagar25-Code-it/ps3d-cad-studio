@@ -8,6 +8,7 @@ import {
 } from "../../workbench-core/src/index.js";
 import { analyzeWorkbenchSketch, detectSketchProfiles, entityPoints, sampleSpline } from "./index.js";
 import { solveLiveSketch } from "../../workbench-core/src/sketch-solve.js";
+import { isDimensionConstraint } from "../../workbench-core/src/sketch-measure.js";
 
 /** One atomic sketch edit, applied by the `apply-sketch-edit` operation. */
 export interface SketchEditPlan {
@@ -830,11 +831,12 @@ function distanceToCurve(point: Vec2, curve: Curve): number {
 // Relax relations and dimensions
 // ---------------------------------------------------------------------------------------------
 
-/** Constraint IDs on the given entities that are dimensions (radius, distance) or geometric relations (everything else). */
+/** Constraint IDs on the given entities that are driving dimensions (radius, distance, angle, arc length, perimeter) or geometric relations (everything else). */
 export function constraintsOnEntities(sketch: WorkbenchSketch, entityIds: readonly string[], family: "relations" | "dimensions", suppressed: boolean): readonly string[] {
   return sketch.constraints
     .filter((constraint) => constraint.entityIds.some((id) => entityIds.includes(id)))
-    .filter((constraint) => (constraint.kind === "radius" || constraint.kind === "distance") === (family === "dimensions"))
+    .filter((constraint) => constraint.driven !== true)
+    .filter((constraint) => isDimensionConstraint(constraint) === (family === "dimensions"))
     .filter((constraint) => (constraint.suppressed === true) === suppressed)
     .map((constraint) => constraint.id);
 }

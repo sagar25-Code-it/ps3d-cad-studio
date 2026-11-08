@@ -155,6 +155,8 @@ export type SketchDimension =
     })
   | (DimensionBase & { readonly kind: "length"; readonly target: GeometryReference; readonly unit: "mm" })
   | (DimensionBase & { readonly kind: "radius"; readonly target: GeometryReference; readonly unit: "mm" })
+  /** Length along an arc (radius times the swept angle). Driving it sweeps the arc's end angle with the radius held. */
+  | (DimensionBase & { readonly kind: "arc-length"; readonly target: GeometryReference; readonly unit: "mm" })
   | (DimensionBase & { readonly kind: "diameter"; readonly target: GeometryReference; readonly unit: "mm" })
   | (DimensionBase & {
       readonly kind: "angle";

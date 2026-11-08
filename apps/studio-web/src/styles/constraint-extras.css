@@ -1,0 +1,15 @@
+/* Angle, arc-length and perimeter dimensions, reference dimensions, Smooth (G2), spline helpers and Pierce. */
+.driving-dimension.extra path { stroke: #ffd36a; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.driving-dimension.reference line, .driving-dimension.reference path { stroke: #9fb4c8; stroke-dasharray: 4 3; }
+.driving-dimension.reference .arrow { fill: #9fb4c8; }
+.driving-dimension.reference .driving-dimension-text { fill: #cfe0f0; font-weight: 500; }
+.extra-dimension-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.extra-dimension-list li { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.extra-dimension-list li b { text-transform: capitalize; }
+.extra-dimension-list li span { color: var(--muted, #9fb4c8); flex: 1 1 auto; }
+.extra-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; font-size: 12px; }
+.extra-row > span { min-width: 92px; }
+.extra-row input { width: 64px; }
+.extra-row select { max-width: 150px; }
+.extra-measure { display: block; margin-top: 4px; color: var(--muted, #9fb4c8); }
+.smooth-controller button, .pierce-controller button { margin-top: 4px; }

@@ -412,22 +412,43 @@ function applyDrivingDimension(
     const next: Vec2 = dimension.kind === "coordinate-x" ? [target, point[1]] : [point[0], target];
     return moveReference(document, dimension.target, next, fixed, tolerance, dimension.id, "DIMENSION_CONFLICT");
   }
+  if (dimension.kind === "arc-length") {
+    const arc = findGeometry(document, dimension.target.entityId);
+    if (arc?.kind !== "arc") return invalidDimension(document, dimension.id, "Arc length requires an arc.");
+    if (target <= 0) return dimensionConflict(document, dimension.id, "An arc length must be positive.");
+    const wanted = target / arc.radiusMm;
+    if (wanted >= Math.PI * 2 - 1e-9) return dimensionConflict(document, dimension.id, "An arc cannot be as long as, or longer than, its full circle at this radius.");
+    const current = arcSweep(arc);
+    if (Math.abs(current - wanted) * arc.radiusMm <= tolerance) return { document, changed: false, applied: true };
+    if (isFixed(fixed, arc.id, "self")) return dimensionConflict(document, dimension.id, "The arc is fixed at another length.");
+    // The start of the arc and its radius are held; the far end sweeps to the length asked for.
+    return { document: replaceGeometry(document, { ...arc, endAngleRad: arc.startAngleRad + wanted }), changed: true, applied: true };
+  }
   if (dimension.kind === "angle") {
     const first = findLine(document, dimension.first.entityId);
     const second = findLine(document, dimension.second.entityId);
     if (first === undefined || second === undefined) return invalidDimension(document, dimension.id, "Angular dimensions require two lines.");
-    if (lineFullyFixed(fixed, second)) return dimensionConflict(document, dimension.id, "The second line is fixed and cannot satisfy the angle.");
-    const base = Math.atan2(first.end[1] - first.start[1], first.end[0] - first.start[0]);
-    const length = distance(second.start, second.end);
-    const direction: Vec2 = [Math.cos(base + normalizeAngle(target)), Math.sin(base + normalizeAngle(target))];
-    const startReference: GeometryReference = { entityId: second.id, selector: "start" };
-    const endReference: GeometryReference = { entityId: second.id, selector: "end" };
-    if (isReferenceFixed(fixed, endReference)) {
-      const nextStart: Vec2 = [second.end[0] - direction[0] * length, second.end[1] - direction[1] * length];
-      return moveReference(document, startReference, nextStart, fixed, tolerance, dimension.id, "DIMENSION_CONFLICT");
-    }
-    const nextEnd: Vec2 = [second.start[0] + direction[0] * length, second.start[1] + direction[1] * length];
-    return moveReference(document, endReference, nextEnd, fixed, tolerance, dimension.id, "DIMENSION_CONFLICT");
+    const wanted = normalizeAngle(target);
+    const firstFixed = lineFullyFixed(fixed, first);
+    const secondFixed = lineFullyFixed(fixed, second);
+    if (firstFixed && secondFixed) return dimensionConflict(document, dimension.id, "Both lines are fixed and cannot satisfy the angle.");
+    // The second line turns about a pivot to make the angle; when only the first can move, it turns the other way.
+    const mover = secondFixed ? first : second;
+    const reference = secondFixed ? second : first;
+    const direction = Math.atan2(reference.end[1] - reference.start[1], reference.end[0] - reference.start[0]) + (secondFixed ? -wanted : wanted);
+    const length = distance(mover.start, mover.end);
+    const unit: Vec2 = [Math.cos(direction), Math.sin(direction)];
+    const startFixed = isFixed(fixed, mover.id, "start");
+    const endFixed = isFixed(fixed, mover.id, "end");
+    // Turn about the joint the two lines share, so the corner they form stays closed; otherwise about the end that is held, else the start.
+    const joined = (point: Vec2): boolean => distance(point, reference.start) <= 1e-6 || distance(point, reference.end) <= 1e-6;
+    const pivotAtEnd = joined(mover.end) && !joined(mover.start) ? true : joined(mover.start) ? false : endFixed && !startFixed;
+    if (!pivotAtEnd && endFixed) return dimensionConflict(document, dimension.id, "The line's far end is fixed, so it cannot turn about its start.");
+    if (pivotAtEnd && startFixed) return dimensionConflict(document, dimension.id, "The line's far end is fixed, so it cannot turn about its end.");
+    const nextStart: Vec2 = pivotAtEnd ? [mover.end[0] - unit[0] * length, mover.end[1] - unit[1] * length] : mover.start;
+    const nextEnd: Vec2 = pivotAtEnd ? mover.end : [mover.start[0] + unit[0] * length, mover.start[1] + unit[1] * length];
+    const changed = distance(nextStart, mover.start) > tolerance || distance(nextEnd, mover.end) > tolerance;
+    return { document: changed ? replaceLine(document, mover.id, nextStart, nextEnd) : document, changed, applied: true };
   }
   return unsupported(document, "UNSUPPORTED_DIMENSION", "This driving dimension is not implemented by the analytic backend.", [document.id], "Use a backend that declares support for this dimension.");
 }
@@ -523,6 +544,10 @@ function measureDimension(document: ParametricSketchDocument, dimension: SketchD
     const geometry = findGeometry(document, dimension.target.entityId);
     if (geometry?.kind !== "circle" && geometry?.kind !== "arc") return undefined;
     return dimension.kind === "diameter" ? geometry.radiusMm * 2 : geometry.radiusMm;
+  }
+  if (dimension.kind === "arc-length") {
+    const arc = findGeometry(document, dimension.target.entityId);
+    return arc?.kind === "arc" ? arc.radiusMm * arcSweep(arc) : undefined;
   }
   if (dimension.kind === "linear") {
     const first = getReferencedPoint(document, dimension.first);
@@ -929,6 +954,12 @@ function projectPointOnLine(point: Vec2, start: Vec2, end: Vec2): Vec2 {
   const offset = subtract(point, start);
   const parameter = (offset[0] * vector[0] + offset[1] * vector[1]) / denominator;
   return [start[0] + parameter * vector[0], start[1] + parameter * vector[1]];
+}
+
+/** The counter-clockwise angle an arc sweeps from its start angle to its end angle, in [0, 2π). */
+function arcSweep(arc: Extract<SketchGeometry, { kind: "arc" }>): number {
+  const turn = (arc.endAngleRad - arc.startAngleRad) % (Math.PI * 2);
+  return (turn + Math.PI * 2) % (Math.PI * 2);
 }
 
 function normalizeAngle(angle: number): number {

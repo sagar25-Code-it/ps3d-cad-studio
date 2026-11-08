@@ -31,6 +31,7 @@ import { meshBooleanTests } from "./mesh-boolean.test.js";
 import { meshModifyTests } from "./mesh-modify.test.js";
 import { holeWizardTests } from "./hole-wizard.test.js";
 import { sketchChamferModeTests } from "./sketch-chamfer-modes.test.js";
+import { sketchConstraintsWpTests } from "./sketch-constraints-wp.test.js";
 import { sketchArcAndSlotModeTests } from "./sketch-arc-and-slot-modes.test.js";
 import { sketchCurveToolTests } from "./sketch-curve-tools.test.js";
 import { sweepAndLoftTests } from "./sweep-and-loft.test.js";
@@ -112,6 +113,7 @@ const tests: readonly TestCase[] = [
   ...meshModifyTests,
   ...holeWizardTests,
   ...sketchChamferModeTests,
+  ...sketchConstraintsWpTests,
   ...sketchArcAndSlotModeTests,
   ...sketchCurveToolTests,
   ...sweepAndLoftTests,
