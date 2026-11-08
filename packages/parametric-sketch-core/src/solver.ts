@@ -58,7 +58,8 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
   const labelOf = makeLabeler(request.document, request.labels);
   const strong = request.mode === "validate" ? new Set<string>() : new Set(request.preserve ?? defaultPreserve(request.document));
   const weak = request.mode === "validate" || request.preserveWeak === undefined ? undefined : new Set(request.preserveWeak);
-  const preserveOption: { readonly preserve?: ReadonlySet<string>; readonly preserveWeak?: ReadonlySet<string> } = { preserve: strong, ...(weak === undefined ? {} : { preserveWeak: weak }) };
+  const keepShape = request.mode !== "validate" && request.keepShape === true;
+  const preserveOption: { readonly preserve?: ReadonlySet<string>; readonly preserveWeak?: ReadonlySet<string>; readonly keepShape?: boolean } = { preserve: strong, ...(weak === undefined ? {} : { preserveWeak: weak }), ...(keepShape ? { keepShape } : {}) };
   // Unless the caller says who stays put, the geometry a relation names first is the reference.
   const anchors = request.mode === "validate" ? [] : request.anchors ?? defaultAnchors(request.document);
   // The relations alone, with nothing preferred or pinned: what the degrees of freedom and the names of conflicts are read from.
@@ -96,7 +97,7 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
         // The sizes and places the hints wanted to keep cannot be kept (a Fix elsewhere, or a dimension on them): solve again with less required.
         const attempts: readonly (readonly SolveAnchor[])[] = [anchors, []];
         for (const attemptAnchors of attempts) {
-          const retry = buildSolverModel(request.document, { anchors: attemptAnchors, ...(weak === undefined ? {} : { preserveWeak: weak }) });
+          const retry = buildSolverModel(request.document, { anchors: attemptAnchors, ...(weak === undefined ? {} : { preserveWeak: weak }), ...(keepShape ? { keepShape } : {}) });
           const second = solveModel(retry, { tolerance });
           if (second.ok) {
             model = retry;

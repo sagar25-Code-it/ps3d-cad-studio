@@ -31,6 +31,7 @@ import { sketchSolverTests } from "./sketch-solver.test.js";
 import { sketchSolverSimultaneousTests } from "./sketch-solver-simultaneous.test.js";
 import { sketchSolverDofTests } from "./sketch-solver-dof.test.js";
 import { sketchSolverKindsTests } from "./sketch-solver-kinds.test.js";
+import { sketchSolverWave2Tests } from "./sketch-solver-wave2.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
 import { sketchEditSuiteTests } from "./sketch-edit-suite.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
@@ -247,7 +248,8 @@ const tests: readonly TestCase[] = [
   ...sketchUnderlayTests,
   ...sketchExchangeUiTests,
   ...sketchCanvasUxTests,
-  ...sketchCanvasHandleTests
+  ...sketchCanvasHandleTests,
+  ...sketchSolverWave2Tests
 ];
 let failures = 0;
 

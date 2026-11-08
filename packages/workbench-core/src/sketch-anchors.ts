@@ -47,7 +47,7 @@ export function anchorsForConstraint(constraint: WorkbenchSketchConstraint, enti
   switch (constraint.kind) {
     case "horizontal":
     case "vertical":
-      return kindOf(first) === "rectangle" ? [keep(first!, "center")] : [keep(first!, "start")];
+      return kindOf(first) === "rectangle" ? [keep(first!, "center", 1)] : [keep(first!, "start")];
     case "parallel":
     case "perpendicular":
       return [hold(first!), ...(kindOf(second) === "line" ? [keep(second!, "start")] : [])];
@@ -147,7 +147,8 @@ export function anchorsForDimension(constraint: WorkbenchSketchConstraint, entit
           return [hold(first!)];
         case "width":
         case "height":
-          return [keep(first!, "center")];
+          // Nothing holds the centre: a rectangle whose corner is pinned (a Fix, a joint) lets the centre move rather than turn or stretch.
+          return [];
         default:
           // A line's length: it grows from its start.
           return entity?.kind === "line" ? [keep(first!, "start")] : [hold(first!)];
@@ -166,7 +167,7 @@ export function anchorsForDimension(constraint: WorkbenchSketchConstraint, entit
     case "arc-length":
       return [keep(first!, "radius"), keep(first!, "start")];
     case "perimeter":
-      return [keep(first!, "center")];
+      return [];
     default:
       return [];
   }

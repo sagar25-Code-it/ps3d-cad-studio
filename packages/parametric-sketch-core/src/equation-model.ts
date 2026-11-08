@@ -30,6 +30,8 @@ export interface Equation {
   readonly vars: readonly number[];
   readonly entities: readonly string[];
   readonly residual: EvalFn;
+  /** For a shape-keeping term of the two-level solve: 0 direction, 1 length and radius, 2 arc sweep. */
+  readonly level?: number;
 }
 
 export interface EntityLayout {
@@ -58,6 +60,8 @@ export interface SolverModel {
   readonly anchored: Uint8Array;
   readonly equations: Equation[];
   readonly soft: Equation[];
+  /** Two-level solve: terms that pull each curve back toward its original shape (see SketchSolveRequest.keepShape). Empty unless asked for. */
+  readonly keep: Equation[];
   readonly diagnostics: SketchDiagnostic[];
   readonly appliedConstraints: Set<string>;
   readonly appliedDimensions: Set<string>;
@@ -65,6 +69,10 @@ export interface SolverModel {
 }
 
 export const ANCHOR_WEIGHT = { 0: 1, 1: 1e6, 2: 1e12 } as const;
+/** Stiffness of a rectangle's width, height and (scaled by its reach) turn: stiffer than a held centre. */
+const RECTANGLE_SIZE_WEIGHT = 1e9;
+/** Stiffness of a rectangle's turn (times its reach squared): a pinned corner leaves it turned by no more than round-off. */
+const RECTANGLE_TURN_WEIGHT = 1e13;
 const TWO_PI = Math.PI * 2;
 const SMALL = 1e-12;
 
@@ -143,6 +151,7 @@ class ModelBuilder {
   readonly layout = new Map<string, EntityLayout>();
   readonly equations: Equation[] = [];
   readonly soft: Equation[] = [];
+  readonly keep: Equation[] = [];
   readonly diagnostics: SketchDiagnostic[] = [];
   readonly applied = { constraints: new Set<string>(), dimensions: new Set<string>() };
   x0: Float64Array;
@@ -193,10 +202,11 @@ class ModelBuilder {
         this.role[b + 3] = 2;
         this.role[b + 4] = 1;
         const reach = Math.max(1, Math.hypot(values[b + 2]!, values[b + 3]!) / 2);
-        this.weight[b + 2] = SIZE_WEIGHT;
-        this.weight[b + 3] = SIZE_WEIGHT;
-        // A rectangle dragged by a corner travels; it does not turn.
-        this.weight[b + 4] = reach * reach * 100;
+        // A rectangle keeps its size and its turn unless a relation or a dimension changes them: both are far stiffer than any
+        // preference to hold the centre, so a pinned corner moves the centre rather than turning or stretching the rectangle.
+        this.weight[b + 2] = RECTANGLE_SIZE_WEIGHT;
+        this.weight[b + 3] = RECTANGLE_SIZE_WEIGHT;
+        this.weight[b + 4] = reach * reach * RECTANGLE_TURN_WEIGHT;
       } else if (g.kind === "ellipse") {
         this.role[b + 4] = 2;
         this.weight[b + 4] = SIZE_WEIGHT;
@@ -794,6 +804,64 @@ class ModelBuilder {
 
   // ------------------------------------------------------------------ shape preservation
 
+  /** Terms, in millimetres, that measure how far each curve has drifted from its original shape: a line's vector (direction and length together), a radius, an arc's sweep length. */
+  addShapeKeepers(): void {
+    // A size that a driving dimension sets, or an orientation that Horizontal/Vertical sets, is not the shape terms' to keep.
+    const sized = new Set<string>();
+    const oriented = new Set<string>();
+    for (const dimension of this.document.dimensions) {
+      if (dimension.suppressed || dimension.mode !== "driving") continue;
+      if (dimension.kind === "length" || dimension.kind === "radius" || dimension.kind === "diameter" || dimension.kind === "arc-length") sized.add(dimension.target.entityId);
+    }
+    for (const constraint of this.document.constraints) {
+      if (!constraint.suppressed && (constraint.kind === "horizontal" || constraint.kind === "vertical")) oriented.add(constraint.line.entityId);
+    }
+    for (const entry of this.layout.values()) {
+      if (entry.geometry.suppressed) continue;
+      const b = entry.base;
+      const x0 = this.x0;
+      const add = (level: number, size: number, vars: readonly number[], evaluate: EvalFn): void => {
+        this.keep.push({ id: `keep:${entry.id}`, source: "constraint", size, level, vars, entities: [entry.id], residual: evaluate });
+      };
+      switch (entry.geometry.kind) {
+        case "line": {
+          const vx = x0[b + 2]! - x0[b]!;
+          const vy = x0[b + 3]! - x0[b + 1]!;
+          const length0 = Math.hypot(vx, vy);
+          if (length0 <= 1e-9) break;
+          // Direction: the turn from what it was, times its original length (millimetres). A line pointing the other way is a half turn off, not zero.
+          if (!oriented.has(entry.id)) add(0, 1, [b, b + 1, b + 2, b + 3], (x, out, o) => {
+            const ux = x[b + 2]! - x[b]!;
+            const uy = x[b + 3]! - x[b + 1]!;
+            out[o] = length0 * Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+          });
+          if (!sized.has(entry.id)) add(1, 1, [b, b + 1, b + 2, b + 3], (x, out, o) => { out[o] = Math.hypot(x[b + 2]! - x[b]!, x[b + 3]! - x[b + 1]!) - length0; });
+          break;
+        }
+        case "circle": {
+          const r0 = x0[b + 2]!;
+          if (!sized.has(entry.id)) add(1, 1, [b + 2], (x, out, o) => { out[o] = x[b + 2]! - r0; });
+          break;
+        }
+        case "arc": {
+          const r0 = x0[b + 2]!;
+          const s0 = x0[b + 4]!;
+          if (!sized.has(entry.id)) add(1, 1, [b + 2], (x, out, o) => { out[o] = x[b + 2]! - r0; });
+          if (!sized.has(entry.id)) add(2, 1, [b + 4], (x, out, o) => { out[o] = r0 * (x[b + 4]! - s0); });
+          break;
+        }
+        case "ellipse": {
+          const a0 = Math.hypot(x0[b + 2]!, x0[b + 3]!);
+          const b0 = x0[b + 4]!;
+          add(1, 2, [b + 2, b + 3, b + 4], (x, out, o) => { out[o] = Math.hypot(x[b + 2]!, x[b + 3]!) - a0; out[o + 1] = x[b + 4]! - b0; });
+          break;
+        }
+        default:
+          break;
+      }
+    }
+  }
+
   addShapePreservation(only: ReadonlySet<string>, factor: number): void {
     for (const entry of this.layout.values()) {
       if (!only.has(entry.id)) continue;
@@ -879,6 +947,8 @@ export interface BuildOptions {
   readonly preserve?: ReadonlySet<string>;
   /** Entities whose size is only mildly preferred; gives way to `preserve`. */
   readonly preserveWeak?: ReadonlySet<string>;
+  /** Build the two-level shape-keeping terms (see SketchSolveRequest.keepShape). */
+  readonly keepShape?: boolean;
 }
 
 /** Builds the equation system for the active (not suppressed) geometry, constraints and driving dimensions of a document. */
@@ -902,6 +972,7 @@ export function buildSolverModel(document: ParametricSketchDocument, options: Bu
   // a size that is only preferred is a soft term that every real relation outweighs.
   if (options.preserve !== undefined && options.preserve.size > 0) builder.addShapePreservation(options.preserve, 0);
   if (options.preserveWeak !== undefined && options.preserveWeak.size > 0) builder.addShapePreservation(new Set([...options.preserveWeak].filter((id) => options.preserve?.has(id) !== true)), 3e-4);
+  if (options.keepShape === true) builder.addShapeKeepers();
   return {
     document: active,
     layout: builder.layout,
@@ -915,6 +986,7 @@ export function buildSolverModel(document: ParametricSketchDocument, options: Bu
     anchored: builder.anchored,
     equations: builder.equations,
     soft: builder.soft,
+    keep: builder.keep,
     diagnostics: builder.diagnostics,
     appliedConstraints: builder.applied.constraints,
     appliedDimensions: builder.applied.dimensions,

@@ -8,6 +8,7 @@
 /** Solves A x = b for a symmetric positive-definite A given as its diagonal and strictly lower triangle. Undefined when A is not positive definite. */
 export function solveSymmetric(n: number, diag: Float64Array, lower: readonly Map<number, number>[], rhs: Float64Array): Float64Array | undefined {
   if (n === 0) return new Float64Array(0);
+  if (n <= DENSE_LIMIT) return solveDense(n, diag, lower, rhs);
   const adjacency: number[][] = Array.from({ length: n }, () => []);
   for (let i = 0; i < n; i += 1) {
     for (const j of lower[i]!.keys()) {
@@ -79,6 +80,40 @@ export function solveSymmetric(n: number, diag: Float64Array, lower: readonly Ma
   const result = new Float64Array(n);
   for (let old = 0; old < n; old += 1) result[old] = y[position[old]!]!;
   return result;
+}
+
+/** Systems this small are factored as a dense matrix: the ordering work of the skyline solve costs more than the factorisation. */
+const DENSE_LIMIT = 24;
+
+function solveDense(n: number, diag: Float64Array, lower: readonly Map<number, number>[], rhs: Float64Array): Float64Array | undefined {
+  const a = new Float64Array(n * n);
+  for (let i = 0; i < n; i += 1) {
+    a[i * n + i] = diag[i]!;
+    for (const [j, value] of lower[i]!) a[i * n + j] = value;
+  }
+  for (let i = 0; i < n; i += 1) {
+    for (let j = 0; j <= i; j += 1) {
+      let sum = a[i * n + j]!;
+      for (let k = 0; k < j; k += 1) sum -= a[i * n + k]! * a[j * n + k]!;
+      if (j < i) {
+        a[i * n + j] = sum / a[j * n + j]!;
+      } else {
+        if (!(sum > 1e-13 * Math.max(diag[i]!, 1e-300))) return undefined;
+        a[i * n + i] = Math.sqrt(sum);
+      }
+    }
+  }
+  const y = new Float64Array(n);
+  for (let i = 0; i < n; i += 1) {
+    let sum = rhs[i]!;
+    for (let k = 0; k < i; k += 1) sum -= a[i * n + k]! * y[k]!;
+    y[i] = sum / a[i * n + i]!;
+  }
+  for (let i = n - 1; i >= 0; i -= 1) {
+    y[i] = y[i]! / a[i * n + i]!;
+    for (let k = 0; k < i; k += 1) y[k] = y[k]! - a[i * n + k]! * y[i]!;
+  }
+  return y;
 }
 
 /** order[newIndex] = oldIndex. Components are started from their lowest-degree (then lowest-index) node. */

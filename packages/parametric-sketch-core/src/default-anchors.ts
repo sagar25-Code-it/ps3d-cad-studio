@@ -155,7 +155,7 @@ export function defaultAnchors(document: ParametricSketchDocument): readonly Sol
       case "width":
       case "height":
       case "perimeter":
-        hold(at(dimension.target, "center"));
+        hold(at(dimension.target, "center"), 1);
         break;
       case "coordinate-x":
       case "coordinate-y":
