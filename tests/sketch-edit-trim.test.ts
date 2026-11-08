@@ -1,4 +1,6 @@
 import { extendAt, trimAt } from "../packages/workbench-sketch/src/edit-tools.js";
+import { splitAt } from "../packages/workbench-sketch/src/split-jog.js";
+import { sampleSpline } from "../packages/workbench-sketch/src/index.js";
 import { powerTrim, trimToClosest } from "../packages/workbench-sketch/src/trim-extend.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { applyOk, arc, circle, closeTo, con, ctx, ellipse, entityById, ids, line, ofKind, problems, projectWith, radiusOfArc, rect, relationsOf, spline } from "./edit-test-kit.js";
@@ -118,6 +120,37 @@ export const sketchEditTrimTests: readonly TestCase[] = [
       assert(!powerTrim(ctx(project), [[200, 5], [210, 5]]).ok, "a path that crosses nothing is refused");
       const closest = applyOk(project, trimToClosest(ctx(project), "entity:h", [20, 0]));
       assert(closeTo(startOf(closest, "entity:h"), [30, 0]), "trim to closest removes the end up to the first crossing, whatever the exact pick");
+    }
+  },
+  {
+    name: "Sketch edit E17 splitting a spline keeps both halves on the original curve (0.75 mm off before, under 0.02 mm now)",
+    run: () => {
+      const fit: P[] = [[0, 0], [10, 10], [20, 0], [30, 10]];
+      const project = projectWith([spline("s", fit)]);
+      const split = splitAt(ctx(project), "entity:s", [15, 5]);
+      assert(split.ok, "the split plans");
+      if (!split.ok) return;
+      const halves = [...split.value.updateEntities, ...split.value.addEntities].filter((entity) => entity.kind === "spline");
+      equal(halves.length, 2, "two splines");
+      const original = sampleSpline(fit, 200);
+      let worst = 0;
+      for (const half of halves) {
+        if (half.kind !== "spline") continue;
+        for (const point of sampleSpline(half.fitPoints, 40)) {
+          let best = Infinity;
+          for (let index = 0; index < original.length - 1; index += 1) {
+            const a = original[index]!;
+            const b = original[index + 1]!;
+            const d = [b[0] - a[0], b[1] - a[1]];
+            const t = Math.max(0, Math.min(1, ((point[0] - a[0]) * d[0]! + (point[1] - a[1]) * d[1]!) / (d[0]! * d[0]! + d[1]! * d[1]!)));
+            best = Math.min(best, Math.hypot(point[0] - a[0] - d[0]! * t, point[1] - a[1] - d[1]! * t));
+          }
+          worst = Math.max(worst, best);
+        }
+      }
+      assert(worst < 0.02, `halves stay within 0.02 mm of the original (worst ${worst.toFixed(4)} mm)`);
+      const committed = applyOk(project, split);
+      equal(ofKind(committed, "spline").length, 2, "and the split commits");
     }
   },
   {
