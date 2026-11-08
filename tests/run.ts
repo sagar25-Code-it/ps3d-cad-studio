@@ -48,6 +48,7 @@ import { reliefPickHoleDragTests } from "./relief-pick-hole-drag.test.js";
 import { holeTests } from "./hole.test.js";
 import { bodyEditGeometryTests } from "./body-edits.test.js";
 import { bodyEditHandlerTests, bodyEditTimelineTests } from "./body-edit-timeline.test.js";
+import { bodyFlexTests } from "./body-flex.test.js";
 import { planeTiltTests } from "./plane-tilt.test.js";
 import { planeFrameTests } from "./plane-frame.test.js";
 import { constructionPlaneTests } from "./construction-planes.test.js";
@@ -119,6 +120,7 @@ const tests: readonly TestCase[] = [
   ...bodyEditGeometryTests,
   ...bodyEditTimelineTests,
   ...bodyEditHandlerTests,
+  ...bodyFlexTests,
   ...planeTiltTests,
   ...planeFrameTests,
   ...solidOperationsIntegrationTests,

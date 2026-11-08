@@ -1,5 +1,5 @@
 import type { BodyEditSpec, DesignHistory, DesignSolidFeature, GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { draftFaces, offsetRegion, replaceFaces, shellBody, type FaceEditResult } from "../../../packages/workbench-geometry/src/index.js";
+import { draftFaces, flexBody, offsetRegion, replaceFaces, shellBody, type FaceEditResult, type FlexResult } from "../../../packages/workbench-geometry/src/index.js";
 
 /**
  * Applies one body-edit step (general shell, draft, offset region, replace face, ...) to the body a timeline replay has built so
@@ -15,13 +15,14 @@ export interface BodyEditContext {
   readonly history: DesignHistory;
 }
 
-function meshEdit(spec: BodyEditSpec, body: GeneralSolidBody): FaceEditResult | undefined {
+function meshEdit(spec: BodyEditSpec, body: GeneralSolidBody): FaceEditResult | FlexResult | undefined {
   const mesh = { positionsMm: body.positionsMm, indices: body.indices };
   switch (spec.kind) {
     case "shell": return shellBody(mesh, { thicknessMm: spec.thicknessMm, side: spec.side, openFaces: spec.openFaces });
     case "draft": return draftFaces(mesh, { angleDeg: spec.angleDeg, pullDirection: spec.pullDirection, neutralPointMm: spec.neutralPointMm, faces: spec.faces });
     case "offset-region": return offsetRegion(mesh, { distanceMm: spec.distanceMm, faces: spec.faces });
     case "replace-face": return replaceFaces(mesh, { faces: spec.faces, toFace: spec.toFace, toPlane: spec.toPlane });
+    case "flex": return flexBody(mesh, { mode: spec.mode, angleDeg: spec.angleDeg, axisPointMm: spec.axisPointMm, axisDirectionMm: spec.axisDirectionMm, lengthDirectionMm: spec.lengthDirectionMm, zoneLengthMm: spec.zoneLengthMm });
     default: return undefined;
   }
 }
