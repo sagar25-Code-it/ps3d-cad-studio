@@ -5,6 +5,7 @@ import type {
   DesignSolidFeature,
   GeneralSolidBody,
   SketchDatumPlane,
+  SketchPlaneFrame,
   SketchPlaneTilt,
   WorkbenchDiagnostic,
   WorkbenchProject,
@@ -168,11 +169,13 @@ export function editDesignSketch(project: WorkbenchProject, featureId: string): 
   return changed({ ...project, sketch: feature.sketch, activeWorkspace: "sketch", design: next }, [featureId], `Reopened ${feature.name} for editing.`);
 }
 
-export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt): DesignChange {
+export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame): DesignChange {
   const history = designOf(project);
-  const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, ...rest } = project.sketch;
-  const sketch = { ...rest, name: "Sketch", plane, ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), entities: [], constraints: [] };
-  return changed({ ...project, sketch, activeWorkspace: "sketch", design: { ...history, editingSketchId: null } }, [project.sketch.id], `Started a new sketch on the ${plane.replace("datum:", "").toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}.`);
+  const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, ...rest } = project.sketch;
+  const sketch = { ...rest, name: "Sketch", plane, ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), ...(frame === undefined ? {} : { planeFrame: frame }), entities: [], constraints: [] };
+  const where = frame !== undefined ? "a plane through three points"
+    : `the ${plane.replace("datum:", "").toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
+  return changed({ ...project, sketch, activeWorkspace: "sketch", design: { ...history, editingSketchId: null } }, [project.sketch.id], `Started a new sketch on ${where}.`);
 }
 
 function checkSolidFeature(history: DesignHistory, feature: DesignSolidFeature, body: GeneralSolidBody, replacing: boolean): DesignChange | undefined {

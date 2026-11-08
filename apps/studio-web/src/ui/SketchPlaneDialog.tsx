@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { SketchPlaneTilt } from "../../../../packages/workbench-core/src/index.js";
+import type { SketchPlaneFrame, SketchPlaneTilt } from "../../../../packages/workbench-core/src/index.js";
+import { frameThroughPoints } from "../../../../packages/workbench-geometry/src/index.js";
 import type { SketchPlane } from "../general-modeling.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { useDialogFocus } from "./useDialogFocus.js";
@@ -36,6 +37,18 @@ export interface SketchAngleOption {
   readonly label: string;
 }
 
+/** A three-point construction plane of the part, already reduced to the frame a sketch on it uses. */
+export interface SketchFrameOption {
+  readonly frame: SketchPlaneFrame;
+  readonly label: string;
+}
+
+/** Reads "x, y, z" (commas, semicolons or spaces) as a point in millimetres, or undefined when it is not three numbers. */
+function parsePointText(text: string): readonly [number, number, number] | undefined {
+  const parts = text.trim().split(/[\s,;]+/).filter((part) => part !== "").map((part) => Number(part.replace(",", ".")));
+  return parts.length === 3 && parts.every((part) => Number.isFinite(part) && Math.abs(part) <= 100_000) ? [parts[0]!, parts[1]!, parts[2]!] : undefined;
+}
+
 interface SketchPlaneDialogProps {
   readonly open: boolean;
   readonly initialPlane: SketchPlane;
@@ -43,9 +56,11 @@ interface SketchPlaneDialogProps {
   readonly initialTilt?: SketchPlaneTilt | undefined;
   /** The part's angle construction planes, offered as ready-made tilted sketch planes. */
   readonly anglePlanes?: readonly SketchAngleOption[];
+  /** The part's three-point construction planes, offered as ready-made sketch planes. */
+  readonly framePlanes?: readonly SketchFrameOption[];
   /** Axis-aligned planar faces of the shown solids; picking one starts the sketch on that face. */
   readonly faces: readonly SketchFaceOption[];
-  readonly onConfirm: (plane: SketchPlane, offsetMm: number, tilt?: SketchPlaneTilt) => void;
+  readonly onConfirm: (plane: SketchPlane, offsetMm: number, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame) => void;
   readonly onClose: () => void;
 }
 
@@ -55,6 +70,7 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
   const [offsetText, setOffsetText] = useState("0");
   const [tiltAxis, setTiltAxis] = useState<"none" | "x" | "y" | "z">("none");
   const [tiltText, setTiltText] = useState("45");
+  const [pointTexts, setPointTexts] = useState<readonly [string, string, string]>(["", "", ""]);
   const [problem, setProblem] = useState("");
   const dialogRef = useDialogFocus<HTMLElement>(props.open, props.onClose);
 
@@ -64,6 +80,7 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
     setOffsetText(String(Number(props.initialOffsetMm.toFixed(3))));
     setTiltAxis(props.initialTilt?.axis ?? "none");
     setTiltText(String(props.initialTilt?.angleDeg ?? 45));
+    setPointTexts(["", "", ""]);
     setProblem("");
   }, [props.open, props.initialPlane, props.initialOffsetMm, props.initialTilt]);
 
@@ -77,6 +94,15 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
     const angle = Number(tiltText.trim().replace(",", "."));
     if (!Number.isFinite(angle) || angle === 0 || Math.abs(angle) > 180) { setProblem("Enter a tilt angle from -180° to 180°, other than 0."); return; }
     props.onConfirm(chosenPlane, parsed, { axis: tiltAxis, angleDeg: angle });
+  };
+
+  /** Starts the sketch on the plane through the three typed points. */
+  const confirmPoints = (): void => {
+    const points = pointTexts.map(parsePointText);
+    if (points.some((point) => point === undefined)) { setProblem("Type each point as three numbers in millimetres, like 10, 0, 5."); return; }
+    const frame = frameThroughPoints(points as unknown as readonly [readonly [number, number, number], readonly [number, number, number], readonly [number, number, number]]);
+    if ("error" in frame) { setProblem(frame.error); return; }
+    props.onConfirm("xy", 0, undefined, frame);
   };
 
   return <div className="dialog-backdrop save-project-backdrop" role="presentation" onMouseDown={props.onClose}>
@@ -144,6 +170,32 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
             onClick={() => props.onConfirm(option.plane, 0, option.tilt)}
           ><CommandIcon name="projection" /><span><strong>{option.label}</strong><small>{option.plane.toUpperCase()} turned {option.tilt.angleDeg}° about {option.tilt.axis.toUpperCase()}</small></span></button>)}
         </div>}
+        {(props.framePlanes?.length ?? 0) > 0 && <div className="sketch-plane-faces">
+          <small className="sketch-plane-faces-title">Or sketch on a three-point plane of this part</small>
+          {props.framePlanes!.map((option, index) => <button
+            key={`${option.label}:${index}`}
+            type="button"
+            className="sketch-plane-face"
+            onClick={() => props.onConfirm("xy", 0, undefined, option.frame)}
+          ><CommandIcon name="projection" /><span><strong>{option.label}</strong><small>Through 3 points · the sketch starts at the first point</small></span></button>)}
+        </div>}
+        <div className="sketch-plane-faces sketch-plane-points">
+          <small className="sketch-plane-faces-title">Or sketch on the plane through three points</small>
+          {pointTexts.map((text, index) => <label key={index} className="sketch-plane-offset">
+            <span>{`Point ${index + 1} (x, y, z in mm)`}</span>
+            <div className="feature-edit-field">
+              <input
+                inputMode="text"
+                aria-label={`Point ${index + 1} x, y, z in millimetres`}
+                placeholder={["0, 0, 0", "50, 0, 0", "0, 50, 25"][index]}
+                value={text}
+                onChange={(event) => { const next = [...pointTexts] as [string, string, string]; next[index] = event.target.value; setPointTexts(next); setProblem(""); }}
+                onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); confirmPoints(); } }}
+              />
+            </div>
+          </label>)}
+          <button type="button" className="sketch-plane-face" onClick={confirmPoints}><CommandIcon name="projection" /><span><strong>Start sketch through these points</strong><small>The first point is the sketch origin, the second sets its X direction</small></span></button>
+        </div>
         {props.faces.length > 0 && <div className="sketch-plane-faces">
           <small className="sketch-plane-faces-title">Or sketch on a face of a solid</small>
           {props.faces.map((face, index) => <button

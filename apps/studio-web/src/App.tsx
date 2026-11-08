@@ -48,12 +48,13 @@ import {
   type WorkbenchOperation,
   type WorkbenchProject,
   type WorkbenchSelectionKind,
+  type SketchPlaneFrame,
   type SketchPlaneTilt,
   type WorkbenchSketchConstraint,
   type Vec3,
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
-import { flangeReliefs, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
+import { flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
 import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
@@ -348,6 +349,12 @@ export function App(): React.JSX.Element {
   const anglePlaneOptions = useMemo(() => (project.part.construction ?? []).flatMap((plane) => plane.definition.kind === "angle"
     ? [{ plane: plane.definition.basePlane.replace("datum:", "") as SketchPlane, tilt: { axis: plane.definition.axis, angleDeg: plane.definition.angleDeg }, label: plane.name }]
     : []), [project.part.construction]);
+  /** The part's three-point construction planes, offered in the sketch plane dialog as ready-made sketch planes. */
+  const framePlaneOptions = useMemo(() => (project.part.construction ?? []).flatMap((plane) => {
+    if (plane.definition.kind !== "three-points") return [];
+    const frame = frameThroughPoints(plane.definition.points);
+    return "error" in frame ? [] : [{ frame, label: plane.name }];
+  }), [project.part.construction]);
   const sketchFaceOptions = useMemo(() => {
     const options: SketchFaceOption[] = [];
     for (const body of project.part.generalBodies ?? []) {
@@ -789,21 +796,24 @@ export function App(): React.JSX.Element {
     switchWorkspace(workspace);
   };
 
-  const confirmSketchPlane = (plane: SketchPlane, offsetMm = 0, tilt?: SketchPlaneTilt): void => {
+  const confirmSketchPlane = (plane: SketchPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame): void => {
     setSketchPlaneDialogOpen(false);
     const datum = `datum:${plane}` as const;
-    const where = `${plane.toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
+    const where = frame !== undefined ? "plane through three points"
+      : `${plane.toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
+    const placement = { ...(offsetMm === 0 ? {} : { offsetMm }), ...(tilt === undefined ? {} : { tilt }), ...(frame === undefined ? {} : { frame }) };
     if (sketchPlaneDialogMode === "new") {
       void (async () => {
         await commitWorkingSketch();
-        if (applyProjectOperation({ kind: "new-design-sketch", plane: datum, ...(offsetMm === 0 ? {} : { offsetMm }), ...(tilt === undefined ? {} : { tilt }) }, false)) setStatusText(`New sketch on the ${where}. The previous sketch is in the timeline.`);
+        if (applyProjectOperation({ kind: "new-design-sketch", plane: datum, ...placement }, false)) setStatusText(`New sketch on the ${where}. The previous sketch is in the timeline.`);
       })();
       return;
     }
     const sketch = projectRef.current.sketch;
     const sameTilt = (sketch.planeTilt?.axis ?? null) === (tilt?.axis ?? null) && (sketch.planeTilt?.angleDeg ?? 0) === (tilt?.angleDeg ?? 0);
-    if ((sketch.plane !== datum || (sketch.planeOffsetMm ?? 0) !== offsetMm || !sameTilt)
-      && !applyProjectOperation({ kind: "set-sketch-plane", plane: datum, ...(offsetMm === 0 ? {} : { offsetMm }), ...(tilt === undefined ? {} : { tilt }) })) return;
+    const sameFrame = JSON.stringify(sketch.planeFrame ?? null) === JSON.stringify(frame ?? null);
+    if ((sketch.plane !== datum || (sketch.planeOffsetMm ?? 0) !== offsetMm || !sameTilt || !sameFrame)
+      && !applyProjectOperation({ kind: "set-sketch-plane", plane: datum, ...placement })) return;
     if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
     setStatusText(`Sketch on the ${where}, shown face-on. Draw a closed profile, then Create solid extrudes or revolves it from this plane.`);
   };
@@ -3442,7 +3452,7 @@ export function App(): React.JSX.Element {
       }}
       onClose={() => setNewDialogOpen(false)}
     />
-    <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} initialTilt={sketchPlaneDialogMode === "new" ? undefined : project.sketch.planeTilt} anglePlanes={anglePlaneOptions} faces={sketchFaceOptions} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
+    <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} initialTilt={sketchPlaneDialogMode === "new" ? undefined : project.sketch.planeTilt} anglePlanes={anglePlaneOptions} framePlanes={framePlaneOptions} faces={sketchFaceOptions} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
     <FeatureEditDialog feature={featureEdit} busy={status === "working"} onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />
   </main>;
 }

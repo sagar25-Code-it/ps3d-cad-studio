@@ -34,6 +34,7 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
     const where = planeWorldCoordinate(feature.sketch.plane, feature.sketch.planeOffsetMm ?? 0);
     const offset = where.valueMm === 0 ? "" : ` at ${where.axisName} = ${trimNumber(where.valueMm)} mm`;
     const tilt = feature.sketch.planeTilt === undefined ? "" : `, tilted ${trimNumber(feature.sketch.planeTilt.angleDeg)}° about ${feature.sketch.planeTilt.axis.toUpperCase()}`;
+    if (feature.sketch.planeFrame !== undefined) return `Plane through 3 points · ${curves} ${curves === 1 ? "curve" : "curves"}`;
     return `${sketchPlaneName(feature.sketch.plane)} plane${offset}${tilt} · ${curves} ${curves === 1 ? "curve" : "curves"}`;
   }
   const source = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);

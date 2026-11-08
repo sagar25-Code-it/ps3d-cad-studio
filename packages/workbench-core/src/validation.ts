@@ -203,11 +203,25 @@ export function validSketchPlaneTilt(value: unknown): boolean {
     && typeof value.angleDeg === "number" && Number.isFinite(value.angleDeg) && value.angleDeg !== 0 && Math.abs(value.angleDeg) <= 180;
 }
 
+/** A frame is an origin within reach and two unit, perpendicular axes (the third axis follows from them). */
+export function validSketchPlaneFrame(value: unknown): boolean {
+  if (!isRecord(value) || !exactKeys(value, ["originMm", "uAxis", "normal"])) return false;
+  const triple = (candidate: unknown, limit: number): candidate is readonly [number, number, number] => Array.isArray(candidate) && candidate.length === 3
+    && candidate.every((part) => typeof part === "number" && Number.isFinite(part) && Math.abs(part) <= limit);
+  if (!triple(value.originMm, 100_000) || !triple(value.uAxis, 1.000001) || !triple(value.normal, 1.000001)) return false;
+  const u = value.uAxis;
+  const n = value.normal;
+  return Math.abs(Math.hypot(u[0], u[1], u[2]) - 1) < 1e-6 && Math.abs(Math.hypot(n[0], n[1], n[2]) - 1) < 1e-6
+    && Math.abs(u[0] * n[0] + u[1] * n[1] + u[2] * n[2]) < 1e-6;
+}
+
 function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   const optionalOffset = isRecord(value) && Object.hasOwn(value, "planeOffsetMm") ? ["planeOffsetMm"] : [];
   const optionalTilt = isRecord(value) && Object.hasOwn(value, "planeTilt") ? ["planeTilt"] : [];
-  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt])
+  const optionalFrame = isRecord(value) && Object.hasOwn(value, "planeFrame") ? ["planeFrame"] : [];
+  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame])
     || (optionalTilt.length > 0 && !validSketchPlaneTilt(value.planeTilt))
+    || (optionalFrame.length > 0 && (!validSketchPlaneFrame(value.planeFrame) || value.plane !== "datum:xy" || optionalOffset.length > 0 || optionalTilt.length > 0))
     || value.id !== "sketch:primary-profile" || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(value.plane) || !shortText(value.name, 1, 120)
     || (optionalOffset.length > 0 && !finiteRange(value.planeOffsetMm, -100_000, 100_000))
     || !finiteRange(value.gridMm, 0.1, 100) || !finiteRange(value.snapToleranceMm, 0.01, 10)

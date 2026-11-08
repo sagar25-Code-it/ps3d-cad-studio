@@ -200,6 +200,17 @@ export interface SketchPlaneTilt {
   readonly angleDeg: number;
 }
 
+/**
+ * A sketch plane given by its own frame: the sketch's (0, 0) sits at `originMm`, its X runs along `uAxis` and it rises along `normal`
+ * (so its Y is `normal × uAxis`). This is how a sketch sits on a "three points" construction plane. The axes are unit length and
+ * perpendicular. The sketch is built on the XY datum with no offset or tilt, then moved onto this frame.
+ */
+export interface SketchPlaneFrame {
+  readonly originMm: Vec3;
+  readonly uAxis: Vec3;
+  readonly normal: Vec3;
+}
+
 export interface WorkbenchSketch {
   readonly id: "sketch:primary-profile";
   readonly name: string;
@@ -211,6 +222,8 @@ export interface WorkbenchSketch {
   readonly planeOffsetMm?: number;
   /** Absent means the sketch plane is not tilted. Solids built from the sketch are rotated by this after they are placed. */
   readonly planeTilt?: SketchPlaneTilt;
+  /** Absent for a datum plane. Present only with `plane: "datum:xy"` and neither an offset nor a tilt. */
+  readonly planeFrame?: SketchPlaneFrame;
   readonly gridMm: number;
   readonly snapToleranceMm: number;
   readonly entities: readonly SketchEntity[];
@@ -1246,13 +1259,13 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly label: string;
     }
   | { readonly kind: "set-sketch-constraints-suppressed"; readonly constraintIds: readonly string[]; readonly suppressed: boolean }
-  | { readonly kind: "set-sketch-plane"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt }
+  | { readonly kind: "set-sketch-plane"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame }
   /** Finishes the working sketch into the timeline: a new sketch feature, or an update of the one being edited. */
   | { readonly kind: "commit-design-sketch"; readonly featureId: string; readonly name: string }
   /** Reopens a sketch feature as the working sketch. */
   | { readonly kind: "edit-design-sketch"; readonly featureId: string }
   /** Starts a new, empty working sketch on a plane (the previous one should be finished first), optionally offset along its normal. */
-  | { readonly kind: "new-design-sketch"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt }
+  | { readonly kind: "new-design-sketch"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame }
   /** Adds an extrude or revolve feature together with the solid the kernel built for it. */
   | { readonly kind: "add-design-solid"; readonly feature: DesignSolidFeature; readonly body: GeneralSolidBody }
   /** Changes a solid feature's parameters and replaces its solid. */

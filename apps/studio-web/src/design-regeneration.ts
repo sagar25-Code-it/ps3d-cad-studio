@@ -1,7 +1,7 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
-import { attachEdgeFlange, booleanMeshes, flangeReliefs, holeCutter, snapToAxis, tiltPoint, tiltPositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
+import { attachEdgeFlange, booleanMeshes, flangeReliefs, holeCutter, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 
 /**
@@ -111,14 +111,13 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   });
   if (!built.ok) return { ok: false, message: built.message };
   const placed = shifted(built.body, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0));
-  // A sketch on an angle plane is built on its datum plane and then turned about the world axis, which keeps the face names.
-  return { ok: true, body: sketch.planeTilt === undefined ? placed : { ...placed, positionsMm: tiltPositions(placed.positionsMm, sketch.planeTilt) } };
+  // A sketch on an angle or three-point plane is built on its datum plane and then moved onto that plane, which keeps the face names.
+  return { ok: true, body: isPlaced(sketch) ? { ...placed, positionsMm: placePositions(placed.positionsMm, sketch) } : placed };
 }
 
-/** The direction a sketch's solids rise in: its datum plane's normal, turned by the sketch's tilt. */
+/** The direction a sketch's solids rise in: its datum plane's normal, moved onto the sketch's tilt or three-point plane. */
 export function sketchNormal(sketch: DesignSketchFeature): readonly [number, number, number] {
-  const normal = NORMALS[planeKeyOf(sketch.sketch.plane)];
-  return sketch.sketch.planeTilt === undefined ? normal : tiltPoint(normal, sketch.sketch.planeTilt);
+  return placeDirection(NORMALS[planeKeyOf(sketch.sketch.plane)], sketch.sketch);
 }
 
 const PLANE_AXIS: Readonly<Record<SketchPlane, 0 | 1 | 2>> = { xy: 2, xz: 1, yz: 0 };
@@ -129,8 +128,8 @@ const PLANE_AXIS: Readonly<Record<SketchPlane, 0 | 1 | 2>> = { xy: 2, xz: 1, yz:
  */
 export function throughAllOverride(step: DesignSolidFeature, sketchFeature: DesignSketchFeature, targetBody: GeneralSolidBody): DesignSolidFeature {
   const sketch = sketchFeature;
-  // On a tilted sketch plane, measure in the plane's own frame by turning the body back first.
-  const target = sketch.sketch.planeTilt === undefined ? targetBody : { ...targetBody, positionsMm: tiltPositions(targetBody.positionsMm, sketch.sketch.planeTilt, true) };
+  // On a tilted or three-point sketch plane, measure in the plane's own frame by moving the body back first.
+  const target = isPlaced(sketch.sketch) ? { ...targetBody, positionsMm: placePositions(targetBody.positionsMm, sketch.sketch, true) } : targetBody;
   const axis = PLANE_AXIS[planeKeyOf(sketch.sketch.plane)];
   const planeCoordinate = planeWorldCoordinate(sketch.sketch.plane, sketch.sketch.planeOffsetMm ?? 0).valueMm;
   let minimum = Infinity;
@@ -175,9 +174,9 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
     // Edge flange: bend a flange up from a named top-face edge of the sheet this body started as.
     if (step.kind === "sheet-edge-flange") {
       if (current === undefined || baseBody === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sheet this flange bends from could not be built." }); continue; }
-      const plateTilt = history.features.find((candidate): candidate is DesignSketchFeature => candidate.id === base.sketchFeatureId && candidate.kind === "sketch")?.sketch.planeTilt;
+      const plateSketch = history.features.find((candidate): candidate is DesignSketchFeature => candidate.id === base.sketchFeatureId && candidate.kind === "sketch")?.sketch;
       const flatNormal = NORMALS[baseBody.feature?.plane ?? "xy"];
-      const plateNormal = plateTilt === undefined ? flatNormal : tiltPoint(flatNormal, plateTilt);
+      const plateNormal = plateSketch === undefined ? flatNormal : placeDirection(flatNormal, plateSketch);
       const plateFrame = sheetFrameOf(baseBody, plateNormal);
       const liveFlanges = steps.filter((other) => other.kind === "sheet-edge-flange" && isFeatureActive(history, other.id)).map((other) => ({ edgeIndex: other.flangeEdgeIndex ?? 0, reliefMm: other.flangeReliefMm ?? 0 }));
       const relief = plateFrame === undefined ? { startMm: 0, endMm: 0 } : flangeReliefs(plateFrame, step.flangeEdgeIndex ?? 0, liveFlanges);
@@ -431,8 +430,8 @@ export async function flatPatternForBody(project: WorkbenchProject, bodyId: stri
   const rebuilt = await rebuildSolidFeature(base, sketchFeature);
   if (!rebuilt.ok) return { ok: false, message: rebuilt.message };
   const plane = rebuilt.body.feature?.plane ?? planeKeyOf(sketchFeature.sketch.plane);
-  // A plate on a tilted sketch plane is turned back flat first, so its top face lies in the sketch's own plane.
-  const flatBody = sketchFeature.sketch.planeTilt === undefined ? rebuilt.body : { ...rebuilt.body, positionsMm: tiltPositions(rebuilt.body.positionsMm, sketchFeature.sketch.planeTilt, true) };
+  // A plate on a tilted or three-point sketch plane is moved back flat first, so its top face lies in the sketch's own plane.
+  const flatBody = isPlaced(sketchFeature.sketch) ? { ...rebuilt.body, positionsMm: placePositions(rebuilt.body.positionsMm, sketchFeature.sketch, true) } : rebuilt.body;
   const frame = sheetFrameOf(flatBody, NORMALS[plane]);
   if (frame === undefined) return { ok: false, message: "This body has no flat top face with a thickness to unfold." };
   const flanges = steps

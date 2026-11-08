@@ -341,7 +341,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const plane = planeKeyOf(props.sketch.plane);
   const planeInfo = PLANE_INFO[plane];
   const planeWhere = planeWorldCoordinate(props.sketch.plane, props.sketch.planeOffsetMm ?? 0);
-  const planePlacement = planeWhere.valueMm === 0 ? `${planeInfo.name} plane` : `${planeInfo.name} plane at ${planeWhere.axisName} = ${Number(planeWhere.valueMm.toFixed(3))} mm`;
+  const planePlacement = props.sketch.planeFrame !== undefined ? "plane through three points"
+    : planeWhere.valueMm === 0 ? `${planeInfo.name} plane` : `${planeInfo.name} plane at ${planeWhere.axisName} = ${Number(planeWhere.valueMm.toFixed(3))} mm`;
   // While a curve is being dragged the canvas, the analysis and the profiles follow the live result; nothing is committed until release.
   const workingSketch = useMemo<WorkbenchSketch>(() => dragLive === undefined ? props.sketch : { ...props.sketch, entities: dragLive.entities }, [props.sketch, dragLive]);
   const visibleEntities = useMemo(() => workingSketch.entities.filter((entity) => entity.visible !== false), [workingSketch.entities]);
