@@ -457,7 +457,25 @@ function curvesOf(entity: SketchEntity): readonly Curve[] {
     const samples = sampleSpline(entity.fitPoints);
     return samples.slice(0, -1).map((sample, index): Curve => ({ kind: "line", a: sample, b: samples[index + 1]! }));
   }
+  if (entity.kind === "ellipse") {
+    // A closed polyline of short chords (within 0.01 mm of the true ellipse up to 100 mm), so Trim and Extend can use it as a boundary.
+    const samples = ellipseSamples(entity, 256);
+    return samples.map((sample, index): Curve => ({ kind: "line", a: sample, b: samples[(index + 1) % samples.length]! }));
+  }
   return [];
+}
+
+/** Points on an ellipse at evenly spaced parameter values, counter-clockwise from the major axis end. */
+export function ellipseSamples(entity: Extract<SketchEntity, { kind: "ellipse" }>, count: number): readonly Vec2[] {
+  const radians = (entity.rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return Array.from({ length: count }, (_, index): Vec2 => {
+    const t = (index / count) * TWO_PI;
+    const x = entity.majorRadiusMm * Math.cos(t);
+    const y = entity.minorRadiusMm * Math.sin(t);
+    return [entity.center[0] + x * cos - y * sin, entity.center[1] + x * sin + y * cos];
+  });
 }
 
 interface ArcFrame {
@@ -487,71 +505,7 @@ function arcEntity(template: SketchEntity, id: string, center: Vec2, radius: num
   return { id, kind: "arc", start: clockwise ? last : first, mid, end: clockwise ? first : last, construction: template.construction, ...(template.visible === undefined ? {} : { visible: template.visible }) };
 }
 
-/** Removes the part of a curve between its neighbouring intersections that is nearest the pick point. */
-export function trimAt(context: SketchEditContext, targetId: string, pick: Vec2): SketchEditResult {
-  const target = find(context.sketch, targetId);
-  if (target === undefined) return reject("Pick a curve to trim.");
-  const others = context.sketch.entities.filter((entity) => entity.id !== targetId && entity.visible !== false && entity.kind !== "point");
-  const boundaries = others.flatMap(curvesOf);
-  if (target.kind === "line") {
-    const direction: Vec2 = [target.end[0] - target.start[0], target.end[1] - target.start[1]];
-    const length = Math.hypot(direction[0], direction[1]);
-    const hits = boundaries.flatMap((curve) => lineHits(target.start, target.end, curve)).filter((t) => t > 1e-6 && t < 1 - 1e-6).sort((a, b) => a - b);
-    const pickT = clamp(((pick[0] - target.start[0]) * direction[0] + (pick[1] - target.start[1]) * direction[1]) / (length * length), 0, 1);
-    const lower = [...hits].reverse().find((t) => t <= pickT) ?? 0;
-    const upper = hits.find((t) => t >= pickT) ?? 1;
-    const at = (t: number): Vec2 => [target.start[0] + direction[0] * t, target.start[1] + direction[1] * t];
-    if (lower === 0 && upper === 1) return plan("Trim (deleted the whole line: nothing crosses it)", { removeEntityIds: [target.id] });
-    const pieces: Line[] = [];
-    if (lower > 0) pieces.push({ ...target, end: at(lower) });
-    if (upper < 1) pieces.push(lower > 0 ? { ...target, id: context.newId("entity"), start: at(upper) } : { ...target, start: at(upper) });
-    return plan("Trim line", { updateEntities: pieces.filter((piece) => piece.id === target.id), addEntities: pieces.filter((piece) => piece.id !== target.id) });
-  }
-  if (target.kind === "circle") {
-    const angles = boundaries.flatMap((curve) => circleHits(target.center, target.radiusMm, curve)).map(wrapTwoPi).sort((a, b) => a - b);
-    const unique = angles.filter((angle, index) => index === 0 || angle - angles[index - 1]! > 1e-6);
-    if (unique.length < 2) return reject(unique.length === 0 ? "Nothing crosses this circle, so there is nothing to trim against." : "A circle needs at least two crossings to trim an arc out of it.", [target.id]);
-    const pickAngle = wrapTwoPi(Math.atan2(pick[1] - target.center[1], pick[0] - target.center[0]));
-    const before = [...unique].reverse().find((angle) => angle <= pickAngle) ?? unique[unique.length - 1]!;
-    const after = unique.find((angle) => angle > pickAngle) ?? unique[0]!;
-    // Keep the arc from `after` counter-clockwise round to `before`.
-    const kept = arcEntity(target, context.newId("entity"), target.center, target.radiusMm, after, wrapTwoPi(before - after), false);
-    return plan("Trim circle into an arc", { removeEntityIds: [target.id], addEntities: [kept] });
-  }
-  if (target.kind === "arc") {
-    const frame = arcFrame(target);
-    if (frame === undefined) return reject("The arc is degenerate.", [target.id]);
-    const offsets = boundaries.flatMap((curve) => circleHits(frame.center, frame.radius, curve)).map((angle) => wrapTwoPi(angle - frame.startAngle)).filter((offset) => offset > 1e-6 && offset < frame.sweep - 1e-6).sort((a, b) => a - b);
-    const pickOffset = wrapTwoPi(Math.atan2(pick[1] - frame.center[1], pick[0] - frame.center[0]) - frame.startAngle);
-    const pickClamped = pickOffset > frame.sweep ? (pickOffset - frame.sweep < TWO_PI - pickOffset ? frame.sweep : 0) : pickOffset;
-    const lower = [...offsets].reverse().find((offset) => offset <= pickClamped) ?? 0;
-    const upper = offsets.find((offset) => offset >= pickClamped) ?? frame.sweep;
-    if (lower === 0 && upper === frame.sweep) return plan("Trim (deleted the whole arc: nothing crosses it)", { removeEntityIds: [target.id] });
-    const added: Arc[] = [];
-    const updated: Arc[] = [];
-    if (lower > 0) updated.push(arcEntity(target, target.id, frame.center, frame.radius, frame.startAngle, lower, frame.clockwise));
-    if (upper < frame.sweep) (lower > 0 ? added : updated).push(arcEntity(target, lower > 0 ? context.newId("entity") : target.id, frame.center, frame.radius, frame.startAngle + upper, frame.sweep - upper, frame.clockwise));
-    return plan("Trim arc", { updateEntities: updated, addEntities: added });
-  }
-  return reject(`Trim applies to lines, arcs and circles; a ${target.kind} is a single entity.`, [target.id], "Fillet or Chamfer a rectangle first, which turns it into separate lines and arcs.");
-}
-
-/** Extends the end of a line nearest the pick point to the first curve it reaches. */
-export function extendAt(context: SketchEditContext, targetId: string, pick: Vec2): SketchEditResult {
-  const target = find(context.sketch, targetId);
-  if (target?.kind !== "line") return reject("Extend applies to lines. Pick near the end of a line.");
-  const nearStart = distance(pick, target.start) <= distance(pick, target.end);
-  const from = nearStart ? target.start : target.end;
-  const away: Vec2 = nearStart ? [target.start[0] - target.end[0], target.start[1] - target.end[1]] : [target.end[0] - target.start[0], target.end[1] - target.start[1]];
-  const length = Math.hypot(away[0], away[1]);
-  const ray: Vec2 = [from[0] + away[0] / length, from[1] + away[1] / length];
-  const others = context.sketch.entities.filter((entity) => entity.id !== targetId && entity.visible !== false && entity.kind !== "point");
-  // Parameters along the ray from `from`: positive values lie beyond the end.
-  const hits = others.flatMap(curvesOf).flatMap((curve) => lineHits(from, ray, curve)).filter((t) => t > 1e-6).sort((a, b) => a - b);
-  if (hits.length === 0) return reject("Nothing lies beyond that end of the line, so it cannot be extended.", [target.id]);
-  const reach: Vec2 = [from[0] + (ray[0] - from[0]) * hits[0]!, from[1] + (ray[1] - from[1]) * hits[0]!];
-  return plan("Extend line", { updateEntities: [nearStart ? { ...target, start: reach } : { ...target, end: reach }] });
-}
+export { extendAt, powerTrim, trimAt, trimToClosest } from "./trim-extend.js";
 
 /** Parameters t (0 at a, 1 at b, extended beyond) where the infinite line a-b meets a bounded curve. */
 function lineHits(a: Vec2, b: Vec2, curve: Curve): number[] {

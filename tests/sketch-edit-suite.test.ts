@@ -1,7 +1,9 @@
 import { sketchEditCornerTests } from "./sketch-edit-corners.test.js";
+import { sketchEditTrimTests } from "./sketch-edit-trim.test.js";
 import type { TestCase } from "./test-kit.js";
 
 /** The sketch edit and modify tools work package: every audit repro as a regression test. */
 export const sketchEditSuiteTests: readonly TestCase[] = [
-  ...sketchEditCornerTests
+  ...sketchEditCornerTests,
+  ...sketchEditTrimTests
 ];
