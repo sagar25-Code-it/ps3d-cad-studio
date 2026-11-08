@@ -66,7 +66,7 @@ function dropCollinear(points: readonly Pt[], closed: boolean): Pt[] {
     const after = points[(index + 1) % n]!;
     const along = (point[0] - before[0]) * (after[0] - before[0]) + (point[1] - before[1]) * (after[1] - before[1]);
     const span = (after[0] - before[0]) ** 2 + (after[1] - before[1]) ** 2;
-    return !(span > 1e-12 && along > 0 && along < span && distanceToLine(point, before, after) <= 1e-5);
+    return !(span > 1e-12 && along > 0 && along < span && distanceToLine(point, before, after) <= 2e-4);
   });
 }
 

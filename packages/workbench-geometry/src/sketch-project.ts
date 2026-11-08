@@ -81,14 +81,14 @@ const length = (a: Vec3): number => Math.hypot(a[0], a[1], a[2]);
 const MAX_TRIANGLES = 200_000;
 const MAX_SILHOUETTE_SEGMENTS = 6000;
 /** Mesh vertices closer than this are the same vertex. */
-const WELD_MM = 1e-4;
-/** Projected points closer than this are the same sketch point; coordinates are rounded to a micron so shared ends match exactly. */
-const SNAP_MM = 1e-5;
+const WELD_MM = 2e-4;
+/** Projected points closer than this are the same sketch point (mesh Boolean results carry noise of this size); coordinates are rounded to a micron. */
+const SNAP_MM = 1e-4;
 const MIN_GEOMETRY_MM = 0.01;
 /** An edge whose two faces meet at more than this bends the surface enough to count as an edge to project. */
 const DEFAULT_CREASE_DEG = 30;
-/** A triangle whose normal is within this of perpendicular to the view direction is edge-on. */
-const EDGE_ON = 1e-6;
+/** A triangle whose unit normal is within this of perpendicular to the view direction (0.06°) is edge-on; mesh noise tilts walls by about that much. */
+const EDGE_ON = 1e-3;
 
 // ---------------------------------------------------------------------------------------------
 // Welding points
@@ -249,7 +249,8 @@ export interface CurveSet {
 const r6 = (value: number): number => Math.round(value * 1e6) / 1e6;
 const ptKey = (p: Pt): string => `${Math.round(p[0] * 1e5)}:${Math.round(p[1] * 1e5)}`;
 
-function curvesFromSegments(segments: readonly (readonly [Pt, Pt])[]): CurveSet {
+function curvesFromSegments(segments: readonly (readonly [Pt, Pt])[], touching = true): CurveSet {
+  if (touching && segments.length <= MAX_SPLIT_SEGMENTS) segments = splitSegments(segments, false);
   const welder = new Welder(2, SNAP_MM, 1e-6);
   const edges: (readonly [number, number])[] = [];
   for (const [p, q] of segments) edges.push([welder.add(p), welder.add(q)]);
@@ -402,13 +403,50 @@ export function intersectBodyWithPlane(mesh: ProjectionMesh, frame: SketchFrame)
 
 type Seg2 = readonly [Pt, Pt];
 
-/** Cuts every segment where another one crosses it or ends on it, so the pieces meet only at their ends. */
-function splitAtCrossings(segments: readonly Seg2[]): Seg2[] {
+/**
+ * Splits segments until they only meet at their ends. A cut makes new end points that may touch other pieces, so it repeats a few
+ * times, dropping pieces that have become the same.
+ */
+function splitSegments(segments: readonly Seg2[], crossings: boolean): Seg2[] {
+  const unique = (list: readonly Seg2[]): Seg2[] => {
+    const seen = new Set<string>();
+    const out: Seg2[] = [];
+    for (const segment of list) {
+      const a = ptKey4(segment[0]);
+      const b = ptKey4(segment[1]);
+      if (a === b) continue;
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(segment);
+    }
+    return out;
+  };
+  let current = unique(splitOnce(segments, crossings));
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = unique(splitOnce(current, false));
+    if (next.length === current.length) break;
+    current = next;
+  }
+  return current;
+}
+
+const ptKey4 = (p: Pt): string => `${Math.round(p[0] * 1e4)}:${Math.round(p[1] * 1e4)}`;
+
+/** An end of one segment this close to the middle of another counts as touching it. */
+const TOUCH_MM = 2e-4;
+const MAX_SPLIT_SEGMENTS = 30_000;
+
+/**
+ * Cuts every segment where another one ends on it (and, with `crossings`, where two cross), so the pieces meet only at their ends.
+ * A cut lands exactly on the other segment's end point, so two pieces that overlap along a line end up as identical pieces and can
+ * be told apart from different edges. Mesh edges that are long on one face and split into pieces on the next are the usual cause.
+ */
+function splitOnce(segments: readonly Seg2[], crossings: boolean): Seg2[] {
   const n = segments.length;
   const box = segments.map(([p, q]) => [Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.max(p[0], q[0]), Math.max(p[1], q[1])] as const);
   const order = [...segments.keys()].sort((a, b) => box[a]![0] - box[b]![0]);
-  const cuts: number[][] = Array.from({ length: n }, () => [0, 1]);
-  const EPS = 1e-6;
+  const cuts: { readonly t: number; readonly point: Pt }[][] = Array.from({ length: n }, () => []);
   const tOf = (p: Pt, a: Pt, b: Pt): { readonly t: number; readonly off: number } => {
     const dx = b[0] - a[0];
     const dy = b[1] - a[1];
@@ -420,18 +458,19 @@ function splitAtCrossings(segments: readonly Seg2[]): Seg2[] {
     const i = order[x]!;
     for (let y = x + 1; y < n; y += 1) {
       const j = order[y]!;
-      if (box[j]![0] > box[i]![2] + EPS) break;
-      if (box[j]![1] > box[i]![3] + EPS || box[j]![3] < box[i]![1] - EPS) continue;
+      if (box[j]![0] > box[i]![2] + TOUCH_MM) break;
+      if (box[j]![1] > box[i]![3] + TOUCH_MM || box[j]![3] < box[i]![1] - TOUCH_MM) continue;
       const [a, b] = segments[i]!;
       const [c, d] = segments[j]!;
-      // An end of one lying on the other cuts the other there (this also splits collinear overlaps).
       const ends: readonly (readonly [number, Pt])[] = [[i, c], [i, d], [j, a], [j, b]];
       for (const [seg, end] of ends) {
         const [from, to] = segments[seg]!;
         const { t, off } = tOf(end, from, to);
-        if (off <= EPS && t > 1e-9 && t < 1 - 1e-9) cuts[seg]!.push(t);
+        const along = t * Math.hypot(to[0] - from[0], to[1] - from[1]);
+        const total = Math.hypot(to[0] - from[0], to[1] - from[1]);
+        if (off <= TOUCH_MM && along > TOUCH_MM && along < total - TOUCH_MM) cuts[seg]!.push({ t, point: end });
       }
-      // A proper crossing cuts both.
+      if (!crossings) continue;
       const rx = b[0] - a[0];
       const ry = b[1] - a[1];
       const sx = d[0] - c[0];
@@ -439,18 +478,18 @@ function splitAtCrossings(segments: readonly Seg2[]): Seg2[] {
       const denominator = rx * sy - ry * sx;
       if (Math.abs(denominator) < 1e-12) continue;
       const t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / denominator;
-      const s = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / denominator;
-      if (t > 1e-9 && t < 1 - 1e-9 && s > -1e-9 && s < 1 + 1e-9) cuts[i]!.push(t);
-      if (s > 1e-9 && s < 1 - 1e-9 && t > -1e-9 && t < 1 + 1e-9) cuts[j]!.push(s);
+      const u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / denominator;
+      if (t > 1e-9 && t < 1 - 1e-9 && u > -1e-9 && u < 1 + 1e-9) {
+        const point: Pt = [a[0] + rx * t, a[1] + ry * t];
+        cuts[i]!.push({ t, point });
+        if (u > 1e-9 && u < 1 - 1e-9) cuts[j]!.push({ t: u, point });
+      }
     }
   }
   const out: Seg2[] = [];
   segments.forEach(([p, q], index) => {
-    const ts = [...new Set(cuts[index]!)].sort((a, b) => a - b);
-    for (let k = 0; k + 1 < ts.length; k += 1) {
-      const point = (t: number): Pt => (t === 0 ? p : t === 1 ? q : [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
-      out.push([point(ts[k]!), point(ts[k + 1]!)]);
-    }
+    const stops = [{ t: 0, point: p }, ...cuts[index]!.sort((m, k) => m.t - k.t), { t: 1, point: q }];
+    for (let k = 0; k + 1 < stops.length; k += 1) out.push([stops[k]!.point, stops[k + 1]!.point]);
   });
   return out;
 }
@@ -521,7 +560,7 @@ export function silhouetteOfBody(mesh: ProjectionMesh, frame: SketchFrame): Curv
   const welder = new Welder(2, SNAP_MM, 1e-6);
   const seen = new Set<string>();
   const outline: Seg2[] = [];
-  for (const [p, q] of splitAtCrossings(candidates)) {
+  for (const [p, q] of splitSegments(candidates, true)) {
     const a = welder.add(p);
     const b = welder.add(q);
     if (a === b) continue;
@@ -533,7 +572,7 @@ export function silhouetteOfBody(mesh: ProjectionMesh, frame: SketchFrame): Curv
     const dx = end[0]! - start[0]!;
     const dy = end[1]! - start[1]!;
     const size = Math.hypot(dx, dy);
-    const offset = Math.min(5e-4, size / 4);
+    const offset = Math.min(1e-3, size / 4);
     const mx = (start[0]! + end[0]!) / 2;
     const my = (start[1]! + end[1]!) / 2;
     const nx = (-dy / size) * offset;
@@ -541,7 +580,7 @@ export function silhouetteOfBody(mesh: ProjectionMesh, frame: SketchFrame): Curv
     if (covered(mx + nx, my + ny) !== covered(mx - nx, my - ny)) outline.push([[start[0]!, start[1]!], [end[0]!, end[1]!]]);
   }
   if (outline.length === 0) return { ok: false, message: "The body has no outline when seen along the sketch normal." };
-  return { ok: true, value: curvesFromSegments(outline) };
+  return { ok: true, value: curvesFromSegments(outline, false) };
 }
 
 // ---------------------------------------------------------------------------------------------

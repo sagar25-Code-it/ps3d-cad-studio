@@ -3,7 +3,7 @@ import { applyWorkbenchOperation, createWorkbenchProject, designOf, validateWork
 import { solidMetrics } from "../packages/workbench-core/src/solid-metrics.js";
 import { detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
 import { fitPolyline, type FitPrimitive, type Pt } from "../packages/workbench-geometry/src/curve-fit.js";
-import { nearestPickableEdge, pickableEdges } from "../packages/workbench-geometry/src/mesh-modify.js";
+import { meshHole, nearestPickableEdge, pickableEdges } from "../packages/workbench-geometry/src/mesh-modify.js";
 import { frameThroughPoints, placePoint } from "../packages/workbench-geometry/src/sketch-placement.js";
 import { chooseFace, planProjection, projectBodyEdges, sketchFrameOf, sketchToWorld, worldToSketch, type ProjectionMode, type SketchFrameSource } from "../packages/workbench-geometry/src/sketch-project.js";
 import { replayAllBodies, rebuildSolidFeature } from "../apps/studio-web/src/design-regeneration.js";
@@ -239,8 +239,25 @@ export const sketchProjectTests: readonly TestCase[] = [
         const expected = new Set(BOX_VERTICES.map(datumToSketch));
         for (const key of endpointKeys(brought.entities)) assert(expected.has(key), `${name}: end ${key} is a projected corner (${[...expected].join(" | ")})`);
         assert(endpointKeys(brought.entities).size === expected.size, `${name}: all eight corners show (${endpointKeys(brought.entities).size})`);
-        // Every one of the box's twelve edges leaves a distinct line, because no edge runs along these normals.
-        assert(lines.length === 12, `${name}: twelve edges give twelve lines, got ${lines.length}`);
+        // Every one of the box's twelve edges, projected independently, lies along one of the lines. Edges that overlap on the sketch
+        // (two parallel edges seen one behind the other) join into one longer line, so there can be fewer than twelve lines.
+        const sketchPoint = (p: readonly [number, number, number]): readonly [number, number] => {
+          const d = placePoint(p, spec, true);
+          return spec.plane === "datum:xy" ? [d[0], d[1]] : spec.plane === "datum:xz" ? [d[0], d[2]] : [-d[2], d[1]];
+        };
+        const onSomeLine = (point: readonly [number, number]): boolean => lines.some((entity) => {
+          if (entity.kind !== "line") return false;
+          const [dx, dy] = [entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]];
+          const t = ((point[0] - entity.start[0]) * dx + (point[1] - entity.start[1]) * dy) / (dx * dx + dy * dy);
+          return t > -1e-9 && t < 1 + 1e-9 && Math.hypot(entity.start[0] + dx * t - point[0], entity.start[1] + dy * t - point[1]) < 1e-5;
+        });
+        const edges = BOX_VERTICES.flatMap((a, i) => BOX_VERTICES.slice(i + 1).filter((b) => a.filter((v, axis) => v !== b[axis]).length === 1).map((b) => [a, b] as const));
+        assert(edges.length === 12, "a box has twelve edges");
+        for (const [a, b] of edges) {
+          const [pa, pb] = [sketchPoint(a), sketchPoint(b)];
+          assert([pa, pb, [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2] as const].every(onSomeLine), `${name}: the edge ${a.join(",")} to ${b.join(",")} lies along a projected line`);
+        }
+        assert(lines.length >= 8 && lines.length <= 12, `${name}: between eight and twelve lines, got ${lines.length}`);
       }
     }
   },
@@ -422,6 +439,29 @@ export const sketchProjectTests: readonly TestCase[] = [
       assert(detectSketchProfiles(real.project.sketch).length === 1, "while real curves do");
       const missing = projectBodyEdges({ positionsMm: cylinder.body.positionsMm, indices: cylinder.body.indices }, sketchFrameOf(XY as SketchFrameSource), { segments: [] });
       assert(!missing.ok, "no edges, nothing to project");
+    }
+  },
+  {
+    name: "A box drilled with the mesh hole tool (a Boolean result with noisy slivers) still gives a clean outline, hole circle and section",
+    run: async () => {
+      const { project, body } = await box();
+      const drilled = meshHole(body, { diameterMm: 10, depthMm: 40, axis: "z", originMm: [20, 15, 10] });
+      assert(drilled.ok, "the hole is cut");
+      if (!drilled.ok) return;
+      const holed: GeneralSolidBody = { ...body, positionsMm: Array.from(drilled.positionsMm), indices: Array.from(drilled.indices) };
+      delete (holed as { brep?: unknown }).brep;
+      for (const mode of ["project", "silhouette", "intersect"] as const) {
+        const spec: PlaneSpec = mode === "intersect" ? { plane: "datum:xy", planeOffsetMm: 5 } : XY;
+        const brought = bring(project, holed, spec, mode);
+        assert(kindsOf(brought.entities) === "circle,line,line,line,line", `${mode}: the outline and the hole, nothing else: ${kindsOf(brought.entities)}`);
+        const hole = brought.entities.find((entity) => entity.kind === "circle") as Extract<SketchEntity, { kind: "circle" }>;
+        near(hole.radiusMm, 5, 0.01, `${mode}: the hole radius`);
+        near(hole.center[0], 20, 1e-3, `${mode}: the hole centre x`);
+        near(hole.center[1], 15, 1e-3, `${mode}: the hole centre y`);
+      }
+      const plate = bring(project, holed, XY, "silhouette");
+      const solid = await extrudeWorking(plate.project, "drilled-copy", 10);
+      near(volumeOf(solid.body), volumeOf(holed), volumeOf(holed) * 0.01, "the outline and hole extrude to the drilled box's volume");
     }
   },
   {
