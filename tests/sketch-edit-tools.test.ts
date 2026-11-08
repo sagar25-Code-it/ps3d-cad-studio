@@ -133,14 +133,14 @@ export const sketchEditToolTests: readonly TestCase[] = [
     }
   },
   {
-    name: "mirror copies entities across a line and records symmetric relations that hold",
+    name: "mirror copies entities across a line and records symmetric relations (now for every kind) that hold",
     run: () => {
       const rectangle: SketchEntity = { id: "entity:r", kind: "rectangle", center: [5, 2], widthMm: 4, heightMm: 2, rotationDeg: 30, construction: false };
       const project = projectWith([line("a", [2, 1], [5, 3]), circle("c", [4, 6], 1.5), rectangle, line("axis", [0, -10], [0, 10])]);
       const planned = mirrorEntities(context(project), ids("a", "c", "r", "axis"));
       assert(planned.ok, "mirror plans");
       equal(planned.value.addEntities.length, 3, "one copy per mirrored entity");
-      equal(planned.value.addConstraints.length, 2, "line and circle get symmetric relations; the rectangle does not");
+      equal(planned.value.addConstraints.length, 3, "line, circle and rectangle all get a symmetric relation about the axis (the rectangle one is recorded, not solved)");
       const committed = commit(project, planned);
       assert(committed.ok, "the mirrored sketch passes the solver without moving anything");
       const copyLine = linesOf(committed.value.project).find((candidate) => candidate.id !== "entity:a" && candidate.id !== "entity:axis")!;
