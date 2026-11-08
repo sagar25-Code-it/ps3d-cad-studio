@@ -385,7 +385,7 @@ function evaluateRows(component: Component, x: Float64Array, frozen: Uint8Array)
 
 /** Anchored variables that barely moved go back to exactly where they were, if the relations still hold with them held there. */
 function snapAnchored(model: SolverModel, component: Component, frozen: Uint8Array): void {
-  const candidates = component.variables.filter((variable) => model.weight[variable]! > 1 && frozen[variable] === 0 && model.x[variable] !== model.x0[variable] && Math.abs(model.x[variable]! - model.x0[variable]!) < 1e-4);
+  const candidates = component.variables.filter((variable) => model.anchored[variable] === 1 && frozen[variable] === 0 && model.x[variable] !== model.x0[variable] && Math.abs(model.x[variable]! - model.x0[variable]!) < 5e-3);
   if (candidates.length === 0) return;
   const backup = component.variables.map((variable) => model.x[variable]!);
   const held = Uint8Array.from(frozen);

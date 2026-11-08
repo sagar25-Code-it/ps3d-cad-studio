@@ -11,7 +11,7 @@ import type { SketchDofState, SketchRelationSet } from "./types.js";
 export interface RankAnalysis {
   readonly dof: SketchDofState;
   /** Relation sets by constraint/dimension/fix ID, before human labels are applied. */
-  readonly sets: readonly { readonly kind: "redundant" | "conflicting"; readonly ids: readonly string[] }[];
+  readonly sets: readonly { readonly kind: "redundant" | "conflicting"; readonly ids: readonly string[]; /** For a redundant set: the relation, made last, that the others already imply. */ readonly implied: string }[];
 }
 
 interface JacobianRow {
@@ -127,9 +127,14 @@ export function analyzeRank(model: SolverModel, options: { readonly invalid?: bo
     }
   }
 
-  const setMap = new Map<string, { kind: "redundant" | "conflicting"; ids: string[] }>();
+  const setMap = new Map<string, { kind: "redundant" | "conflicting"; ids: string[]; implied: string }>();
   const addSet = (kind: "redundant" | "conflicting", dependent: JacobianRow, support: readonly JacobianRow[]): void => {
     const ids = new Set<string>([dependent.equation.id]);
+    // A relation whose gradient vanished (perpendicular on lines that are already parallel) is stuck because of the others on the same curves.
+    if (kind === "conflicting" && support.length === 0 && dependent.frozenCols.length === 0) {
+      const sameCurves = (entities: readonly string[]): boolean => dependent.equation.entities.length > 0 && entities.length === dependent.equation.entities.length && entities.every((entity) => dependent.equation.entities.includes(entity));
+      for (const equation of model.equations) if (equation !== dependent.equation && sameCurves(equation.entities)) ids.add(equation.id);
+    }
     for (const row of support) {
       ids.add(row.equation.id);
       for (let index = 0; index < row.frozenCols.length; index += 1) {
@@ -143,7 +148,7 @@ export function analyzeRank(model: SolverModel, options: { readonly invalid?: bo
     }
     const sorted = [...ids].sort();
     const key = `${kind}|${sorted.join("|")}`;
-    if (!setMap.has(key)) setMap.set(key, { kind, ids: sorted });
+    if (!setMap.has(key)) setMap.set(key, { kind, ids: sorted, implied: dependent.equation.id });
   };
 
   const entityRank = new Map<string, number>();
@@ -168,8 +173,9 @@ export function analyzeRank(model: SolverModel, options: { readonly invalid?: bo
     const localIndex = new Map<number, number>();
     list.forEach((c, index) => localIndex.set(c, index));
     const sparse: SparseRow[] = groupRows.map((row) => ({ cols: row.freeCols.map((variable) => localIndex.get(column[variable]!)!), vals: row.freeVals }));
-    // Rows that carry the largest residuals go last, so a conflicting row is the one reported as dependent.
-    const order = groupRows.map((_, index) => index).sort((a, b) => Math.abs(groupRows[a]!.residual) - Math.abs(groupRows[b]!.residual) || a - b);
+    // Rows that carry the largest residuals go last, so a conflicting row is the one reported as dependent; among consistent rows the latest one made is.
+    const quantised = (row: JacobianRow): number => (Math.abs(row.residual) > REDUNDANT_RESIDUAL ? Math.abs(row.residual) : 0);
+    const order = groupRows.map((_, index) => index).sort((a, b) => quantised(groupRows[a]!) - quantised(groupRows[b]!) || a - b);
     const ordered = order.map((index) => sparse[index]!);
     const elimination = eliminateRows(ordered, list.length, 1e-7, groupRows.length <= 4000);
     rankTotal += elimination.rank;
@@ -241,7 +247,7 @@ export function describeSets(raw: RankAnalysis["sets"], labelOf: (id: string) =>
         ? `These relations contradict each other: ${list}. Remove or relax one of them.`
         : set.ids.length === 1
           ? `${labels[0]} has no effect on this geometry; it can be removed.`
-          : `These relations overlap, so one of them adds nothing: ${list}.`
+          : `${labelOf(set.implied)} adds nothing: the others already imply it (${joinNames(set.ids.filter((id) => id !== set.implied).map(labelOf).slice(0, 5))}${set.ids.length > 6 ? ` and ${set.ids.length - 6} more` : ""}).`
     };
   });
 }

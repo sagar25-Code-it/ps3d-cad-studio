@@ -26,7 +26,7 @@ import { createElectromechanicalAssembly, electricalSignature } from "./electrom
 import { createVehicleTemplate, vehicleHardPoints, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
-import { resizeSketchEntity, setSketchDimension } from "./sketch-dimension-edit.js";
+import { resizeSketchEntity, setSketchDimension, solveSummary } from "./sketch-dimension-edit.js";
 import { checkNewConstraint } from "./sketch-constraint-check.js";
 import { anchorsForConstraint, preserveForConstraint } from "./sketch-anchors.js";
 import { isSketchDatumEntityId } from "./types.js";
@@ -127,13 +127,18 @@ export function applyWorkbenchOperation(
       operationId: operation.operationId,
       kind: operation.kind,
       intentKey,
-      summary: changed.value.summary,
-      changedIds: changed.value.changedIds
+      summary: fitAuditSummary(changed.value.summary),
+      changedIds: changed.value.changedIds.slice(0, WORKBENCH_LIMITS.maxMates + 1)
     }]
   };
   const validated = validateWorkbenchProject(next);
   if (!validated.ok) return validated;
   return { ok: true, value: { project: validated.value, changedIds: changed.value.changedIds, summary: changed.value.summary, exactRetry: false } };
+}
+
+/** The audit keeps a summary of at most 240 characters; a long one (a big edit that moved many curves) is shortened rather than refused. */
+function fitAuditSummary(summary: string): string {
+  return summary.length <= 240 ? summary : `${summary.slice(0, 237)}...`;
 }
 
 const MATE_STATUS_REFRESH_KINDS: readonly WorkbenchOperation["kind"][] = [
@@ -1365,14 +1370,6 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
 /** Rejects an operation whose sketch constraints cannot all hold, leaving the sketch untouched. */
 function solveFailure(report: Extract<LiveSketchSolveReport, { readonly ok: false }>): WorkbenchResult<never> {
   return failure("CONSTRAINT_CONFLICT", report.message, report.relatedIds, report.recovery);
-}
-
-/** Status suffix describing what a constraint solve changed and what it only recorded. */
-function solveSummary(report: Extract<LiveSketchSolveReport, { readonly ok: true }>): string {
-  const parts: string[] = [];
-  if (report.notes.length > 0) parts.push(report.notes.join("; "));
-  if (report.unsolved.length > 0) parts.push(`Recorded, not solved: ${report.unsolved.map((entry) => entry.reason).join(" ")}`);
-  return parts.length === 0 ? "" : ` ${parts.join(". ")}.`;
 }
 
 function changed(project: WorkbenchProject, changedIds: readonly string[], summary: string): WorkbenchResult<{ readonly project: WorkbenchProject; readonly changedIds: readonly string[]; readonly summary: string }> {

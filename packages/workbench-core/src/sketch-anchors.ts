@@ -90,9 +90,11 @@ export function preserveForConstraint(constraint: WorkbenchSketchConstraint, ent
 
 /** Lines held tangent to a circle or arc: when the circle is resized they stay put and the circle's centre gives way. */
 function tangentLines(circleId: string, entities: ReadonlyMap<string, SketchEntity>, constraints: readonly WorkbenchSketchConstraint[]): readonly string[] {
-  return constraints
+  const lines = constraints
     .filter((candidate) => candidate.kind === "tangent" && candidate.suppressed !== true && candidate.entityIds.includes(circleId))
     .flatMap((candidate) => candidate.entityIds.filter((id) => id !== circleId && entities.get(id)?.kind === "line"));
+  // With two tangent lines (a circle between rails) neither is the reference: they open or close around the circle.
+  return lines.length === 1 ? lines : [];
 }
 
 /** The hints for (re)enforcing a dimension: the dimensioned curve keeps its place where it can, so the curves joined to it follow. */

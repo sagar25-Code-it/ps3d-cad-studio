@@ -30,7 +30,7 @@ import { validateParametricSketch } from "./validation.js";
 export { getReferencedPoint };
 
 const DEFAULT_TOLERANCE_MM = 1e-7;
-const COLLAPSE_MM = 1e-6;
+const COLLAPSE_MM = 0.01;
 
 export const analyticSketchSolver: ParametricSketchSolver = {
   identity: { name: "ps3d-simultaneous-sketch", version: "0.2.0", deterministic: true },

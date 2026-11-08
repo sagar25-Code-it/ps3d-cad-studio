@@ -52,6 +52,8 @@ export interface SolverModel {
   readonly weight: Float64Array;
   /** What each variable measures: 0 a length or coordinate, 1 an angle, 2 a size that must stay positive. The solver limits how far one step may change an angle or a size. */
   readonly role: Uint8Array;
+  /** 1 for a variable the caller asked to keep in place (an anchor). */
+  readonly anchored: Uint8Array;
   readonly equations: Equation[];
   readonly soft: Equation[];
   readonly diagnostics: SketchDiagnostic[];
@@ -147,6 +149,7 @@ class ModelBuilder {
   /** The weight a variable has when nothing is anchored: an angle is weighed by the length it sweeps, so turning is measured in millimetres too. */
   defaultWeight: Float64Array;
   role: Uint8Array;
+  anchored: Uint8Array;
   readonly frozenBy = new Map<number, string[]>();
   readonly entityOfVariable: string[] = [];
   readonly variableCount: number;
@@ -166,15 +169,21 @@ class ModelBuilder {
     this.frozen = new Uint8Array(values.length);
     this.weight = new Float64Array(values.length).fill(1);
     this.role = new Uint8Array(values.length);
+    this.anchored = new Uint8Array(values.length);
     for (const entry of this.layout.values()) {
       const b = entry.base;
       const g = entry.geometry;
-      if (g.kind === "circle") this.role[b + 2] = 2;
-      else if (g.kind === "arc") {
+      // A size (a radius, a side, a width) is stiffer than a position, so a relation that can be met by sliding a curve or by resizing it slides it.
+      const SIZE_WEIGHT = 100;
+      if (g.kind === "circle") {
+        this.role[b + 2] = 2;
+        this.weight[b + 2] = SIZE_WEIGHT;
+      } else if (g.kind === "arc") {
         this.role[b + 2] = 2;
         this.role[b + 3] = 1;
         this.role[b + 4] = 1;
         const reach = Math.max(1, values[b + 2]!);
+        this.weight[b + 2] = SIZE_WEIGHT;
         this.weight[b + 3] = reach * reach;
         this.weight[b + 4] = reach * reach;
       } else if (g.kind === "rectangle") {
@@ -182,9 +191,17 @@ class ModelBuilder {
         this.role[b + 3] = 2;
         this.role[b + 4] = 1;
         const reach = Math.max(1, Math.hypot(values[b + 2]!, values[b + 3]!) / 2);
-        this.weight[b + 4] = reach * reach;
-      } else if (g.kind === "ellipse") this.role[b + 4] = 2;
-      else if (g.kind === "slot") this.role[b + 4] = 2;
+        this.weight[b + 2] = SIZE_WEIGHT;
+        this.weight[b + 3] = SIZE_WEIGHT;
+        // A rectangle dragged by a corner travels; it does not turn.
+        this.weight[b + 4] = reach * reach * 100;
+      } else if (g.kind === "ellipse") {
+        this.role[b + 4] = 2;
+        this.weight[b + 4] = SIZE_WEIGHT;
+      } else if (g.kind === "slot") {
+        this.role[b + 4] = 2;
+        this.weight[b + 4] = SIZE_WEIGHT;
+      }
     }
     this.defaultWeight = Float64Array.from(this.weight);
   }
@@ -366,11 +383,17 @@ class ModelBuilder {
         } else {
           const point = this.point(anchor.reference);
           if (point === undefined) continue;
-          for (const variable of point.vars) this.weight[variable] = factor * this.defaultWeight[variable]!;
+          for (const variable of point.vars) {
+            this.weight[variable] = factor * this.defaultWeight[variable]!;
+            this.anchored[variable] = anchor.priority > 0 ? 1 : 0;
+          }
           continue;
         }
       }
-      for (let index = from; index < to; index += 1) this.weight[entry.base + index] = factor * this.defaultWeight[entry.base + index]!;
+      for (let index = from; index < to; index += 1) {
+        this.weight[entry.base + index] = factor * this.defaultWeight[entry.base + index]!;
+        this.anchored[entry.base + index] = anchor.priority > 0 ? 1 : 0;
+      }
     }
   }
 
@@ -842,13 +865,14 @@ export function buildSolverModel(document: ParametricSketchDocument, options: Bu
     // Projected (associative) geometry and suppressed geometry are constants: relations can read them but never move them.
     if (geometry.source?.associative === true || geometry.suppressed) builder.freezeRange(geometry.id, 0, builder.layout.get(geometry.id)!.count, undefined);
   }
-  for (const constraint of [...document.constraints].filter((candidate) => !candidate.suppressed).sort(byId)) {
+  // Relations are taken in the order the document lists them (the order they were made), so "the later one is the redundant one" means something.
+  for (const constraint of document.constraints.filter((candidate) => !candidate.suppressed)) {
     if (constraint.kind === "fix") builder.addConstraint(constraint);
   }
-  for (const constraint of [...document.constraints].filter((candidate) => !candidate.suppressed).sort(byId)) {
+  for (const constraint of document.constraints.filter((candidate) => !candidate.suppressed)) {
     if (constraint.kind !== "fix") builder.addConstraint(constraint);
   }
-  for (const dimension of [...document.dimensions].filter((candidate) => !candidate.suppressed && candidate.mode === "driving").sort(byId)) builder.addDimension(dimension);
+  for (const dimension of document.dimensions.filter((candidate) => !candidate.suppressed && candidate.mode === "driving")) builder.addDimension(dimension);
   if (options.anchors !== undefined) builder.applyAnchors(options.anchors);
   if (options.preserve !== undefined && options.preserve.size > 0) builder.addShapePreservation(options.preserve);
   return {
@@ -861,6 +885,7 @@ export function buildSolverModel(document: ParametricSketchDocument, options: Bu
     frozenBy: builder.frozenBy,
     weight: builder.weight,
     role: builder.role,
+    anchored: builder.anchored,
     equations: builder.equations,
     soft: builder.soft,
     diagnostics: builder.diagnostics,

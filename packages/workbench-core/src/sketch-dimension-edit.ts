@@ -43,7 +43,9 @@ function solveFailure(report: Extract<LiveSketchSolveReport, { readonly ok: fals
 
 export function solveSummary(report: Extract<LiveSketchSolveReport, { readonly ok: true }>): string {
   const parts: string[] = [];
-  if (report.notes.length > 0) parts.push(report.notes.join("; "));
+  // A long edit moved many curves: say how many instead of listing each one.
+  if (report.notes.length > 4) parts.push(`Moved ${report.movedIds.length} curves`);
+  else if (report.notes.length > 0) parts.push(report.notes.join("; "));
   if (report.unsolved.length > 0) parts.push(`Recorded, not solved: ${report.unsolved.map((entry) => entry.reason).join(" ")}`);
   return parts.length === 0 ? "" : ` ${parts.join(". ")}.`;
 }
@@ -114,12 +116,16 @@ export function redriveDimension(sketch: WorkbenchSketch, constraint: WorkbenchS
   const name = dimensionNameOf(constraint, target?.kind);
   const value = dimensionTargetValue(constraint);
   if (value === undefined) return { ok: false, applied: failure("INVALID_OPERATION", "The dimension has no value.", [constraint.id], "Give the dimension a value.") as Extract<Applied, { readonly ok: false }> };
-  const resized = target !== undefined && entityIds.length === 1 && !heldByFix(sketch, target.id)
+  // A circle or arc held tangent to something is left to the solver, which sees how it touches now (outside or inside) and keeps it that way.
+  const tangent = target !== undefined && sketch.constraints.some((candidate) => candidate.kind === "tangent" && candidate.suppressed !== true && candidate.entityIds.includes(target.id));
+  const resized = target !== undefined && entityIds.length === 1 && !heldByFix(sketch, target.id) && !(tangent && (target.kind === "circle" || target.kind === "arc"))
     ? (name === "perimeter" && target.kind !== "circle" ? resizeForPerimeter(target, value, sketch) : resizeSketchEntity(target, name, value))
     : undefined;
   const baseSketch: WorkbenchSketch = { ...sketch, entities: resized === undefined || target === undefined ? sketch.entities : sketch.entities.map((entity) => entity.id === target.id ? resized : entity) };
   const entityMap = new Map(baseSketch.entities.map((entity) => [entity.id, entity] as const));
-  const solved = solveLiveSketch(baseSketch, real, { anchors: anchorsForDimension(constraint, entityMap, sketch.constraints), preserve: preserveForConstraint(constraint, entityMap) });
+  // Once the curve has its new size by direct resize it is the reference and its neighbours follow; otherwise only part of it is held.
+  const anchors = resized !== undefined && target !== undefined ? [{ entityId: target.id, ref: "self" as const, priority: 2 as const }] : anchorsForDimension(constraint, entityMap, sketch.constraints);
+  const solved = solveLiveSketch(baseSketch, real, { anchors, preserve: preserveForConstraint(constraint, entityMap) });
   if (!solved.ok) return { ok: false, applied: solveFailure(solved) as Extract<Applied, { readonly ok: false }> };
   const nextSketch: WorkbenchSketch = { ...baseSketch, entities: solved.entities };
   const measured = measureDimensionConstraint(nextSketch, constraint);
