@@ -65,7 +65,14 @@ function arcPath(layout: DimensionLayout): string | undefined {
 }
 
 /** Angle, arc-length and perimeter dimensions (and driven ones of every kind) drawn like the other driving dimensions; driving text opens the value editor. */
-export function ExtraDimensionMarks(props: { readonly sketch: WorkbenchSketch; readonly px: number; readonly onEdit?: (constraint: WorkbenchSketchConstraint, anchor: Vec2) => void }): React.JSX.Element {
+export function ExtraDimensionMarks(props: {
+  readonly sketch: WorkbenchSketch;
+  readonly px: number;
+  readonly onEdit?: (constraint: WorkbenchSketchConstraint, anchor: Vec2) => void;
+  /** With this, a press on the text selects the dimension and a double-click edits it (reference dimensions too). Without it a press edits a driving dimension, as before. */
+  readonly onSelect?: (constraintId: string, additive: boolean) => void;
+  readonly selectedIds?: readonly string[];
+}): React.JSX.Element {
   const { sketch, px } = props;
   const marks = sketch.constraints.flatMap((constraint) => {
     const isExtra = constraint.kind === "angle" || constraint.kind === "arc-length" || constraint.kind === "perimeter";
@@ -78,13 +85,14 @@ export function ExtraDimensionMarks(props: { readonly sketch: WorkbenchSketch; r
     const path = arcPath(layout);
     const flip = (point: Vec2): string => `${point[0]},${-point[1]}`;
     const textWidth = (layout.label.length * 7.4 + 12) * px;
-    return <g key={constraint.id} className={`driving-dimension extra${driven ? " reference" : ""}${constraint.suppressed === true ? " relaxed" : ""}`} data-dimension-constraint={constraint.id} pointerEvents={props.onEdit === undefined || driven ? "none" : undefined}>
+    const selecting = props.onSelect !== undefined;
+    return <g key={constraint.id} className={`driving-dimension extra${driven ? " reference" : ""}${constraint.suppressed === true ? " relaxed" : ""}${props.selectedIds?.includes(constraint.id) === true ? " selected" : ""}`} data-dimension-constraint={constraint.id} pointerEvents={selecting ? undefined : props.onEdit === undefined || driven ? "none" : undefined}>
       {layout.extensionLines.map((segment, index) => <line key={index} x1={segment.from[0]} y1={-segment.from[1]} x2={segment.to[0]} y2={-segment.to[1]} />)}
       {path === undefined
         ? <line x1={layout.dimensionLine.from[0]} y1={-layout.dimensionLine.from[1]} x2={layout.dimensionLine.to[0]} y2={-layout.dimensionLine.to[1]} />
         : <path d={path} fill="none" />}
       {layout.arrows.map((arrow, index) => <polygon key={index} className="arrow" points={arrowHead(arrow, px).map(flip).join(" ")} />)}
-      {!driven && <rect className="driving-dimension-hit" x={layout.textAt[0] - textWidth / 2} y={-layout.textAt[1] - 11 * px} width={textWidth} height={20 * px} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); props.onEdit?.(constraint, layout.textAt); }} />}
+      {(selecting || !driven) && <rect className="driving-dimension-hit" x={layout.textAt[0] - textWidth / 2} y={-layout.textAt[1] - 11 * px} width={textWidth} height={20 * px} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); if (props.onSelect !== undefined) props.onSelect(constraint.id, event.shiftKey || event.ctrlKey || event.metaKey); else props.onEdit?.(constraint, layout.textAt); }} onDoubleClick={(event) => { event.stopPropagation(); props.onEdit?.(constraint, layout.textAt); }} />}
       <text className="driving-dimension-text" x={layout.textAt[0]} y={-layout.textAt[1] + 4 * px} style={{ fontSize: 12.5 * px, strokeWidth: 3.5 * px }} pointerEvents="none">{layout.label}</text>
     </g>;
   })}</>;

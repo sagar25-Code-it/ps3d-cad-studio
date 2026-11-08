@@ -1080,8 +1080,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         const existing = props.sketch.constraints.find((constraint) => constraint.kind === "angle" && constraint.driven !== true && constraint.entityIds[0] === firstLine.id && constraint.entityIds[1] === secondLine.id);
         const shown = existing?.valueDeg ?? angleBetweenLinesDeg(firstLine, secondLine);
         const layout = angleDimensionLayout(firstLine, secondLine, shown, px);
-        const next = { entityId: firstLine.id, secondEntityId: secondLine.id, dimension: "angle" as const, anchor: layout?.textAt ?? entityAnchor(firstLine), label: "Angle (degrees)" };
-        window.setTimeout(() => { setDimensionEdit(next); setDimensionText(String(Number(shown.toFixed(3)))); }, 0);
+        const next: DimensionEditState = { entityId: firstLine.id, secondEntityId: secondLine.id, dimension: "angle", anchor: layout?.textAt ?? entityAnchor(firstLine), label: "Angle (degrees)", storedValue: existing?.valueDeg, wasReference: false };
+        window.setTimeout(() => { setDimensionEdit(next); setDimensionReference(false); setDimensionText(String(Number(shown.toPrecision(12)))); }, 0);
         props.onMessage("Type the angle in degrees from the first line to the second and press Enter.");
         return;
       }
@@ -1144,8 +1144,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const fitTwo = (kind: SketchConstraintKind): ConstraintFit => lastTwo.length === 2 ? constraintFit(kind, lastTwo.map((entity) => entity.kind)) : { ok: false, reason: "Select two curves; Shift-click the second." };
   const fitThree = (): ConstraintFit => lastThree.length === 3 ? constraintFit("symmetry", lastThree.map((entity) => entity.kind)) : { ok: false, reason: "Select the two curves to mirror, then the axis line last." };
   const fixedIds = selectedEntity === undefined ? [] : props.sketch.constraints.filter((constraint) => constraint.kind === "fixed" && constraint.suppressed !== true && constraint.entityIds.includes(selectedEntity.id)).map((constraint) => constraint.id);
-  const horizontalFit = fitOne("horizontal");
-  const verticalFit = fitOne("vertical");
+  // Horizontal and Vertical apply to every selected line; the other one-curve actions apply to the whole selection too.
+  const fitEach = (kind: "horizontal" | "vertical"): ConstraintFit => selectedEntities.some((entity) => constraintFit(kind, [entity.kind]).ok) ? { ok: true } as ConstraintFit : { ok: false, reason: selectedEntities.length === 0 ? "Select one or more lines." : "None of the selected curves is a line." };
+  const horizontalFit = fitEach("horizontal");
+  const verticalFit = fitEach("vertical");
+  const selectionFixed = selectionIsFixed(props.sketch, selectionIds);
+  const selectionCount = selectionIds.length;
+  const scopeSuffix = selectionCount > 1 ? ` (${selectionCount})` : "";
   const parallelFit = fitTwo("parallel");
   const perpendicularFit = fitTwo("perpendicular");
   const collinearFit = fitTwo("collinear");
@@ -1719,8 +1724,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
       <ViewportChrome workspace="sketch" state={props.viewportState} measurePoints={[]} onNavigationMode={props.onNavigationMode} onSelectionFilter={props.onSelectionFilter} onOrientation={props.onOrientation} onViewAngles={props.onViewAngles} onProjection={props.onProjection} onGrid={props.onGrid} onAxes={props.onAxes} onShadingMode={() => undefined} onBodyColor={() => undefined} onBackgroundTone={() => undefined} onFit={camera.fit} onHome={camera.fit} onClearMeasure={() => undefined} />
 
-      <div className="sketch-palette" ref={paletteRef} aria-label="Sketch palette">
-        <header><div><span>SKETCH</span><strong>Palette</strong></div><button onClick={props.onChangePlane} title="Move this sketch to another datum plane"><CommandIcon name="view" />Plane</button></header>
+      <div className={`sketch-palette${paletteCollapsed ? " collapsed" : ""}`} ref={paletteRef} aria-label="Sketch palette">
+        <header><div><span>SKETCH</span><strong>Palette</strong></div><button className="palette-collapse" aria-expanded={!paletteCollapsed} aria-label={paletteCollapsed ? "Expand the sketch palette" : "Collapse the sketch palette"} title={paletteCollapsed ? "Show the palette (it stays out of the way until you need it; this is remembered)" : "Collapse the palette so it does not cover the canvas (this is remembered)"} onClick={() => setPaletteCollapsed((current) => !current)}>{paletteCollapsed ? "◂" : "▸"}</button>{!paletteCollapsed && <button onClick={props.onChangePlane} title="Move this sketch to another datum plane"><CommandIcon name="view" />Plane</button>}</header>
+        {!paletteCollapsed && <>
         <PaletteToggle label="Sketch grid" active={props.viewportState.gridVisible} onToggle={props.onGrid} />
         <PaletteToggle label="Snap" active={snapEnabled} onToggle={setSnapEnabled} />
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
@@ -1729,9 +1735,22 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
         <PaletteToggle label="Constraints" active={showConstraints} onToggle={setShowConstraints} />
+        {showConstraints && <ConstraintDisplayPanel settings={constraintDisplay} present={constraintKinds} onChange={setConstraintDisplay} />}
+        {showDimensions && <details className="palette-dimension-display">
+          <summary>Dimension display</summary>
+          <label className="palette-number"><span>Unit</span><select aria-label="Dimension unit" value={dimensionDisplay.unit} onChange={(event) => setDimensionDisplay((current) => ({ ...current, unit: event.target.value === "in" ? "in" : "mm" }))}><option value="mm">mm</option><option value="in">in</option></select></label>
+          <label className="palette-number"><span>Decimals</span><input type="number" min={0} max={6} step={1} aria-label="Dimension decimals" value={dimensionDisplay.precision} onChange={(event) => setDimensionDisplay((current) => ({ ...current, precision: clampPrecision(Number(event.target.value)) }))} /></label>
+          <PaletteToggle label="Show unit" active={dimensionDisplay.showUnit} onToggle={(showUnit) => setDimensionDisplay((current) => ({ ...current, showUnit }))} />
+          <small>Display only: the model keeps millimetres. Drag a dimension's text to move it; it is remembered in this browser.</small>
+        </details>}
+        <div className="palette-view-tools" role="group" aria-label="View and measure">
+          <button type="button" className={zoomWindowMode ? "active" : ""} aria-pressed={zoomWindowMode} title="Zoom window (Z): drag a rectangle to zoom to it" onClick={() => zoomWindowMode ? setZoomWindowMode(false) : startZoomWindow()}><CommandIcon name="view" />Zoom window</button>
+          <button type="button" title="Zoom to the selected curves (Shift+F)" disabled={selectionIds.length === 0} onClick={frameSelection}><CommandIcon name="view" />Zoom selection</button>
+          <button type="button" className={measureMode ? "active" : ""} aria-pressed={measureMode} title="Measure (I): two points for a distance, two lines for an angle. Nothing is added to the sketch." onClick={() => { if (measureMode) { setMeasureMode(false); setMeasureState(EMPTY_MEASURE); } else startMeasure(); }}><CommandIcon name="dimension" />Measure</button>
+        </div>
         <PaletteToggle label="Curvature comb" active={showComb} onToggle={setShowComb} />
         {showComb && <label><span>Comb scale</span><input type="range" aria-label="Curvature comb scale" min={0.2} max={3} step={0.1} value={combScale} onChange={(event) => setCombScale(Number(event.target.value))} /></label>}
-        <button className="palette-action" disabled={selectedEntity === undefined} onClick={() => selectedEntity !== undefined && props.onToggleConstruction(selectedEntity.id)}><CommandIcon name={selectedEntity?.construction === true ? "rectangle" : "construction"} />{selectedEntity?.construction === true ? "Profile geometry" : "Construction"}</button>
+        <button className="palette-action" disabled={selectedEntities.length === 0} onClick={() => { runSelectionAction(constructionSelectionPlan(selectedEntities)); }}><CommandIcon name={selectedEntities.length > 0 && selectedEntities.every((entity) => entity.construction) ? "rectangle" : "construction"} />{selectedEntities.length > 0 && selectedEntities.every((entity) => entity.construction) ? "Profile geometry" : "Construction"}{selectedEntities.length > 1 ? ` (${selectedEntities.length})` : ""}</button>
         <div className="sketch-make-solid" aria-label="Create a solid from a profile">
           <span className="make-solid-title">Create solid</span>
           <div className="make-solid-row">
@@ -1980,6 +1999,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           <summary>Shortcuts</summary>
           <dl>{SKETCH_HOTKEY_HELP.map((entry) => <div key={entry.keys}><dt>{entry.keys}</dt><dd>{entry.action}</dd></div>)}</dl>
         </details>
+        </>}
       </div>
 
       <div className="canvas-hud"><span>{planePlacement} · {planeInfo.horizontalLabel} → · {planeInfo.verticalLabel} ↑</span><span>{props.dimensionMode ? "Dimension" : sketchToolLabel(props.tool)}</span><span>Grid {props.viewportState.gridVisible ? `${format(grid.minorMm)} mm` : "off"}</span><span>Snap {snapEnabled ? `${SNAP_PIXELS} px` : "off"}</span><span>{pointerInside ? `${planeInfo.horizontalLabel} ${format(cursor[0])}  ${planeInfo.verticalLabel} ${format(cursor[1])} mm` : "Cursor outside the sketch"}</span><span>{visibleEntities.length}/{props.sketch.entities.length} entities visible</span><strong>{analysis.classification.replace("-", " ")}</strong></div>
@@ -2017,8 +2037,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           <dl className="compact-facts"><div><dt>Primary</dt><dd>{selectedEntity.kind}</dd></div><div><dt>Freedom</dt><dd>{analysis.entityFreedom[selectedEntity.id] ?? 0}</dd></div><div><dt>Stable ID</dt><dd>{shortId(selectedEntity.id)}</dd></div><div><dt>Constraints</dt><dd>{selectedConstraints.length}</dd></div></dl>
           <div className="selection-chips">{selectedEntities.map((entity, index) => <span key={entity.id}><b>{index + 1}</b>{entity.kind}</span>)}</div>
           <div className="constraint-buttons">
-            <button disabled={!horizontalFit.ok} title={hint(horizontalFit, "Make the line horizontal.")} onClick={() => constrain("horizontal")}><CommandIcon name="horizontal" />Horizontal</button>
-            <button disabled={!verticalFit.ok} title={hint(verticalFit, "Make the line vertical.")} onClick={() => constrain("vertical")}><CommandIcon name="vertical" />Vertical</button>
+            <button disabled={!horizontalFit.ok} title={hint(horizontalFit, "Make every selected line horizontal.")} onClick={() => { runSelectionAction(constrainEachPlan(props.sketch, "horizontal", selectedEntities, newConstraintId)); }}><CommandIcon name="horizontal" />Horizontal{scopeSuffix}</button>
+            <button disabled={!verticalFit.ok} title={hint(verticalFit, "Make every selected line vertical.")} onClick={() => { runSelectionAction(constrainEachPlan(props.sketch, "vertical", selectedEntities, newConstraintId)); }}><CommandIcon name="vertical" />Vertical{scopeSuffix}</button>
             <button disabled={!parallelFit.ok} title={hint(parallelFit, "Make two lines parallel.")} onClick={() => constrain("parallel")}><CommandIcon name="parallel" />Parallel</button>
             <button disabled={!perpendicularFit.ok} title={hint(perpendicularFit, "Make two lines perpendicular.")} onClick={() => constrain("perpendicular")}><CommandIcon name="perpendicular" />Perpendicular</button>
             <button disabled={!collinearFit.ok} title={hint(collinearFit, "Put two lines on one line.")} onClick={() => constrain("collinear")}><CommandIcon name="collinear" />Collinear</button>
@@ -2026,12 +2046,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             <button disabled={!equalFit.ok} title={hint(equalFit, "Make two lines equal in length, or two circles or arcs equal in radius.")} onClick={() => constrain("equal")}><CommandIcon name="equal" />Equal</button>
             <button disabled={!tangentFit.ok} title={hint(tangentFit, "Line and circle/arc, or two circles/arcs. The second selection is adjusted.")} onClick={() => constrain("tangent")}><CommandIcon name="tangent" />Tangent</button>
             <button disabled={!symmetricFit.ok} title={hint(symmetricFit, "Select two lines or two circles, then the axis line last. The second is mirrored onto the first.")} onClick={() => constrain("symmetry")}><CommandIcon name="mirror" />Symmetric</button>
-            {fixedIds.length === 0
-              ? <button onClick={() => constrain("fixed")}><CommandIcon name="fixed" />Fix primary</button>
-              : <button title="Remove the Fixed relation so the curve can move again." onClick={() => fixedIds.forEach((id) => props.onDeleteConstraint(id))}><CommandIcon name="unfixed" />Unfix primary</button>}
-            <button onClick={() => props.onToggleConstruction(selectedEntity.id)}><CommandIcon name={selectedEntity.construction ? "rectangle" : "construction"} />{selectedEntity.construction ? "Profile" : "Construction"}</button>
-            <button onClick={() => props.onToggleVisibility(selectedEntity.id)}><CommandIcon name={selectedEntity.visible === false ? "eye" : "eye-off"} />{selectedEntity.visible === false ? "Show entity" : "Hide entity"}</button>
-            <button className="danger" onClick={() => props.onDeleteEntity(selectedEntity.id)}><CommandIcon name="trash" />Delete primary</button>
+            {!selectionFixed
+              ? <button title="Fix every selected curve in place." onClick={() => { runSelectionAction(fixSelectionPlan(props.sketch, selectedEntities, newConstraintId)); }}><CommandIcon name="fixed" />Fix{selectionCount > 1 ? ` selection (${selectionCount})` : " curve"}</button>
+              : <button title="Remove the Fixed relation from every selected curve so they can move again." onClick={() => { runSelectionAction(unfixSelectionPlan(props.sketch, selectionIds)); }}><CommandIcon name="unfixed" />Unfix{selectionCount > 1 ? ` selection (${selectionCount})` : " curve"}</button>}
+            <button title="Turn every selected curve into construction geometry, or back (X)." onClick={() => { runSelectionAction(constructionSelectionPlan(selectedEntities)); }}><CommandIcon name={selectedEntities.every((entity) => entity.construction) ? "rectangle" : "construction"} />{selectedEntities.every((entity) => entity.construction) ? "Profile" : "Construction"}{scopeSuffix}</button>
+            <button title="Hide every selected curve." onClick={() => { runSelectionAction(visibilitySelectionPlan(selectedEntities)); }}><CommandIcon name="eye-off" />Hide{selectionCount > 1 ? ` selection (${selectionCount})` : " curve"}</button>
+            <button className="danger" title="Delete every selected curve (Delete)." onClick={() => { if (runSelectionAction(deleteSelectionPlan(props.sketch, selectionIds))) { setSelectionIds([]); props.onSelect(null); } }}><CommandIcon name="trash" />Delete{selectionCount > 1 ? ` selection (${selectionCount})` : " curve"}</button>
           </div>
         </>}
       </section>
@@ -2056,8 +2076,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <div className="profile-list">{profiles.map((profile, index) => <button key={profile.id} className={selectedProfileIds.includes(profile.id) ? "selected" : ""} onClick={(event) => selectProfile(profile, event.shiftKey || event.ctrlKey || event.metaKey)}><span><b>P{index + 1}</b>{profileLabel(profile)}</span><small>{format(profile.areaMm2)} mm²</small></button>)}</div>
       </section>
 
-      <section className="inspector-section"><header><strong>Constraint records</strong><span>{props.sketch.constraints.length}</span></header>
-        <div className="record-list">{props.sketch.constraints.slice(-10).reverse().map((constraint) => <button key={constraint.id} onClick={() => props.onDeleteConstraint(constraint.id)} title="Delete this constraint"><CommandIcon name={constraint.dimension === undefined ? constraint.kind : "dimension"} /><span>{constraint.kind}{constraint.dimension === undefined ? "" : ` · ${constraint.dimension}`}{constraint.driven === true ? " · reference" : ""}{constraint.suppressed === true ? " · relaxed" : ""}</span><small>{constraint.valueDeg !== undefined ? `${format(constraint.valueDeg)}°` : constraint.valueMm === undefined ? shortId(constraint.id) : `${format(constraint.valueMm)} mm`}</small></button>)}</div>
+      <section className="inspector-section constraint-records"><header><strong>Constraint records</strong><span>{props.sketch.constraints.length}{redundantIds.size > 0 ? ` · ${redundantIds.size} redundant` : ""}</span></header>
+        <ConstraintRecordList rows={recordRows} selectedIds={selectedConstraintIds} redundantIds={redundantIds} onHover={setHoverConstraintId} onSelect={selectConstraint} onDelete={deleteSelectedConstraints} onToggleRelaxed={(id, relaxed) => { props.onSetSuppressed([id], relaxed); }} />
       </section>
       <div className="scope-note"><strong>Preview solver boundary</strong><p>A small analytic solver enforces horizontal, vertical, parallel, perpendicular, collinear, tangent, concentric, equal, symmetric and fixed relations plus radius and length dimensions on lines, circles and arcs; a conflict is refused with the reason. Rectangles are rigid, point-on-curve and endpoint relations are recorded but not solved, and there is no general nonlinear solver. Degrees of freedom are an estimate.</p></div>
     </aside>
