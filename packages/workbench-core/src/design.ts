@@ -238,7 +238,8 @@ export function editDesignSketch(project: WorkbenchProject, featureId: string): 
 export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef): DesignChange {
   const history = designOf(project);
   const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, ...rest } = project.sketch;
-  const sketch = { ...rest, name: "Sketch", plane, ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), ...(frame === undefined ? {} : { planeFrame: frame }), ...(face === undefined ? {} : { planeFace: face }), entities: [], constraints: [] };
+  const { texts: _texts, patterns: _patterns, underlay: _underlay, ...fresh } = rest;
+  const sketch = { ...fresh, name: "Sketch", plane, ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), ...(frame === undefined ? {} : { planeFrame: frame }), ...(face === undefined ? {} : { planeFace: face }), entities: [], constraints: [] };
   const where = frame !== undefined ? "a plane through three points"
     : `the ${plane.replace("datum:", "").toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
   return changed({ ...project, sketch, activeWorkspace: "sketch", design: { ...history, editingSketchId: null } }, [project.sketch.id], `Started a new sketch on ${where}.`);

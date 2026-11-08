@@ -222,6 +222,11 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="spline" label="Make Path" hint="chain curves" active={props.sketchEditTool === "make-path"} onClick={() => props.onSketchEditTool("make-path")} />
         <RibbonButton icon="mirror" label="Dynamic Mirror" hint="axis, then draw" active={props.sketchEditTool === "dynamic-mirror"} onClick={() => props.onSketchEditTool("dynamic-mirror")} />
       </RibbonGroup>
+      <RibbonGroup label="Insert">
+        <RibbonButton icon="open" label="Import" hint="DXF · SVG" active={props.sketchEditTool === "import-drawing"} onClick={() => props.onSketchEditTool("import-drawing")} />
+        <RibbonButton icon="export" label="Export" hint="DXF · SVG" active={props.sketchEditTool === "export-drawing"} onClick={() => props.onSketchEditTool("export-drawing")} />
+        <RibbonButton icon="view" label="Picture" hint="trace · calibrate" active={props.sketchEditTool === "underlay"} onClick={() => props.onSketchEditTool("underlay")} />
+      </RibbonGroup>
       <RibbonGroup label="Include & solve">
         <RibbonButton icon="fixed" label="Fix Curve" hint="pin selection" onClick={() => props.onSketchCommand("fix-curve")} />
         <RibbonButton icon="inspect" label="Show Movable" hint="free geometry" active={props.sketchShowMovable} onClick={() => props.onSketchCommand("show-movable")} />

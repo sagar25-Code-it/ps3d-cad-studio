@@ -538,10 +538,10 @@ export const sketchInputExtrasTests: readonly TestCase[] = [
       assert(!rebindKey(DEFAULT_SKETCH_KEYMAP, "tool:line", "5").ok, "a digit is not allowed (digits type into the fields)");
       assert(!rebindKey(DEFAULT_SKETCH_KEYMAP, "tool:line", "Ctrl+L").ok, "Ctrl combinations are not allowed");
       assert(!rebindKey(DEFAULT_SKETCH_KEYMAP, "tool:line", "F5").ok, "F5 belongs to the browser");
-      const free = rebindKey(DEFAULT_SKETCH_KEYMAP, "tool:line", "q");
+      const free = rebindKey(DEFAULT_SKETCH_KEYMAP, "tool:line", "n");
       assert(free.ok, "an unused key is accepted");
-      equal(free.keymap.keys["tool:line"], "Q", "normalised to upper case");
-      equal(resolveSketchHotkey(press("q"), idle, free.keymap)?.kind, "tool", "Q now starts the line");
+      equal(free.keymap.keys["tool:line"], "N", "normalised to upper case");
+      equal(resolveSketchHotkey(press("n"), idle, free.keymap)?.kind, "tool", "N now starts the line");
       equal(resolveSketchHotkey(press("l"), idle, free.keymap), undefined, "and L no longer does");
       const replaced = rebindKey(DEFAULT_SKETCH_KEYMAP, "tool:line", "R", { replace: true });
       assert(replaced.ok && replaced.displaced === "tool:rectangle", "replacing takes the key from the rectangle");
@@ -553,9 +553,9 @@ export const sketchInputExtrasTests: readonly TestCase[] = [
       const storage = memoryStorage();
       assert(free.ok && replaced.ok, "ok");
       saveKeymap(storage, free.keymap);
-      equal(storage.data.get(KEYMAP_STORAGE_KEY), JSON.stringify({ "tool:line": "Q" }), "only the difference from the defaults is stored");
+      equal(storage.data.get(KEYMAP_STORAGE_KEY), JSON.stringify({ "tool:line": "N" }), "only the difference from the defaults is stored");
       const reloaded = loadKeymap(storage);
-      equal(reloaded.keys["tool:line"], "Q", "the custom key is back after a reload");
+      equal(reloaded.keys["tool:line"], "N", "the custom key is back after a reload");
       equal(reloaded.keys["tool:rectangle"], "R", "the rest are the defaults");
       saveKeymap(storage, DEFAULT_SKETCH_KEYMAP);
       equal(storage.data.has(KEYMAP_STORAGE_KEY), false, "the defaults clear the entry");

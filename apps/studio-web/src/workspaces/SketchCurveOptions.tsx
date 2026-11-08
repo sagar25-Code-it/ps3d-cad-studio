@@ -19,6 +19,10 @@ export interface CurveOptionFields {
   readonly text: string;
   readonly textHeight: string;
   readonly textRotation: string;
+  /** Sideways stretch of the letters, the letter spacing multiplier and which end of the text sits on the click. */
+  readonly textWidth: string;
+  readonly textSpacing: string;
+  readonly textAlign: "left" | "center" | "right";
   readonly profileMode: ProfileSegmentMode;
   /** Fit-point spline: how the curve is spaced between uneven clicks. */
   readonly splineMode: SplineParameterization;
@@ -37,6 +41,9 @@ export const DEFAULT_CURVE_OPTION_FIELDS: CurveOptionFields = {
   text: DEFAULT_CURVE_TOOL_OPTIONS.text,
   textHeight: String(DEFAULT_CURVE_TOOL_OPTIONS.textHeightMm),
   textRotation: String(DEFAULT_CURVE_TOOL_OPTIONS.textRotationDeg),
+  textWidth: "1",
+  textSpacing: "1",
+  textAlign: "left",
   profileMode: "line",
   splineMode: "uniform",
   keepPolygon: DEFAULT_CURVE_TOOL_OPTIONS.keepControlPolygon,
@@ -66,6 +73,7 @@ export function curveOptionsFromFields(fields: CurveOptionFields, context: Curve
     text: fields.text,
     textHeightMm: number(fields.textHeight, Number.NaN),
     textRotationDeg: number(fields.textRotation, 0),
+    textLayout: { widthFactor: number(fields.textWidth, 1), spacing: number(fields.textSpacing, 1), align: fields.textAlign, construction: false },
     centerlineReachMm: context.centerlineReachMm,
     entities: context.entities,
     pickReachMm: context.pickReachMm,
@@ -77,6 +85,8 @@ export function curveOptionsFromFields(fields: CurveOptionFields, context: Curve
 }
 
 interface PanelProps {
+  /** Text being re-edited: Apply re-draws it with the palette settings, Cancel leaves it as it was. */
+  readonly textEdit?: { readonly onApply: () => void; readonly onCancel: () => void } | undefined;
   readonly tool: SketchTool;
   readonly fields: CurveOptionFields;
   readonly onChange: (next: CurveOptionFields) => void;
@@ -87,9 +97,9 @@ interface PanelProps {
 }
 
 /** The palette controls of whichever extra curve tool is active; nothing for the other tools. */
-export function SketchCurveOptionsPanel({ tool, fields, onChange, blockNames, selectedCount, onSaveBlock }: PanelProps): React.JSX.Element | null {
+export function SketchCurveOptionsPanel({ tool, fields, onChange, blockNames, selectedCount, onSaveBlock, textEdit }: PanelProps): React.JSX.Element | null {
   const set = <K extends keyof CurveOptionFields>(key: K, value: CurveOptionFields[K]): void => onChange({ ...fields, [key]: value });
-  const numberField = (label: string, key: "cornerRadius" | "rho" | "tension" | "textHeight" | "textRotation" | "blockRotation" | "blockScale", step: number, min?: number, max?: number): React.JSX.Element => (
+  const numberField = (label: string, key: "cornerRadius" | "rho" | "tension" | "textHeight" | "textRotation" | "textWidth" | "textSpacing" | "blockRotation" | "blockScale", step: number, min?: number, max?: number): React.JSX.Element => (
     <label className="palette-number"><span>{label}</span><input type="number" {...(min === undefined ? {} : { min })} {...(max === undefined ? {} : { max })} step={step} value={fields[key]} aria-label={label} onChange={(event) => set(key, event.target.value)} /></label>
   );
   switch (tool) {
@@ -131,7 +141,19 @@ export function SketchCurveOptionsPanel({ tool, fields, onChange, blockNames, se
       <>
         <label className="palette-number"><span>Text</span><input type="text" maxLength={TEXT_MAX_CHARACTERS} value={fields.text} aria-label="Sketch text" onChange={(event) => set("text", event.target.value)} /></label>
         {numberField("Text height (mm)", "textHeight", 1, 0.5, 1000)}
+        {numberField("Text width (x normal)", "textWidth", 0.1, 0.2, 5)}
+        {numberField("Letter spacing (x normal)", "textSpacing", 0.1, 0, 10)}
         {numberField("Text angle (deg)", "textRotation", 5, -360, 360)}
+        <label className="palette-number"><span>Align on the click</span>
+          <select aria-label="Text alignment" value={fields.textAlign} onChange={(event) => set("textAlign", event.target.value === "center" ? "center" : event.target.value === "right" ? "right" : "left")}>
+            <option value="left">Left end</option><option value="center">Middle</option><option value="right">Right end</option>
+          </select>
+        </label>
+        {textEdit !== undefined && <>
+          <p className="profile-help">Editing placed text. Change the settings, then Apply; or click the sketch to move it there.</p>
+          <button className="palette-action primary" onClick={textEdit.onApply}>Apply to the text</button>
+          <button className="palette-action" onClick={textEdit.onCancel}>Cancel editing</button>
+        </>}
       </>
     );
     default: return null;

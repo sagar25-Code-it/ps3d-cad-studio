@@ -111,6 +111,11 @@ import { edgeBlendKernelTests, edgeBlendRimTests } from "./edge-blend.test.js";
 import { edgeBlendStepTests } from "./edge-blend-steps.test.js";
 import { limitsSurfaceTests } from "./limits-surface-suite.test.js";
 import { pipelinePlatformTests } from "./pipeline-platform.test.js";
+import { sketchTextObjectTests } from "./sketch-text-objects.test.js";
+import { sketchPatternObjectTests } from "./sketch-pattern-objects.test.js";
+import { sketchExchangeTests } from "./sketch-exchange.test.js";
+import { sketchUnderlayTests } from "./sketch-underlay.test.js";
+import { sketchExchangeUiTests } from "./sketch-exchange-ui.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -231,7 +236,12 @@ const tests: readonly TestCase[] = [
   ...edgeBlendRimTests,
   ...edgeBlendStepTests,
   ...limitsSurfaceTests,
-  ...pipelinePlatformTests
+  ...pipelinePlatformTests,
+  ...sketchTextObjectTests,
+  ...sketchPatternObjectTests,
+  ...sketchExchangeTests,
+  ...sketchUnderlayTests,
+  ...sketchExchangeUiTests
 ];
 let failures = 0;
 

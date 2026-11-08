@@ -20,6 +20,7 @@ import {
 import { locateDimensionConstraint, redriveDimension } from "./sketch-dimension-edit.js";
 import type { DesignFeature, DesignHistory, DesignParameter, DesignSolidFeature, SketchEntity, WorkbenchOperation, WorkbenchProject, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 import { isSketchDatumEntityId } from "./types.js";
+import { reconcileSketchObjects } from "./sketch-objects.js";
 import { failure } from "./validation.js";
 
 /**
@@ -90,6 +91,11 @@ function applySketchBindings(sketch: WorkbenchSketch, results: readonly BindingR
     }
     current = redriven.sketch;
     updated += 1;
+  }
+  // Associative pattern copies follow the source curve that a parameter just resized.
+  if (updated > 0 && (current.patterns?.length ?? 0) > 0) {
+    const followed = reconcileSketchObjects(sketch, current, new Set());
+    if (followed.ok) current = followed.sketch;
   }
   return { sketch: current, updated, issues };
 }

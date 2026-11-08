@@ -19,6 +19,8 @@ export type SketchHotkeyAction =
   | { readonly kind: "dimension" }
   | { readonly kind: "edit-tool"; readonly tool: SketchEditHotkeyTool }
   | { readonly kind: "toggle-construction" }
+  /** Q: everything drawn from now on is construction geometry (or back). */
+  | { readonly kind: "toggle-draw-construction" }
   | { readonly kind: "fit" }
   | { readonly kind: "pan-mode" }
   | { readonly kind: "select-tool" }
@@ -87,7 +89,7 @@ export interface SketchHotkeyContext {
 export type SketchCommandId =
   | `tool:${Exclude<SketchTool, "select">}`
   | `edit:${SketchEditHotkeyTool}`
-  | "dimension" | "toggle-construction" | "fit" | "pan-mode" | "select-tool"
+  | "dimension" | "toggle-construction" | "toggle-draw-construction" | "fit" | "pan-mode" | "select-tool"
   | "toggle-snap" | "toggle-ortho" | "toggle-polar";
 
 export type SketchCommandGroup = "Draw" | "Modify" | "Dimension and view" | "Input assistance";
@@ -150,6 +152,7 @@ export const SKETCH_KEYMAP_COMMANDS: readonly SketchCommandInfo[] = [
   c("edit:split", "Split", "Modify"),
   c("dimension", "Sketch dimension", "Dimension and view", "D"),
   c("toggle-construction", "Toggle construction on the selection", "Dimension and view", "X"),
+  c("toggle-draw-construction", "Draw as construction: new curves are construction geometry (toggle)", "Dimension and view", "Q"),
   c("select-tool", "Select tool", "Dimension and view", "V"),
   c("pan-mode", "Pan navigation", "Dimension and view", "P"),
   c("fit", "Fit the sketch to the window", "Dimension and view", "F"),
@@ -376,6 +379,7 @@ function actionForCommand(id: SketchCommandId): SketchHotkeyAction | undefined {
   switch (id) {
     case "dimension": return { kind: "dimension" };
     case "toggle-construction": return { kind: "toggle-construction" };
+    case "toggle-draw-construction": return { kind: "toggle-draw-construction" };
     case "fit": return { kind: "fit" };
     case "pan-mode": return { kind: "pan-mode" };
     case "select-tool": return { kind: "select-tool" };

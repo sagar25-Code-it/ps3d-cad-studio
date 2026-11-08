@@ -1,6 +1,7 @@
 import type { PatternDefinition } from "./pattern.js";
 import type { BodyEditSpec } from "./body-edit.js";
 import type { SheetBendTable } from "./sheet-features.js";
+import type { SketchObjectsEdit, SketchPatternObject, SketchTextObject, SketchUnderlay } from "./sketch-objects.js";
 
 export const WORKBENCH_FORMAT = "ps3d-workbench-project" as const;
 export const WORKBENCH_SCHEMA_VERSION = 1 as const;
@@ -308,6 +309,12 @@ export interface WorkbenchSketch {
   readonly snapToleranceMm: number;
   readonly entities: readonly SketchEntity[];
   readonly constraints: readonly WorkbenchSketchConstraint[];
+  /** Editable text kept beside the curves it generated (see sketch-objects.ts). Absent means none. */
+  readonly texts?: readonly SketchTextObject[];
+  /** Associative patterns whose instance curves follow their source. Absent means none. */
+  readonly patterns?: readonly SketchPatternObject[];
+  /** A locked background picture for tracing. Absent means none. */
+  readonly underlay?: SketchUnderlay;
 }
 
 export interface PartIntent {
@@ -1541,6 +1548,8 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly addConstraints: readonly WorkbenchSketchConstraint[];
       /** Constraints to delete by ID, so an edit can re-point or drop relations that no longer hold. Absent means none. */
       readonly removeConstraintIds?: readonly string[];
+      /** Text, pattern and underlay records to set or remove together with the curves. Absent means none. */
+      readonly objects?: SketchObjectsEdit;
       readonly label: string;
     }
   | { readonly kind: "set-sketch-constraints-suppressed"; readonly constraintIds: readonly string[]; readonly suppressed: boolean }

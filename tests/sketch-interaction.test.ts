@@ -33,7 +33,7 @@ export const sketchInteractionTests: readonly TestCase[] = [
       equal(resolveSketchHotkey(press("z", { ctrl: true }), idle), undefined, "Ctrl+Z falls through to undo");
       equal(resolveSketchHotkey(press("s", { ctrl: true }), idle), undefined, "Ctrl+S falls through to save");
       equal(resolveSketchHotkey(press("a", { ctrl: true }), idle)?.kind, "select-all", "Ctrl+A selects every curve");
-      equal(resolveSketchHotkey(press("q"), idle), undefined, "unbound keys fall through");
+      equal(resolveSketchHotkey(press("j"), idle), undefined, "unbound keys fall through");
       // Typed input: while fields are showing, digits and Tab are theirs; otherwise they fall through.
       const typing: SketchHotkeyContext = { ...idle, tool: "line", pendingPoints: 1, dynamicFieldCount: 2 };
       equal(JSON.stringify(resolveSketchHotkey(press("5"), typing)), JSON.stringify({ kind: "type-value", key: "5" }), "a digit starts typing into the first field");

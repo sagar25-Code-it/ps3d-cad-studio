@@ -29,6 +29,11 @@ function addThrough(project: WorkbenchProject, shape: SketchShape, label = "Adde
   return applied.value.project;
 }
 
+function boundsOfEntitiesForText(entities: readonly SketchEntity[]): number {
+  const box = boundsOf(entities);
+  return box.max[1] - box.min[1];
+}
+
 function sketchOf(entities: readonly SketchEntity[]): WorkbenchSketch {
   return { ...emptyProject().sketch, entities, constraints: [] };
 }
@@ -512,7 +517,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
         const shape = must(buildSketchText([0, 0], character, { heightMm: 12 }, ids));
         assert(shape.entities.length >= 1, `"${character}" draws something`);
         const box = boundsOf(shape.entities);
-        assert(box.max[1] - box.min[1] <= 12 * 1.2 + 1e-9, `"${character}" is not taller than 120% of the cap height`);
+        assert(box.max[1] - box.min[1] <= 12 * (8.6 / 6) + 1e-9, `"${character}" stays within the cap height plus ascender and descender room`);
         assert(box.max[0] - box.min[0] > 0 || box.max[1] - box.min[1] > 0, `"${character}" has extent`);
       }
       assert(STROKE_FONT_CHARACTERS.includes("Z") && STROKE_FONT_CHARACTERS.includes("9"), "letters and digits are present");
@@ -535,7 +540,8 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       near(sb.max[1], 7 + 6, 0.12, "capitals are the asked height (round letters overshoot by under 2 percent)");
       near(sb.min[0], 5, 1e-6, "the text starts at the click (x)");
       const lower = must(buildSketchText([5, 7], "hello 42", { heightMm: 6 }, ids));
-      equal(lower.entities.length, small.entities.length, "lowercase uses the capital forms");
+      assert(lower.entities.length !== small.entities.length || JSON.stringify(lower.entities.map((e) => e.kind)) !== JSON.stringify(small.entities.map((e) => e.kind)), "lowercase has its own forms (audit T25: it used to be the capitals)");
+      near(boundsOfEntitiesForText(must(buildSketchText([0, 0], "o", { heightMm: 12 }, ids)).entities), 8, 1e-6, "a lowercase o is the x-height, two thirds of the capital");
       const turned = must(buildSketchText([0, 0], "HELLO", { heightMm: 10, rotationDeg: 90 }, ids));
       const tb = boundsOf(turned.entities);
       assert(tb.max[1] - tb.min[1] > 2 * (tb.max[0] - tb.min[0]), "rotated 90 degrees the text runs up the sketch");
