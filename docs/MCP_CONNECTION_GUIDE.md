@@ -88,11 +88,11 @@ the client needs. OAuth credentials are read-only. A maximum of five active pers
 8. Treat the returned project as a new copy. Remote MCP does not click the live
    CAD browser, open private files, or write an external project automatically.
 
-The twelve tools are `ps3d_guide`, `ps3d_agent_handshake`,
+The thirteen tools are `ps3d_guide`, `ps3d_agent_handshake`,
 `ps3d_plan_engineering_intent`, `ps3d_find_commands`, `ps3d_capabilities`,
 `ps3d_inspect_project`, `ps3d_design_health`, `ps3d_analyze_vehicle`,
 `ps3d_electromechanical_catalog`, `ps3d_preview_electromechanical`,
-`ps3d_preview_operation`, and `ps3d_apply_preview`.
+`ps3d_prepare_design_solid`, `ps3d_preview_operation`, and `ps3d_apply_preview`.
 
 ## Local Python and stdio option
 

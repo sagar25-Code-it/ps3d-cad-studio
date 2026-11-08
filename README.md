@@ -35,7 +35,7 @@ Official PS3D Master links: [Engineering calculator](https://stepper-calculator.
 | Drawing | Preview | Descriptive front base view with aligned first/third-angle top and right projections; optional full section A-A and reference isometric; hidden-edge and center-line control; selective non-duplicated dimensions; user-defined general tolerances kept independent from explicit datum/position/flatness/perpendicularity inputs; A4/A3 zones, revision table, projection symbol, release-marked original title block, and SVG output |
 | Electrical | Preview | Original vector component library, stable references and terminals, named pin-to-pin AC/DC/control/ground nets, automatic BESS single-line/DC auxiliary/motor-starter concepts, live structural ERC, concept BOM, SVG output, and review-gated conversion into one traceable mounting plate with DIN rails, ducts, panel-scale generic packages, terminal detail, and unsized orthogonal conductor visualization |
 | Vehicle | Preview | Five original topology-specific motorcycle/scooter/EV/three-wheel packages; one authoritative SI hardpoint/member graph for 3D and orthographic projection; fork, swingarm, unit-swing and front-view wishbone state constraints; Ackermann targets; brake/tyre, road-load, operating-point and support-polygon screens; visible invariant gate; full-droop/design/full-bump states; and explicit safety boundaries |
-| Automate | Preview | Twelve model-neutral local and authenticated remote MCP tools, built-in engineering-intent decomposition for parts and multi-level assemblies, machine-readable collaboration guide, experience-adapted stateless coordination agent, deterministic command finder, all-workspace Design Health analysis, scoped receipt-gated previews, OAuth/personal-token access, and a dependency-free Python client |
+| Automate | Preview | Thirteen model-neutral local and authenticated remote MCP tools, built-in engineering-intent decomposition for parts and multi-level assemblies, machine-readable collaboration guide, experience-adapted stateless coordination agent, deterministic command finder, all-workspace Design Health analysis, scoped receipt-gated previews, OAuth/personal-token access, and a dependency-free Python client |
 
 The 3D workspaces also provide an explicit, on-device camera hand controller.
 After the user starts the camera, a dedicated same-origin Worker runs a
@@ -195,12 +195,12 @@ standards/evidence questions, semantic interfaces, dependency packages, and
 approval gates without asking the user to paste a master prompt or claiming
 geometry execution. Use
 `ps3d_find_commands` to map a plain-language goal to a bounded recipe without
-executing it. The twelve tools are `ps3d_guide`, `ps3d_agent_handshake`,
+executing it. The thirteen tools are `ps3d_guide`, `ps3d_agent_handshake`,
 `ps3d_plan_engineering_intent`, `ps3d_find_commands`,
 `ps3d_capabilities`, `ps3d_inspect_project`, `ps3d_design_health`,
 `ps3d_analyze_vehicle`, `ps3d_electromechanical_catalog`,
-`ps3d_preview_electromechanical`, `ps3d_preview_operation`, and
-`ps3d_apply_preview`.
+`ps3d_preview_electromechanical`, `ps3d_prepare_design_solid`,
+`ps3d_preview_operation`, and `ps3d_apply_preview`.
 Circuit-to-3D preview
 resolves only the project-owned generic catalog and returns an exact operation
 plus receipt; it does not apply the result or control a live browser session.

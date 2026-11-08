@@ -29,7 +29,7 @@ export interface Equation {
   /** Every variable index the residuals read (frozen ones included). */
   readonly vars: readonly number[];
   readonly entities: readonly string[];
-  readonly eval: EvalFn;
+  readonly residual: EvalFn;
 }
 
 export interface EntityLayout {
@@ -319,14 +319,14 @@ class ModelBuilder {
     if (point !== undefined) {
       const px = point.x(this.x0);
       const py = point.y(this.x0);
-      this.equations.push({ id: constraint.id, source: "constraint", size: 2, vars: point.vars, entities: [entityId], eval: (x, out, o) => { out[o] = point.x(x) - px; out[o + 1] = point.y(x) - py; } });
+      this.equations.push({ id: constraint.id, source: "constraint", size: 2, vars: point.vars, entities: [entityId], residual: (x, out, o) => { out[o] = point.x(x) - px; out[o + 1] = point.y(x) - py; } });
       return;
     }
     if (g.kind === "ellipse" && (selector === "major-axis" || selector === "minor-axis")) {
       const b = entry.base;
       if (selector === "major-axis") {
         const a0 = Math.hypot(this.x0[b + 2]!, this.x0[b + 3]!);
-        this.equations.push({ id: constraint.id, source: "constraint", size: 1, vars: [b + 2, b + 3], entities: [entityId], eval: (x, out, o) => { out[o] = Math.hypot(x[b + 2]!, x[b + 3]!) - a0; } });
+        this.equations.push({ id: constraint.id, source: "constraint", size: 1, vars: [b + 2, b + 3], entities: [entityId], residual: (x, out, o) => { out[o] = Math.hypot(x[b + 2]!, x[b + 3]!) - a0; } });
       } else {
         this.freezeRange(entityId, 4, 5, constraint.id);
       }
@@ -426,7 +426,7 @@ class ModelBuilder {
   private make(id: string, source: "constraint" | "dimension", size: number, entities: readonly string[], vars: readonly (readonly number[])[], evaluate: EvalFn): Equation {
     const merged = new Set<number>();
     for (const list of vars) for (const variable of list) merged.add(variable);
-    return { id, source, size, vars: [...merged].sort((a, b) => a - b), entities: entities.filter((entity) => this.layout.has(entity)), eval: evaluate };
+    return { id, source, size, vars: [...merged].sort((a, b) => a - b), entities: entities.filter((entity) => this.layout.has(entity)), residual: evaluate };
   }
 
   private buildConstraint(constraint: SketchConstraint): readonly Equation[] | Failure | undefined {
@@ -801,10 +801,10 @@ class ModelBuilder {
       const x0 = this.x0;
       const add = (size: number, vars: readonly number[], evaluate: EvalFn): void => {
         if (factor === 0) {
-          this.equations.push({ id: `shape:${entry.id}`, source: "constraint", size, vars, entities: [entry.id], eval: evaluate });
+          this.equations.push({ id: `shape:${entry.id}`, source: "constraint", size, vars, entities: [entry.id], residual: evaluate });
           return;
         }
-        this.soft.push({ id: `shape:${entry.id}`, source: "constraint", size, softFactor: factor, vars, entities: [entry.id], eval: evaluate });
+        this.soft.push({ id: `shape:${entry.id}`, source: "constraint", size, softFactor: factor, vars, entities: [entry.id], residual: evaluate });
       };
       switch (entry.geometry.kind) {
         case "line":
@@ -931,7 +931,7 @@ export function pinPointEquation(model: SolverModel, id: string, reference: Geom
   const builder = new ModelBuilder(model.document);
   const point = builder.point(reference);
   if (point === undefined) return undefined;
-  return { id, source: "constraint", size: 2, vars: point.vars, entities: [reference.entityId], eval: (x, out, o) => { out[o] = point.x(x) - target[0]; out[o + 1] = point.y(x) - target[1]; } };
+  return { id, source: "constraint", size: 2, vars: point.vars, entities: [reference.entityId], residual: (x, out, o) => { out[o] = point.x(x) - target[0]; out[o + 1] = point.y(x) - target[1]; } };
 }
 
 /** The variables a point reference reads, or undefined for a reference that is not a point. */

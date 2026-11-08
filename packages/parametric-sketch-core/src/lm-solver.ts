@@ -53,7 +53,7 @@ function activeVariables(equation: Equation, frozen: Uint8Array): number[] {
 }
 
 function evaluateAll(parts: readonly Part[], x: Float64Array, residual: Float64Array): void {
-  for (const part of parts) part.equation.eval(x, residual, part.rowStart);
+  for (const part of parts) part.equation.residual(x, residual, part.rowStart);
 }
 
 function sumOfSquares(parts: readonly Part[], residual: Float64Array): number {
@@ -99,13 +99,13 @@ function jacobian(parts: readonly Part[], x: Float64Array, rowCount: number, scr
       const original = x[variable]!;
       const step = model_role_step(role, variable, baseStep, original);
       x[variable] = original + step;
-      part.equation.eval(x, plus, 0);
+      part.equation.residual(x, plus, 0);
       x[variable] = original - step;
-      part.equation.eval(x, minus, 0);
+      part.equation.residual(x, minus, 0);
       x[variable] = original + 2 * step;
-      part.equation.eval(x, plusTwo, 0);
+      part.equation.residual(x, plusTwo, 0);
       x[variable] = original - 2 * step;
-      part.equation.eval(x, minusTwo, 0);
+      part.equation.residual(x, minusTwo, 0);
       x[variable] = original;
       for (let row = 0; row < size; row += 1) {
         const derivative = (8 * (plus[row]! - minus[row]!) - (plusTwo[row]! - minusTwo[row]!)) / (12 * step);
@@ -360,7 +360,7 @@ function failingReport(model: SolverModel, equations: readonly Equation[], x: Fl
   const reports: ResidualReport[] = [];
   const out = new Float64Array(8);
   for (const equation of equations) {
-    equation.eval(x, out, 0);
+    equation.residual(x, out, 0);
     let worst = 0;
     for (let row = 0; row < equation.size; row += 1) {
       const value = Math.abs(out[row]!);
@@ -379,7 +379,7 @@ export function solveModel(model: SolverModel, options: SolveOptions, frozenOver
   const failing: ResidualReport[] = [];
   const out = new Float64Array(8);
   for (const equation of constants) {
-    equation.eval(model.x, out, 0);
+    equation.residual(model.x, out, 0);
     for (let row = 0; row < equation.size; row += 1) {
       if (!(Math.abs(out[row]!) <= options.tolerance)) {
         failing.push({ equation, residual: Math.abs(out[row]!) });

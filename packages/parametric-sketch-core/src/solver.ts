@@ -74,7 +74,7 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
     const out = new Float64Array(8);
     for (const equation of model.equations) {
       if (equation.source !== "constraint" || seen.has(equation.id)) continue;
-      equation.eval(model.x, out, 0);
+      equation.residual(model.x, out, 0);
       if (Array.from({ length: equation.size }, (_, row) => Math.abs(out[row]!)).some((value) => !(value <= tolerance))) {
         seen.add(equation.id);
         addUniqueDiagnostic(diagnostics, makeDiagnostic(

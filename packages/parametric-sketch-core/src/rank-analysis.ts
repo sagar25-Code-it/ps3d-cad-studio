@@ -34,7 +34,7 @@ export function jacobianRows(model: SolverModel, equations: readonly Equation[],
   const plusTwo = new Float64Array(8);
   const minusTwo = new Float64Array(8);
   for (const equation of equations) {
-    equation.eval(x, base, 0);
+    equation.residual(x, base, 0);
     const baseStep = differenceStep(model.role, x, equation.vars);
     const cols: number[][] = Array.from({ length: equation.size }, () => []);
     const vals: number[][] = Array.from({ length: equation.size }, () => []);
@@ -42,13 +42,13 @@ export function jacobianRows(model: SolverModel, equations: readonly Equation[],
       const original = x[variable]!;
       const step = model.role[variable] === 0 ? baseStep : 1e-4 * Math.max(1, Math.abs(original));
       x[variable] = original + step;
-      equation.eval(x, plus, 0);
+      equation.residual(x, plus, 0);
       x[variable] = original - step;
-      equation.eval(x, minus, 0);
+      equation.residual(x, minus, 0);
       x[variable] = original + 2 * step;
-      equation.eval(x, plusTwo, 0);
+      equation.residual(x, plusTwo, 0);
       x[variable] = original - 2 * step;
-      equation.eval(x, minusTwo, 0);
+      equation.residual(x, minusTwo, 0);
       x[variable] = original;
       for (let row = 0; row < equation.size; row += 1) {
         const derivative = (8 * (plus[row]! - minus[row]!) - (plusTwo[row]! - minusTwo[row]!)) / (12 * step);
