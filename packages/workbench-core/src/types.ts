@@ -412,7 +412,7 @@ export interface GeneralSolidBody {
   /** Flat triangle vertex indices; length is a multiple of 3. */
   readonly indices: readonly number[];
   readonly feature?: {
-    readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome";
+    readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem";
     readonly plane: "xy" | "xz" | "yz";
     /** Extrusion height / revolve angle (degrees) / sweep distance / loft height / treatment size. */
     readonly valueMm: number;
@@ -1001,7 +1001,7 @@ export interface DesignSketchFeature extends DesignFeatureBase {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
@@ -1137,6 +1137,16 @@ export interface DesignSolidFeature extends DesignFeatureBase {
    * The tool body is subtracted from the target to carve the indent cavity.
    */
   readonly indentToolBodyId?: string;
+  /** Sheet-base / sheet-flange only: sheet thickness in millimetres. */
+  readonly sheetThicknessMm?: number;
+  /** Sheet-base / sheet-flange only: inner bend radius in millimetres (for the bend K-factor and flat-pattern unfold). */
+  readonly sheetBendRadiusMm?: number;
+  /** Sheet-flange only: length of the flange in millimetres (how far the flange extends from the edge). */
+  readonly flangeLengthMm?: number;
+  /** Sheet-flange only: bend angle in degrees (90 is a right-angle flange). */
+  readonly flangeAngleDeg?: number;
+  /** Sheet-hem only: hem style — "closed" folds the flange back against the base, "open" leaves a gap of sheetThicknessMm. */
+  readonly hemStyle?: "closed" | "open";
 }
 
 export type DesignFeature = DesignSketchFeature | DesignSolidFeature;

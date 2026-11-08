@@ -6,3 +6,4 @@ export * from "./tessellate.js";
 export * from "./mesh-boolean.js";
 export * from "./mesh-modify.js";
 export * from "./construction-geometry.js";
+export * from "./sheet-metal.js";

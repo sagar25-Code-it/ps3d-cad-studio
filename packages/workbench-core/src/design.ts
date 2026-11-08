@@ -293,14 +293,14 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
   if (Object.hasOwn(value, "extent")) {
     // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
     if (!["distance", "through-all"].includes(String(value.extent))) return false;
     if (value.extent === "through-all" && (value.kind !== "extrude" || value.operation !== "cut")) return false;
   }
-  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
+  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "sheet-base", "sheet-flange", "sheet-hem"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
   if (typeof value.valueMm !== "number" || !Number.isFinite(value.valueMm) || value.valueMm === 0 || Math.abs(value.valueMm) > 100_000) return false;
@@ -409,6 +409,25 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (Object.hasOwn(value, "indentToolBodyId")) {
     if (value.kind !== "indent" || !stable(String(value.indentToolBodyId))) return false;
   }
+  const sheetKind = value.kind === "sheet-base" || value.kind === "sheet-flange" || value.kind === "sheet-hem";
+  if (Object.hasOwn(value, "sheetThicknessMm")) {
+    if (!sheetKind || typeof value.sheetThicknessMm !== "number" || !Number.isFinite(value.sheetThicknessMm) || value.sheetThicknessMm <= 0 || value.sheetThicknessMm > 1000) return false;
+  }
+  if (Object.hasOwn(value, "sheetBendRadiusMm")) {
+    if (!sheetKind || typeof value.sheetBendRadiusMm !== "number" || !Number.isFinite(value.sheetBendRadiusMm) || value.sheetBendRadiusMm < 0 || value.sheetBendRadiusMm > 1000) return false;
+  }
+  if (Object.hasOwn(value, "flangeLengthMm")) {
+    if (!sheetKind || typeof value.flangeLengthMm !== "number" || !Number.isFinite(value.flangeLengthMm) || value.flangeLengthMm <= 0 || value.flangeLengthMm > 10_000) return false;
+  }
+  if (Object.hasOwn(value, "flangeAngleDeg")) {
+    if (value.kind !== "sheet-flange" || typeof value.flangeAngleDeg !== "number" || !Number.isFinite(value.flangeAngleDeg) || value.flangeAngleDeg <= 0 || value.flangeAngleDeg > 180) return false;
+  }
+  if (Object.hasOwn(value, "hemStyle")) {
+    if (value.kind !== "sheet-hem" || !["closed", "open"].includes(String(value.hemStyle))) return false;
+  }
+  if (sheetKind && !Object.hasOwn(value, "sheetThicknessMm")) return false;
+  if ((value.kind === "sheet-flange" || value.kind === "sheet-hem") && (!Object.hasOwn(value, "flangeLengthMm") || !Object.hasOwn(value, "sheetBendRadiusMm"))) return false;
+  if (value.kind === "sheet-flange" && !Object.hasOwn(value, "flangeAngleDeg")) return false;
   // Each new kind must carry its required parameters.
   if (value.kind === "thread") {
     if (!Object.hasOwn(value, "threadPitchMm") || !Object.hasOwn(value, "threadTurns") || !Object.hasOwn(value, "threadDepthMm")) return false;

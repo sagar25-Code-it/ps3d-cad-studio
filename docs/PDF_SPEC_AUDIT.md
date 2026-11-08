@@ -155,7 +155,17 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 
 ## 9. Sheet metal
 
-Out of this repository entirely so far; the PDF devotes a full section to it (base flange, hem, miter, jog, unfold / fold, flat pattern, DXF / SVG export). This is a separate workspace stage - not addressed here.
+| PDF requirement | Status | Where / Gap |
+|---|---|---|
+| Base flange / sheet base | Shipped | `DesignSolidFeature.kind: "sheet-base"` extrudes a sketch profile by `sheetThicknessMm` |
+| Edge flange (bend angle, inner radius, length) | Partial | `kind: "sheet-flange"` builds a leg + circular bend + straight flange (`bentStripSection` / `tessellateBentStrip`) from `sheetThicknessMm`, `sheetBendRadiusMm`, `flangeLengthMm`, `flangeAngleDeg` (1–180°). The profile's X-extent is the flat leg and the height field is the strip width; the flange is its own body, not yet attached to a picked edge of an existing sheet |
+| Hem (closed / open) | Shipped | `kind: "sheet-hem"` is a 180° flange; closed uses a 0.05 mm inner radius so the return leg lies on the sheet, open keeps the bend radius |
+| Bend allowance / deduction / K-factor | Shipped | `sheetBendAllowanceMm`, `sheetOutsideSetbackMm`, `sheetBendDeductionMm` in `packages/workbench-geometry/src/sheet-metal.ts`, default K-factor 0.44 |
+| Unfold / flat pattern | Partial | `flatPatternOf` unfolds a leg + bend + flange into the flat blank (length, bend allowance, outline, bend lines) and `flatPatternSvg` renders it at 1 mm per unit. Single-bend strips only; multi-bend parts, corner reliefs and bend tables are out |
+| Flat pattern export (DXF / SVG) | Partial | SVG string shipped; DXF writer and a UI export button still to come |
+| Miter flange, jog, lofted bend, corner relief, bend table | Missing | |
+
+Sheet metal here is mesh-based like the rest of the modeler, so folded and flat shapes are computed from the same parameters rather than from a true sheet-metal B-rep with edge-attached flanges.
 
 ## Summary - biggest gaps to close before pending Hole / Fillet / Chamfer / Shell
 

@@ -141,7 +141,7 @@ interface SketchWorkspaceProps {
   readonly onCreateSolid: (
     profileIds: readonly string[],
     plane: PlaneKey,
-    operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome",
+    operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem",
     valueMm: number,
     edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number },
     direction?: "one-side" | "symmetric" | "flipped",
@@ -171,6 +171,11 @@ interface SketchWorkspaceProps {
       readonly ribThicknessMm?: number;
       readonly ribDirection?: "symmetric" | "one-side";
       readonly domeHeightMm?: number;
+      readonly sheetThicknessMm?: number;
+      readonly sheetBendRadiusMm?: number;
+      readonly flangeLengthMm?: number;
+      readonly flangeAngleDeg?: number;
+      readonly hemStyle?: "closed" | "open";
     }
   ) => void;
   /** The solids a join or cut can modify. */
@@ -252,7 +257,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [selectionBox, setSelectionBox] = useState<{ readonly start: Vec2; readonly end: Vec2 } | undefined>(undefined);
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
-  const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome">("extrude");
+  const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem">("extrude");
   const [solidValue, setSolidValue] = useState("10");
   const [sweepDx, setSweepDx] = useState("0");
   const [sweepDy, setSweepDy] = useState("0");
@@ -276,6 +281,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [threadHandedness, setThreadHandedness] = useState<"right" | "left">("right");
   const [ribThickness, setRibThickness] = useState("2");
   const [domeHeight, setDomeHeight] = useState("8");
+  const [sheetThickness, setSheetThickness] = useState("2");
+  const [sheetBendRadius, setSheetBendRadius] = useState("2");
+  const [flangeLength, setFlangeLength] = useState("20");
+  const [flangeAngle, setFlangeAngle] = useState("90");
+  const [hemStyle, setHemStyle] = useState<"closed" | "open">("closed");
   const [modifierEdgeSize, setModifierEdgeSize] = useState("1");
   const [shellThickness, setShellThickness] = useState("2");
   const [shellOpenFace, setShellOpenFace] = useState<"top" | "bottom" | "none">("top");
@@ -1165,7 +1175,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <div className="sketch-make-solid" aria-label="Create a solid from a profile">
           <span className="make-solid-title">Create solid</span>
           <div className="make-solid-row">
-            <select aria-label="Operation" value={solidOp} onChange={(event) => { const next = event.target.value as "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome"; setSolidOp(next); setSolidValue(next === "revolve" ? "360" : next === "helix" ? "20" : "20"); }}>
+            <select aria-label="Operation" value={solidOp} onChange={(event) => { const next = event.target.value as "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem"; setSolidOp(next); setSolidValue(next === "revolve" ? "360" : next === "helix" ? "20" : "20"); }}>
               <option value="extrude">Extrude</option>
               <option value="revolve">Revolve</option>
               <option value="sweep">Sweep (linear)</option>
@@ -1178,6 +1188,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="thread">Thread (helical ridge)</option>
               <option value="rib">Rib (thin wall)</option>
               <option value="dome">Dome (capped)</option>
+              <option value="sheet-base">Sheet metal: base plate</option>
+              <option value="sheet-flange">Sheet metal: flange</option>
+              <option value="sheet-hem">Sheet metal: hem</option>
             </select>
             <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? "Sweep distance in millimetres" : "Height in millimetres"} type="number" min={solidOp === "revolve" ? 1 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : 1} value={solidValue} disabled={cutThroughAll} onChange={(event) => setSolidValue(event.target.value)} />
             <small>{solidOp === "revolve" ? "°" : "mm"}</small>
@@ -1296,6 +1309,26 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="left">Left-handed</option>
             </select>
           </div>}
+          {(solidOp === "sheet-base" || solidOp === "sheet-flange" || solidOp === "sheet-hem") && <div className="make-solid-row" aria-label="Sheet metal parameters">
+            <small>Thickness</small>
+            <input aria-label="Sheet thickness in millimetres" type="number" min={0.1} step={0.1} value={sheetThickness} onChange={(event) => setSheetThickness(event.target.value)} />
+            {solidOp !== "sheet-base" && <>
+              <small>mm · bend R</small>
+              <input aria-label="Sheet bend radius in millimetres" type="number" min={0} step={0.5} value={sheetBendRadius} onChange={(event) => setSheetBendRadius(event.target.value)} />
+              <small>mm · flange</small>
+              <input aria-label="Flange length in millimetres" type="number" min={0.5} step={1} value={flangeLength} onChange={(event) => setFlangeLength(event.target.value)} />
+            </>}
+            {solidOp === "sheet-flange" && <>
+              <small>mm · angle</small>
+              <input aria-label="Flange bend angle in degrees" type="number" min={1} max={180} step={5} value={flangeAngle} onChange={(event) => setFlangeAngle(event.target.value)} />
+              <small>°</small>
+            </>}
+            {solidOp === "sheet-hem" && <select aria-label="Hem style" value={hemStyle} onChange={(event) => setHemStyle(event.target.value === "open" ? "open" : "closed")}>
+              <option value="closed">Closed hem</option>
+              <option value="open">Open hem</option>
+            </select>}
+            {solidOp !== "sheet-base" && <small>Profile X-extent = flat leg · height field = strip width</small>}
+          </div>}
           {solidOp === "rib" && <div className="make-solid-row" aria-label="Rib parameters">
             <small>Thickness</small>
             <input aria-label="Rib thickness in millimetres" type="number" min={0.1} step={0.5} value={ribThickness} onChange={(event) => setRibThickness(event.target.value)} />
@@ -1363,7 +1396,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
                           ? { ribThicknessMm: Number(ribThickness) }
                           : solidOp === "dome"
                             ? { domeHeightMm: Number(domeHeight) }
-                            : undefined;
+                            : solidOp === "sheet-base"
+                              ? { sheetThicknessMm: Number(sheetThickness) }
+                              : solidOp === "sheet-flange"
+                                ? { sheetThicknessMm: Number(sheetThickness), sheetBendRadiusMm: Number(sheetBendRadius), flangeLengthMm: Number(flangeLength), flangeAngleDeg: Number(flangeAngle) }
+                                : solidOp === "sheet-hem"
+                                  ? { sheetThicknessMm: Number(sheetThickness), sheetBendRadiusMm: Number(sheetBendRadius), flangeLengthMm: Number(flangeLength), hemStyle }
+                                  : undefined;
             const effectiveProfileIds = solidOp === "loft" && loftMode === "two-profile" && selectedProfileIds.length >= 2
               ? selectedProfileIds.slice(0, 1)
               : selectedProfileIds;

@@ -1,5 +1,5 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { booleanMeshes, revolveAxisRelation, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateRevolve, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { booleanMeshes, revolveAxisRelation, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateBentStrip, tessellateRevolve, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism, evaluateProfileRevolution, stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { profileOutlineMm, stableEntityToken, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
@@ -80,7 +80,7 @@ function rotateLocalToPlane(point: WorldPoint, plane: SketchPlane): WorldPoint {
 export interface CreateGeneralSolidRequest {
   readonly profile: SketchProfile;
   readonly plane: SketchPlane;
-  readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome";
+  readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem";
   /** Extrusion height / revolve angle (deg) / sweep distance / loft height, in millimetres (angle: degrees). For edge-fillet/chamfer, shell and draft this is still the extrusion height. */
   readonly valueMm: number;
   readonly bodyId: string;
@@ -136,6 +136,12 @@ export interface CreateGeneralSolidRequest {
   readonly domeHeightMm?: number;
   /** Edge-fillet only: optional end radius (start → end along the vertical edge). */
   readonly edgeEndSizeMm?: number;
+  /** Sheet metal: thickness, inner bend radius, flange length (mm) and bend angle (deg); hem style. */
+  readonly sheetThicknessMm?: number;
+  readonly sheetBendRadiusMm?: number;
+  readonly flangeLengthMm?: number;
+  readonly flangeAngleDeg?: number;
+  readonly hemStyle?: "closed" | "open";
 }
 
 /** Maps a hole profile to the kernel's hole loop; the id comes from its sketch entities so wall names survive edits. */
@@ -235,6 +241,31 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     // Fall through to the extrude path below by treating operation as extrude. We can't just reassign since operation is readonly,
     // so delegate to a nested call with operation swapped.
     return createGeneralSolidBody({ ...request, operation: "extrude" });
+  }
+  if (request.operation === "sheet-base") {
+    const thickness = request.sheetThicknessMm;
+    if (thickness === undefined || !Number.isFinite(thickness) || thickness <= 0) return { ok: false, message: "Sheet base needs a positive thickness." };
+    const mesh = tessellateExtrude(polygonMm, thickness, request.plane);
+    if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The sheet base could not be built." };
+    return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
+  }
+  if (request.operation === "sheet-flange" || request.operation === "sheet-hem") {
+    const thickness = request.sheetThicknessMm;
+    const radius = request.sheetBendRadiusMm;
+    const flangeLength = request.flangeLengthMm;
+    if (thickness === undefined || !Number.isFinite(thickness) || thickness <= 0) return { ok: false, message: "Sheet flange needs a positive thickness." };
+    if (radius === undefined || !Number.isFinite(radius) || radius < 0) return { ok: false, message: "Sheet flange needs a non-negative bend radius." };
+    if (flangeLength === undefined || !Number.isFinite(flangeLength) || flangeLength <= 0) return { ok: false, message: "Sheet flange needs a positive flange length." };
+    const isHem = request.operation === "sheet-hem";
+    const angle = isHem ? 180 : request.flangeAngleDeg;
+    if (angle === undefined || !Number.isFinite(angle) || angle <= 0 || angle > 180) return { ok: false, message: "The bend angle must be between 0° and 180°." };
+    // The profile's X extent is the flat leg that stays in the sketch plane; valueMm is the strip width.
+    const xs = polygonMm.map((point) => point[0]);
+    const leg = Math.max(...xs) - Math.min(...xs);
+    const innerRadius = isHem && (request.hemStyle ?? "closed") === "closed" ? 0.05 : radius;
+    const mesh = tessellateBentStrip({ legMm: leg, flangeLengthMm: flangeLength, angleDeg: angle, innerRadiusMm: innerRadius, thicknessMm: thickness, widthMm: Math.abs(request.valueMm) }, request.plane);
+    if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The flange could not be built. Check the leg, flange length, thickness and width are positive." };
+    return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
   if (request.operation === "thread") {
     // Thread is a helical ridge: a small triangular V-section profile at the thread depth / pitch over a given number of turns.
