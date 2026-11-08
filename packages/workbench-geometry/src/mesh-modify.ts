@@ -99,6 +99,15 @@ export interface EdgeTreatmentOptions {
   readonly angleThresholdDeg?: number;
   /** Fillet tessellation per edge. Default 8. */
   readonly segments?: number;
+  /** Treat only the sharp edges that match one of these segments (by end points) instead of every sharp convex edge. */
+  readonly onlyEdges?: readonly (readonly [V3, V3])[];
+}
+
+/** A straight edge of the mesh a click can land on, tagged with the smooth run (chain) of edges it belongs to. */
+export interface PickableEdge {
+  readonly a: V3;
+  readonly b: V3;
+  readonly chain: number;
 }
 
 const MAX_SHARP_EDGES = 200;
@@ -491,7 +500,10 @@ function detectSharpConvexEdges(body: ModifyMeshInput, angleThresholdDeg: number
     const crossX = n1[1] * n2[2] - n1[2] * n2[1];
     const crossY = n1[2] * n2[0] - n1[0] * n2[2];
     const crossZ = n1[0] * n2[1] - n1[1] * n2[0];
-    const convex = crossX * ex + crossY * ey + crossZ * ez;
+    // The edge must be read in the direction the first triangle winds along it, or the sign says nothing about convexity.
+    const first = [weldedIndex[body.indices[t1 * 3]!]!, weldedIndex[body.indices[t1 * 3 + 1]!]!, weldedIndex[body.indices[t1 * 3 + 2]!]!] as const;
+    const forward = (first[0] === weldA && first[1] === weldB) || (first[1] === weldA && first[2] === weldB) || (first[2] === weldA && first[0] === weldB);
+    const convex = (forward ? 1 : -1) * (crossX * ex + crossY * ey + crossZ * ez);
     if (convex <= 0) continue; // Concave or indeterminate.
     sharpSet.set(key, { aIdx: weldA, bIdx: weldB, a: [ax, ay, az], b: [bx, by, bz], n1, n2 });
     if (sharpSet.size > MAX_SHARP_EDGES) return `Too many sharp edges (${sharpSet.size}+); simplify the body before treating its edges.`;
@@ -513,6 +525,80 @@ function findEdgePositions(body: ModifyMeshInput, weldedIndex: readonly number[]
 }
 
 // ---------------------------------------------------------------------------------------------
+// Edge picking: every sharp convex edge of a body can be picked by a click. Edges that meet end to
+// end where nothing else joins them and that hardly turn (the segments of a round rim) form one
+// chain, so picking one segment of a circle picks the whole circle.
+// ---------------------------------------------------------------------------------------------
+
+/** Two straight edges continue each other when the line turns by no more than this where they meet. */
+const CHAIN_TURN_LIMIT_DEG = 35;
+/** An edge that bends the surface by less than this is a facet seam, not a pickable edge. */
+const PICK_MIN_BEND_DEG = 20;
+
+/** The sharp convex edges of a body as pickable segments, grouped into chains; a message when the body has too many. */
+export function pickableEdges(body: ModifyMeshInput, angleThresholdDeg: number = DEFAULT_ANGLE_THRESHOLD_DEG): readonly PickableEdge[] | string {
+  const detected = detectSharpConvexEdges(body, angleThresholdDeg);
+  if (typeof detected === "string") return detected;
+  // The seams between the facets of a round face bend only a few degrees; they are not edges anyone means to pick.
+  const seamCos = Math.cos(PICK_MIN_BEND_DEG * Math.PI / 180);
+  const sharp = detected.filter((edge) => edge.n1[0] * edge.n2[0] + edge.n1[1] * edge.n2[1] + edge.n1[2] * edge.n2[2] <= seamCos);
+  const parent = sharp.map((_, index) => index);
+  const find = (index: number): number => { let root = index; while (parent[root] !== root) root = parent[root]!; return root; };
+  const atVertex = new Map<number, number[]>();
+  sharp.forEach((edge, index) => {
+    for (const vertex of [edge.aIdx, edge.bIdx]) {
+      const bucket = atVertex.get(vertex);
+      if (bucket === undefined) atVertex.set(vertex, [index]); else bucket.push(index);
+    }
+  });
+  const cosLimit = Math.cos(CHAIN_TURN_LIMIT_DEG * Math.PI / 180);
+  const direction = (edge: SharpEdge): V3 => normalize(sub(edge.b, edge.a)) ?? [0, 0, 0];
+  for (const bucket of atVertex.values()) {
+    if (bucket.length !== 2) continue;
+    const [first, second] = bucket as [number, number];
+    const d1 = direction(sharp[first]!);
+    const d2 = direction(sharp[second]!);
+    if (Math.abs(d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2]) >= cosLimit) parent[find(first)] = find(second);
+  }
+  const chainIds = new Map<number, number>();
+  return sharp.map((edge, index) => {
+    const root = find(index);
+    let chain = chainIds.get(root);
+    if (chain === undefined) { chain = chainIds.size; chainIds.set(root, chain); }
+    return { a: edge.a, b: edge.b, chain };
+  });
+}
+
+function distanceToSegmentMm(point: V3, a: V3, b: V3): number {
+  const ab = sub(b, a);
+  const lengthSquared = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+  const ap = sub(point, a);
+  const t = lengthSquared < 1e-18 ? 0 : Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / lengthSquared));
+  return Math.hypot(point[0] - (a[0] + ab[0] * t), point[1] - (a[1] + ab[1] * t), point[2] - (a[2] + ab[2] * t));
+}
+
+/** The pickable edge closest to a clicked point, with the whole chain it belongs to. */
+export function nearestPickableEdge(edges: readonly PickableEdge[], point: V3): { readonly edge: PickableEdge; readonly distanceMm: number; readonly chain: readonly PickableEdge[] } | undefined {
+  let best: PickableEdge | undefined;
+  let bestDistance = Infinity;
+  for (const edge of edges) {
+    const distance = distanceToSegmentMm(point, edge.a, edge.b);
+    if (distance < bestDistance) { best = edge; bestDistance = distance; }
+  }
+  if (best === undefined) return undefined;
+  const chain = best.chain;
+  return { edge: best, distanceMm: bestDistance, chain: edges.filter((edge) => edge.chain === chain) };
+}
+
+/** The sharp edges a treatment applies to: all of them, or only those matching the picked segments. */
+function chosenEdges(sharp: readonly SharpEdge[], only: EdgeTreatmentOptions["onlyEdges"]): readonly SharpEdge[] {
+  if (only === undefined) return sharp;
+  const TOL = 1e-4;
+  const same = (p: V3, q: V3): boolean => Math.abs(p[0] - q[0]) < TOL && Math.abs(p[1] - q[1]) < TOL && Math.abs(p[2] - q[2]) < TOL;
+  return sharp.filter((edge) => only.some(([a, b]) => (same(edge.a, a) && same(edge.b, b)) || (same(edge.a, b) && same(edge.b, a))));
+}
+
+// ---------------------------------------------------------------------------------------------
 // Chamfer: for each sharp convex edge, build a triangular prism cutter that removes the corner
 // material, chaining Boolean cuts.
 // ---------------------------------------------------------------------------------------------
@@ -521,9 +607,10 @@ export function meshChamfer(body: ModifyMeshInput, options: EdgeTreatmentOptions
   const size = options.sizeMm;
   if (!Number.isFinite(size) || size <= 0) return { ok: false, message: "Chamfer distance must be a positive length." };
   const angleThreshold = options.angleThresholdDeg ?? DEFAULT_ANGLE_THRESHOLD_DEG;
-  const sharp = detectSharpConvexEdges(body, angleThreshold);
-  if (typeof sharp === "string") return { ok: false, message: sharp };
-  if (sharp.length === 0) return { ok: false, message: "No sharp convex edges were found on this body, so there is nothing to chamfer." };
+  const found = detectSharpConvexEdges(body, angleThreshold);
+  if (typeof found === "string") return { ok: false, message: found };
+  const sharp = chosenEdges(found, options.onlyEdges);
+  if (sharp.length === 0) return { ok: false, message: options.onlyEdges === undefined ? "No sharp convex edges were found on this body, so there is nothing to chamfer." : "The picked edge is not a sharp convex edge of this body, so there is nothing to chamfer." };
 
   let current: BooleanMeshInput = { positionsMm: Array.from(body.positionsMm), indices: Array.from(body.indices) };
   let applied = 0;
@@ -605,9 +692,10 @@ export function meshFillet(body: ModifyMeshInput, options: EdgeTreatmentOptions)
   const angleThreshold = options.angleThresholdDeg ?? DEFAULT_ANGLE_THRESHOLD_DEG;
   const segments = options.segments ?? DEFAULT_FILLET_SEGMENTS;
   if (!Number.isInteger(segments) || segments < 3 || segments > 48) return { ok: false, message: "Fillet tessellation must be between 3 and 48 segments." };
-  const sharp = detectSharpConvexEdges(body, angleThreshold);
-  if (typeof sharp === "string") return { ok: false, message: sharp };
-  if (sharp.length === 0) return { ok: false, message: "No sharp convex edges were found on this body, so there is nothing to fillet." };
+  const found = detectSharpConvexEdges(body, angleThreshold);
+  if (typeof found === "string") return { ok: false, message: found };
+  const sharp = chosenEdges(found, options.onlyEdges);
+  if (sharp.length === 0) return { ok: false, message: options.onlyEdges === undefined ? "No sharp convex edges were found on this body, so there is nothing to fillet." : "The picked edge is not a sharp convex edge of this body, so there is nothing to fillet." };
 
   let current: BooleanMeshInput = { positionsMm: Array.from(body.positionsMm), indices: Array.from(body.indices) };
   let applied = 0;

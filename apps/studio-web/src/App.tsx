@@ -54,7 +54,7 @@ import {
   type Vec3,
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
-import { flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
+import { flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, nearestPickableEdge, pickableEdges, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
 import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
@@ -1402,7 +1402,57 @@ export function App(): React.JSX.Element {
     void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
   };
 
-  const handleModifyGeneralBody = (modifier: "hole" | "fillet" | "chamfer" | "shell"): void => {
+  /**
+   * Fillet or chamfer one picked edge: the sharp convex edges of the solid are drawn over it, and a click on any of them (flat,
+   * slanted or round) picks that edge, with the rest of its smooth run, such as a whole circular rim. The click decides the solid
+   * too, so an edge of another solid can be picked without selecting it first.
+   */
+  const handleEdgeTreatment = async (modifier: "fillet" | "chamfer"): Promise<void> => {
+    const bodies = projectRef.current.part.generalBodies ?? [];
+    const selected = bodies.find((candidate) => candidate.id === selectedId);
+    const name = modifierLabelOf(modifier);
+    if (selected === undefined) { setStatus("ready"); setStatusText(`${name} needs a general solid body selected first.`); return; }
+    const edgesOf = (target: GeneralSolidBody): ReturnType<typeof pickableEdges> => pickableEdges({ positionsMm: target.positionsMm, indices: target.indices });
+    const edges = edgesOf(selected);
+    if (typeof edges === "string") { setStatus("ready"); setStatusText(`${name}: ${edges}`); return; }
+    if (edges.length === 0) { setStatus("ready"); setStatusText(`${name}: ${selected.name} has no sharp convex edge to pick.`); return; }
+    const guides: ViewportGuideSegment[] = edges.map((edge) => [edge.a, edge.b]);
+    const runs = new Set(edges.map((edge) => edge.chain)).size;
+    const picked = await requestViewportPick(`${name}: click an edge of ${selected.name} (${runs} ${runs === 1 ? "edge" : "edges"} outlined)`, guides);
+    if (picked === null) return;
+    const body = bodies.find((candidate) => candidate.id === picked.semanticId) ?? selected;
+    const bodyEdges = body === selected ? edges : edgesOf(body);
+    if (typeof bodyEdges === "string") { setStatus("ready"); setStatusText(`${name}: ${bodyEdges}`); return; }
+    const nearest = nearestPickableEdge(bodyEdges, picked.pointMm);
+    if (nearest === undefined) { setStatus("ready"); setStatusText(`${name}: ${body.name} has no sharp convex edge to pick.`); return; }
+    const chainIndexes = bodyEdges.flatMap((edge, index) => edge.chain === nearest.edge.chain ? [index] : []);
+    const viewport = viewportRef.current;
+    viewport?.setGuideSegments(bodyEdges.map((edge) => [edge.a, edge.b] as ViewportGuideSegment), chainIndexes);
+    const clearHighlight = (): void => viewport?.setGuideSegments([]);
+    window.setTimeout(clearHighlight, 4000);
+    const pieces = nearest.chain.length;
+    const where = `${pieces === 1 ? `a ${Math.hypot(nearest.edge.b[0] - nearest.edge.a[0], nearest.edge.b[1] - nearest.edge.a[1], nearest.edge.b[2] - nearest.edge.a[2]).toFixed(1)} mm edge` : `a run of ${pieces} edges`} of ${body.name}, ${nearest.distanceMm.toFixed(1)} mm from your click`;
+    setStatusText(`${name}: picked ${where}.`);
+    const raw = typeof window === "undefined" ? "2" : window.prompt(modifier === "fillet" ? "Fillet radius (mm):" : "Chamfer distance (mm):", "2");
+    if (raw === null) { clearHighlight(); return; }
+    const value = Number.parseFloat(raw);
+    if (!Number.isFinite(value) || value <= 0) { clearHighlight(); setStatus("ready"); setStatusText(`${name}: enter a positive number in millimetres.`); return; }
+    const input = { positionsMm: body.positionsMm, indices: body.indices };
+    const onlyEdges = nearest.chain.map((edge) => [edge.a, edge.b] as const);
+    const result = modifier === "fillet" ? meshFillet(input, { sizeMm: value, onlyEdges }) : meshChamfer(input, { sizeMm: value, onlyEdges });
+    clearHighlight();
+    if (!result.ok) { setStatus("ready"); setStatusText(`${name} failed: ${result.message}`); return; }
+    const label = modifier === "fillet" ? `Fillet R ${value} mm (picked edge)` : `Chamfer ${value} mm (picked edge)`;
+    const { feature: _feature, brep: _brep, ...keep } = body;
+    void _feature; void _brep;
+    const nextBody: GeneralSolidBody = { ...keep, positionsMm: Array.from(result.positionsMm), indices: Array.from(result.indices) };
+    if (!applyProjectOperation({ kind: "modify-general-body", targetBodyId: body.id, modifier, label, body: nextBody })) { setStatus("ready"); setStatusText(`The project rejected the ${name} result.`); return; }
+    setSelectedId(body.id);
+    setStatusText(`Applied ${label} to ${body.name}: ${where}.`);
+  };
+
+  const handleModifyGeneralBody = (modifier: "hole" | "fillet" | "chamfer" | "shell", scope: "picked" | "all" = "picked"): void => {
+    if ((modifier === "fillet" || modifier === "chamfer") && scope === "picked") { void handleEdgeTreatment(modifier); return; }
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
     const body = bodies.find((candidate) => candidate.id === selectedId);

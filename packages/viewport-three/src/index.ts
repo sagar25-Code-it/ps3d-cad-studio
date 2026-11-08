@@ -947,7 +947,8 @@ export class ThreeViewportAdapter {
    * Draws guide lines over the model (edges the user may pick, with the one under consideration highlighted). Passing an empty
    * list removes them.
    */
-  setGuideSegments(segmentsMm: readonly ViewportGuideSegment[], activeIndex: number | null = null): void {
+  setGuideSegments(segmentsMm: readonly ViewportGuideSegment[], activeIndex: number | readonly number[] | null = null): void {
+    const activeSet = new Set<number>(activeIndex === null ? [] : typeof activeIndex === "number" ? [activeIndex] : activeIndex);
     for (const object of [...this.#guideGroup.children]) {
       this.#guideGroup.remove(object);
       if ("geometry" in object && object.geometry instanceof THREE.BufferGeometry) object.geometry.dispose();
@@ -962,7 +963,7 @@ export class ThreeViewportAdapter {
       const direction = new THREE.Vector3().subVectors(end, start);
       const length = direction.length();
       if (length < 1e-9) return;
-      const active = index === activeIndex;
+      const active = activeSet.has(index);
       const geometry = new THREE.CylinderGeometry(active ? rodRadius * 1.6 : rodRadius, active ? rodRadius * 1.6 : rodRadius, length, 8, 1, false);
       const rod = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: active ? "#ffb347" : "#3fd0ff", depthTest: false, transparent: true, opacity: active ? 1 : 0.85 }));
       rod.quaternion.setFromUnitVectors(up, direction.normalize());

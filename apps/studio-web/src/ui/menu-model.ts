@@ -62,7 +62,7 @@ export interface WorkbenchMenuActions {
   readonly onDeleteSelected: () => void;
   readonly onMoveSelectedBody: () => void;
   readonly onResizeSelectedBody: () => void;
-  readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell") => void;
+  readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell", scope?: "picked" | "all") => void;
   readonly onFit: () => void;
   readonly onHome: () => void;
   readonly onToggleGrid: () => void;
@@ -120,9 +120,13 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
     { id: "modify.hole", label: "Hole…", icon: "hole", divider: true, disabled: !state.generalBodySelected,
       hint: state.generalBodySelected ? "Drill a through-hole along +Z into the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("hole") },
     { id: "modify.fillet", label: "Fillet…", icon: "fillet", disabled: !state.generalBodySelected,
-      hint: state.generalBodySelected ? "Round every sharp convex edge on the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("fillet") },
+      hint: state.generalBodySelected ? "Click any sharp edge of the selected solid to round it" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("fillet") },
     { id: "modify.chamfer", label: "Chamfer…", icon: "chamfer", disabled: !state.generalBodySelected,
-      hint: state.generalBodySelected ? "Bevel every sharp convex edge on the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("chamfer") },
+      hint: state.generalBodySelected ? "Click any sharp edge of the selected solid to bevel it" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("chamfer") },
+    { id: "modify.fillet-all", label: "Fillet all edges…", icon: "fillet", disabled: !state.generalBodySelected,
+      hint: state.generalBodySelected ? "Round every sharp convex edge on the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("fillet", "all") },
+    { id: "modify.chamfer-all", label: "Chamfer all edges…", icon: "chamfer", disabled: !state.generalBodySelected,
+      hint: state.generalBodySelected ? "Bevel every sharp convex edge on the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("chamfer", "all") },
     { id: "modify.shell", label: "Shell…", icon: "shell", disabled: !state.generalBodySelected,
       hint: state.generalBodySelected ? "Hollow the selected solid with the +Z face left open" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("shell") }
   ] };

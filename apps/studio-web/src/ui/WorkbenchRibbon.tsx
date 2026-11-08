@@ -46,7 +46,7 @@ interface WorkbenchRibbonProps {
   readonly onCreatePartPreviewBody: (shape: PartPreviewBodyShape) => void;
   readonly onPartPreviewAction: (operation: "edit-transform" | "edit-size" | "edit-appearance" | "duplicate" | "mirror-x" | "pattern-x" | "toggle-visible" | "delete", commandName: string) => void;
   readonly onPartFeatureAction: (operation: "revolve" | "pattern-feature" | "mirror-feature" | "unite" | "subtract" | "trim-body" | "edge-blend" | "chamfer" | "draft" | "shell" | "move-face" | "offset-face" | "replace-face" | "delete-face" | "resize-blend" | "update-model", commandName: string) => void;
-  readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell") => void;
+  readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell", scope?: "picked" | "all") => void;
   readonly onAddConstructionPlane: (mode: "offset" | "angle" | "three-points" | "midplane" | "tangent-to-cylinder" | "perpendicular-to-axis") => void;
   readonly onAddConstructionAxis: (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis") => void;
   readonly onAddConstructionPoint: (mode: "xyz" | "midpoint" | "axis-plane-intersection") => void;
@@ -233,8 +233,10 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       <RibbonGroup label="Solid modify">
         <RibbonButton icon="hole" label="Hole" hint="Ø 6 · through" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("hole")} />
         <RibbonButton icon="bore" label="Hole Wizard" hint="M-series + style" disabled={!generalBodySelected} onClick={props.onHoleWizard} />
-        <RibbonButton icon="fillet" label="Fillet" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("fillet")} />
-        <RibbonButton icon="chamfer" label="Chamfer" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer")} />
+        <RibbonButton icon="fillet" label="Fillet" hint="click an edge" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("fillet")} />
+        <RibbonButton icon="chamfer" label="Chamfer" hint="click an edge" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer")} />
+        <RibbonButton icon="fillet" label="Fillet All" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("fillet", "all")} />
+        <RibbonButton icon="chamfer" label="Chamfer All" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer", "all")} />
         <RibbonButton icon="shell" label="Shell" hint="open +Z" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("shell")} />
       </RibbonGroup>
       <RibbonGroup label="Sheet metal">
