@@ -6,6 +6,7 @@ import {
   type WorkbenchResult,
   type WorkbenchSketch
 } from "../../workbench-core/src/index.js";
+import { CURVE_TOOL_LABELS, curveToolRequiredPoints, isFixedCurveTool, type CurveToolId, type FixedCurveToolId } from "./curve-tools.js";
 
 /**
  * The short names remain the default Fusion-familiar variants so existing
@@ -36,11 +37,13 @@ export type SketchTool =
   /** A center-to-center slot: two end centres, then a width point. Placed as several entities, see shapes.ts. */
   | "slot"
   /** A straight (overall) slot: two outer endpoints (cap edges), then a width point. Placed as several entities, see shapes.ts. */
-  | "slot-straight";
+  | "slot-straight"
+  /** The extra curve tools (midpoint line, centerline, parallelogram, rounded rectangle, arc slots, conics, blend, profile, text ...): see curve-tools.ts. */
+  | CurveToolId;
 
 /** Tools whose result is a whole parametric shape (several entities and relations) rather than one entity. */
-export function isShapeTool(tool: SketchTool): tool is "polygon" | "slot" | "slot-straight" {
-  return tool === "polygon" || tool === "slot" || tool === "slot-straight";
+export function isShapeTool(tool: SketchTool): tool is "polygon" | "slot" | "slot-straight" | FixedCurveToolId {
+  return tool === "polygon" || tool === "slot" || tool === "slot-straight" || isFixedCurveTool(tool);
 }
 
 export type SketchProfileBoundary =
@@ -362,6 +365,8 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
 }
 
 export function requiredSketchPoints(tool: SketchTool): number {
+  const curveTool = curveToolRequiredPoints(tool);
+  if (curveTool !== undefined) return curveTool;
   // A spline needs three fit points at least; the workspace lets the user keep adding points until they finish it.
   return tool === "select" ? 0 : tool === "point" ? 1 : tool === "arc" || tool === "arc-center" || tool === "arc-tangent" || tool === "spline" || tool === "rectangle-three-point" || tool === "circle-three-point" || tool === "ellipse" || tool === "slot" || tool === "slot-straight" ? 3 : 2;
 }
@@ -384,7 +389,8 @@ export function sketchToolLabel(tool: SketchTool): string {
     spline: "Fit-point spline",
     polygon: "Polygon",
     slot: "Center-to-center slot",
-    "slot-straight": "Straight slot"
+    "slot-straight": "Straight slot",
+    ...CURVE_TOOL_LABELS
   };
   return labels[tool];
 }

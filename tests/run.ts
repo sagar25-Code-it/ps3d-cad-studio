@@ -32,6 +32,7 @@ import { meshModifyTests } from "./mesh-modify.test.js";
 import { holeWizardTests } from "./hole-wizard.test.js";
 import { sketchChamferModeTests } from "./sketch-chamfer-modes.test.js";
 import { sketchArcAndSlotModeTests } from "./sketch-arc-and-slot-modes.test.js";
+import { sketchCurveToolTests } from "./sketch-curve-tools.test.js";
 import { sweepAndLoftTests } from "./sweep-and-loft.test.js";
 import { edgeShellDraftTests } from "./edge-shell-draft.test.js";
 import { constructionAxesAndPointsTests } from "./construction-axes-and-points.test.js";
@@ -102,6 +103,7 @@ const tests: readonly TestCase[] = [
   ...holeWizardTests,
   ...sketchChamferModeTests,
   ...sketchArcAndSlotModeTests,
+  ...sketchCurveToolTests,
   ...sweepAndLoftTests,
   ...edgeShellDraftTests,
   ...constructionAxesAndPointsTests,

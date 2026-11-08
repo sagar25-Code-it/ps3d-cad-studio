@@ -26,6 +26,9 @@ import { autoConstraintsFor, dropConstraintFor, type PlacedPointInference } from
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, buildPolygon, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
+import { CURVE_TOOL_PROMPTS, buildControlPointSpline, buildCurveTool, isFixedCurveTool } from "../../../../packages/workbench-sketch/src/curve-tools.js";
+import { extendProfileChain, startProfileChain, type ProfileChain } from "../../../../packages/workbench-sketch/src/blend-profile.js";
+import { DEFAULT_CURVE_OPTION_FIELDS, SketchCurveOptionsPanel, curveOptionsFromFields } from "./SketchCurveOptions.js";
 import { entitiesInSelectionBox, selectionBoxMode, selectionRect, type SketchSelectionBoxMode } from "../../../../packages/workbench-sketch/src/selection.js";
 import { SketchCheckPanel, SketchEditPanel, SketchRelationList, type SketchEditToolId, type StretchWindowRect } from "./SketchEditPanel.js";
 import { SketchGrid } from "./sketch/SketchGrid.js";
@@ -242,6 +245,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [dimensionEdit, setDimensionEdit] = useState<{ readonly entityId: string; readonly dimension: DrivingDimension; readonly anchor: Vec2; readonly label: string } | undefined>(undefined);
   const [dimensionText, setDimensionText] = useState("");
   const [polygonSides, setPolygonSides] = useState(String(POLYGON_DEFAULT_SIDES));
+  // The extra curve tools (rounded rectangle, conics, blend, profile, text ...): their palette numbers, and the Profile chain being drawn.
+  const [curveFields, setCurveFields] = useState(DEFAULT_CURVE_OPTION_FIELDS);
+  const profileChain = useRef<ProfileChain | undefined>(undefined);
   // Typed input: fields the user has typed into are locked; the others keep following the pointer.
   const [fieldText, setFieldText] = useState<Partial<Record<DynamicFieldId, string>>>({});
   const [dynamicFocused, setDynamicFocused] = useState(false);
@@ -380,6 +386,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const dimensionedIds = useMemo(() => new Set(drivingDimensions.map((view) => view.entity.id)), [drivingDimensions]);
   const dimensionModeWasActive = useRef(false);
   const previewEntity = useMemo(() => {
+    if (props.tool === "profile") {
+      const chain = profileChain.current;
+      if (chain === undefined || pending.length === 0) return undefined;
+      const step = extendProfileChain(chain, cursor, curveFields.profileMode, PICK_PIXELS * px, { entity: () => "entity:tool-preview", constraint: () => "constraint:tool-preview" });
+      return step.ok ? step.value.entity : { id: "entity:tool-preview", kind: "line" as const, start: chain.tail, end: cursor, construction: false } satisfies SketchEntity;
+    }
+    if (props.tool === "spline-control") return undefined;
     if (props.tool === "spline") {
       return pending.length >= 1 ? { id: "entity:tool-preview", kind: "spline" as const, fitPoints: [...pending, cursor], construction: false } satisfies SketchEntity : undefined;
     }
@@ -399,20 +412,30 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       return { id: "entity:tool-preview", kind: "line" as const, start: pending[pending.length - 1]!, end: cursor, construction: false } satisfies SketchEntity;
     }
     return undefined;
-  }, [cursor, pending, props.tool]);
+  }, [cursor, pending, props.tool, curveFields.profileMode]);
   const navigationPan = props.tool === "select" && props.viewportState.navigationMode === "pan";
   /** A whole polygon or slot is built from the points placed so far plus the cursor, so it can be previewed and then placed. */
-  const buildShape = (tool: "polygon" | "slot" | "slot-straight", points: readonly Vec2[]): ReturnType<typeof buildPolygon> => {
+  const buildShape = (tool: Exclude<SketchTool, "select">, points: readonly Vec2[]): ReturnType<typeof buildPolygon> => {
     const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
+    if (isFixedCurveTool(tool)) {
+      const options = curveOptionsFromFields(curveFields, { entities: props.sketch.entities, centerlineReachMm: Math.max(1000, camera.camera.widthMm * 3 + Math.hypot(camera.camera.centerMm[0], camera.camera.centerMm[1])), pickReachMm: Math.max(props.sketch.snapToleranceMm, PICK_PIXELS * px) });
+      return buildCurveTool(tool, points, options, ids);
+    }
     if (tool === "polygon") return buildPolygon(points[0]!, points[1]!, Math.round(Number(polygonSides)), ids);
     if (tool === "slot-straight") return buildSlotOverall(points[0]!, points[1]!, points[2]!, ids);
     return buildSlot(points[0]!, points[1]!, points[2]!, ids);
   };
   const previewShape = useMemo<SketchShape | undefined>(() => {
+    if (props.tool === "spline-control") {
+      if (pending.length < 2) return pending.length === 1 ? { entities: [{ id: "entity:tool-preview", kind: "line", start: pending[0]!, end: cursor, construction: false }], constraints: [] } : undefined;
+      let counter = 0;
+      const built = buildControlPointSpline([...pending, cursor], false, true, { entity: () => `entity:tool-preview-${counter += 1}`, constraint: () => "constraint:tool-preview" });
+      return built.ok ? built.value : undefined;
+    }
     if (!isShapeTool(props.tool) || pending.length !== requiredSketchPoints(props.tool) - 1) return undefined;
     const built = buildShape(props.tool, [...pending, cursor]);
     return built.ok ? built.value : undefined;
-  }, [props.tool, pending, cursor, polygonSides]);
+  }, [props.tool, pending, cursor, polygonSides, curveFields, props.sketch.entities]);
 
   useEffect(() => {
     dragGesture.current = undefined;
@@ -421,7 +444,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [props.sketch, props.tool, props.cancelVersion]);
   useEffect(() => setPending([]), [props.tool, props.cancelVersion]);
   useEffect(() => {
-    if (pending.length === 0) { chainStart.current = undefined; chainSegments.current = 0; setPendingInference([]); }
+    if (pending.length === 0) { chainStart.current = undefined; chainSegments.current = 0; profileChain.current = undefined; setPendingInference([]); }
   }, [pending.length]);
   // Starting a drawing tool, Sketch Dimension or an edit tool ends relation picking; switching to Select (which picking itself does) does not.
   useEffect(() => {
@@ -462,7 +485,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     // Placing tools infer from the sketch (endpoints, centres, midpoints, intersections, alignment...). A line or spline also
     // infers from the last point it placed, which enables perpendicular, tangent and level/plumb hints.
     const placing = props.tool !== "select";
-    const anchor = (props.tool === "line" || props.tool === "spline") ? pending.at(-1) : undefined;
+    const anchor = (props.tool === "line" || props.tool === "spline" || props.tool === "spline-control" || props.tool === "profile") ? pending.at(-1) : undefined;
     const result: InferenceResult = snapEnabled && placing
       ? inferSketchPoint(point, props.sketch, { toleranceMm: SNAP_PIXELS * px, gridMm: grid.minorMm, ...(anchor === undefined ? {} : { anchor }) })
       : { point, snapped: false, guides: [] };
@@ -478,6 +501,19 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       if (!result.ok) { props.onMessage(result.diagnostics[0]?.message ?? "The sketch edit was rejected."); return; }
       props.onApplyEdit(result.value);
       setSelectionIds([]);
+      return;
+    }
+    if (props.tool === "spline-control") {
+      // Control points: clicking the first one again closes the loop, clicking the last one again (or Enter) ends an open curve.
+      const first = pending[0];
+      const last = pending.at(-1);
+      if (pending.length >= 3 && first !== undefined && Math.hypot(snapped.point[0] - first[0], snapped.point[1] - first[1]) <= PICK_PIXELS * px) { finishControlSpline(pending, true); return; }
+      const gap = last === undefined ? Infinity : Math.hypot(snapped.point[0] - last[0], snapped.point[1] - last[1]);
+      if (pending.length >= 3 && gap <= PICK_PIXELS * px) { finishControlSpline(pending, false); return; }
+      if (gap < 0.05) return;
+      const next = [...pending, snapped.point];
+      setPending(next);
+      props.onMessage(`Control-point spline: point ${next.length} accepted.${next.length >= 3 ? " Click the first point to close it, click the last point again or press Enter to finish." : ""}`);
       return;
     }
     if (props.tool === "spline") {
@@ -505,8 +541,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   /** Places one point of the active tool: a click, or Enter on typed values. A finished shape is added to the sketch. */
   const placePoint = (point: Vec2, label: string, found?: InferenceResult): void => {
-    if (props.tool === "select" || props.tool === "spline") return;
+    if (props.tool === "select" || props.tool === "spline" || props.tool === "spline-control") return;
     setFieldText({});
+    if (props.tool === "profile") { placeProfilePoint(point); return; }
     const points = [...pending, point];
     const previous = pending.at(-1);
     const placed: readonly PlacedPointInference[] = [
@@ -517,7 +554,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (points.length < requiredSketchPoints(props.tool)) {
       setPending(points);
       setPendingInference(placed);
-      props.onMessage(`${sketchToolLabel(props.tool)}: point ${points.length} accepted${label === "" ? "" : ` (${label})`}.`);
+      const nextPrompt = isFixedCurveTool(props.tool) ? CURVE_TOOL_PROMPTS[props.tool][points.length] : undefined;
+      props.onMessage(`${sketchToolLabel(props.tool)}: point ${points.length} accepted${label === "" ? "" : ` (${label})`}.${nextPrompt === undefined ? "" : ` Next: ${nextPrompt}.`}`);
       return;
     }
     if (isShapeTool(props.tool)) {
@@ -529,7 +567,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       const accepted = props.onApplyEdit({ label: `Added ${sketchToolLabel(props.tool).toLowerCase()} (${shape.value.entities.length} curves, ${shape.value.constraints.length} relations)`, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shape.value.constraints });
       if (accepted === false) return;
       setPending([]);
-      props.onMessage(`Added ${sketchToolLabel(props.tool).toLowerCase()} with ${shape.value.entities.length} curves and ${shape.value.constraints.length} relations as one closed profile.`);
+      props.onMessage(`Added ${sketchToolLabel(props.tool).toLowerCase()} with ${shape.value.entities.length} curve${shape.value.entities.length === 1 ? "" : "s"} and ${shape.value.constraints.length} relation${shape.value.constraints.length === 1 ? "" : "s"}.`);
       return;
     }
     const built = buildSketchEntity(props.tool, points, `entity:user-${crypto.randomUUID()}`);
@@ -593,6 +631,44 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     props.onAddEntity(built.value);
     setPending([]);
     props.onMessage(`Added fit-point spline with ${points.length} points and stable ID ${built.value.id}.`);
+  };
+
+  const finishControlSpline = (controls: readonly Vec2[], closed: boolean): void => {
+    const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
+    const built = buildControlPointSpline(controls, closed, curveFields.keepPolygon, ids);
+    if (!built.ok) { props.onMessage(built.diagnostics[0]?.message ?? "The spline was rejected."); setPending([]); return; }
+    const accepted = props.onApplyEdit({ label: `Added control-point spline (${controls.length} control points${closed ? ", closed" : ""})`, removeEntityIds: [], updateEntities: [], addEntities: built.value.entities, addConstraints: built.value.constraints });
+    if (accepted === false) return;
+    setPending([]);
+    props.onMessage(`Added ${closed ? "closed " : ""}control-point spline from ${controls.length} control points${closed ? " as two splines that meet at two points, so it bounds a profile" : ""}.`);
+  };
+
+  /** One click of the Profile tool: the first click starts the chain, each later click adds a line or a tangent arc; ending on the start closes the loop. */
+  const placeProfilePoint = (point: Vec2): void => {
+    const chain = profileChain.current;
+    if (chain === undefined) {
+      profileChain.current = startProfileChain(point);
+      setPending([point]);
+      props.onMessage("Profile: start placed. Click the next point; pick Tangent arc in the Sketch palette to curve into it, click the start again to close, Esc to stop.");
+      return;
+    }
+    const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
+    const step = extendProfileChain(chain, point, curveFields.profileMode, PICK_PIXELS * px, ids);
+    if (!step.ok) { props.onMessage(`${step.diagnostics[0]?.message ?? "The segment was rejected."} Place the point somewhere else, or press Esc to stop.`); return; }
+    const { entity, constraints, chain: next, closed } = step.value;
+    let accepted: boolean | void = undefined;
+    if (constraints.length > 0) accepted = props.onApplyEdit({ label: `Added profile ${entity.kind} ${next.segments}`, removeEntityIds: [], updateEntities: [], addEntities: [entity], addConstraints: constraints });
+    // If the solver refused the relations, the segment itself is still drawn.
+    if (constraints.length === 0 || accepted === false) props.onAddEntity(entity);
+    if (closed) {
+      profileChain.current = undefined;
+      setPending([]);
+      props.onMessage(`Closed the profile after ${next.segments} segments. It is now a closed profile.`);
+      return;
+    }
+    profileChain.current = next;
+    setPending([next.tail]);
+    props.onMessage(`Added profile ${entity.kind} ${next.segments}. Keep clicking, click the start to close it, or press Esc to stop.`);
   };
 
   /** Opens the value editor next to a curve's dimension: the length of a line, the diameter of a circle, the width or height of a rectangle. */
@@ -850,6 +926,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         });
         return;
       case "finish":
+        if (props.tool === "spline-control") { if (pending.length >= 3) finishControlSpline(pending, false); return; }
+        if (props.tool === "profile") { profileChain.current = undefined; setPending([]); props.onMessage("Profile finished."); return; }
         if (pending.length >= 3) finishSpline(pending);
         return;
       case "type-value": {
@@ -1199,6 +1277,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Snap" active={snapEnabled} onToggle={setSnapEnabled} />
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
         {props.tool === "polygon" && <label className="palette-number"><span>Polygon sides</span><input type="number" min={POLYGON_MIN_SIDES} max={POLYGON_MAX_SIDES} step={1} value={polygonSides} aria-label="Number of polygon sides" onChange={(event) => setPolygonSides(event.target.value)} /></label>}
+        <SketchCurveOptionsPanel tool={props.tool} fields={curveFields} onChange={setCurveFields} />
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
         <PaletteToggle label="Constraints" active={showConstraints} onToggle={setShowConstraints} />
