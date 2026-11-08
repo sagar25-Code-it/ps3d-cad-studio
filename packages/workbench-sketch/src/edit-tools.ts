@@ -63,52 +63,8 @@ function plan(label: string, parts: Partial<Omit<SketchEditPlan, "label">>): Ske
 // Offset
 // ---------------------------------------------------------------------------------------------
 
-/**
- * Offsets the selected curves by `distanceMm`. For a circle, arc or rectangle a positive distance
- * moves outward; for a line (or a connected chain of lines) it moves to the left of the line's
- * direction, except that a closed loop of lines offsets outward. Connected lines are re-joined with
- * mitred corners. Each result is a new, unconstrained entity; the originals stay.
- */
-export function offsetEntities(context: SketchEditContext, ids: readonly string[], distanceMm: number): SketchEditResult {
-  if (!Number.isFinite(distanceMm) || Math.abs(distanceMm) < 0.01 || Math.abs(distanceMm) > 5000) return reject("Enter an offset distance between 0.01 mm and 5000 mm (negative offsets to the other side).");
-  const entities = ids.map((id) => find(context.sketch, id));
-  if (entities.length === 0 || entities.some((entity) => entity === undefined)) return reject("Select the curves to offset.");
-  const selected = entities as SketchEntity[];
-  const added: SketchEntity[] = [];
-  const lines = selected.filter((entity): entity is Line => entity.kind === "line");
-  for (const entity of selected) {
-    if (entity.kind === "line") continue;
-    if (entity.kind === "circle") {
-      const radiusMm = entity.radiusMm + distanceMm;
-      if (radiusMm < 0.01) return reject("The inward offset is larger than the circle's radius.", [entity.id]);
-      added.push({ ...entity, id: context.newId("entity"), radiusMm });
-    } else if (entity.kind === "arc") {
-      const circle = circumcircle(entity.start, entity.mid, entity.end);
-      if (circle === undefined) return reject("The arc is degenerate.", [entity.id]);
-      const radiusMm = circle.radiusMm + distanceMm;
-      if (radiusMm < 0.01) return reject("The inward offset is larger than the arc's radius.", [entity.id]);
-      const scale = radiusMm / circle.radiusMm;
-      const about = (point: Vec2): Vec2 => [circle.center[0] + (point[0] - circle.center[0]) * scale, circle.center[1] + (point[1] - circle.center[1]) * scale];
-      added.push({ ...entity, id: context.newId("entity"), start: about(entity.start), mid: about(entity.mid), end: about(entity.end) });
-    } else if (entity.kind === "rectangle") {
-      const widthMm = entity.widthMm + 2 * distanceMm;
-      const heightMm = entity.heightMm + 2 * distanceMm;
-      if (widthMm < 0.01 || heightMm < 0.01) return reject("The inward offset is larger than the rectangle.", [entity.id]);
-      added.push({ ...entity, id: context.newId("entity"), widthMm, heightMm });
-    } else {
-      return reject(`Offset applies to lines, arcs, circles and rectangles; a ${entity.kind} cannot be offset.`, [entity.id]);
-    }
-  }
-  if (lines.length > 0) {
-    const chains = buildLineChains(lines, context.sketch.snapToleranceMm);
-    for (const chain of chains) {
-      const result = offsetChain(chain, distanceMm, context);
-      if (typeof result === "string") return reject(result, chain.lines.map((line) => line.id));
-      added.push(...result);
-    }
-  }
-  return plan(`Offset ${selected.length} curve${selected.length === 1 ? "" : "s"} by ${format(distanceMm)} mm`, { addEntities: added });
-}
+export { expandOffsetSelection, offsetEntities } from "./offset-tools.js";
+export type { OffsetChainMode, OffsetCorner, OffsetOptions } from "./offset-tools.js";
 
 interface LineChain {
   /** Vertices in traversal order; a closed chain repeats no vertex. */
@@ -210,7 +166,26 @@ function offsetChain(chain: LineChain, distanceMm: number, context: SketchEditCo
     if (distance(from, to) < 0.01 || flipped) return "The offset distance collapses part of the shape; use a smaller distance.";
     created.push({ id: context.newId("entity"), kind: "line", start: from, end: to, construction: chain.lines[index]?.construction ?? false });
   }
+  // Two edges that are not neighbours must not cross: a neck narrower than twice the distance makes its two sides swap and cross.
+  for (let i = 0; i < created.length; i += 1) {
+    for (let j = i + 2; j < created.length; j += 1) {
+      if (chain.closed && i === 0 && j === created.length - 1) continue;
+      const a = created[i] as Line;
+      const b = created[j] as Line;
+      if (segmentsProperlyCross(a.start, a.end, b.start, b.end)) return "The offset overlaps itself: some part of the shape is narrower than twice the distance. Use a smaller distance.";
+    }
+  }
   return created;
+}
+
+function segmentsProperlyCross(a: Vec2, b: Vec2, c: Vec2, d: Vec2): boolean {
+  const orient = (p: Vec2, q: Vec2, r: Vec2): number => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  const d1 = orient(c, d, a);
+  const d2 = orient(c, d, b);
+  const d3 = orient(a, b, c);
+  const d4 = orient(a, b, d);
+  const eps = 1e-9;
+  return ((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) && ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps));
 }
 
 // ---------------------------------------------------------------------------------------------

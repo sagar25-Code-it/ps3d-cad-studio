@@ -193,7 +193,7 @@ function stubOf(cut: Cut, id: string): Cuttable {
 // Meeting point
 // ---------------------------------------------------------------------------------------------
 
-function lineCircle(origin: Vec2, direction: Vec2, center: Vec2, radius: number): readonly Vec2[] {
+export function lineCircle(origin: Vec2, direction: Vec2, center: Vec2, radius: number): readonly Vec2[] {
   const length = Math.hypot(direction[0], direction[1]);
   const u: Vec2 = [direction[0] / length, direction[1] / length];
   const f: Vec2 = [origin[0] - center[0], origin[1] - center[1]];
@@ -206,7 +206,7 @@ function lineCircle(origin: Vec2, direction: Vec2, center: Vec2, radius: number)
   return ts.map((t): Vec2 => [origin[0] + u[0] * t, origin[1] + u[1] * t]);
 }
 
-function circleCircle(c1: Vec2, r1: number, c2: Vec2, r2: number): readonly Vec2[] {
+export function circleCircle(c1: Vec2, r1: number, c2: Vec2, r2: number): readonly Vec2[] {
   const between = dist(c1, c2);
   if (between < 1e-12 || between > r1 + r2 + 1e-9 || between < Math.abs(r1 - r2) - 1e-9) return [];
   const along = (r1 * r1 - r2 * r2 + between * between) / (2 * between);
@@ -217,7 +217,7 @@ function circleCircle(c1: Vec2, r1: number, c2: Vec2, r2: number): readonly Vec2
   return height < 1e-9 ? [base] : [[base[0] - uy * height, base[1] + ux * height], [base[0] + uy * height, base[1] - ux * height]];
 }
 
-function lineLine(a: Vec2, ad: Vec2, b: Vec2, bd: Vec2): Vec2 | undefined {
+export function lineLine(a: Vec2, ad: Vec2, b: Vec2, bd: Vec2): Vec2 | undefined {
   const denominator = ad[0] * bd[1] - ad[1] * bd[0];
   if (Math.abs(denominator) < 1e-12 * Math.max(1, Math.hypot(ad[0], ad[1]) * Math.hypot(bd[0], bd[1]))) return undefined;
   const t = ((b[0] - a[0]) * bd[1] - (b[1] - a[1]) * bd[0]) / denominator;
