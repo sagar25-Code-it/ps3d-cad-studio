@@ -342,3 +342,27 @@ export function parseConstraintDisplay(text: string | null | undefined): Constra
     return DEFAULT_CONSTRAINT_DISPLAY;
   }
 }
+
+export interface ConstraintRow {
+  readonly id: string;
+  readonly kind: SketchConstraintKind;
+  readonly label: string;
+  /** "Parallel: Line 2, Line 5", with a value for a dimension. */
+  readonly text: string;
+  readonly suppressed: boolean;
+  readonly dimension: boolean;
+  readonly entityIds: readonly string[];
+}
+
+/** Every relation of the sketch as a list row, newest first. There is no cap: the list scrolls (the old one showed only the last ten). */
+export function constraintRows(constraints: readonly WorkbenchSketchConstraint[], labels: ReadonlyMap<string, string>): readonly ConstraintRow[] {
+  return [...constraints].reverse().map((constraint) => ({
+    id: constraint.id,
+    kind: constraint.kind,
+    label: CONSTRAINT_GLYPH_INFO[constraint.kind].label,
+    text: describeConstraint(constraint, labels),
+    suppressed: constraint.suppressed === true,
+    dimension: isDimensionKind(constraint.kind),
+    entityIds: constraint.entityIds
+  }));
+}

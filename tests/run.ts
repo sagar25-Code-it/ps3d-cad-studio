@@ -103,6 +103,7 @@ import { edgeBlendKernelTests, edgeBlendRimTests } from "./edge-blend.test.js";
 import { edgeBlendStepTests } from "./edge-blend-steps.test.js";
 import { limitsSurfaceTests } from "./limits-surface-suite.test.js";
 import { sketchCanvasUxTests } from "./sketch-canvas-ux.test.js";
+import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -215,7 +216,8 @@ const tests: readonly TestCase[] = [
   ...edgeBlendRimTests,
   ...edgeBlendStepTests,
   ...limitsSurfaceTests,
-  ...sketchCanvasUxTests
+  ...sketchCanvasUxTests,
+  ...sketchCanvasHandleTests
 ];
 let failures = 0;
 

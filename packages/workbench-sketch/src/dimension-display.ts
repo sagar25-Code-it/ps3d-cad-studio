@@ -29,7 +29,9 @@ export function clampPrecision(value: number): number {
 /** A length in millimetres as label text: "25.40 mm", or "1.000 in" when the unit is inches. Tiny non-zero values never round to "0". */
 export function formatLengthLabel(valueMm: number, settings: DimensionDisplaySettings = DEFAULT_DIMENSION_DISPLAY): string {
   const precision = clampPrecision(settings.precision);
-  const shown = settings.unit === "in" ? valueMm / MM_PER_INCH : valueMm;
+  const raw = settings.unit === "in" ? valueMm / MM_PER_INCH : valueMm;
+  // Floating-point dust (a solver result of 1e-13) is zero, not a tiny length.
+  const shown = Math.abs(raw) < 1e-9 ? 0 : raw;
   let text = shown.toFixed(precision);
   // A value that is not zero but would print as zero keeps its first significant digits, so 0.0004 does not read as 0.
   if (shown !== 0 && Number(text) === 0) text = Number(shown.toPrecision(2)).toString();
