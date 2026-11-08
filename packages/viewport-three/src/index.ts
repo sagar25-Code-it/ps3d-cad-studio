@@ -1,10 +1,14 @@
 import * as THREE from "three";
-import { ZEBRA_FRAGMENT_SOURCE, ZEBRA_UNIFORMS_SOURCE, axisVector, clampZebraFrequency, type ZebraOptions } from "./zebra.js";
+import { clampZebraFrequency, type ZebraOptions } from "./zebra.js";
+import { applyZebraToObject, disposeZebraOriginals } from "./zebra-materials.js";
+import { buildAnalysisGroup, disposeAnalysisGroup, type ViewportAnalysisOverlay } from "./analysis-overlay.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { cloneExchangeObject, disposeExchangeObject, inspectExchangeObject, type ExchangeBounds, type ViewportJpeg } from "../../exchange-3d/src/index.js";
 import type { ModelSuccessResponse } from "../../worker-protocol/src/index.js";
 import type { PreviewBounds, PreviewPrimitive, PreviewScene } from "../../workbench-geometry/src/index.js";
 
+export { buildAnalysisGroup, disposeAnalysisGroup, EMPTY_ANALYSIS_OVERLAY, type OverlayRgb, type ViewportAnalysisLines, type ViewportAnalysisMesh, type ViewportAnalysisOverlay } from "./analysis-overlay.js";
+export { applyZebraToObject } from "./zebra-materials.js";
 export { ZEBRA_AXES, ZEBRA_DEFAULT, ZEBRA_MAX_FREQUENCY, ZEBRA_MIN_FREQUENCY, clampZebraFrequency, zebraBandAt, zebraReflection, type ZebraAxis, type ZebraOptions } from "./zebra.js";
 
 export interface ViewportOptions {
@@ -172,6 +176,7 @@ export class ThreeViewportAdapter {
   readonly #bodyGroup = new THREE.Group();
   readonly #measurementGroup = new THREE.Group();
   readonly #guideGroup = new THREE.Group();
+  #analysisGroup: THREE.Group | undefined;
   readonly #grid = new THREE.GridHelper(0.24, 24, "#9aa3aa", "#545d64");
   readonly #axes = new THREE.AxesHelper(0.035);
   readonly #hemisphereLight = new THREE.HemisphereLight("#f5f7f8", "#1f2428", 1.35);
@@ -337,10 +342,22 @@ export class ThreeViewportAdapter {
     this.#emitViewState();
   }
 
-  /** Shades every standard-material mesh with zebra stripes (or restores normal shading with null). New geometry picks it up too. */
+  /** Draws colour-mapped analysis meshes and highlight lines over the model (or clears them with null). */
+  setAnalysisOverlay(overlay: ViewportAnalysisOverlay | null): void {
+    if (this.#analysisGroup !== undefined) {
+      this.#scene.remove(this.#analysisGroup);
+      disposeAnalysisGroup(this.#analysisGroup);
+      this.#analysisGroup = undefined;
+    }
+    if (overlay === null || (overlay.meshes.length === 0 && overlay.lines.length === 0)) return;
+    this.#analysisGroup = buildAnalysisGroup(overlay);
+    this.#scene.add(this.#analysisGroup);
+  }
+
+  /** Shades every mesh, whatever its material, with zebra stripes (or restores normal shading with null). New geometry and imports pick it up too. */
   setZebra(options: ZebraOptions | null): void {
     this.#zebra = options === null ? null : { axis: options.axis, frequency: clampZebraFrequency(options.frequency) };
-    for (const object of this.#objects) object.traverse((entry) => this.#applyZebra(entry));
+    for (const object of this.#objects) this.#applyZebra(object);
     this.#emitViewState();
   }
 
@@ -349,21 +366,7 @@ export class ThreeViewportAdapter {
   }
 
   #applyZebra(entry: THREE.Object3D): void {
-    if (!(entry instanceof THREE.Mesh) || !(entry.material instanceof THREE.MeshStandardMaterial)) return;
-    const material = entry.material;
-    const options = this.#zebra;
-    material.customProgramCacheKey = () => (options === null ? "" : `zebra:${options.axis}:${options.frequency}`);
-    material.onBeforeCompile = options === null
-      ? () => undefined
-      : (shader) => {
-        const axis = axisVector(options.axis);
-        shader.uniforms["uZebraAxis"] = { value: new THREE.Vector3(axis[0], axis[1], axis[2]) };
-        shader.uniforms["uZebraFrequency"] = { value: options.frequency };
-        shader.fragmentShader = shader.fragmentShader
-          .replace("void main() {", `${ZEBRA_UNIFORMS_SOURCE}void main() {`)
-          .replace("#include <opaque_fragment>", `#include <opaque_fragment>${ZEBRA_FRAGMENT_SOURCE}`);
-      };
-    material.needsUpdate = true;
+    applyZebraToObject(entry, this.#zebra);
   }
 
   setShadingMode(mode: ViewportShadingMode): void {
@@ -559,12 +562,17 @@ export class ThreeViewportAdapter {
     });
     this.#bodyGroup.add(root);
     this.#objects.push(root);
+    if (this.#zebra !== null) this.#applyZebra(root);
     this.#bodyId = undefined;
     this.fitExchange(inspectExchangeObject(root).bounds);
   }
 
   snapshotExchangeObject(): THREE.Object3D {
-    const snapshot = cloneExchangeObject(this.#bodyGroup);
+    // Zebra stand-in materials are a display aid and must not leak into an export.
+    const zebra = this.#zebra;
+    if (zebra !== null) applyZebraToObject(this.#bodyGroup, null);
+    let snapshot: THREE.Object3D;
+    try { snapshot = cloneExchangeObject(this.#bodyGroup); } finally { if (zebra !== null) applyZebraToObject(this.#bodyGroup, zebra); }
     const helpers: THREE.Object3D[] = [];
     snapshot.traverse((entry) => { if (entry.userData["ps3dExchangeHelper"] === true) helpers.push(entry); });
     for (const helper of helpers) { helper.parent?.remove(helper); disposeExchangeObject(helper); }
@@ -668,6 +676,7 @@ export class ThreeViewportAdapter {
     this.#canvas.removeEventListener("pointercancel", this.#onPointerUp);
     this.#canvas.removeEventListener("wheel", this.#onWheel);
     this.#canvas.removeEventListener("contextmenu", this.#onContextMenu);
+    this.setAnalysisOverlay(null);
     this.#clearBody();
     this.#clearMeasurements();
     this.#grid.geometry.dispose();
@@ -888,6 +897,7 @@ export class ThreeViewportAdapter {
   #clearBody(): void {
     for (const object of this.#objects) {
       this.#bodyGroup.remove(object);
+      disposeZebraOriginals(object);
       disposeExchangeObject(object);
     }
     this.#objects.length = 0;
@@ -1023,7 +1033,7 @@ export class ThreeViewportAdapter {
     this.#bodyGroup.add(object);
     this.#objects.push(object);
     if (pickable) this.#pickable.push(object);
-    if (this.#zebra !== null) object.traverse((entry) => this.#applyZebra(entry));
+    if (this.#zebra !== null) this.#applyZebra(object);
   }
 
   #addPrimitive(primitive: PreviewPrimitive): void {

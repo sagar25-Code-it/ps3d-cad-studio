@@ -6,6 +6,7 @@ export * from "./surface.js";
 export * from "./tessellate.js";
 export * from "./mesh-boolean.js";
 export * from "./mesh-modify.js";
+export * from "./analysis-index.js";
 export * from "./construction-geometry.js";
 export * from "./construction-binders.js";
 export * from "./construction-planes-extra.js";

@@ -90,7 +90,7 @@ import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "
 import { edgesToPick, isSketchProjectCommand, needsPick, pickedEdgeRun, planSketchProject, sourceBodyOf, type SketchProjectCommand, type SketchProjectPick } from "./sketch-project-command.js";
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
-import { facesOfBody, parseBlendSizes } from "./edge-blend-step.js";
+import { facesOfBody } from "./edge-blend-step.js";
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
 import { flatPatternForBody, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
@@ -154,6 +154,11 @@ import { CameraGestureControl, type CameraCursorState } from "./ui/CameraGesture
 import { DesignHealthCenter } from "./ui/DesignHealthCenter.js";
 import { SmartFaultBrain } from "./ui/SmartFaultBrain.js";
 import { WorkbenchContextMenu } from "./ui/WorkbenchContextMenu.js";
+import { MarkingMenu } from "./ui/MarkingMenu.js";
+import { buildMarkingMenu } from "./ui/marking-menu.js";
+import { useOnViewInput } from "./ui/OnViewInput.js";
+import { AnalysisLayer } from "./analysis/AnalysisLayer.js";
+import type { AnalysisMode } from "./analysis/analysis-session.js";
 import { SketchWorkspace } from "./workspaces/SketchWorkspace.js";
 import { SKETCH_EDIT_TOOL_LABELS, type SketchEditToolId } from "./workspaces/SketchEditPanel.js";
 import type { SketchEditPlan } from "../../../packages/workbench-sketch/src/edit-tools.js";
@@ -180,7 +185,7 @@ type OperationIntent = WithoutEnvelope<WorkbenchOperation>;
 type PartParameter = Extract<WorkbenchOperation, { kind: "set-part-parameter" }>["parameter"];
 type ReplaceableAssemblyTemplate = Exclude<AssemblyTemplateId, "custom" | "electrical-panel">;
 type UiDiagnostic = Pick<Diagnostic, "code" | "message" | "recovery"> | { readonly code: string; readonly message: string; readonly recovery: string };
-interface OpenContextMenu { readonly x: number; readonly y: number; readonly selectionId: string | null; readonly selectionKind: WorkbenchSelectionKind; }
+interface OpenContextMenu { readonly x: number; readonly y: number; readonly selectionId: string | null; readonly selectionKind: WorkbenchSelectionKind; /** Open as the radial marking menu rather than the list. */ readonly radial?: boolean; }
 interface PreparedQualifiedWorker {
   readonly client: GeometryWorkerClient;
   readonly response: ModelSuccessResponse;
@@ -347,6 +352,9 @@ export function App(): React.JSX.Element {
   const [assemblyExplodePreviewMm, setAssemblyExplodePreviewMm] = useState<number | null>(null);
   const assemblyExplodeRef = useRef(initialProject.assembly.explodeMm);
   const [contextMenu, setContextMenu] = useState<OpenContextMenu>();
+  const [analysisRequest, setAnalysisRequest] = useState<{ readonly mode: AnalysisMode; readonly nonce: number } | null>(null);
+  const onView = useOnViewInput();
+  useEffect(() => { if (project.activeWorkspace !== "part") setAnalysisRequest(null); }, [project.activeWorkspace]);
   const clientRef = useRef<GeometryWorkerClient | undefined>(undefined);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraCursorRef = useRef<HTMLDivElement>(null);
@@ -710,17 +718,18 @@ export function App(): React.JSX.Element {
     if (pickRef.current !== null) { pickRef.current(point); return; }
     setMeasurePoints((current) => current.length >= 2 ? [point] : [...current, point]);
   }, []);
-  const openContextMenu = useCallback((clientX: number, clientY: number, selectionId: string | null, selectionKind?: WorkbenchSelectionKind): void => {
+  const openContextMenu = useCallback((clientX: number, clientY: number, selectionId: string | null, selectionKind?: WorkbenchSelectionKind, radial = false): void => {
     if (selectionId !== null) setSelectedId(selectionId);
-    setContextMenu({ x: clientX, y: clientY, selectionId, selectionKind: selectionKind ?? classifyWorkbenchSelection(selectionId) });
+    setContextMenu({ x: clientX, y: clientY, selectionId, selectionKind: selectionKind ?? classifyWorkbenchSelection(selectionId), ...(radial ? { radial: true } : {}) });
   }, []);
+  const openRadialContextMenu = useCallback((clientX: number, clientY: number, selectionId: string | null, selectionKind?: WorkbenchSelectionKind): void => openContextMenu(clientX, clientY, selectionId, selectionKind, true), [openContextMenu]);
   useEffect(() => {
     if (masterCartOpen || !isThreeDimensional || canvasRef.current === null) return;
     const viewport = new ThreeViewportAdapter(canvasRef.current, {
       onSelectBody: setSelectedId,
       onViewChange: setViewportState,
       onMeasurePoint: acceptMeasurePoint,
-      onContextMenu: (request) => openContextMenu(request.clientX, request.clientY, request.semanticId, (request.selectionKind === "body" || request.selectionKind === "component") && request.selectionKind === classifyWorkbenchSelection(request.semanticId) ? request.selectionKind : undefined),
+      onContextMenu: (request) => openContextMenu(request.clientX, request.clientY, request.semanticId, (request.selectionKind === "body" || request.selectionKind === "component") && request.selectionKind === classifyWorkbenchSelection(request.semanticId) ? request.selectionKind : undefined, true),
       ...(project.activeWorkspace === "assembly" ? { assemblyTouchGestures: {
         getExplodeMm: () => assemblyExplodeRef.current,
         onExplodePreview: previewAssemblyExplode,
@@ -1666,21 +1675,18 @@ export function App(): React.JSX.Element {
     const inside = nearest.edge.concave === true;
     const where = `${inside ? "an inside corner, " : ""}${pieces === 1 ? `a ${Math.hypot(nearest.edge.b[0] - nearest.edge.a[0], nearest.edge.b[1] - nearest.edge.a[1], nearest.edge.b[2] - nearest.edge.a[2]).toFixed(1)} mm edge` : `a run of ${pieces} edges`} of ${body.name}, ${nearest.distanceMm.toFixed(1)} mm from your click`;
     setStatusText(`${name}: picked ${where}.`);
-    const sizeText = typeof window === "undefined" ? "2" : window.prompt(modifier === "fillet" ? "Fillet radius in mm (2), or a radius that changes along the edge (1-4):" : "Chamfer distance in mm (3), two distances (5x2), or a distance and an angle with the first face (4@30):", "2");
-    if (sizeText === null) { clearHighlight(); return; }
-    const sizes = parseBlendSizes(modifier, sizeText);
-    if (!sizes.ok) { clearHighlight(); setStatus("ready"); setStatusText(`${name}: ${sizes.message}`); return; }
+    const value = await onView.ask({ label: modifier === "fillet" ? "Fillet radius" : "Chamfer distance", quantity: "length", defaultValue: 2, min: 0, exclusiveMin: true, step: 0.5 });
+    if (value === null) { clearHighlight(); return; }
+    // The value is typed on the view while the project stays live, so make sure the body is still the one that was picked.
+    if ((projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === body.id) !== body) { clearHighlight(); setStatus("ready"); setStatusText(`${name}: ${body.name} changed while the value was being typed; pick the edge again.`); return; }
     // The picked run is remembered with the faces beside it, so a timeline step can find the same edge again after the model is rebuilt.
     const group = describePickedEdge(nearest.chain, facesOfBody(body));
     const base = baseFeatureOf(designOf(projectRef.current), body.id);
     if (base !== undefined) {
       const draft: DesignSolidFeature = {
         id: `feature:edge-blend-${crypto.randomUUID()}`, name: modifier === "fillet" ? "Fillet" : "Chamfer", kind: "edge-blend", suppressed: false,
-        sketchFeatureId: base.sketchFeatureId, profileIds: [], valueMm: sizes.valueMm, bodyId: body.id, operation: "direct-edit",
-        blendType: modifier, blendEdges: [group],
-        ...(sizes.endSizeMm === undefined ? {} : { blendEndSizeMm: sizes.endSizeMm }),
-        ...(sizes.secondSizeMm === undefined ? {} : { blendSecondSizeMm: sizes.secondSizeMm }),
-        ...(sizes.angleDeg === undefined ? {} : { blendAngleDeg: sizes.angleDeg })
+        sketchFeatureId: base.sketchFeatureId, profileIds: [], valueMm: value, bodyId: body.id, operation: "direct-edit",
+        blendType: modifier, blendEdges: [group]
       };
       const feature: DesignSolidFeature = { ...draft, name: edgeBlendTitle(draft) };
       clearHighlight();
@@ -1689,12 +1695,11 @@ export function App(): React.JSX.Element {
       return;
     }
     // A body with no timeline step of its own (for example one made by Combine) is treated in one go, as before.
-    const value = sizes.valueMm;
     const input = { positionsMm: body.positionsMm, indices: body.indices };
     const onlyEdges = group.segments;
     const result = modifier === "fillet"
-      ? meshFillet(input, { sizeMm: value, onlyEdges, ...(inside ? { concave: true } : {}), ...(sizes.endSizeMm === undefined ? {} : { endSizeMm: sizes.endSizeMm }) })
-      : meshChamfer(input, { sizeMm: value, onlyEdges, ...(inside ? { concave: true } : {}), ...(sizes.secondSizeMm === undefined ? {} : { secondSizeMm: sizes.secondSizeMm }), ...(sizes.angleDeg === undefined ? {} : { angleDeg: sizes.angleDeg }) });
+      ? meshFillet(input, { sizeMm: value, onlyEdges, ...(inside ? { concave: true } : {}) })
+      : meshChamfer(input, { sizeMm: value, onlyEdges, ...(inside ? { concave: true } : {}) });
     clearHighlight();
     if (!result.ok) { setStatus("ready"); setStatusText(`${name} failed: ${result.message}`); return; }
     const label = modifier === "fillet" ? `Fillet R ${value} mm (picked edge)` : `Chamfer ${value} mm (picked edge)`;
@@ -1706,7 +1711,7 @@ export function App(): React.JSX.Element {
     setStatusText(`Applied ${label} to ${body.name}: ${where}.`);
   };
 
-  const handleModifyGeneralBody = (modifier: "hole" | "fillet" | "chamfer" | "shell", scope: "picked" | "all" = "picked"): void => {
+  const handleModifyGeneralBody = async (modifier: "hole" | "fillet" | "chamfer" | "shell", scope: "picked" | "all" = "picked"): Promise<void> => {
     if ((modifier === "fillet" || modifier === "chamfer") && scope === "picked") { void handleEdgeTreatment(modifier); return; }
     if (modifier === "shell") { handleBodyEdit("shell"); return; }
     const current = projectRef.current;
@@ -1715,14 +1720,13 @@ export function App(): React.JSX.Element {
     if (body === undefined) { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)} needs a general solid body selected first.`); return; }
     const defaults = { hole: 6, fillet: 2, chamfer: 2 } as const;
     const prompt: Record<typeof modifier, string> = {
-      hole: "Hole diameter (mm):",
-      fillet: "Fillet radius (mm):",
-      chamfer: "Chamfer distance (mm):"
+      hole: "Hole diameter",
+      fillet: "Fillet radius",
+      chamfer: "Chamfer distance"
     };
-    const raw = typeof window === "undefined" ? String(defaults[modifier]) : window.prompt(prompt[modifier], String(defaults[modifier]));
-    if (raw === null) return;
-    const value = Number.parseFloat(raw);
-    if (!Number.isFinite(value) || value <= 0) { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)}: enter a positive number in millimetres.`); return; }
+    const value = await onView.ask({ label: prompt[modifier], quantity: "length", defaultValue: defaults[modifier], min: 0, exclusiveMin: true, step: 0.5 });
+    if (value === null) return;
+    if ((projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === body.id) !== body) { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)}: ${body.name} changed while the value was being typed; run the command again.`); return; }
     const input = { positionsMm: body.positionsMm, indices: body.indices };
     let result: { readonly ok: true; readonly positionsMm: readonly number[]; readonly indices: readonly number[] } | { readonly ok: false; readonly message: string };
     let label: string;
@@ -2094,9 +2098,20 @@ export function App(): React.JSX.Element {
   // not a selectable entity with its own inspector panel. Routing those through setSelectedId
   // would clear the live selection and render nothing, so handle them explicitly here with
   // honest guidance (and keep the real selection intact). Returns true when handled.
+  /** Opens the Part analysis panel on the mode named by an `analysis:<mode>` id. */
+  const openAnalysis = (analysisId: string): void => {
+    const mode = analysisId.slice("analysis:".length) as AnalysisMode;
+    if (projectRef.current.activeWorkspace !== "part") switchWorkspace("part");
+    setAnalysisRequest((current) => ({ mode, nonce: (current?.nonce ?? 0) + 1 }));
+  };
+
   const handleVirtualSelection = (selectionId: string): boolean => {
     if (selectionId.startsWith("design-health:")) {
       openDesignHealth();
+      return true;
+    }
+    if (selectionId.startsWith("analysis:") && projectRef.current.activeWorkspace === "part") {
+      openAnalysis(selectionId);
       return true;
     }
     if (selectionId === "analysis:interference" || selectionId === "assembly-action:clearance") {
@@ -3294,6 +3309,7 @@ export function App(): React.JSX.Element {
   const runContextCommand = (commandId: string): void => {
     const selectionId = contextMenu?.selectionId ?? selectedId;
     setContextMenu(undefined);
+    if (commandId.startsWith("analysis:")) { openAnalysis(commandId); return; }
     if (commandId === "history.undo") { historyActionRef.current.undo(); return; }
     if (commandId === "history.redo") { historyActionRef.current.redo(); return; }
     if (commandId === "view.fit") { fitViewport(); return; }
@@ -3589,6 +3605,7 @@ export function App(): React.JSX.Element {
     canUndo,
     canRedo,
     generalBodyCount: (project.part.generalBodies ?? []).length,
+    analysisBodyCount: (project.part.generalBodies ?? []).length + (project.part.previewBodies ?? []).length,
     previewBodySelected,
     generalBodySelected: selectedGeneralBody !== undefined,
     ...(selectedTimelineFeature === undefined ? {} : { selectedFeature: { name: selectedTimelineFeature.name, suppressed: selectedTimelineFeature.suppressed, kind: selectedTimelineFeature.kind } }),
@@ -3625,7 +3642,8 @@ export function App(): React.JSX.Element {
     onExportStl: () => void exportStl(),
     onPlateJson: () => void downloadNative(),
     onLearning: () => window.location.assign("/learn"),
-    onShortcuts: () => setShortcutsOpen(true)
+    onShortcuts: () => setShortcutsOpen(true),
+    onAnalysis: (mode) => openAnalysis(`analysis:${mode}`)
   });
 
   // What a visible-scene export would hold right now, named honestly in the Exchange Center.
@@ -3789,7 +3807,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openContextMenu} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams)} onChangePlane={() => setSketchPlaneDialogOpen(true)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={() => { setSketchCancelVersion((version) => version + 1); switchWorkspace("part"); setStatusText("Cancelled the sketch and returned to Design. Pending points were dropped; committed geometry is kept."); }} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams)} onChangePlane={() => setSketchPlaneDialogOpen(true)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={() => { setSketchCancelVersion((version) => version + 1); switchWorkspace("part"); setStatusText("Cancelled the sketch and returned to Design. Pending points were dropped; committed geometry is kept."); }} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl
@@ -3828,6 +3846,7 @@ export function App(): React.JSX.Element {
           onClearMeasure={() => setMeasurePoints([])}
         />
         <ViewportMetrics workspace={project.activeWorkspace} model={model} imported={activeImport} project={project} interferenceCount={interferences.length} surfaceTriangles={surfacePreview.metrics.triangles} vehicleAnalysis={vehiclePreview.analysis} vehiclePrimitiveCount={vehiclePreview.scene.primitives.length} />
+        {project.activeWorkspace === "part" && analysisRequest !== null && activeImport === undefined && <AnalysisLayer part={project.part} viewportRef={viewportRef} mode={analysisRequest.mode} nonce={analysisRequest.nonce} onClose={() => setAnalysisRequest(null)} onMessage={setStatusText} />}
         {quickMeasure !== undefined && <div className="quick-measure-bar" role="status" aria-live="polite" aria-label="Quick measure"><span className="quick-measure-title">{quickMeasure.title}</span>{quickMeasure.metrics.map((metric, index) => <span key={index}>{metric}</span>)}</div>}
       </section>}
       {!masterCartOpen && <>
@@ -3841,7 +3860,16 @@ export function App(): React.JSX.Element {
       {project.activeWorkspace === "automate" && <AutomateWorkspace project={project} selectedId={selectedId} remoteRevealRequest={automateRemoteReveal} onSelect={setSelectedId} onApplyProject={(next, message) => { const valid = validateWorkbenchProject(next); if (valid.ok) { pushProject(valid.value); setStatusText(message); return; } const first = valid.diagnostics[0]; setDiagnostic(first === undefined ? undefined : { code: first.code, message: first.message, recovery: first.recovery }); setStatus("error"); setStatusText(first?.message ?? "The confirmed preview failed project validation and was not applied."); }} onReviewElectromechanical={requestElectromechanicalAssembly} onMessage={setStatusText} />}
       </>}
     </section>}
-    {contextMenu !== undefined && <WorkbenchContextMenu x={contextMenu.x} y={contextMenu.y} selectionLabel={contextMenu.selectionId ?? `${project.activeWorkspace} canvas`} commands={contextCommands} onRun={runContextCommand} onClose={() => setContextMenu(undefined)} />}
+    {contextMenu !== undefined && contextMenu.radial === true && <MarkingMenu
+      x={contextMenu.x}
+      y={contextMenu.y}
+      model={buildMarkingMenu({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo, faceSelected: selectedFace !== null && selectedFace.bodyId === contextMenu.selectionId, bodyCount: (project.part.generalBodies ?? []).length + (project.part.previewBodies ?? []).length })}
+      onRun={runContextCommand}
+      onMore={() => setContextMenu({ ...contextMenu, radial: false })}
+      onClose={() => setContextMenu(undefined)}
+    />}
+    {onView.element}
+    {contextMenu !== undefined && contextMenu.radial !== true && <WorkbenchContextMenu x={contextMenu.x} y={contextMenu.y} selectionLabel={contextMenu.selectionId ?? `${project.activeWorkspace} canvas`} commands={contextCommands} onRun={runContextCommand} onClose={() => setContextMenu(undefined)} />}
     {showTimeline && <TimelineBar
       history={designOf(project)}
       selectedId={selectedId}

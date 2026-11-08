@@ -3,6 +3,7 @@ import { boundsFromPoints } from "./assembly.js";
 import { constructionPlaneCorners, evaluateConstructionAxis, evaluateConstructionPlane, evaluateConstructionPoint } from "./construction-geometry.js";
 import { newPrimitiveMesh } from "./primitive-bodies.js";
 import { binderPrimitives } from "./binder-preview.js";
+import { boxMesh, coneMesh, cylinderMesh, sphereMesh } from "./primitive-meshes.js";
 import type { PreviewPrimitive, PreviewScene } from "./types.js";
 
 const RADIAL_SEGMENTS = 64;
@@ -169,6 +170,20 @@ function generalBodyBounds(positionsMm: readonly number[]): readonly Vec3[] {
     }
   }
   return [min, max];
+}
+
+/**
+ * The closed triangle mesh of an analytic preview body in world millimetres, for analysis tools. Bodies the preview
+ * draws as renderer primitives (plain block, cylinder, cone, sphere) get a generated mesh of the same shape.
+ */
+export function previewBodyMeshMm(body: PartPreviewBody): { readonly positionsMm: readonly number[]; readonly indices: readonly number[] } {
+  const local = analyticBodyMesh(body);
+  if (local !== undefined) return { positionsMm: transformPositions(local.positions, body.translationMm, body.rotationDeg), indices: local.indices };
+  const plain = body.shape === "block" ? boxMesh(body.sizeMm[0], body.sizeMm[1], body.sizeMm[2])
+    : body.shape === "cylinder" ? cylinderMesh(body.sizeMm[0] / 2, body.sizeMm[2], RADIAL_SEGMENTS)
+      : body.shape === "cone" ? coneMesh(body.sizeMm[0] / 2, body.sizeMm[1] / 2, body.sizeMm[2], RADIAL_SEGMENTS)
+        : sphereMesh(body.sizeMm[0] / 2, RADIAL_SEGMENTS, RADIAL_SEGMENTS / 2);
+  return { positionsMm: transformPositions(plain.positionsMm, body.translationMm, body.rotationDeg), indices: plain.indices };
 }
 
 function partPreviewPrimitive(body: PartPreviewBody): PreviewPrimitive {

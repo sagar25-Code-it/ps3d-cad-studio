@@ -12,6 +12,7 @@ import { buildSurfacePreview, findAssemblyInterference } from "../../workbench-g
 import { createAutomaticDrawingPlan } from "../../workbench-drawing/src/index.js";
 import { createElectricalSchematic } from "../../workbench-electrical/src/index.js";
 import { buildVehiclePreview } from "../../workbench-vehicle/src/index.js";
+import { partGeometryFindings } from "./part-geometry.js";
 
 export type DesignHealthStatus = "healthy" | "review" | "blocked";
 export type DesignHealthSeverity = "info" | "warning" | "error";
@@ -96,6 +97,8 @@ export function buildDesignHealthReport(project: WorkbenchProject): DesignHealth
   else add(finding("health:sketch-constrained", "sketch", "info", "Sketch constraint state is closed", "The bounded solver estimates zero remaining degrees of freedom.", "Continue to review constraint intent after topology edits.", [project.sketch.id], `${sketch.appliedConstraints} applied constraints`));
 
   add(finding("health:part-kernel-boundary", "part", "info", "Qualified and analytic solid lanes are bounded", "The centered-bore plate is worker-validated. Additional revolve, pattern, mirror, aligned Boolean, trim, detail, shell, draft, and planar-face operations regenerate deterministic closed analytic meshes but remain preview-scoped rather than general B-rep.", "Review each operation's preconditions and export a neutral tessellated reference until a general exact kernel is separately qualified.", [project.part.id, ...(project.part.previewBodies ?? []).map((body) => body.id)], `${project.part.widthMm} × ${project.part.heightMm} × ${project.part.thicknessMm} mm · ${project.part.previewBodies?.length ?? 0} analytic bodies`));
+
+  for (const solidFinding of partGeometryFindings(project.part)) add(solidFinding);
 
   const interferences = findAssemblyInterference(project.assembly);
   const conflictingMates = project.assembly.mates.filter((mate) => mate.status === "conflict");

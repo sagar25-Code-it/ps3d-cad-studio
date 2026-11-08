@@ -29,6 +29,11 @@ import { sketchSolverTests } from "./sketch-solver.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
 import { meshModifyTests } from "./mesh-modify.test.js";
+import { meshCheckTests } from "./mesh-check.test.js";
+import { bodyAnalysisTests } from "./body-analysis.test.js";
+import { viewportAnalysisTests } from "./viewport-analysis.test.js";
+import { analysisSessionTests } from "./analysis-session.test.js";
+import { onViewAndMarkingTests } from "./on-view-and-marking.test.js";
 import { holeWizardTests } from "./hole-wizard.test.js";
 import { sketchChamferModeTests } from "./sketch-chamfer-modes.test.js";
 import { sketchConstraintsWpTests } from "./sketch-constraints-wp.test.js";
@@ -131,6 +136,11 @@ const tests: readonly TestCase[] = [
   ...sketchRepairTests,
   ...meshBooleanTests,
   ...meshModifyTests,
+  ...meshCheckTests,
+  ...bodyAnalysisTests,
+  ...viewportAnalysisTests,
+  ...analysisSessionTests,
+  ...onViewAndMarkingTests,
   ...holeWizardTests,
   ...sketchChamferModeTests,
   ...sketchConstraintsWpTests,

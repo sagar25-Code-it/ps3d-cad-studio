@@ -1,0 +1,43 @@
+/* Part analysis panel, marking menu and on-view input. */
+.studio-app .analysis-panel { position: absolute; left: 0.75rem; top: 3.4rem; z-index: 6; width: min(21rem, calc(100% - 1.5rem)); max-height: calc(100% - 7rem); overflow: auto; padding: 0.55rem 0.7rem 0.7rem; border: 1px solid #aeb5ba; border-radius: 7px; background: #f7f8f9f5; color: #2c3237; font-size: 12.5px; box-shadow: 0 10px 30px #15191d33; }
+.studio-app .analysis-panel > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
+.studio-app .analysis-panel .analysis-close { border: 0; background: transparent; font-size: 18px; line-height: 1; cursor: pointer; color: #52606b; }
+.studio-app .analysis-modes { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-bottom: 0.5rem; }
+.studio-app .analysis-modes button { padding: 0.2rem 0.5rem; border: 1px solid #c5ccd2; border-radius: 999px; background: #fff; color: #2c3237; font-size: 12px; cursor: pointer; }
+.studio-app .analysis-modes button.active { border-color: #1f6fb6; background: #e6f1fb; color: #14507f; font-weight: 600; }
+.studio-app .analysis-controls { display: grid; gap: 0.35rem; margin-bottom: 0.5rem; }
+.studio-app .analysis-controls label { display: grid; grid-template-columns: 9rem 1fr; align-items: center; gap: 0.4rem; }
+.studio-app .analysis-controls input, .studio-app .analysis-controls select { min-width: 0; padding: 0.2rem 0.3rem; border: 1px solid #c5ccd2; border-radius: 4px; background: #fff; color: #2c3237; font: inherit; }
+.studio-app .analysis-headline { margin: 0 0 0.5rem; padding: 0.35rem 0.5rem; border-left: 3px solid #8a949c; border-radius: 3px; background: #eef1f3; }
+.studio-app .analysis-headline.ok { border-left-color: #2f8f5b; background: #eaf6ef; }
+.studio-app .analysis-headline.warn { border-left-color: #c9962b; background: #fff6df; }
+.studio-app .analysis-headline.bad { border-left-color: #d1322b; background: #fdecea; }
+.studio-app .analysis-legend { margin-bottom: 0.5rem; }
+.studio-app .analysis-legend ul { margin: 0.25rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.15rem; }
+.studio-app .analysis-legend li { display: flex; align-items: center; gap: 0.4rem; }
+.studio-app .analysis-legend i { display: inline-block; width: 1.1rem; height: 0.7rem; border: 1px solid #0003; border-radius: 2px; flex: none; }
+.studio-app .analysis-legend small { display: block; margin-top: 0.2rem; color: #52606b; }
+.studio-app .analysis-rows { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.3rem; }
+.studio-app .analysis-rows li { display: grid; gap: 0.1rem; padding: 0.3rem 0.45rem; border: 1px solid #d5dade; border-radius: 4px; background: #fff; }
+.studio-app .analysis-rows li.bad { border-color: #e3a29d; }
+.studio-app .analysis-rows li.warn { border-color: #e2c27f; }
+.studio-app .analysis-rows li.ok { border-color: #a9d3bc; }
+.studio-app .analysis-rows li span { color: #52606b; }
+
+/* Marking menu */
+.studio-app .marking-menu { position: fixed; z-index: 90; width: 0; height: 0; }
+.studio-app .marking-menu .marking-ring { position: absolute; left: -124px; top: -124px; width: 248px; height: 248px; border-radius: 50%; background: #f7f8f9d9; border: 1px solid #aeb5ba; box-shadow: 0 10px 34px #15191d44; pointer-events: none; }
+.studio-app .marking-menu .marking-hub { position: absolute; left: -26px; top: -26px; width: 52px; height: 52px; border-radius: 50%; border: 1px solid #aeb5ba; background: #fff; color: #52606b; font-size: 11px; line-height: 1.1; cursor: pointer; padding: 0; }
+.studio-app .marking-menu .marking-item { position: absolute; width: 92px; margin-left: -46px; margin-top: -19px; min-height: 38px; padding: 0.15rem 0.2rem; display: grid; justify-items: center; align-content: center; gap: 0.05rem; border: 1px solid #c5ccd2; border-radius: 7px; background: #fff; color: #2c3237; font-size: 11px; line-height: 1.1; text-align: center; cursor: pointer; box-shadow: 0 2px 6px #15191d22; }
+.studio-app .marking-menu .marking-item:hover, .studio-app .marking-menu .marking-item:focus-visible, .studio-app .marking-menu .marking-item.active { border-color: #1f6fb6; background: #e6f1fb; outline: none; }
+.studio-app .marking-menu .marking-item:disabled { opacity: 0.45; cursor: default; }
+.studio-app .marking-menu .marking-item kbd { font-size: 10px; color: #6b7a86; }
+.studio-app .marking-caption { position: absolute; left: -90px; top: 160px; width: 180px; text-align: center; font-size: 11px; color: #2c3237; text-shadow: 0 0 3px #fff; pointer-events: none; }
+
+/* On-view input */
+.studio-app .on-view-input { position: fixed; z-index: 95; display: grid; gap: 0.2rem; padding: 0.35rem 0.45rem; border: 1px solid #1f6fb6; border-radius: 6px; background: #ffffff; color: #2c3237; font-size: 12px; box-shadow: 0 6px 18px #15191d40; }
+.studio-app .on-view-input label { display: flex; align-items: center; gap: 0.35rem; }
+.studio-app .on-view-input input { width: 6.5rem; padding: 0.15rem 0.3rem; border: 1px solid #c5ccd2; border-radius: 4px; font: inherit; }
+.studio-app .on-view-input input.invalid { border-color: #d1322b; background: #fdecea; }
+.studio-app .on-view-input em { font-style: normal; color: #6b7a86; font-size: 11px; }
+.studio-app .on-view-input .on-view-error { color: #b3261e; font-size: 11px; }

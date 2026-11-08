@@ -6,7 +6,7 @@ import type { PartPreviewBody, Vec3 } from "../../workbench-core/src/index.js";
  * volumes approach the analytic ones from below as the tessellation refines (the tests pin the tolerance).
  */
 
-export interface PrimitiveMesh {
+export interface NewPrimitiveMesh {
   readonly positions: readonly number[];
   readonly indices: readonly number[];
 }
@@ -16,7 +16,7 @@ const STACKS = 32;
 const SPIRAL_STEPS_PER_TURN = 64;
 
 /** Ellipsoid with the given full axis lengths. Two pole vertices, STACKS-1 latitude rings of AROUND vertices. */
-export function ellipsoidMesh(dx: number, dy: number, dz: number): PrimitiveMesh {
+export function ellipsoidMesh(dx: number, dy: number, dz: number): NewPrimitiveMesh {
   const a = dx / 2; const b = dy / 2; const c = dz / 2;
   const positions: number[] = [0, 0, c];
   const ringStart = (ring: number): number => 1 + ring * AROUND;
@@ -45,7 +45,7 @@ export function ellipsoidMesh(dx: number, dy: number, dz: number): PrimitiveMesh
 }
 
 /** Regular n-gon prism, vertex 0 on local +X, circumscribed diameter `diameter`, height `height`. */
-export function prismMesh(sides: number, diameter: number, height: number): PrimitiveMesh {
+export function prismMesh(sides: number, diameter: number, height: number): NewPrimitiveMesh {
   const radius = diameter / 2;
   const positions: number[] = [];
   const bottomZ = -height / 2; const topZ = height / 2;
@@ -73,7 +73,7 @@ export function prismMesh(sides: number, diameter: number, height: number): Prim
  * Right-triangle wedge: a width x depth x height bounding box where the full height stands on the -Y edge and the
  * top face slopes down to a sharp edge at +Y. The cross-section in YZ is a right triangle; X is the extrusion.
  */
-export function wedgeMesh(width: number, depth: number, height: number): PrimitiveMesh {
+export function wedgeMesh(width: number, depth: number, height: number): NewPrimitiveMesh {
   const x = width / 2; const y = depth / 2; const z = height / 2;
   // Front triangle (x = -w/2) then back triangle (x = +w/2): low-back, low-front, high-back.
   const positions = [
@@ -111,7 +111,7 @@ export function spiralDimensions(outerDiameter: number, turns: number): { readon
 }
 
 /** Flat spiral ribbon of constant radial width and the given thickness, swept over `turns` turns. */
-export function spiralMesh(outerDiameter: number, turns: number, thickness: number): PrimitiveMesh {
+export function spiralMesh(outerDiameter: number, turns: number, thickness: number): NewPrimitiveMesh {
   const { pitch, width } = spiralDimensions(outerDiameter, turns);
   const steps = Math.max(8, Math.ceil(turns * SPIRAL_STEPS_PER_TURN));
   const zBottom = -thickness / 2; const zTop = thickness / 2;
@@ -138,7 +138,7 @@ export function spiralMesh(outerDiameter: number, turns: number, thickness: numb
 }
 
 /** Straight hollow tube along Z, open at both ends (a closed solid: the end faces are annuli). */
-export function tubeMesh(outerDiameter: number, innerDiameter: number, height: number): PrimitiveMesh {
+export function tubeMesh(outerDiameter: number, innerDiameter: number, height: number): NewPrimitiveMesh {
   const outerRadius = outerDiameter / 2; const innerRadius = innerDiameter / 2;
   const zBottom = -height / 2; const zTop = height / 2;
   const positions: number[] = [];
@@ -165,7 +165,7 @@ export function tubeMesh(outerDiameter: number, innerDiameter: number, height: n
 }
 
 /** The local-frame mesh of one of the five new primitives, or undefined for any other shape. */
-export function newPrimitiveMesh(body: Pick<PartPreviewBody, "shape" | "sizeMm" | "primitiveParams">): PrimitiveMesh | undefined {
+export function newPrimitiveMesh(body: Pick<PartPreviewBody, "shape" | "sizeMm" | "primitiveParams">): NewPrimitiveMesh | undefined {
   const [x, y, z] = body.sizeMm;
   if (body.shape === "ellipsoid") return ellipsoidMesh(x, y, z);
   if (body.shape === "prism") return prismMesh(body.primitiveParams?.sides ?? 6, x, z);
