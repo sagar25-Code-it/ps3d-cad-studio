@@ -1,7 +1,7 @@
 import type { DesignSolidFeature, PatternDefinition, PatternShape, WorkbenchOperation, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { MAX_DESIGN_FEATURES, MAX_GENERAL_BODIES, applyWorkbenchOperation, baseFeatureOf, describePattern, designOf, isFeatureActive, modifiesBody } from "../../../packages/workbench-core/src/index.js";
 import { patternTransforms, summarizePattern } from "../../../packages/workbench-geometry/src/index.js";
-import { replayAllBodies } from "./design-regeneration.js";
+import { isRebuildFailure, replayAllBodies } from "./design-regeneration.js";
 import { copyGeneralBody, patternContextOf } from "./pattern-replay.js";
 
 /** What the pattern dialog asks for. `featureIds` empty or absent patterns the whole body; otherwise it repeats those hole and cut steps. */
@@ -99,7 +99,7 @@ function definitionOf(request: PatternRequest, groupId: string, copyIndex?: numb
 /** Replays the timeline and stores the results, in chunks the operation accepts. Fails if one of `mustApply` could not be rebuilt. */
 async function regenerate(project: WorkbenchProject, mustApply: readonly string[]): Promise<{ readonly ok: true; readonly project: WorkbenchProject } | { readonly ok: false; readonly message: string }> {
   const results = await replayAllBodies(project);
-  const blocked = results.find((result) => mustApply.includes(result.featureId) && result.message !== undefined);
+  const blocked = results.find((result) => mustApply.includes(result.featureId) && isRebuildFailure(result));
   if (blocked?.message !== undefined) return { ok: false, message: `Not applied: ${blocked.message}` };
   let next = project;
   for (let start = 0; start < results.length; start += 100) {

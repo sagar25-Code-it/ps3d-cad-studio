@@ -180,6 +180,21 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   return { ok: true, body: isPlaced(sketch) ? { ...placed, positionsMm: placePositions(placed.positionsMm, sketch) } : placed, ...(warnings.length === 0 ? {} : { warnings }) };
 }
 
+/**
+ * Begins a rebuild message that is a note about a step that WAS applied (a hole of the region was left out, a circle crossing its outline
+ * did not become a hole), as opposed to the reason a step could not be rebuilt. Both are stored as the feature's health message.
+ */
+export const REBUILD_NOTE_PREFIX = "Note: ";
+
+export function isRebuildNote(message: string | undefined): boolean {
+  return message?.startsWith(REBUILD_NOTE_PREFIX) === true;
+}
+
+/** Whether a rebuild result says its step could not be applied (a note alone does not). */
+export function isRebuildFailure(result: { readonly message?: string | undefined }): boolean {
+  return result.message !== undefined && !isRebuildNote(result.message);
+}
+
 /** A rebuild message the `regenerate-design` operation accepts (at most 400 characters). */
 function clipMessage(text: string): string {
   return text.length <= 400 ? text : `${text.slice(0, 397)}...`;
@@ -425,7 +440,10 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
     let built = await rebuildSolidFeature(modifies ? { ...sized, bodyId: `${step.id}:tool` } : sized, sketchFeature, existing?.color, sketchLookupOf(history));
     if (!built.ok) { outcomes.set(step.id, { featureId: step.id, message: built.message }); continue; }
     const notes = [followed.warning, warning, built.warning].filter((note): note is string => note !== undefined);
-    const applied: RebuildResult = { featureId: step.id, ...(notes.length === 0 ? {} : { message: clipMessage(notes.join(" ")) }), ...(followed.movedToOffsetMm === undefined ? {} : { sketchPlaneOffsetMm: followed.movedToOffsetMm }) };
+    // What the region detector said (a hole left out, a curve that crosses the outline) changes the solid, so it is kept on the feature too.
+    const regionNotes = built.warnings ?? [];
+    const noteText = regionNotes.length === 0 ? notes.join(" ") : `${REBUILD_NOTE_PREFIX}${[...notes, ...regionNotes].join(" ")}`;
+    const applied: RebuildResult = { featureId: step.id, ...(noteText === "" ? {} : { message: clipMessage(noteText) }), ...(followed.movedToOffsetMm === undefined ? {} : { sketchPlaneOffsetMm: followed.movedToOffsetMm }) };
     if (trim !== undefined) {
       const trimmedTool = await trimToFace(built.body, trim);
       if (!trimmedTool.ok) { outcomes.set(step.id, { featureId: step.id, message: trimmedTool.message }); continue; }

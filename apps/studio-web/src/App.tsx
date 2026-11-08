@@ -101,7 +101,7 @@ import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
 import { facesOfBody } from "./edge-blend-step.js";
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
-import { flatPatternForBody, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
+import { flatPatternForBody, isRebuildFailure, isRebuildNote, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
 import { ChangeParametersDialog } from "./ui/ChangeParametersDialog.js";
@@ -2451,7 +2451,7 @@ export function App(): React.JSX.Element {
       if (outcome.value.changed) pushProject(outcome.value.project);
       const { failed, rebuilt } = outcome.value;
       if (failed.length > 0) { setStatus("error"); setStatusText(`${failed.length} timeline step${failed.length === 1 ? "" : "s"} could not be rebuilt: ${failed[0]!.message}`); }
-      else if (rebuilt.length > 0) { setStatus("ready"); setStatusText(`Rebuilt ${rebuilt.length} timeline step${rebuilt.length === 1 ? "" : "s"} from the edited sketch.`); }
+      else if (rebuilt.length > 0) { setStatus("ready"); setStatusText(`Rebuilt ${rebuilt.length} timeline step${rebuilt.length === 1 ? "" : "s"} from the edited sketch.${outcome.value.notes.length > 0 ? ` ${outcome.value.notes[0]}` : ""}`); }
       return outcome.value.sketchFeatureId;
     }
     setStatus("error");
@@ -2468,11 +2468,13 @@ export function App(): React.JSX.Element {
     planeOfferRef.current = planeOfferAfterFinish(planeOfferRef.current);
     switchWorkspace("part");
     if (failedRebuild.length > 0) { setStatusText(`Finished the sketch, but ${failedRebuild.length} timeline step${failedRebuild.length === 1 ? "" : "s"} could not be rebuilt: ${failedRebuild[0]!.message}`); return; }
-    setStatusText(sketchId === undefined
+    const finished = sketchId === undefined
       ? "Sketch session finished. There was no closed geometry to record yet."
       : lastSketchCommit()?.changed === false
         ? "Sketch session finished. The timeline already held this sketch."
-        : "Finished the sketch into the timeline. Extrude it with Create solid in the Sketch palette; editing it later rebuilds what is built on it.");
+        : "Finished the sketch into the timeline. Extrude it with Create solid in the Sketch palette; editing it later rebuilds what is built on it.";
+    const regionNote = lastSketchCommit()?.notes[0];
+    setStatusText(regionNote === undefined ? finished : `${finished} ${regionNote}`);
 
   };
 
@@ -2699,14 +2701,16 @@ export function App(): React.JSX.Element {
       setStatusText("Rebuilding the timeline…");
       const results = await replayAllBodies(next);
       if (projectRef.current !== before) { setStatus("ready"); setStatusText("The design changed while it was rebuilding, so that edit was not applied. Try it again."); return false; }
-      const blocked = mustApply === undefined ? undefined : results.find((result) => result.featureId === mustApply && result.message !== undefined);
+      const blocked = mustApply === undefined ? undefined : results.find((result) => result.featureId === mustApply && isRebuildFailure(result));
       if (blocked?.message !== undefined) { setStatus("error"); setStatusText(`Not applied: ${blocked.message}`); return false; }
       if (results.length > 0) {
         const second = applyWorkbenchOperation(next, { kind: "regenerate-design", results, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: next.revision } as WorkbenchOperation);
         if (second.ok) {
           next = second.value.project;
-          const failed = results.filter((result) => result.message !== undefined);
+          const failed = results.filter(isRebuildFailure);
           if (failed.length > 0) summary = `${summary} ${failed.length} step${failed.length === 1 ? "" : "s"} could not be applied: ${failed[0]!.message}`;
+          const noted = results.find((result) => isRebuildNote(result.message));
+          if (noted !== undefined) summary = `${summary} ${noted.message}`;
         }
       }
     }

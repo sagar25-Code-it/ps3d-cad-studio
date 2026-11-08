@@ -1,10 +1,11 @@
-import { rebuildSolidFeature } from "../apps/studio-web/src/design-regeneration.js";
+import { isRebuildFailure, isRebuildNote, rebuildSolidFeature, replayBody } from "../apps/studio-web/src/design-regeneration.js";
 import { createGeneralSolidBody } from "../apps/studio-web/src/general-modeling.js";
 import { triangulateLoops } from "../packages/occt-kernel-adapter/src/polygon.js";
 import { detectSketchProfiles, resolveProfileRegion } from "../packages/workbench-sketch/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { circ, line, rect, sketchFeatureOf, sketchOf, solidFeature, volumeOf } from "./region-wave2-kit.js";
-import type { DesignSolidFeature, SketchEntity } from "../packages/workbench-core/src/index.js";
+import type { DesignFeature, DesignSolidFeature, SketchEntity, WorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { createWorkbenchProject } from "../packages/workbench-core/src/index.js";
 import type { SketchProfile } from "../packages/workbench-sketch/src/index.js";
 
 /** Rebuilds a feature of the given kind on the region the picker names (its stable reference, as the sketch stores it). */
@@ -140,6 +141,59 @@ export const regionWave2Tests: readonly TestCase[] = [
       assert(built.ok, `the pipe builds: ${built.ok ? "" : built.message}`);
       const hollow = Math.PI * 36 * 100;
       near(volumeOf(built.body.positionsMm, built.body.indices), hollow, hollow * 0.03, "the pipe is a tube along 100 mm of path (a solid bar would be 31416)");
+    }
+  },
+  {
+    name: "region N-02: a hole tangent to the outline, or within the tolerance of it, is an error on the region-reference path (it used to give a full plate, even 4001 mm3 of 4000)",
+    run: async () => {
+      for (const cx of [6.99, 7, 7.01]) {
+        const built = await buildOn([rect("r", [0, 0], 20, 20), circ("h", [cx, 0], 3)], "extrude", { valueMm: 10 }, (profiles) => [profiles[0]!.ref!]);
+        assert(!built.ok, `hole at x=${cx} is refused on the reference path (it built ${built.ok ? volumeOf(built.body.positionsMm, built.body.indices).toFixed(2) : ""})`);
+        assert(/hole h touches the outline/u.test(built.message), `the message names the hole and the wall: ${built.message}`);
+      }
+      const crescent = await buildOn([circ("o", [0, 0], 10), circ("i", [5, 0], 5)], "extrude", { valueMm: 10 }, (profiles) => [profiles[0]!.ref!]);
+      assert(!crescent.ok && /hole i touches the outline/u.test(crescent.message), "an internally tangent circle is refused, not a full disc");
+      const ids = await buildOn([rect("r", [0, 0], 20, 20), circ("h", [7, 0], 3)], "extrude", { valueMm: 10 }, () => []);
+      assert(!ids.ok, "the empty selection refuses it too: both paths agree");
+      // The region reference still notches the plate for a hole that crosses the edge.
+      const crossing = await buildOn([rect("r", [0, 0], 20, 20), circ("h", [9, 0], 3)], "extrude", { valueMm: 10 }, (profiles) => [profiles[0]!.ref!]);
+      assert(crossing.ok, "a crossing circle notches the plate");
+      near(volumeOf(crossing.body.positionsMm, crossing.body.indices), 3799.8, 3, "the notched plate");
+    }
+  },
+  {
+    name: "region N-10: holes that touch or lie within 0.01 mm of each other are named in the message instead of a kernel role clash",
+    run: async () => {
+      for (const gap of [0, 0.005]) {
+        const half = 5 + gap / 2;
+        const built = await buildOn([rect("p", [0, 0], 40, 40), circ("a", [-half, 0], 5), circ("b", [half, 0], 5)], "extrude", { valueMm: 10 }, (profiles) => [profiles[0]!.ref!]);
+        assert(!built.ok, "holes with a zero-width wall between them are refused");
+        assert(/holes a and b touch/u.test(built.message) && !/roles must be unique/u.test(built.message), `the message names the holes (gap ${gap}): ${built.ok ? "" : built.message}`);
+      }
+      const apart = await buildOn([rect("p", [0, 0], 40, 40), circ("a", [-5.02, 0], 5), circ("b", [5.02, 0], 5)], "extrude", { valueMm: 10 }, (profiles) => [profiles[0]!.ref!]);
+      assert(apart.ok, "holes 0.04 mm apart build");
+      near(volumeOf(apart.body.positionsMm, apart.body.indices), (1600 - 2 * Math.PI * 25) * 10, 30, "the plate minus both holes");
+    }
+  },
+  {
+    name: "region N-03: a hole left out or a crossing circle reaches the feature's health message on replay, as a note and not as a failure",
+    run: async () => {
+      const BODY = "general-body:b";
+      const replayed = async (entities: SketchEntity[], profileIds: (profiles: readonly SketchProfile[]) => readonly string[]) => {
+        const sketch = sketchOf(entities);
+        const features: DesignFeature[] = [sketchFeatureOf(sketch), solidFeature("extrude", { profileIds: profileIds(detectSketchProfiles(sketch)), bodyId: BODY })];
+        const project: WorkbenchProject = { ...createWorkbenchProject("project:test-notes"), design: { features, rollbackIndex: features.length, editingSketchId: null } } as WorkbenchProject;
+        return replayBody(project, BODY);
+      };
+      const crossing = await replayed([rect("r", [0, 0], 20, 20), circ("h", [9, 0], 3)], () => []);
+      const result = crossing.find((entry) => entry.body !== undefined)!;
+      assert(result.message !== undefined && /crosses the outline of r/u.test(result.message), `the crossing circle is reported: ${result.message}`);
+      assert(isRebuildNote(result.message) && !isRebuildFailure(result), "and it is a note: the step was applied, so it must not block or count as a failure");
+      near(volumeOf(result.body!.positionsMm, result.body!.indices), 4000, 0.01, "the plate is whole (the crossing circle is not a hole)");
+      const clean = await replayed([rect("r", [0, 0], 20, 20), circ("h", [0, 0], 3)], () => []);
+      assert(clean.every((entry) => entry.message === undefined), "a plain plate with a bore has no message");
+      const refused = await replayed([rect("r", [0, 0], 20, 20), circ("h", [7, 0], 3)], (profiles) => [profiles[0]!.ref!]);
+      assert(refused.some((entry) => isRebuildFailure(entry) && /hole h touches the outline/u.test(entry.message!)), "a failure that has a region reason carries it");
     }
   }
 ];

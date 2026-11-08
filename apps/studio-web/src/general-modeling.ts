@@ -74,7 +74,14 @@ function insetPolygon(polygonMm: readonly PolygonPoint[], insetMm: number, kind:
 /** One kernel side face per sketch entity of a curve loop, so arcs stay single cylindrical walls with stable names. */
 function curveEdgeGroups(boundary: SketchProfile["boundary"], rolePrefix: string): readonly ProfileEdgeGroup[] | undefined {
   if (boundary.kind !== "curve-loop") return undefined;
-  return boundary.segments.map((segment) => ({ role: `${rolePrefix}-${stableEntityToken([segment.key ?? segment.entityId])}`, edgeCount: segment.edgeCount, curved: segment.kind !== "line" }));
+  // A curve split in two where another touches it gives two segments with one key; the walls still need distinct names.
+  const seen = new Map<string, number>();
+  return boundary.segments.map((segment) => {
+    const token = stableEntityToken([segment.key ?? segment.entityId]);
+    const count = (seen.get(token) ?? 0) + 1;
+    seen.set(token, count);
+    return { role: `${rolePrefix}-${count === 1 ? token : `${token}.${count}`}`, edgeCount: segment.edgeCount, curved: segment.kind !== "line" };
+  });
 }
 
 /** Place a 2D sketch point (millimetres) onto its datum plane in world metres, matching the analytic tessellator's orientation. */

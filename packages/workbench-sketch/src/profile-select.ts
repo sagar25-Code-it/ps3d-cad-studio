@@ -370,7 +370,7 @@ function outlineRegion(profiles: readonly SketchProfile[], universe: readonly Sk
     }
   };
   place(root, 0);
-  return finish(groups, warnings);
+  return finish(groups, [...warnings, ...touchWarnings(groups, false)]);
 }
 
 function pickLargest(profiles: readonly SketchProfile[]): SketchProfile {
@@ -479,24 +479,38 @@ function unionRegion(universe: readonly SketchProfile[], picks: readonly ExactPi
     const inList = incoming.get(key);
     if (inList === undefined) incoming.set(key, [edge]); else inList.push(edge);
   };
+  // Every ring (an outline or a hole of an included face) and the edges it contributed, so a ring that no neighbour cancelled can be kept whole.
+  const rings: { readonly ids: number[]; readonly infos: EdgeInfo[]; readonly reverse: boolean; readonly edges: (DirectedEdge | undefined)[] }[] = [];
   const ringEdges = (profile: SketchProfile, boundary: SketchProfileBoundary, reverse: boolean): void => {
     const points = profileOutlineMm(boundary);
     const infos = edgeInfos(profile, boundary, points.length);
     const ids = points.map((point) => registry.id(point));
+    const own: (DirectedEdge | undefined)[] = [];
     for (let index = 0; index < points.length; index += 1) {
       const next = (index + 1) % points.length;
       const info = infos[index] ?? { kind: "line" as const, entityId: profile.entityIds[0] ?? profile.id, key: `${profile.id}/e${index}` };
+      const before = edges.length;
       if (reverse) add(ids[next]!, ids[index]!, info); else add(ids[index]!, ids[next]!, info);
+      own.push(edges.length > before ? edges[edges.length - 1] : undefined);
     }
+    rings.push({ ids, infos: infos.slice(0, points.length), reverse, edges: own });
   };
   for (const face of included.values()) {
     ringEdges(face, face.boundary, false);
     for (const hole of face.holes ?? []) ringEdges(hole, hole.boundary, true);
   }
-  // Chain what is left into loops.
+  // A ring none of whose edges met a neighbour's stays exactly as it was: chaining it with other rings at a point where they touch (a hole
+  // tangent to the outline, two holes meeting) would tie the outline and the hole into one figure-eight loop.
   const live = edges.filter((edge) => !edge.cancelled);
   const used = new Set<DirectedEdge>();
   const loops: { ids: number[]; infos: EdgeInfo[] }[] = [];
+  for (const ring of rings) {
+    if (ring.ids.length < 3 || ring.edges.some((edge) => edge === undefined || edge.cancelled)) continue;
+    for (const edge of ring.edges) used.add(edge!);
+    loops.push(ring.reverse
+      ? { ids: [ring.ids[0]!, ...ring.ids.slice(1).reverse()], infos: [...ring.infos].reverse() }
+      : { ids: [...ring.ids], infos: [...ring.infos] });
+  }
   for (const start of live) {
     if (used.has(start)) continue;
     const ids: number[] = [];
@@ -565,15 +579,62 @@ function unionRegion(universe: readonly SketchProfile[], picks: readonly ExactPi
   outers.sort((left, right) => right.ring.area - left.ring.area);
   const groups: { outer: SketchProfile; holes: SketchProfile[] }[] = outers.map((item) => ({ outer: item.profile, holes: [] }));
   for (const hole of holes.sort((left, right) => right.ring.area - left.ring.area)) {
-    const probe = hole.ring.points[0]!;
     let owner = -1;
     for (let index = outers.length - 1; index >= 0; index -= 1) {
-      if (outers[index]!.ring.area > hole.ring.area && pointInRing(probe, outers[index]!.ring.points)) { owner = index; break; }
+      if (outers[index]!.ring.area > hole.ring.area && holeStandsIn(hole.ring, outers[index]!.ring)) { owner = index; break; }
     }
     if (owner >= 0) groups[owner]!.holes.push(hole.profile);
     else warnings.push(`A hole in the selected regions has no outline around it and was ignored.`);
   }
-  return finish(groups, warnings);
+  return finish(groups, [...warnings, ...touchWarnings(groups)]);
+}
+
+/**
+ * Whether a hole's ring lies inside an outline's ring. A hole that touches the outline (tangent, or within the tolerance) has corners
+ * on the outline itself, where "inside" is undefined, so those corners are skipped and the rest decide: all of them inside.
+ */
+function holeStandsIn(hole: Ring, outer: Ring): boolean {
+  if (hole.box[0] < outer.box[0] - TOLERANCE_MM || hole.box[2] > outer.box[2] + TOLERANCE_MM || hole.box[1] < outer.box[1] - TOLERANCE_MM || hole.box[3] > outer.box[3] + TOLERANCE_MM) return false;
+  const stride = Math.max(1, Math.floor(hole.points.length / 12));
+  let counted = 0;
+  for (let index = 0; index < hole.points.length; index += stride) {
+    const point = hole.points[index]!;
+    if (distanceToRing(point, outer.points) <= 1e-6) continue;
+    if (!pointInRing(point, outer.points)) return false;
+    counted += 1;
+  }
+  return counted > 0;
+}
+
+/**
+ * Holes of a region that touch the outline or one another, or sit closer than the tolerance: a wall that thin cannot be built, and a
+ * kernel refusal on its own ("a hole crosses the outline") does not say which holes are meant.
+ */
+const holeName = (hole: SketchProfile): string => shortId(hole.entityIds[0] ?? hole.id);
+
+function touchWarnings(groups: readonly { readonly outer: SketchProfile; readonly holes: readonly SketchProfile[] }[], includeOutline = true): string[] {
+  const notes: string[] = [];
+  for (const group of groups) {
+    if (group.holes.length === 0) continue;
+    const outerRing = ringOf(group.outer);
+    const rings = group.holes.map((hole) => ({ hole, ring: ringOf(hole) }));
+    if (includeOutline) for (const item of rings) {
+      if (relate(outerRing, item.ring).touching) notes.push(`The hole ${holeName(item.hole)} touches the outline of ${shortId(group.outer.id)} (or lies within ${TOLERANCE_MM} mm of it), which leaves a zero-width wall. Move it inward or dimension it clear of the edge.`);
+    }
+    // Sweep by left edge so only holes whose boxes (grown by the tolerance) overlap are compared.
+    const order = [...rings].sort((left, right) => left.ring.box[0] - right.ring.box[0]);
+    for (let index = 0; index < order.length; index += 1) {
+      const left = order[index]!;
+      for (let next = index + 1; next < order.length; next += 1) {
+        const right = order[next]!;
+        if (right.ring.box[0] > left.ring.box[2] + TOLERANCE_MM) break;
+        if (right.ring.box[1] > left.ring.box[3] + TOLERANCE_MM || left.ring.box[1] > right.ring.box[3] + TOLERANCE_MM) continue;
+        const related = relate(left.ring, right.ring);
+        if (related.touching && related.relation === "disjoint") notes.push(`The holes ${holeName(left.hole)} and ${holeName(right.hole)} touch or lie within ${TOLERANCE_MM} mm of each other, which leaves a zero-width wall between them. Move them apart, or overlap them to make one opening.`);
+      }
+    }
+  }
+  return notes;
 }
 
 function synthesize(points: readonly Vec2[], infos: readonly EdgeInfo[], area: number): SketchProfile {
