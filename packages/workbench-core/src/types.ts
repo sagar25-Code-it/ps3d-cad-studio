@@ -1,5 +1,6 @@
 import type { PatternDefinition } from "./pattern.js";
 import type { BodyEditSpec } from "./body-edit.js";
+import type { SheetBendTable } from "./sheet-features.js";
 
 export const WORKBENCH_FORMAT = "ps3d-workbench-project" as const;
 export const WORKBENCH_SCHEMA_VERSION = 1 as const;
@@ -1150,7 +1151,7 @@ export interface EdgeBlendGroup {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "pattern" | "edge-blend" | "offset-region" | "replace-face" | "web" | "wrap" | "flex";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "pattern" | "edge-blend" | "offset-region" | "replace-face" | "web" | "wrap" | "flex" | "sheet-jog" | "sheet-lofted-bend";
   /**
    * A step that reshapes an existing body by picked faces or a transform (a general shell or draft, offset region, replace face,
    * a rib / web, wrap or flex). Always paired with `operation: "direct-edit"`; see `BodyEditSpec`.
@@ -1319,6 +1320,21 @@ export interface DesignSolidFeature extends DesignFeatureBase {
    * stops half of it short of the corner; a flange end that meets no other flange is not shortened. 0 or absent means no relief.
    */
   readonly flangeReliefMm?: number;
+  /**
+   * Sheet-edge-flange only: makes the step a miter flange. The edges that follow `flangeEdgeIndex` along the plate's outline, in running
+   * order; the flange bends along all of them with a mitre joint at every corner between two. All share this step's radius, length and angle.
+   */
+  readonly flangeMiterEdges?: readonly number[];
+  /** Sheet-base / sheet-flange / sheet-hem / extruded plate / lofted bend: the bend table the flat pattern reads K-factors from. */
+  readonly sheetBendTable?: SheetBendTable;
+  /** Sheet-jog only: the plate edge the jog line runs parallel to (index as for an edge flange). */
+  readonly jogEdgeIndex?: number;
+  /** Sheet-jog only: distance from that edge, into the plate, to where the first bend of the jog starts (mm). */
+  readonly jogPositionMm?: number;
+  /** Sheet-jog only: how far the far side steps up (positive, along the sheet normal) or down (negative), in mm. */
+  readonly jogOffsetMm?: number;
+  /** Sheet-jog only: angle of the sloping web of the jog from the sheet, 1 to 89 degrees. */
+  readonly jogAngleDeg?: number;
   /** Hole only: the shape. A tapped hole is recorded as a plain hole at its tap-drill diameter. */
   readonly holeStyle?: "simple" | "counterbore" | "countersink";
   /** Hole only: the point on the face where the hole starts, in millimetres. */

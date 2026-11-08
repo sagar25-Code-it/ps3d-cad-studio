@@ -81,7 +81,13 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
                 ? `${trimNumber(feature.valueMm)} mm · chamfer ${trimNumber(feature.edge?.sizeMm ?? 0)} mm`
                 : feature.kind === "shell"
                   ? `${trimNumber(feature.valueMm)} mm · wall ${trimNumber(feature.shellThicknessMm ?? 0)} mm${feature.shellOpenFace === "none" ? "" : ` · ${feature.shellOpenFace ?? "top"} open`}`
-                  : `${trimNumber(feature.valueMm)} mm · ${trimNumber(feature.draftAngleDeg ?? 0)}° draft · ${feature.draftNeutralFace ?? "bottom"} neutral`;
+                  : feature.kind === "sheet-jog"
+                    ? `${trimNumber(feature.jogOffsetMm ?? 0)} mm step at ${trimNumber(feature.jogAngleDeg ?? 0)}° · ${trimNumber(feature.jogPositionMm ?? 0)} mm from edge ${feature.jogEdgeIndex ?? 0}`
+                    : feature.kind === "sheet-edge-flange"
+                      ? `${trimNumber(feature.flangeAngleDeg ?? 0)}° flange, ${trimNumber(feature.flangeLengthMm ?? 0)} mm · ${feature.flangeMiterEdges === undefined ? `edge ${feature.flangeEdgeIndex ?? 0}` : `mitred along edges ${[feature.flangeEdgeIndex ?? 0, ...feature.flangeMiterEdges].join(", ")}`}`
+                      : feature.kind === "sheet-lofted-bend"
+                        ? `${trimNumber(Math.abs(feature.valueMm))} mm lofted bend · ${trimNumber(feature.sheetThicknessMm ?? 0)} mm sheet`
+                        : `${trimNumber(feature.valueMm)} mm · ${trimNumber(feature.draftAngleDeg ?? 0)}° draft · ${feature.draftNeutralFace ?? "bottom"} neutral`;
   const verb = !modifiesBody(feature) ? "" : feature.operation === "cut" ? "Cut " : feature.operation === "join" ? "Join " : "";
   return `${verb}${amount} · from ${source === undefined ? "a deleted sketch" : source.name}`;
 }

@@ -1,7 +1,9 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
-import { attachEdgeFlange, booleanMeshes, flangeReliefs, holeCutter, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
+import { attachEdgeFlange, attachMiterFlange, booleanMeshes, developBend, flangeReliefs, holeCutter, jogSheetMesh, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BendRecord, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
+import { flangeEdgesOf } from "../../../packages/workbench-core/src/index.js";
+import { bendResolverOfStep, loftedBendBody, loftedBendFlat, plateFlangesOf, plateJogsOf } from "./sheet-metal-features.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 import { applyPatternStep } from "./pattern-replay.js";
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
@@ -54,7 +56,7 @@ function shifted(body: GeneralSolidBody, normal: readonly [number, number, numbe
 
 /** Builds the solid a feature describes from the sketch snapshot it is based on. For a join or cut this is the tool solid. */
 export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature, color = "#b9c2c8"): Promise<SolidRebuild> {
-  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "pattern" || feature.kind === "edge-blend" || feature.kind === "offset-region" || feature.kind === "replace-face" || feature.kind === "web" || feature.kind === "wrap" || feature.kind === "flex" || feature.bodyEdit !== undefined) {
+  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "pattern" || feature.kind === "edge-blend" || feature.kind === "offset-region" || feature.kind === "replace-face" || feature.kind === "web" || feature.kind === "wrap" || feature.kind === "flex" || feature.kind === "sheet-jog" || feature.bodyEdit !== undefined) {
     return { ok: false, message: "A direct-edit / indent step is applied during timeline replay, not through the sketch-driven builder." };
   }
   const sketch = sketchFeature.sketch;
@@ -64,6 +66,12 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   const region = resolveProfileRegion(profiles, feature.profileIds, { includeIslands: feature.kind === "extrude" && feature.edge === undefined });
   if (!region.ok) return { ok: false, message: region.diagnostics[0]?.message ?? "The sketch has no closed profile for this feature." };
   const plane = planeKeyOf(sketch.plane);
+  if (feature.kind === "sheet-lofted-bend") {
+    const lofted = loftedBendBody(feature, profiles, region.value.outer, plane, color);
+    if (!lofted.ok) return lofted;
+    const loftedPlaced = shifted(lofted.body, NORMALS[plane], sketch.planeOffsetMm ?? 0);
+    return { ok: true, body: isPlaced(sketch) ? { ...loftedPlaced, positionsMm: placePositions(loftedPlaced.positionsMm, sketch) } : loftedPlaced };
+  }
   const sweep = feature.kind === "revolve" ? revolveSpan(feature) : undefined;
   if (sweep !== undefined && sweep.totalDeg > 360 + 1e-9) return { ok: false, message: "A revolve cannot turn more than 360 degrees in all. Use a smaller angle." };
   const reach = feature.kind === "extrude" && feature.direction === "two-side" ? Math.abs(feature.valueMm) + (feature.secondValueMm ?? 0) : sweep?.totalDeg ?? Math.abs(feature.valueMm);
@@ -217,6 +225,7 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
   const outcomes = new Map<string, RebuildResult>();
   let current: GeneralSolidBody | undefined;
   let baseBody: GeneralSolidBody | undefined;
+  let lastJog: { readonly edgeIndex: number; readonly endMm: number } | undefined;
   for (const step of steps) {
     // A lone body is rebuilt whatever its state; the steps of a chain only while they are live.
     if (chained && !isFeatureActive(history, step.id)) continue;
@@ -240,6 +249,9 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
       outcomes.set(step.id, { featureId: step.id, ...(applied.note === undefined ? {} : { message: applied.note }) });
       continue;
     }
+    // Edge flanges and jogs bend a flat plate; a lofted bend (or a standalone flange or hem) has no flat top face to bend them from.
+    if ((step.kind === "sheet-edge-flange" || step.kind === "sheet-jog") && base.kind === "sheet-lofted-bend") { outcomes.set(step.id, { featureId: step.id, message: "A lofted bend has no flat plate to bend flanges or jogs from; use a Sheet base or an extruded plate." }); continue; }
+    if (step.kind === "sheet-jog" && (base.kind === "sheet-flange" || base.kind === "sheet-hem")) { outcomes.set(step.id, { featureId: step.id, message: "A jog bends a flat plate; use a Sheet base or an extruded plate." }); continue; }
     // Edge flange: bend a flange up from a named top-face edge of the sheet this body started as.
     if (step.kind === "sheet-edge-flange") {
       if (current === undefined || baseBody === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sheet this flange bends from could not be built." }); continue; }
@@ -247,13 +259,37 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
       const flatNormal = NORMALS[baseBody.feature?.plane ?? "xy"];
       const plateNormal = plateSketch === undefined ? flatNormal : placeDirection(flatNormal, plateSketch);
       const plateFrame = sheetFrameOf(baseBody, plateNormal);
-      const liveFlanges = steps.filter((other) => other.kind === "sheet-edge-flange" && isFeatureActive(history, other.id)).map((other) => ({ edgeIndex: other.flangeEdgeIndex ?? 0, reliefMm: other.flangeReliefMm ?? 0 }));
+      // Every edge a live flange step bends counts as flanged for corner relief; a miter flange's own corners are mitred, not relieved.
+      const liveFlanges = steps.filter((other) => other.kind === "sheet-edge-flange" && isFeatureActive(history, other.id)).flatMap((other) => flangeEdgesOf(other).map((edgeIndex) => ({ edgeIndex, reliefMm: other.flangeReliefMm ?? 0 })));
       const relief = plateFrame === undefined ? { startMm: 0, endMm: 0 } : flangeReliefs(plateFrame, step.flangeEdgeIndex ?? 0, liveFlanges);
-      const attached = attachEdgeFlange(current, baseBody, plateNormal, { edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0, reliefStartMm: relief.startMm, reliefEndMm: relief.endMm });
+      const chain = flangeEdgesOf(step);
+      const attached = step.flangeMiterEdges !== undefined
+        ? attachMiterFlange(current, baseBody, plateNormal, {
+          edgeIndices: chain, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0,
+          freeEndReliefs: chain.map((edgeIndex) => plateFrame === undefined ? { startMm: 0, endMm: 0 } : flangeReliefs(plateFrame, edgeIndex, [{ edgeIndex, reliefMm: step.flangeReliefMm ?? 0 }, ...liveFlanges.filter((other) => !chain.includes(other.edgeIndex))]))
+        })
+        : attachEdgeFlange(current, baseBody, plateNormal, { edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0, reliefStartMm: relief.startMm, reliefEndMm: relief.endMm });
       if (!attached.ok) { outcomes.set(step.id, { featureId: step.id, message: attached.message }); continue; }
       const { brep: _faceNames, ...withoutFaces } = current;
       void _faceNames;
       current = { ...withoutFaces, positionsMm: [...attached.positionsMm], indices: [...attached.indices] };
+      outcomes.set(step.id, { featureId: step.id });
+      continue;
+    }
+    // Jog: step the far side of the sheet up or down with two opposite bends.
+    if (step.kind === "sheet-jog") {
+      if (current === undefined || baseBody === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sheet this jog bends could not be built." }); continue; }
+      if (lastJog !== undefined && lastJog.edgeIndex !== (step.jogEdgeIndex ?? 0)) { outcomes.set(step.id, { featureId: step.id, message: "All jogs of one sheet must run parallel to the same edge, so they can be unfolded together." }); continue; }
+      if (lastJog !== undefined && (step.jogPositionMm ?? 0) < lastJog.endMm - 1e-6) { outcomes.set(step.id, { featureId: step.id, message: `This jog starts ${(step.jogPositionMm ?? 0).toFixed(2)} mm from the edge, inside the previous jog (which ends ${lastJog.endMm.toFixed(2)} mm out). Put it further from the edge.` }); continue; }
+      const jogSketch = history.features.find((candidate): candidate is DesignSketchFeature => candidate.id === base.sketchFeatureId && candidate.kind === "sketch")?.sketch;
+      const jogFlatNormal = NORMALS[baseBody.feature?.plane ?? "xy"];
+      const jogNormal = jogSketch === undefined ? jogFlatNormal : placeDirection(jogFlatNormal, jogSketch);
+      const jogged = jogSheetMesh(current, baseBody, jogNormal, { edgeIndex: step.jogEdgeIndex ?? 0, positionMm: step.jogPositionMm ?? 0, offsetMm: step.jogOffsetMm ?? 0, angleDeg: step.jogAngleDeg ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0 });
+      if (!jogged.ok) { outcomes.set(step.id, { featureId: step.id, message: jogged.message }); continue; }
+      const { brep: _jogFaces, ...withoutJogFaces } = current;
+      void _jogFaces;
+      current = { ...withoutJogFaces, positionsMm: [...jogged.positionsMm], indices: [...jogged.indices] };
+      lastJog = { edgeIndex: step.jogEdgeIndex ?? 0, endMm: (step.jogPositionMm ?? 0) + jogged.profile.runMm };
       outcomes.set(step.id, { featureId: step.id });
       continue;
     }
@@ -541,7 +577,7 @@ export function applyDirectEdit(feature: DesignSolidFeature & { readonly kind: "
 }
 
 export type FlatPatternOutcome =
-  | { readonly ok: true; readonly layout: FlatLayout; readonly summary: string; readonly notes: readonly string[] }
+  | { readonly ok: true; readonly layout: FlatLayout; readonly summary: string; readonly notes: readonly string[]; readonly bends: readonly BendRecord[] }
   | { readonly ok: false; readonly message: string };
 
 /**
@@ -555,6 +591,14 @@ export async function flatPatternForBody(project: WorkbenchProject, bodyId: stri
   if (base === undefined) return { ok: false, message: "This body is not in the timeline, so it has no sheet-metal steps to unfold." };
   const sketchFeature = history.features.find((candidate): candidate is DesignSketchFeature => candidate.id === base.sketchFeatureId && candidate.kind === "sketch");
   if (sketchFeature === undefined) return { ok: false, message: "The sketch this body was made from is no longer in the timeline." };
+  // The body's bend table (kept on the step that made it) decides each bend's K-factor; without one every bend uses the default.
+  const resolve = bendResolverOfStep(base);
+  if (base.kind === "sheet-lofted-bend") {
+    const loftProfiles = detectSketchProfiles(sketchFeature.sketch);
+    const loftRegion = resolveProfileRegion(loftProfiles, base.profileIds, { includeIslands: false });
+    if (!loftRegion.ok) return { ok: false, message: loftRegion.diagnostics[0]?.message ?? "The sketch has no closed profile for this lofted bend." };
+    return loftedBendFlat(base, loftProfiles, loftRegion.value.outer, resolve);
+  }
   if (base.kind === "sheet-flange" || base.kind === "sheet-hem") {
     const profiles = detectSketchProfiles(sketchFeature.sketch);
     const region = resolveProfileRegion(profiles, base.profileIds, { includeIslands: false });
@@ -570,8 +614,9 @@ export async function flatPatternForBody(project: WorkbenchProject, bodyId: stri
       widthMm: Math.abs(base.valueMm)
     };
     if (!(spec.legMm > 0 && spec.flangeLengthMm > 0 && spec.thicknessMm > 0 && spec.widthMm > 0)) return { ok: false, message: "The flange has a zero dimension, so it cannot be unfolded." };
-    const pattern = flatPatternOf(spec);
-    return { ok: true, layout: layoutOfFlatPattern(pattern), summary: `${pattern.flatLengthMm.toFixed(2)} x ${pattern.widthMm.toFixed(2)} mm blank, 1 bend, bend allowance ${pattern.bendAllowanceMm.toFixed(2)} mm`, notes: [] };
+    const bend = developBend(resolve, spec.thicknessMm, spec.innerRadiusMm, spec.angleDeg);
+    const pattern = flatPatternOf(spec, bend.kFactor);
+    return { ok: true, layout: layoutOfFlatPattern(pattern), summary: `${pattern.flatLengthMm.toFixed(2)} x ${pattern.widthMm.toFixed(2)} mm blank, 1 bend, bend allowance ${pattern.bendAllowanceMm.toFixed(2)} mm (K ${bend.kFactor.toFixed(3)}, ${bend.source === "default" ? "default" : "bend table"})`, notes: [], bends: [bend] };
   }
   if (base.kind !== "sheet-base" && base.kind !== "extrude") return { ok: false, message: "Flat pattern needs a sheet-metal body: a Sheet base (or an extruded plate), optionally with edge flanges, or a Flange / Hem." };
   const rebuilt = await rebuildSolidFeature(base, sketchFeature);
@@ -581,14 +626,16 @@ export async function flatPatternForBody(project: WorkbenchProject, bodyId: stri
   const flatBody = isPlaced(sketchFeature.sketch) ? { ...rebuilt.body, positionsMm: placePositions(rebuilt.body.positionsMm, sketchFeature.sketch, true) } : rebuilt.body;
   const frame = sheetFrameOf(flatBody, NORMALS[plane]);
   if (frame === undefined) return { ok: false, message: "This body has no flat top face with a thickness to unfold." };
-  const flanges = steps
-    .filter((step) => step.kind === "sheet-edge-flange" && isFeatureActive(history, step.id))
-    .map((step) => ({ edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0, reliefMm: step.flangeReliefMm ?? 0 }));
-  const pattern = flatPatternOfPlate(frame, plane, flanges);
+  const live = (step: DesignSolidFeature): boolean => isFeatureActive(history, step.id);
+  const plateFlanges = plateFlangesOf(frame, steps, live);
+  if ("error" in plateFlanges) return { ok: false, message: plateFlanges.error };
+  const pattern = flatPatternOfPlate(frame, plane, plateFlanges.flanges, resolve, plateJogsOf(steps, live));
   if ("error" in pattern) return { ok: false, message: pattern.error };
+  const fromTable = pattern.bends.filter((bend) => bend.source !== "default").length;
+  const tableNote = base.sheetBendTable === undefined ? [] : [`${fromTable} of ${pattern.bends.length} bends developed from the bend table${pattern.bends.length - fromTable === 0 ? "" : `, ${pattern.bends.length - fromTable} with its default K-factor ${base.sheetBendTable.defaultKFactor}`}.`];
   const width = pattern.boundsMm.maxX - pattern.boundsMm.minX;
   const height = pattern.boundsMm.maxY - pattern.boundsMm.minY;
-  return { ok: true, layout: pattern, summary: `${width.toFixed(2)} x ${height.toFixed(2)} mm blank, ${pattern.bendCount} bend${pattern.bendCount === 1 ? "" : "s"}, ${frame.thicknessMm.toFixed(2)} mm thick`, notes: pattern.notes };
+  return { ok: true, layout: pattern, summary: `${width.toFixed(2)} x ${height.toFixed(2)} mm blank, ${pattern.bendCount} bend${pattern.bendCount === 1 ? "" : "s"}, ${frame.thicknessMm.toFixed(2)} mm thick`, notes: [...pattern.notes, ...tableNote], bends: pattern.bends };
 }
 
 export type HoleDrilling =

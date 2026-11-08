@@ -26,6 +26,7 @@ export * from "./edge-blend.js";
 export * from "./body-edit.js";
 export * from "./solid-metrics.js";
 export * from "./design-labels.js";
+export * from "./sheet-features.js";
 export * from "./planar-faces.js";
 export { dragLiveSketch, solveLiveSketch, type LiveDragTarget, type LiveSketchSolveReport } from "./sketch-solve.js";
 export * from "./engineering-intent.js";

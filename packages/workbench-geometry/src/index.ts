@@ -28,3 +28,7 @@ export * from "./flex.js";
 export * from "./web.js";
 export * from "./wrap.js";
 export * from "./wrap-apply.js";
+export * from "./sheet-miter.js";
+export * from "./sheet-jog.js";
+export * from "./bend-table.js";
+export * from "./sheet-lofted-bend.js";

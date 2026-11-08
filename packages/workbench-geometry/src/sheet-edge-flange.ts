@@ -118,6 +118,20 @@ export interface EdgeFlangeSpec {
   /** How far the flange stops short of the edge's start and end, leaving a corner relief gap where a neighbouring flange meets it. */
   readonly reliefStartMm?: number;
   readonly reliefEndMm?: number;
+  /**
+   * Miter joint at the start or end of the flange: tan(turn / 2) where `turn` is the signed angle (left turn positive, seen from
+   * the sheet normal) from this edge to its neighbour in the chain. The flange's end is then cut on the vertical bisector plane of
+   * the corner instead of square: a point at outward offset u runs on by u × tan(turn / 2), so the next flange meets it exactly.
+   * A mitred end ignores the corner relief.
+   */
+  readonly mitreStartTan?: number;
+  readonly mitreEndTan?: number;
+  /**
+   * True when the neighbour across the mitre is already in `body`: this flange then adds no end face there and removes the
+   * neighbour's, so the two flanges are joined instead of closed off against each other.
+   */
+  readonly mitreStartJoin?: boolean;
+  readonly mitreEndJoin?: boolean;
 }
 
 /**
@@ -190,8 +204,12 @@ export function attachEdgeFlange(body: SheetMesh, base: SheetMesh, normal: Vec3,
   if (edge === undefined) return { ok: false, message: `There is no edge ${spec.edgeIndex}; this plate has ${frame.edges.length} (0 to ${frame.edges.length - 1}).` };
   if (!(spec.flangeLengthMm > 0) || !(spec.innerRadiusMm >= 0) || !(spec.angleDeg > 0 && spec.angleDeg <= 180)) return { ok: false, message: "A flange needs a positive length, a non-negative bend radius and an angle from 0° to 180°." };
   const thickness = frame.thicknessMm;
-  const reliefStart = spec.reliefStartMm ?? 0;
-  const reliefEnd = spec.reliefEndMm ?? 0;
+  const mitreStart = spec.mitreStartTan;
+  const mitreEnd = spec.mitreEndTan;
+  if ((mitreStart !== undefined && !Number.isFinite(mitreStart)) || (mitreEnd !== undefined && !Number.isFinite(mitreEnd))) return { ok: false, message: "A mitre joint needs a finite corner angle." };
+  // A mitred end is cut on the corner's bisector plane, so it has no relief gap.
+  const reliefStart = mitreStart === undefined ? spec.reliefStartMm ?? 0 : 0;
+  const reliefEnd = mitreEnd === undefined ? spec.reliefEndMm ?? 0 : 0;
   if (!(reliefStart >= 0) || !(reliefEnd >= 0)) return { ok: false, message: "A corner relief cannot be negative." };
   const span = edge.lengthMm - reliefStart - reliefEnd;
   if (!(span > 1e-3)) return { ok: false, message: `The corner relief (${(reliefStart + reliefEnd).toFixed(2)} mm) leaves no flange on edge ${spec.edgeIndex}, which is ${edge.lengthMm.toFixed(2)} mm long.` };
@@ -199,6 +217,14 @@ export function attachEdgeFlange(body: SheetMesh, base: SheetMesh, normal: Vec3,
   const strip = tessellateExtrude(section, span, "xy");
   if (strip.positionsMm.length < 9) return { ok: false, message: "The flange could not be built." };
   const direction = unit3([edge.endMm[0] - edge.startMm[0], edge.endMm[1] - edge.startMm[1], edge.endMm[2] - edge.startMm[2]]);
+  // How far along the edge (from its start) the flange runs at outward offset u: square ends, relief gaps or mitre cuts.
+  const alongStart = (u: number): number => (mitreStart === undefined ? reliefStart : -u * mitreStart);
+  const alongEnd = (u: number): number => (mitreEnd === undefined ? edge.lengthMm - reliefEnd : edge.lengthMm + u * mitreEnd);
+  if (mitreStart !== undefined || mitreEnd !== undefined) {
+    for (const [u] of section) {
+      if (!(alongEnd(u) - alongStart(u) > 1e-3)) return { ok: false, message: `The mitre cuts the flange away: edge ${spec.edgeIndex} is too short for a flange this deep at that corner.` };
+    }
+  }
   // The strip's frame is (u, v, s) = (outward, normal, along the edge); a left-handed mapping needs its winding flipped.
   const flip = dot3(edge.outward, cross3(frame.normal, direction)) < 0;
   const stripVertices = strip.positionsMm.length / 3;
@@ -207,8 +233,13 @@ export function attachEdgeFlange(body: SheetMesh, base: SheetMesh, normal: Vec3,
     const u = strip.positionsMm[i * 3]!;
     const v = strip.positionsMm[i * 3 + 1]!;
     const s = strip.positionsMm[i * 3 + 2]!;
-    for (let axis = 0; axis < 3; axis += 1) world.push(edge.startMm[axis]! + edge.outward[axis]! * u + frame.normal[axis]! * (v - thickness) + direction[axis]! * (s + reliefStart));
+    const along = s < span / 2 ? alongStart(u) : alongEnd(u);
+    for (let axis = 0; axis < 3; axis += 1) world.push(edge.startMm[axis]! + edge.outward[axis]! * u + frame.normal[axis]! * (v - thickness) + direction[axis]! * along);
   }
+  // A joined mitre has no end face of its own; the face is shared with the neighbour and both are left out.
+  const isStartFace = (a: number, b: number, c: number): boolean => [a, b, c].every((index) => strip.positionsMm[index * 3 + 2]! < 1e-9);
+  const isEndFace = (a: number, b: number, c: number): boolean => [a, b, c].every((index) => strip.positionsMm[index * 3 + 2]! > span - 1e-9);
+  const capVertexKeys = new Set<string>();
   const stripTriangles: number[] = [];
   for (let corner = 0; corner + 2 < strip.indices.length; corner += 3) {
     const a = strip.indices[corner]!;
@@ -216,6 +247,11 @@ export function attachEdgeFlange(body: SheetMesh, base: SheetMesh, normal: Vec3,
     const c = strip.indices[corner + 2]!;
     // The flange's end wall at u = 0 is what the plate's side wall replaces.
     if ([a, b, c].every((index) => Math.abs(strip.positionsMm[index * 3]!) < 1e-6)) continue;
+    const joinedFace = (spec.mitreStartJoin === true && mitreStart !== undefined && isStartFace(a, b, c)) || (spec.mitreEndJoin === true && mitreEnd !== undefined && isEndFace(a, b, c));
+    if (joinedFace) {
+      for (const index of [a, b, c]) capVertexKeys.add(pointKey(world[index * 3]!, world[index * 3 + 1]!, world[index * 3 + 2]!));
+      continue;
+    }
     stripTriangles.push(a, flip ? c : b, flip ? b : c);
   }
   const down = (point: Vec3): Vec3 => [point[0] - frame.normal[0] * thickness, point[1] - frame.normal[1] * thickness, point[2] - frame.normal[2] * thickness];
@@ -234,6 +270,8 @@ export function attachEdgeFlange(body: SheetMesh, base: SheetMesh, normal: Vec3,
     const triangle = [body.indices[corner]!, body.indices[corner + 1]!, body.indices[corner + 2]!];
     const onWall = triangle.every((index) => corners.includes(pointKey(body.positionsMm[index * 3]!, body.positionsMm[index * 3 + 1]!, body.positionsMm[index * 3 + 2]!)));
     if (onWall) { removed += 1; continue; }
+    // The neighbour's mitre face is the one this flange joins to, so it goes.
+    if (capVertexKeys.size > 0 && triangle.every((index) => capVertexKeys.has(pointKey(body.positionsMm[index * 3]!, body.positionsMm[index * 3 + 1]!, body.positionsMm[index * 3 + 2]!)))) continue;
     keptBody.push(...triangle);
   }
   if (removed < 2) return { ok: false, message: `Edge ${spec.edgeIndex} has no flat side wall left to bend from; it may already carry a flange.` };

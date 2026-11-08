@@ -125,6 +125,19 @@ export function parameterFieldsOf(feature: DesignSolidFeature): readonly Paramet
       number("angle", "Bend angle", "°", (f) => f.flangeAngleDeg, (f, v) => ({ ...f, flangeAngleDeg: v }), { ...positive, max: 180 }),
       number("relief", "Corner relief", "mm", (f) => f.flangeReliefMm ?? 0, (f, v) => ({ ...f, flangeReliefMm: v }), { min: 0, max: 1000, hint: "gap left where this flange meets a neighbouring flange; 0 for none" })
     ];
+    case "sheet-jog": return [
+      { id: "edge", label: "Edge number", unit: "", input: "integer", min: 0, max: 1000, hint: "the plate edge the jog line runs parallel to",
+        read: (f) => String(f.jogEdgeIndex ?? 0), write: (f, v) => ({ ...f, jogEdgeIndex: v as number }) },
+      number("position", "Distance from the edge", "mm", (f) => f.jogPositionMm, (f, v) => ({ ...f, jogPositionMm: v }), { min: 0, max: 100_000, hint: "to where the first bend starts" }),
+      number("offset", "Step height", "mm", (f) => f.jogOffsetMm, (f, v) => ({ ...f, jogOffsetMm: v, valueMm: Math.max(0.01, Math.abs(v)) }), { min: -10_000, max: 10_000, hint: "positive steps up, negative down; zero is not allowed" }),
+      number("angle", "Jog angle", "°", (f) => f.jogAngleDeg, (f, v) => ({ ...f, jogAngleDeg: v }), { min: 1, max: 89 }),
+      number("radius", "Inner bend radius", "mm", (f) => f.sheetBendRadiusMm, (f, v) => ({ ...f, sheetBendRadiusMm: v }), { min: 0, max: 1000 })
+    ];
+    case "sheet-lofted-bend": return [
+      number("valueMm", "Height", "mm", (f) => Math.abs(f.valueMm), (f, v) => ({ ...f, valueMm: v }), positive),
+      number("thickness", "Sheet thickness", "mm", (f) => f.sheetThicknessMm, (f, v) => ({ ...f, sheetThicknessMm: v }), { ...positive, max: 1000 }),
+      ...(feature.loftTopScale !== undefined ? [number("scale", "Top scale", "×", (f) => f.loftTopScale, (f, v) => ({ ...f, loftTopScale: v }), { ...positive, max: 100 })] : [])
+    ];
     case "hole": return [
       vector("position", "Position on the face", (f) => f.holePositionMm, (f, v) => ({ ...f, holePositionMm: v })),
       number("diameter", "Hole diameter", "mm", (f) => f.holeDiameterMm, (f, v) => ({ ...f, holeDiameterMm: v }), { ...positive, max: 10_000 }),
@@ -251,6 +264,8 @@ export function refreshedName(feature: DesignSolidFeature): string {
   switch (feature.kind) {
     case "sheet-edge-flange":
       return name.replace(/^Edge flange \d+/u, `Edge flange ${feature.flangeEdgeIndex ?? 0}`).replace(/\(\d+(?:\.\d+)?°, \d+(?:\.\d+)? mm\)$/u, `(${(feature.flangeAngleDeg ?? 0).toFixed(0)}°, ${(feature.flangeLengthMm ?? 0).toFixed(0)} mm)`);
+    case "sheet-jog":
+      return name.replace(/^Jog \d+/u, `Jog ${feature.jogEdgeIndex ?? 0}`).replace(/\(-?\d+(?:\.\d+)? mm, \d+(?:\.\d+)?°\)$/u, `(${(feature.jogOffsetMm ?? 0).toFixed(0)} mm, ${(feature.jogAngleDeg ?? 0).toFixed(0)}°)`);
     case "hole": return name.replace(/Ø\s?\d+(?:\.\d+)?/u, `Ø${(feature.holeDiameterMm ?? 0).toFixed(2)}`);
     case "edge-blend": return name.replace(/^(?:Fillet|Chamfer) [^(]*?(?= \(|$)/u, edgeBlendTitle(feature));
     case "move-body": return name.replace(/\([^()]*mm\)$/u, `(${vectorText(feature.moveDeltaMm)} mm)`);
