@@ -1700,9 +1700,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       <div className="inspector-title"><div><p>Sketch intelligence</p><h2>{props.sketch.name}</h2></div><CapabilityBadge level="preview" /></div>
       <section className={`solver-card ${analysis.classification}`}>
         <span className="solver-number">{analysis.degreesOfFreedom}</span>
-        <div><strong>{analysis.classification === "fully-constrained" ? "Fully constrained" : analysis.classification === "conflict" ? "Constraint conflict" : "Degrees of freedom"}</strong><small>{analysis.appliedConstraints} supported constraints evaluated</small></div>
+        <div><strong>{analysis.classification === "fully-constrained" ? "Fully constrained" : analysis.classification === "conflict" ? "Constraint conflict" : "Degrees of freedom"}</strong><small>{analysis.appliedConstraints} constraints enforced, rank {analysis.rank}{analysis.redundant.length > 0 ? `, ${analysis.redundant.length} redundant` : ""}</small></div>
       </section>
       {analysis.conflicts.length > 0 && <div className="inline-warning">{analysis.conflicts[0]}</div>}
+      {analysis.redundant.length > 0 && analysis.conflicts.length === 0 && <div className="inline-warning" title={analysis.redundant.map((set) => set.message).join(" ")}>{analysis.redundant[0]!.message}</div>}
 
       {dynamicMirrorEntity !== undefined && props.editTool !== "dynamic-mirror" && <div className="inline-warning movable-note" role="status" aria-label="Dynamic mirror active">
         Dynamic mirror is on: what you draw is mirrored about {dynamicMirrorEntity.id.replace(/^entity:/u, "")}. <button className="palette-action" onClick={() => { setDynamicMirrorAxis(null); props.onMessage("Dynamic mirror stopped."); }}><CommandIcon name="cancel" />Stop</button>
