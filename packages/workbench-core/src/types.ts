@@ -166,11 +166,20 @@ export type SketchConstraintKind =
   | "equal"
   | "radius"
   | "distance"
-  | "fixed";
+  | "fixed"
+  | "angle"
+  | "arc-length"
+  | "perimeter"
+  | "smooth"
+  | "pierce"
+  | "refraction";
 
 /** Which defining point of an entity a point-level relation (Coincident, Midpoint) refers to. */
 export const SKETCH_POINT_REFS = ["start", "end", "mid", "center", "self"] as const;
 export type SketchPointRef = (typeof SKETCH_POINT_REFS)[number];
+
+/** The dimensions `set-sketch-dimension` can drive or measure. */
+export type SketchDimensionName = "length" | "width" | "height" | "radius" | "angle" | "arc-length" | "perimeter";
 
 export interface WorkbenchSketchConstraint {
   readonly id: string;
@@ -183,9 +192,28 @@ export interface WorkbenchSketchConstraint {
   readonly points?: readonly SketchPointRef[];
   readonly valueMm?: number;
   readonly dimension?: "length" | "width" | "height" | "radius";
+  /**
+   * Angle dimension only: the angle in degrees, counter-clockwise, from the direction of `entityIds[0]` to the direction of
+   * `entityIds[1]` (each line runs from its start to its end). Held by the solver unless the dimension is `driven`.
+   */
+  readonly valueDeg?: number;
+  /**
+   * A driven (reference) dimension is measured from the geometry and never moves it, so it carries no value. Any dimension kind
+   * (distance, radius, angle, arc length, perimeter) can be driven.
+   */
+  readonly driven?: boolean;
+  /** Pierce only: the construction axis or body edge chain that crosses the sketch plane at the point named by `entityIds[0]`. */
+  readonly pierce?: SketchPierceReference;
+  /** Refraction only: the ratio n2 / n1 of the refractive index beyond the interface line to the index before it. */
+  readonly ratio?: number;
   /** A relaxed constraint stays recorded but is ignored by the solver and the degree-of-freedom estimate. */
   readonly suppressed?: boolean;
 }
+
+/** What a Pierce constraint holds its point to: a construction axis, or one chain of sharp edges (by chain number) of a general body. */
+export type SketchPierceReference =
+  | { readonly kind: "axis"; readonly axisId: string }
+  | { readonly kind: "body-edge"; readonly bodyId: string; readonly chain: number };
 
 /** The datum planes a sketch can lie on. The plane is persisted with the sketch so it survives reload and Undo. */
 export const SKETCH_DATUM_PLANES = ["datum:xy", "datum:xz", "datum:yz"] as const;
@@ -1246,7 +1274,17 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "delete-sketch-entity"; readonly entityId: string }
   | { readonly kind: "add-sketch-constraint"; readonly constraint: WorkbenchSketchConstraint }
   | { readonly kind: "delete-sketch-constraint"; readonly constraintId: string }
-  | { readonly kind: "set-sketch-dimension"; readonly entityId: string; readonly dimension: "length" | "width" | "height" | "radius"; readonly valueMm: number }
+  | {
+      readonly kind: "set-sketch-dimension";
+      readonly entityId: string;
+      readonly dimension: SketchDimensionName;
+      /** Millimetres, or degrees for an angle dimension. Ignored (the measured value is kept) when `driven`. */
+      readonly valueMm: number;
+      /** Angle dimension only: the second line. The angle runs from `entityId` to this line. */
+      readonly secondEntityId?: string;
+      /** Make or keep this dimension a driven (reference) one: it is measured, never enforced. */
+      readonly driven?: boolean;
+    }
   | { readonly kind: "toggle-sketch-construction"; readonly entityId: string }
   | { readonly kind: "toggle-sketch-entity-visibility"; readonly entityId: string }
   | {

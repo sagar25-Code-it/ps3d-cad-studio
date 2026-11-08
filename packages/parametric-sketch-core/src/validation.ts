@@ -204,6 +204,9 @@ function validateDimensionCompatibility(
   } else if (dimension.kind === "radius" || dimension.kind === "diameter") {
     const geometry = geometryById.get(dimension.target.entityId);
     if (geometry !== undefined && geometry.kind !== "circle" && geometry.kind !== "arc") incompatible("requires a circle or arc");
+  } else if (dimension.kind === "arc-length") {
+    const geometry = geometryById.get(dimension.target.entityId);
+    if (geometry !== undefined && geometry.kind !== "arc") incompatible("requires an arc");
   } else if (dimension.kind === "angle") {
     const first = geometryById.get(dimension.first.entityId);
     const second = geometryById.get(dimension.second.entityId);

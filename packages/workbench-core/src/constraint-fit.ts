@@ -60,7 +60,7 @@ function pointFit(kind: "coincident" | "midpoint", kinds: readonly (SketchEntity
  * pair the solver is happy with (or the reverse). Point-level relations (Coincident, Midpoint) also take the
  * defining point each entity contributes.
  */
-export function constraintFit(kind: SketchConstraintKind, kinds: readonly (SketchEntityKind | undefined)[], points?: readonly SketchPointRef[]): ConstraintFit {
+export function constraintFit(kind: SketchConstraintKind, kinds: readonly (SketchEntityKind | undefined)[], points?: readonly SketchPointRef[], options: { readonly driven?: boolean } = {}): ConstraintFit {
   if (kinds.some((entry) => entry === undefined)) return no("A referenced entity no longer exists.");
   const [first, second, third] = kinds;
   switch (kind) {
@@ -73,6 +73,27 @@ export function constraintFit(kind: SketchConstraintKind, kinds: readonly (Sketc
     case "coincident":
     case "midpoint":
       return pointFit(kind, kinds, points);
+    case "angle":
+      return kinds.length === 2 && first === "line" && second === "line" ? FITS : no("An angle dimension applies to two lines.");
+    case "arc-length":
+      if (kinds.length !== 1) return no("An arc length dimension applies to one curve.");
+      if (options.driven === true) return first === "arc" || first === "line" || first === "spline" ? FITS : no("A reference arc length measures an arc, a line or a spline.");
+      return first === "arc" ? FITS : no("A driving arc length applies to an arc; a line takes a length dimension.");
+    case "perimeter":
+      if (options.driven === true) return kinds.length >= 1 && kinds.every((entry) => entry !== "point") ? FITS : no("A reference perimeter measures curves, not points.");
+      return kinds.length === 1 && (first === "circle" || first === "rectangle" || first === "ellipse") ? FITS : no("A driving perimeter applies to one circle, rectangle or ellipse.");
+    case "smooth": {
+      if (kinds.length !== 2) return no("Smooth joins the end of a spline to one other curve.");
+      if (first !== "spline" && second !== "spline") return no("Smooth needs a spline at one of the two curves.");
+      const continuing = (entry: SketchEntityKind | undefined): boolean => entry === "line" || entry === "arc" || entry === "spline";
+      if (!continuing(first) || !continuing(second)) return no("Smooth joins a spline to a line, an arc or another spline.");
+      if (points === undefined || points.length !== 2 || points.some((ref) => ref !== "start" && ref !== "end")) return no("Smooth needs the end (start or end) of each curve that meets; pick them on the canvas.");
+      return FITS;
+    }
+    case "pierce":
+      return kinds.length === 1 && first === "point" ? FITS : no("Pierce puts one sketch point where an axis or edge crosses the sketch plane.");
+    case "refraction":
+      return kinds.length === 3 && kinds.every((entry) => entry === "line") ? FITS : no("Refraction needs the incident line, the refracted line and the interface line.");
     default:
       break;
   }

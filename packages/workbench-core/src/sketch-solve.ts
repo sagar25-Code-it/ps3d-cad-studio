@@ -8,6 +8,7 @@ import type {
   SketchGeometry
 } from "../../parametric-sketch-core/src/types.js";
 import { constraintFit } from "./constraint-fit.js";
+import { applyExtraConstraints } from "./sketch-solve-extras.js";
 import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 
 /** A constraint the analytic solver could not enforce, kept on the sketch as design intent. */
@@ -66,6 +67,23 @@ export function dragLiveSketch(sketch: WorkbenchSketch, target: LiveDragTarget):
 }
 
 function runLiveSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[] | undefined, drag?: LiveDragTarget): LiveSketchSolveReport {
+  const base = runAnalyticSolve(sketch, focusEntityIds, drag);
+  if (!base.ok) return base;
+  // Relations on rectangles, ellipses and splines (perimeter, smooth, refraction) are solved on the analytic pass's result.
+  const component = constraintComponent(sketch, focusEntityIds);
+  const extras = applyExtraConstraints({ entities: base.entities, constraints: sketch.constraints }, (id) => component.has(id));
+  if (!extras.ok) return { ok: false, message: extras.message, relatedIds: extras.relatedIds, recovery: extras.recovery };
+  if (extras.movedIds.length === 0 && extras.unsolved.length === 0) return base;
+  return {
+    ok: true,
+    entities: extras.entities,
+    movedIds: [...new Set([...base.movedIds, ...extras.movedIds])],
+    notes: [...base.notes, ...extras.notes],
+    unsolved: [...base.unsolved, ...extras.unsolved]
+  };
+}
+
+function runAnalyticSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[] | undefined, drag?: LiveDragTarget): LiveSketchSolveReport {
   const component = constraintComponent(sketch, focusEntityIds);
   const entities = sketch.entities.filter((entity) => component.has(entity.id));
   // A relaxed (suppressed) relation stays recorded but is not enforced.
@@ -163,6 +181,11 @@ interface ArcFrame {
   readonly reversed: boolean;
   readonly center: Vec2;
   readonly radiusMm: number;
+  /** The solver arc's start and end angles as they were handed over, to tell a swept arc from an untouched one. */
+  readonly startAngleRad: number;
+  readonly endAngleRad: number;
+  /** Where the live arc's middle point sits along the sweep (0 to 1), kept when the arc is resized or swept. */
+  readonly midFraction: number;
 }
 
 /** The solver names a line's middle "midpoint" and a point entity's location "self"; everything else matches. */
@@ -179,10 +202,15 @@ function toSolverGeometry(entity: SketchEntity, arcFrames: Map<string, ArcFrame>
     const circle = circumcircle(entity.start, entity.mid, entity.end);
     if (circle === undefined) return undefined;
     const reversed = cross(entity.start, entity.mid, entity.end) < 0;
-    arcFrames.set(entity.id, { reversed, center: circle.center, radiusMm: circle.radiusMm });
     const startAngle = Math.atan2(entity.start[1] - circle.center[1], entity.start[0] - circle.center[0]);
     const endAngle = Math.atan2(entity.end[1] - circle.center[1], entity.end[0] - circle.center[0]);
-    return { ...base, kind: "arc", center: circle.center, radiusMm: circle.radiusMm, startAngleRad: reversed ? endAngle : startAngle, endAngleRad: reversed ? startAngle : endAngle };
+    const midAngle = Math.atan2(entity.mid[1] - circle.center[1], entity.mid[0] - circle.center[0]);
+    const solverStart = reversed ? endAngle : startAngle;
+    const solverEnd = reversed ? startAngle : endAngle;
+    const wrap = (angle: number): number => ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const sweep = wrap(solverEnd - solverStart);
+    arcFrames.set(entity.id, { reversed, center: circle.center, radiusMm: circle.radiusMm, startAngleRad: solverStart, endAngleRad: solverEnd, midFraction: sweep < 1e-12 ? 0.5 : wrap(midAngle - solverStart) / sweep });
+    return { ...base, kind: "arc", center: circle.center, radiusMm: circle.radiusMm, startAngleRad: solverStart, endAngleRad: solverEnd };
   }
   return undefined;
 }
@@ -199,7 +227,10 @@ function fromSolverGeometry(entity: SketchEntity, solved: SketchGeometry, frame:
     return near2(entity.point, solved.point) ? undefined : { ...entity, point: solved.point };
   }
   if (entity.kind === "arc" && solved.kind === "arc" && frame !== undefined) {
-    if (near2(frame.center, solved.center) && Math.abs(frame.radiusMm - solved.radiusMm) <= MOVE_TOLERANCE_MM) return undefined;
+    const wrap = (angle: number): number => ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const sameSweep = Math.abs(wrap(solved.endAngleRad - solved.startAngleRad) - wrap(frame.endAngleRad - frame.startAngleRad)) * solved.radiusMm <= MOVE_TOLERANCE_MM
+      && Math.abs(wrap(solved.startAngleRad - frame.startAngleRad)) * solved.radiusMm <= MOVE_TOLERANCE_MM;
+    if (near2(frame.center, solved.center) && Math.abs(frame.radiusMm - solved.radiusMm) <= MOVE_TOLERANCE_MM && sameSweep) return undefined;
     return rebuildArc(entity, solved, frame);
   }
   return undefined;
@@ -210,7 +241,7 @@ function rebuildArc(entity: Extract<SketchEntity, { kind: "arc" }>, solved: ArcG
   const at = (angle: number): Vec2 => [solved.center[0] + solved.radiusMm * Math.cos(angle), solved.center[1] + solved.radiusMm * Math.sin(angle)];
   const first = at(solved.startAngleRad);
   const last = at(solved.startAngleRad + sweep);
-  const mid = at(solved.startAngleRad + sweep / 2);
+  const mid = at(solved.startAngleRad + sweep * frame.midFraction);
   return frame.reversed ? { ...entity, start: last, mid, end: first } : { ...entity, start: first, mid, end: last };
 }
 
@@ -236,10 +267,13 @@ function translateConstraint(
   if (constraint.kind === "fixed") {
     return { constraints: constraint.entityIds.filter((id) => present.has(id)).map((id, index) => ({ id: `${constraint.id}#${index}`, suppressed: false, kind: "fix" as const, target: self(id) })), dimensions: [] };
   }
-  if (constraint.kind === "radius" || constraint.kind === "distance") return translateDimension(constraint, kindOf, present);
+  if (constraint.kind === "radius" || constraint.kind === "distance") return constraint.driven === true ? { constraints: [], dimensions: [] } : translateDimension(constraint, kindOf, present);
+  if (constraint.kind === "angle" || constraint.kind === "arc-length" || constraint.kind === "perimeter") return translateSizeDimension(constraint, kindOf, present);
   // One shared rule table decides which entity kinds each relation can act on (the Constrain buttons and the analysis read it too).
   const fit = constraintFit(constraint.kind, constraint.entityIds.map(kindOf), constraint.points);
   if (!fit.ok) return none(fit.reason);
+  // Smooth, Pierce and Refraction are solved after the analytic pass (spline ends, closed forms, the 3D crossing); nothing to hand the backend.
+  if (constraint.kind === "smooth" || constraint.kind === "pierce" || constraint.kind === "refraction") return { constraints: [], dimensions: [] };
 
   if (constraint.kind === "coincident" || constraint.kind === "midpoint") {
     const refs = constraint.points ?? [];
@@ -317,6 +351,38 @@ function translateDimension(constraint: WorkbenchSketchConstraint, kindOf: (id: 
     return { constraints: [], dimensions: [{ id: constraint.id, mode: "driving", suppressed: false, value: { value }, kind: "length", target: { entityId: id, selector: "self" }, unit: "mm" }] };
   }
   // Rectangle width and height are applied directly to the rectangle when the dimension is set.
+  return { constraints: [], dimensions: [] };
+}
+
+/** Angle, arc length and perimeter: the ones the backend can hold become solver dimensions; a rectangle's or ellipse's perimeter is solved afterwards. */
+function translateSizeDimension(constraint: WorkbenchSketchConstraint, kindOf: (id: string) => SketchEntity["kind"] | undefined, present: ReadonlySet<string>): Translated {
+  const none = (reason: string): Translated => ({ constraints: [], dimensions: [], unsolved: reason });
+  const fit = constraintFit(constraint.kind, constraint.entityIds.map(kindOf), constraint.points, { driven: constraint.driven === true });
+  if (!fit.ok) return none(fit.reason);
+  // A driven (reference) dimension is only measured.
+  if (constraint.driven === true) return { constraints: [], dimensions: [] };
+  const [first, second] = constraint.entityIds;
+  if (constraint.kind === "angle") {
+    if (constraint.valueDeg === undefined) return none("The angle dimension has no value.");
+    if (!present.has(first!) || !present.has(second!)) return none("The dimensioned lines are not solved by the live solver.");
+    return {
+      constraints: [],
+      dimensions: [{ id: constraint.id, mode: "driving", suppressed: false, value: { value: (constraint.valueDeg * Math.PI) / 180 }, kind: "angle", first: { entityId: first!, selector: "self" }, second: { entityId: second!, selector: "self" }, unit: "rad" }]
+    };
+  }
+  if (constraint.valueMm === undefined) return none("The dimension has no value.");
+  if (constraint.kind === "arc-length") {
+    if (!present.has(first!)) return none("The dimensioned arc is not solved by the live solver.");
+    return { constraints: [], dimensions: [{ id: constraint.id, mode: "driving", suppressed: false, value: { value: constraint.valueMm }, kind: "arc-length", target: { entityId: first!, selector: "self" }, unit: "mm" }] };
+  }
+  // Perimeter: a circle's is its radius; rectangles and ellipses are resized after the analytic pass.
+  if (kindOf(first!) === "circle" && present.has(first!)) {
+    const target: GeometryReference = { entityId: first!, selector: "radius" };
+    return {
+      constraints: [{ id: `${constraint.id}#hold`, suppressed: false, kind: "fix", target }],
+      dimensions: [{ id: constraint.id, mode: "driving", suppressed: false, value: { value: constraint.valueMm / (2 * Math.PI) }, kind: "radius", target: { entityId: first!, selector: "self" }, unit: "mm" }]
+    };
+  }
   return { constraints: [], dimensions: [] };
 }
 

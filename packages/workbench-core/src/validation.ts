@@ -284,24 +284,54 @@ function validateEntity(value: unknown): value is SketchEntity {
   return false;
 }
 
+const CONSTRAINT_KINDS = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed", "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"];
+
 function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): value is WorkbenchSketchConstraint {
-  if (!isRecord(value) || !stableId(value.id) || !Array.isArray(value.entityIds) || value.entityIds.length < 1 || value.entityIds.length > (value.kind === "symmetry" ? 3 : 2)
+  // A reference perimeter may sum a whole chain of curves; a refraction names three lines and a symmetry three curves.
+  const maxEntities = !isRecord(value) ? 0 : value.kind === "perimeter" ? 64 : value.kind === "symmetry" || value.kind === "refraction" ? 3 : 2;
+  if (!isRecord(value) || !stableId(value.id) || !Array.isArray(value.entityIds) || value.entityIds.length < 1 || value.entityIds.length > maxEntities
     || value.entityIds.some((id) => typeof id !== "string" || !entityIds.has(id))) return false;
-  const kinds = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed"];
-  if (!kinds.includes(String(value.kind))) return false;
+  if (!CONSTRAINT_KINDS.includes(String(value.kind))) return false;
   const hasValue = Object.hasOwn(value, "valueMm");
   const hasDimension = Object.hasOwn(value, "dimension");
   const hasSuppressed = Object.hasOwn(value, "suppressed");
   const hasPoints = Object.hasOwn(value, "points");
-  const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : []), ...(hasPoints ? ["points"] : [])];
-  if (!exactKeys(value, expectedKeys) || (hasDimension && !hasValue) || (hasSuppressed && typeof value.suppressed !== "boolean")) return false;
+  const hasValueDeg = Object.hasOwn(value, "valueDeg");
+  const hasDriven = Object.hasOwn(value, "driven");
+  const hasPierce = Object.hasOwn(value, "pierce");
+  const hasRatio = Object.hasOwn(value, "ratio");
+  const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : []), ...(hasPoints ? ["points"] : []),
+    ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : [])];
+  if (!exactKeys(value, expectedKeys) || (hasSuppressed && typeof value.suppressed !== "boolean")) return false;
+  if (hasDriven && typeof value.driven !== "boolean") return false;
+  const driven = value.driven === true;
+  // A driven (reference) dimension is measured: it carries no value of its own, and only dimension kinds can be driven.
+  if (driven && (hasValue || hasValueDeg || !["radius", "distance", "angle", "arc-length", "perimeter"].includes(String(value.kind)))) return false;
+  if (hasDimension && (!hasValue && !driven)) return false;
   if (hasDimension && !["length", "width", "height", "radius"].includes(String(value.dimension))) return false;
+  if (hasValueDeg && (value.kind !== "angle" || !(typeof value.valueDeg === "number" && Number.isFinite(value.valueDeg) && value.valueDeg >= 0 && value.valueDeg < 360))) return false;
+  if (value.kind === "angle" && !driven && !hasValueDeg) return false;
+  if (value.kind === "angle" && (value.entityIds.length !== 2 || hasValue)) return false;
   if (hasPoints) {
     // Only point-level relations name defining points, and each name must be a known point reference.
     const points = value.points;
-    if ((value.kind !== "coincident" && value.kind !== "midpoint") || !Array.isArray(points) || points.length < 1 || points.length > value.entityIds.length
+    if ((value.kind !== "coincident" && value.kind !== "midpoint" && value.kind !== "smooth") || !Array.isArray(points) || points.length < 1 || points.length > value.entityIds.length
       || points.some((point) => !(SKETCH_POINT_REFS as readonly unknown[]).includes(point))) return false;
+    if (value.kind === "smooth" && (points.length !== 2 || points.some((point) => point !== "start" && point !== "end"))) return false;
   }
+  if (value.kind === "smooth" && (!hasPoints || value.entityIds.length !== 2)) return false;
+  if (hasPierce) {
+    const pierce = value.pierce;
+    if (value.kind !== "pierce" || !isRecord(pierce)) return false;
+    const validReference = pierce.kind === "axis"
+      ? exactKeys(pierce, ["kind", "axisId"]) && stableId(pierce.axisId)
+      : pierce.kind === "body-edge" && exactKeys(pierce, ["kind", "bodyId", "chain"]) && stableId(pierce.bodyId) && integerRange(pierce.chain, 0, 100_000);
+    if (!validReference) return false;
+  }
+  if (value.kind === "pierce" && (!hasPierce || value.entityIds.length !== 1)) return false;
+  if (hasRatio && (value.kind !== "refraction" || !finiteRange(value.ratio, 0.05, 20))) return false;
+  if (value.kind === "refraction" && (!hasRatio || value.entityIds.length !== 3)) return false;
+  if (hasValue && value.kind === "arc-length" || hasValue && value.kind === "perimeter") return finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, 40_000);
   return !hasValue || finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, 20_000);
 }
 

@@ -23,6 +23,7 @@ import { createElectromechanicalAssembly, electricalSignature } from "./electrom
 import { createVehicleTemplate, vehicleHardPoints, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
+import { setSketchDimension } from "./sketch-dimension-edit.js";
 import { solveAssemblyMates } from "./assembly-solve.js";
 import {
   addDesignSolid,
@@ -190,8 +191,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       if (!keys(input, [...common, "constraintId"]) || !stableId(input.constraintId)) return invalidOperation("The sketch constraint ID is invalid.");
       break;
     case "set-sketch-dimension":
-      if (!keys(input, [...common, "entityId", "dimension", "valueMm"]) || !stableId(input.entityId)
-        || !["length", "width", "height", "radius"].includes(String(input.dimension)) || !finite(input.valueMm)) {
+      if (!keys(input, [...common, "entityId", "dimension", "valueMm", ...(Object.hasOwn(input, "secondEntityId") ? ["secondEntityId"] : []), ...(Object.hasOwn(input, "driven") ? ["driven"] : [])]) || !stableId(input.entityId)
+        || !["length", "width", "height", "radius", "angle", "arc-length", "perimeter"].includes(String(input.dimension)) || !finite(input.valueMm)
+        || (Object.hasOwn(input, "secondEntityId") && !stableId(input.secondEntityId)) || (Object.hasOwn(input, "driven") && typeof input.driven !== "boolean")) {
         return invalidOperation("The sketch dimension edit is invalid.");
       }
       break;
@@ -575,41 +577,8 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     case "delete-sketch-constraint":
       if (!project.sketch.constraints.some((constraint) => constraint.id === operation.constraintId)) return broken(operation.constraintId, "The sketch constraint does not exist.");
       return changed({ ...project, sketch: { ...project.sketch, constraints: project.sketch.constraints.filter((constraint) => constraint.id !== operation.constraintId) } }, [operation.constraintId], `Deleted constraint ${operation.constraintId}.`);
-    case "set-sketch-dimension": {
-      const target = project.sketch.entities.find((entity) => entity.id === operation.entityId);
-      if (target === undefined) return broken(operation.entityId, "The sketch entity does not exist.");
-      if (operation.valueMm < WORKBENCH_LIMITS.minGeometryMm || operation.valueMm > 10_000) {
-        return failure("OUTSIDE_SUPPORTED_ENVELOPE", "The driving dimension is outside the 0.01–10,000 mm preview envelope.", [operation.entityId], "Enter a positive bounded millimeter value.");
-      }
-      const resized = resizeSketchEntity(target, operation.dimension, operation.valueMm);
-      if (resized === undefined) return invalidOperation(`${operation.dimension} is not a supported driving dimension for a ${target.kind}.`);
-      const existing = project.sketch.constraints.find((constraint) => constraint.entityIds.length === 1
-        && constraint.entityIds[0] === operation.entityId
-        && (constraint.dimension === operation.dimension || (constraint.dimension === undefined && constraint.kind === "radius" && operation.dimension === "radius")));
-      if (existing === undefined && project.sketch.constraints.length >= WORKBENCH_LIMITS.maxConstraints) {
-        return failure("RESOURCE_LIMIT", "The sketch reached its constraint record limit.", [project.sketch.id], "Delete a constraint before adding another driving dimension.");
-      }
-      const dimensionId = existing?.id ?? `constraint:dimension-${operation.dimension}-${operation.entityId.replaceAll(":", "-")}`;
-      const dimensionConstraint = {
-        id: dimensionId,
-        kind: operation.dimension === "radius" ? "radius" as const : "distance" as const,
-        entityIds: [operation.entityId],
-        valueMm: operation.valueMm,
-        dimension: operation.dimension
-      };
-      const constraints = existing === undefined
-        ? [...project.sketch.constraints, dimensionConstraint]
-        : project.sketch.constraints.map((constraint) => constraint.id === existing.id ? dimensionConstraint : constraint);
-      const resizedSketch = { ...project.sketch, entities: project.sketch.entities.map((entity) => entity.id === target.id ? resized : entity), constraints };
-      // Relations that touch the resized entity are re-enforced (for example a tangent circle follows its line).
-      const solvedDimension = solveLiveSketch(resizedSketch, [target.id]);
-      if (!solvedDimension.ok) return solveFailure(solvedDimension);
-      return changed(
-        { ...project, sketch: { ...resizedSketch, entities: solvedDimension.entities } },
-        [target.id, dimensionId, ...solvedDimension.movedIds.filter((id) => id !== target.id)],
-        `Set ${operation.dimension} of ${target.id} to ${formatNumber(operation.valueMm)} mm.${solveSummary(solvedDimension)}`
-      );
-    }
+    case "set-sketch-dimension":
+      return setSketchDimension(project, operation);
     case "apply-sketch-edit":
       return applySketchEdit(project, operation);
     case "set-sketch-constraints-suppressed": {
@@ -1249,19 +1218,6 @@ function markElectromechanicalStale(project: WorkbenchProject, electrical: Elect
     ? project.assembly
     : { ...project.assembly, electromechanicalSource: { ...source, status: "stale" as const } };
   return { ...project, electrical, assembly };
-}
-
-function resizeSketchEntity(entity: SketchEntity, dimension: "length" | "width" | "height" | "radius", valueMm: number): SketchEntity | undefined {
-  if (entity.kind === "line" && dimension === "length") {
-    const dx = entity.end[0] - entity.start[0];
-    const dy = entity.end[1] - entity.start[1];
-    const current = Math.hypot(dx, dy);
-    return { ...entity, end: [entity.start[0] + dx / current * valueMm, entity.start[1] + dy / current * valueMm] as const };
-  }
-  if (entity.kind === "circle" && dimension === "radius") return { ...entity, radiusMm: valueMm };
-  if (entity.kind === "rectangle" && dimension === "width") return { ...entity, widthMm: valueMm };
-  if (entity.kind === "rectangle" && dimension === "height") return { ...entity, heightMm: valueMm };
-  return undefined;
 }
 
 /**
