@@ -51,7 +51,8 @@ function commit(project: WorkbenchProject, result: SketchEditResult) {
     removeEntityIds: result.value.removeEntityIds,
     updateEntities: result.value.updateEntities,
     addEntities: result.value.addEntities,
-    addConstraints: result.value.addConstraints
+    addConstraints: result.value.addConstraints,
+    ...(result.value.removeConstraintIds === undefined ? {} : { removeConstraintIds: result.value.removeConstraintIds })
   });
 }
 
@@ -292,16 +293,23 @@ export const sketchEditToolTests: readonly TestCase[] = [
     }
   },
   {
-    name: "an edit that would break a recorded relation is refused until the relation is relaxed",
+    name: "an edit whose raw plan would break a recorded relation is refused by the operation; the planner removes that relation itself, and a relaxed one stays recorded",
     run: () => {
       const project = projectWith(
         [line("a", [0, 0], [10, 0]), line("b", [10, 0], [10, 10]), line("c", [20, 0], [20, 10])],
         [{ id: "constraint:equal-bc", kind: "equal", entityIds: ["entity:b", "entity:c"] }]
       );
-      const blocked = commit(project, filletCorners(context(project), ids("a", "b"), 2));
-      assert(!blocked.ok, "the fillet shortens b, which would break equal(b, c)");
+      const planned = filletCorners(context(project), ids("a", "b"), 2);
+      assert(planned.ok, "the fillet plans");
+      assert(planned.value.removeConstraintIds?.includes("constraint:equal-bc") === true, "the plan removes equal(b, c), which the shortened b no longer satisfies");
+      const { removeConstraintIds: _dropped, ...stripped } = planned.value;
+      const blocked = commit(project, { ok: true, value: stripped });
+      assert(!blocked.ok, "the operation still refuses a plan that leaves the broken relation in place");
       equal(blocked.diagnostics[0]?.code, "CONSTRAINT_CONFLICT", "typed as a conflict");
       assert(blocked.diagnostics[0]!.recovery.includes("Relax Relations"), "and points at the fix");
+      const applied = commit(project, planned);
+      assert(applied.ok, "with the relation removed by the planner the fillet applies");
+      equal(applied.value.project.sketch.constraints.some((constraint) => constraint.id === "constraint:equal-bc"), false, "and the equal relation is gone");
 
       const relaxIds = constraintsOnEntities(project.sketch, ["entity:b"], "relations", false);
       equal(relaxIds.length, 1, "the relation is found on the selected entity");

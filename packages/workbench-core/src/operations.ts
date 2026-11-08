@@ -1320,11 +1320,13 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   }
   const gone = new Set([...dropped.map((constraint) => constraint.id), ...removedConstraints]).size;
   const droppedNote = gone === 0 ? "" : ` Removed ${gone} constraint${gone === 1 ? "" : "s"}.`;
-  const unsolvedNote = solved.unsolved.length === 0 ? "" : ` Recorded, not solved: ${solved.unsolved.map((entry) => entry.reason).join(" ")}`;
+  // The audit entry holds at most 240 characters of summary and 201 IDs; a big edit (a rounded rectangle, a pattern) must not trip that.
+  const unsolvedNote = solved.unsolved.length === 0 ? "" : ` Recorded, not solved: ${[...new Set(solved.unsolved.map((entry) => entry.reason))].join(" ")}`;
+  const summary = `${operation.label}.${droppedNote}${unsolvedNote}`;
   return changed(
     { ...project, sketch: next },
-    [...removed, ...updates.keys(), ...addedIds, ...operation.addConstraints.map((constraint) => constraint.id)],
-    `${operation.label}.${droppedNote}${unsolvedNote}`
+    [...removed, ...updates.keys(), ...addedIds, ...operation.addConstraints.map((constraint) => constraint.id)].slice(0, 200),
+    summary.length > 240 ? `${summary.slice(0, 237)}...` : summary
   );
 }
 
