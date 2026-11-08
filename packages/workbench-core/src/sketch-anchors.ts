@@ -103,6 +103,19 @@ function isChained(id: string, constraints: readonly WorkbenchSketchConstraint[]
   return refs.has("start") && refs.has("end");
 }
 
+/** Arcs and circles that have a Coincident joint with an end of the line. */
+export function joinedRounds(lineId: string, entities: ReadonlyMap<string, SketchEntity>, constraints: readonly WorkbenchSketchConstraint[]): readonly string[] {
+  const rounds = new Set<string>();
+  for (const candidate of constraints) {
+    if (candidate.kind !== "coincident" || candidate.suppressed === true || !candidate.entityIds.includes(lineId)) continue;
+    for (const id of candidate.entityIds) {
+      const kind = entities.get(id)?.kind;
+      if (id !== lineId && (kind === "arc" || kind === "circle")) rounds.add(id);
+    }
+  }
+  return [...rounds];
+}
+
 /** Circles and arcs held tangent to the given circle or arc. */
 function tangentCircles(circleId: string, entities: ReadonlyMap<string, SketchEntity>, constraints: readonly WorkbenchSketchConstraint[]): readonly string[] {
   return constraints
@@ -149,8 +162,9 @@ export function anchorsForDimension(constraint: WorkbenchSketchConstraint, entit
         case "height":
           return [keep(first!, "center")];
         default:
-          // A line's length: it grows from its start.
-          return entity?.kind === "line" ? [keep(first!, "start")] : [hold(first!)];
+          // A line's length: it grows from its start, and the arcs and circles joined to its ends keep their radius (a slot's cap or a
+          // plate's fillet slides with the line instead of being quietly resized).
+          return entity?.kind === "line" ? [keep(first!, "start"), ...joinedRounds(first!, entities, siblings).map((round) => keep(round, "radius", 1))] : [hold(first!)];
       }
     }
     case "angle": {

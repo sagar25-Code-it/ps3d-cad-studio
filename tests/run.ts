@@ -16,6 +16,7 @@ import { sketchAutoConstraintTests } from "./sketch-auto-constraints.test.js";
 import { sketchDragTests } from "./sketch-drag.test.js";
 import { sketchDimensionLayoutTests } from "./sketch-dimension-layout.test.js";
 import { sketchShapeTests } from "./sketch-shapes.test.js";
+import { sketchShapeJointTests } from "./sketch-shape-joints.test.js";
 import { sketchEllipseTests } from "./sketch-ellipse.test.js";
 import { designTimelineTests } from "./design-timeline.test.js";
 import { designRegenerationTests } from "./design-regeneration.test.js";
@@ -247,7 +248,8 @@ const tests: readonly TestCase[] = [
   ...sketchUnderlayTests,
   ...sketchExchangeUiTests,
   ...sketchCanvasUxTests,
-  ...sketchCanvasHandleTests
+  ...sketchCanvasHandleTests,
+  ...sketchShapeJointTests
 ];
 let failures = 0;
 

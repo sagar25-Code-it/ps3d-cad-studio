@@ -237,7 +237,7 @@ export const sketchInputExtrasTests: readonly TestCase[] = [
       assert(polygonCorner.ok, "polygon corner");
       const polygon = buildPolygon([0, 0], polygonCorner.point, 6, ids());
       assert(polygon.ok, "the polygon builds");
-      for (const side of polygon.value.entities) {
+      for (const side of polygon.value.entities.filter((entity) => !entity.construction)) {
         assert(side.kind === "line", "polygon side");
         near(Math.hypot(side.start[0], side.start[1]), 12, 1e-9, "every corner is exactly the typed circumradius from the centre");
       }

@@ -38,7 +38,7 @@ import { copySketchSelection, cutSketchSelection, nextPasteNumber, parseClipboar
 import { keyLabelForCommand, sketchHotkeyHelp, type SketchHotkeyAction } from "../../../../packages/workbench-sketch/src/hotkeys.js";
 import { DRAW_CONSTRUCTION_OFF_MESSAGE, DRAW_CONSTRUCTION_ON_MESSAGE, entityForDrawMode, planForDrawMode } from "../../../../packages/workbench-sketch/src/draw-construction.js";
 import { findTextObject, planSketchText, planSketchTextEdit, textSpecFromFields } from "../../../../packages/workbench-sketch/src/sketch-text.js";
-import type { SketchTextObject } from "../../../../packages/workbench-core/src/index.js";
+import type { SketchTextObject, WorkbenchResult } from "../../../../packages/workbench-core/src/index.js";
 import { SketchExportPanel, SketchImportPanel, SketchUnderlayPanel, type UnderlayPickState } from "./sketch/SketchExchangePanel.js";
 import { SketchPatternPanel } from "./sketch/SketchPatternPanel.js";
 import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
@@ -46,7 +46,8 @@ import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../
 import { autoConstraintsFor, dropConstraintFor, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
-import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, buildPolygon, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
+import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, POLYGON_MODES, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
+import { POLYGON_MODE_LABELS, buildPolygonByMode, parsePolygonMode } from "../../../../packages/workbench-sketch/src/polygon-modes.js";
 import { buildControlPointSpline, buildCurveTool, isFixedCurveTool } from "../../../../packages/workbench-sketch/src/curve-tools.js";
 import { extendProfileChain, startProfileChain, type ProfileChain } from "../../../../packages/workbench-sketch/src/blend-profile.js";
 import { DEFAULT_CURVE_OPTION_FIELDS, SketchCurveOptionsPanel, curveOptionsFromFields } from "./SketchCurveOptions.js";
@@ -343,6 +344,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [dimensionEdit, setDimensionEdit] = useState<DimensionEditState | undefined>(undefined);
   const [dimensionText, setDimensionText] = useState("");
   const [polygonSides, setPolygonSides] = useSketchPref("polygonSides", String(POLYGON_DEFAULT_SIDES));
+  const [polygonModeText, setPolygonMode] = useSketchPref("polygonMode", "inscribed");
+  const polygonMode = parsePolygonMode(polygonModeText);
   // The editor's Reference checkbox: a reference dimension is measured and never moves the geometry.
   const [dimensionReference, setDimensionReference] = useState(false);
   // The extra curve tools (rounded rectangle, conics, blend, profile, text ...): their palette numbers, and the Profile chain being drawn.
@@ -601,13 +604,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [cursor, pending, props.tool, curveFields.profileMode, curveFields.splineMode]);
   const navigationPan = props.tool === "select" && props.viewportState.navigationMode === "pan";
   /** A whole polygon or slot is built from the points placed so far plus the cursor, so it can be previewed and then placed. */
-  const buildShape = (tool: Exclude<SketchTool, "select">, points: readonly Vec2[]): ReturnType<typeof buildPolygon> => {
+  const buildShape = (tool: Exclude<SketchTool, "select">, points: readonly Vec2[]): WorkbenchResult<SketchShape> => {
     const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
     if (isFixedCurveTool(tool)) {
       const options = curveOptionsFromFields(curveFields, { entities: props.sketch.entities, centerlineReachMm: Math.max(1000, camera.camera.widthMm * 3 + Math.hypot(camera.camera.centerMm[0], camera.camera.centerMm[1])), pickReachMm: Math.max(props.sketch.snapToleranceMm, PICK_PIXELS * px), block: blockLibrary.get(curveFields.blockChoice) });
       return buildCurveTool(tool, points, options, ids);
     }
-    if (tool === "polygon") return buildPolygon(points[0]!, points[1]!, Math.round(Number(polygonSides)), ids);
+    if (tool === "polygon") return buildPolygonByMode(points[0]!, points[1]!, Math.round(Number(polygonSides)), polygonMode, ids);
     if (tool === "slot-straight") return buildSlotOverall(points[0]!, points[1]!, points[2]!, ids);
     return buildSlot(points[0]!, points[1]!, points[2]!, ids);
   };
@@ -621,7 +624,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (!isShapeTool(props.tool) || pending.length !== requiredSketchPoints(props.tool) - 1) return undefined;
     const built = buildShape(props.tool, [...pending, cursor]);
     return built.ok ? built.value : undefined;
-  }, [props.tool, pending, cursor, polygonSides, curveFields, props.sketch.entities]);
+  }, [props.tool, pending, cursor, polygonSides, polygonMode, curveFields, props.sketch.entities]);
   const dynamicMirrorEntity = useMemo(() => {
     const axis = props.sketch.entities.find((entity) => entity.id === dynamicMirrorAxis);
     return axis?.kind === "line" ? axis : undefined;
@@ -2045,6 +2048,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
         <PaletteToggle label="Draw as construction (Q)" active={drawAsConstruction} onToggle={(next) => { setDrawAsConstruction(next); props.onMessage(next ? DRAW_CONSTRUCTION_ON_MESSAGE : DRAW_CONSTRUCTION_OFF_MESSAGE); }} />
         {props.tool === "polygon" && <label className="palette-number"><span>Polygon sides</span><input type="number" min={POLYGON_MIN_SIDES} max={POLYGON_MAX_SIDES} step={1} value={polygonSides} aria-label="Number of polygon sides" onChange={(event) => setPolygonSides(event.target.value)} /></label>}
+        {props.tool === "polygon" && <label className="palette-number"><span>Polygon size by</span><select value={polygonMode} aria-label="How the polygon is sized" title="Inscribed: centre, then a corner. Circumscribed: centre, then the middle of a side. Edge: the two ends of one side." onChange={(event) => setPolygonMode(parsePolygonMode(event.target.value))}>{POLYGON_MODES.map((mode) => <option key={mode} value={mode}>{POLYGON_MODE_LABELS[mode]}</option>)}</select></label>}
         <SketchCurveOptionsPanel tool={props.tool} fields={curveFields} onChange={setCurveFields} blockNames={blockNames} selectedCount={selectedEntities.length} onSaveBlock={saveSelectionAsBlock} textEdit={textEditId === null ? undefined : { onApply: () => placeText(), onCancel: () => { setTextEditId(null); props.onMessage("Text editing cancelled."); } }} />
         {props.tool === "select" && selectedEntity !== undefined && findTextObject(props.sketch, selectedEntity.id) !== undefined && <button className="palette-action" title="Re-open this text (or double-click it)" onClick={() => startTextEdit(findTextObject(props.sketch, selectedEntity.id)!)}><CommandIcon name="edit" />Edit text</button>}
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
