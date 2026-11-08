@@ -17,6 +17,7 @@ import {
   type SketchTool
 } from "../../../../packages/workbench-sketch/src/index.js";
 import { gridSteps, sketchToScreen } from "../../../../packages/workbench-sketch/src/camera.js";
+import { buildFitSpline } from "../../../../packages/workbench-sketch/src/spline-fit.js";
 import { advanceArcSweepTrack, arcSweepDirection, startArcSweepTrack, type ArcSweepTrack } from "../../../../packages/workbench-sketch/src/arc-sweep.js";
 import { mergeTyped, typedIntentConstraints } from "../../../../packages/workbench-sketch/src/typed-intent.js";
 import { dynamicFieldsFor, measureFromCursor, parseDynamicNumber, pointFromDynamicInput, type DynamicFieldId, type DynamicValues } from "../../../../packages/workbench-sketch/src/dynamic-input.js";
@@ -433,7 +434,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     }
     if (props.tool === "spline-control") return undefined;
     if (props.tool === "spline") {
-      return pending.length >= 1 ? { id: "entity:tool-preview", kind: "spline" as const, fitPoints: [...pending, cursor], construction: false } satisfies SketchEntity : undefined;
+      if (pending.length < 1) return undefined;
+      const rough = { id: "entity:tool-preview", kind: "spline" as const, fitPoints: [...pending, cursor], construction: false } satisfies SketchEntity;
+      if (pending.length < 2 || curveFields.splineMode === "uniform") return rough;
+      const shaped = buildFitSpline([...pending, cursor], curveFields.splineMode, "entity:tool-preview");
+      return shaped.ok ? shaped.value : rough;
     }
     if (props.tool === "select") return undefined;
     const required = requiredSketchPoints(props.tool);
@@ -451,7 +456,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       return { id: "entity:tool-preview", kind: "line" as const, start: pending[pending.length - 1]!, end: cursor, construction: false } satisfies SketchEntity;
     }
     return undefined;
-  }, [cursor, pending, props.tool, curveFields.profileMode]);
+  }, [cursor, pending, props.tool, curveFields.profileMode, curveFields.splineMode]);
   const navigationPan = props.tool === "select" && props.viewportState.navigationMode === "pan";
   /** A whole polygon or slot is built from the points placed so far plus the cursor, so it can be previewed and then placed. */
   const buildShape = (tool: Exclude<SketchTool, "select">, points: readonly Vec2[]): ReturnType<typeof buildPolygon> => {
@@ -743,7 +748,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
 
   const finishSpline = (points: readonly Vec2[]): void => {
-    const built = buildSketchEntity("spline", points, `entity:user-${crypto.randomUUID()}`);
+    const built = buildFitSpline(points, curveFields.splineMode, `entity:user-${crypto.randomUUID()}`);
     if (!built.ok) { props.onMessage(built.diagnostics[0]?.message ?? "The spline was rejected."); setPending([]); return; }
     addDrawn(built.value);
     setPending([]);

@@ -40,6 +40,7 @@ import { sketchConstraintsWpTests } from "./sketch-constraints-wp.test.js";
 import { sketchArcAndSlotModeTests } from "./sketch-arc-and-slot-modes.test.js";
 import { sketchCurveToolTests } from "./sketch-curve-tools.test.js";
 import { sketchCreationFixTests } from "./sketch-creation-fixes.test.js";
+import { sketchCreationCapabilityTests } from "./sketch-creation-capabilities.test.js";
 import { sweepAndLoftTests } from "./sweep-and-loft.test.js";
 import { edgeShellDraftTests } from "./edge-shell-draft.test.js";
 import { constructionAxesAndPointsTests } from "./construction-axes-and-points.test.js";
@@ -149,6 +150,7 @@ const tests: readonly TestCase[] = [
   ...sketchArcAndSlotModeTests,
   ...sketchCurveToolTests,
   ...sketchCreationFixTests,
+  ...sketchCreationCapabilityTests,
   ...sweepAndLoftTests,
   ...edgeShellDraftTests,
   ...constructionAxesAndPointsTests,

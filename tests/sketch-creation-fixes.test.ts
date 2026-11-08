@@ -8,7 +8,7 @@ import { CONIC_FIT_POINTS, buildConicByRho, buildHyperbola, conicArcPoint } from
 import { buildCurveTool, DEFAULT_CURVE_TOOL_OPTIONS } from "../packages/workbench-sketch/src/curve-tools.js";
 import { directionOfAngle, pointFromDynamicInput } from "../packages/workbench-sketch/src/dynamic-input.js";
 import { inferSketchPoint } from "../packages/workbench-sketch/src/inference.js";
-import { analyzeWorkbenchSketch, buildSketchEntity, sampleArc, sampleSpline, selectTangentSketchEntities, type SketchTool } from "../packages/workbench-sketch/src/index.js";
+import { analyzeWorkbenchSketch, buildSketchEntity, detectSketchProfiles, sampleArc, sampleSpline, selectTangentSketchEntities, type SketchTool } from "../packages/workbench-sketch/src/index.js";
 import { entitiesInSelectionBox } from "../packages/workbench-sketch/src/selection.js";
 import { buildSlot } from "../packages/workbench-sketch/src/shapes.js";
 import { TEXT_MAX_ENTITIES, buildSketchText } from "../packages/workbench-sketch/src/stroke-text.js";
@@ -589,6 +589,31 @@ export const sketchCreationFixTests: readonly TestCase[] = [
         near(ellipse.rotationDeg, expected, 1e-9, label);
         assert(ellipse.majorRadiusMm >= ellipse.minorRadiusMm, `${label}: major is not shorter than minor`);
       }
+    }
+  },
+
+  // ------------------------------------------------------------------------------------------ performance guard
+  {
+    name: "Curve creation performance: inference over 500 mixed curves (ellipses and splines included) and profile detection on 500 arcs and lines stay fast",
+    run: () => {
+      const entities: SketchEntity[] = [];
+      for (let index = 0; index < 500; index += 1) {
+        const x = (index % 25) * 40;
+        const y = Math.floor(index / 25) * 40;
+        if (index % 5 === 0) entities.push({ id: `entity:perf-${index}`, kind: "ellipse", center: [x, y], majorRadiusMm: 15, minorRadiusMm: 8, rotationDeg: index % 90, construction: false });
+        else if (index % 5 === 1) entities.push({ id: `entity:perf-${index}`, kind: "spline", fitPoints: [[x, y], [x + 8, y + 6], [x + 16, y - 3], [x + 24, y + 4]], construction: false });
+        else if (index % 5 === 2) entities.push({ id: `entity:perf-${index}`, kind: "circle", center: [x, y], radiusMm: 9, construction: false });
+        else if (index % 5 === 3) entities.push({ id: `entity:perf-${index}`, kind: "arc", start: [x, y], mid: [x + 6, y + 6], end: [x + 12, y], construction: false });
+        else entities.push(lineOf(`entity:perf-${index}`, [x, y], [x + 20, y + 10]));
+      }
+      const sketch = { ...emptyProject().sketch, entities, constraints: [] };
+      const startedAt = performance.now();
+      for (let probe = 0; probe < 20; probe += 1) inferSketchPoint([probe * 37 % 1000, probe * 53 % 800], sketch, { toleranceMm: 4, anchor: [100, 100] });
+      const perCall = (performance.now() - startedAt) / 20;
+      assert(perCall < 100, `inference stays under 100 ms a call with 500 curves (took ${perCall.toFixed(1)} ms)`);
+      const loopStart = performance.now();
+      detectSketchProfiles(sketch);
+      assert(performance.now() - loopStart < 1000, "profile detection on 500 curves is well under a second");
     }
   },
 

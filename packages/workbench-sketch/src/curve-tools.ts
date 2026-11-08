@@ -1,6 +1,8 @@
 import type { SketchEntity, Vec2, WorkbenchResult } from "../../workbench-core/src/index.js";
 import { buildBlendCurve } from "./blend-profile.js";
 import { buildCenterline, buildCenterpointArcSlot, buildMidpointLine, buildParallelogram, buildRoundedRectangle, buildThreePointArcSlot } from "./basic-curve-shapes.js";
+import { buildEllipticalArc } from "./ellipse-arc.js";
+import { buildTangentCircleThree, buildTangentCircleTwo } from "./tangent-circles.js";
 import { buildConicByRho, buildConicFromFivePoints, buildControlPointSpline, buildHyperbola, buildParabola } from "./conic-curves.js";
 import { badShape, type ShapeIds, type SketchShape } from "./curve-math.js";
 import { insertSketchBlock, type SketchBlock } from "./sketch-blocks.js";
@@ -22,6 +24,9 @@ export type FixedCurveToolId =
   | "hyperbola"
   | "conic"
   | "conic-five"
+  | "ellipse-arc"
+  | "circle-tangent-3"
+  | "circle-tangent-2"
   | "blend"
   | "text"
   | "block";
@@ -42,6 +47,9 @@ const FIXED_POINTS: Readonly<Record<FixedCurveToolId, number>> = {
   hyperbola: 3,
   conic: 3,
   "conic-five": 5,
+  "ellipse-arc": 5,
+  "circle-tangent-3": 3,
+  "circle-tangent-2": 2,
   blend: 2,
   text: 1,
   block: 1
@@ -59,6 +67,9 @@ export const CURVE_TOOL_LABELS: Readonly<Record<CurveToolId, string>> = {
   hyperbola: "Hyperbola",
   conic: "Conic (rho)",
   "conic-five": "Conic (5 points)",
+  "ellipse-arc": "Elliptical arc",
+  "circle-tangent-3": "3-tangent circle",
+  "circle-tangent-2": "2-tangent circle",
   blend: "Blend curve",
   profile: "Profile",
   text: "Text",
@@ -78,6 +89,9 @@ export const CURVE_TOOL_PROMPTS: Readonly<Record<CurveToolId, readonly string[]>
   hyperbola: ["centre", "vertex", "a point on the branch"],
   conic: ["start", "end", "the point where the end tangents meet"],
   "conic-five": ["point 1", "point 2", "point 3", "point 4", "point 5"],
+  "ellipse-arc": ["centre of the ellipse", "end of the major axis", "a point that sets the minor radius", "where the arc starts", "where the arc ends (counter-clockwise from the start)"],
+  "circle-tangent-3": ["near the first curve", "near the second curve", "near the third curve"],
+  "circle-tangent-2": ["near the first curve", "near the second curve (the radius is in the Sketch palette)"],
   blend: ["near the first curve end", "near the second curve end"],
   profile: ["start", "next point (click the start again to close)"],
   text: ["where the text starts"],
@@ -109,7 +123,7 @@ export function curveToolRequiredPoints(tool: string): number | undefined {
 
 /** The numbers a curve tool reads from the Sketch palette besides its clicks. */
 export interface CurveToolOptions {
-  /** Rounded rectangle corner radius. */
+  /** Rounded rectangle corner radius; also the radius of a 2-tangent circle. */
   readonly cornerRadiusMm: number;
   /** Conic (rho) shoulder ratio, 0.02 to 0.98. */
   readonly rho: number;
@@ -166,6 +180,9 @@ export function buildCurveTool(tool: FixedCurveToolId, points: readonly Vec2[], 
     case "hyperbola": return buildHyperbola(p(0), p(1), p(2), ids);
     case "conic": return buildConicByRho(p(0), p(1), p(2), options.rho, ids);
     case "conic-five": return buildConicFromFivePoints(points, ids);
+    case "ellipse-arc": return buildEllipticalArc(p(0), p(1), p(2), p(3), p(4), ids);
+    case "circle-tangent-3": return buildTangentCircleThree(options.entities, points, options.pickReachMm, ids);
+    case "circle-tangent-2": return buildTangentCircleTwo(options.entities, points, options.cornerRadiusMm, options.pickReachMm, ids);
     case "blend": return buildBlendCurve(options.entities, p(0), p(1), options.blendTension, options.pickReachMm, ids);
     case "block": return options.block === undefined ? badShape("There is no block to insert: select curves, save them as a block, then choose it in the Sketch palette.", "Save a block first.") : insertSketchBlock(options.block, p(0), { rotationDeg: options.blockRotationDeg, scale: options.blockScale }, ids);
     case "text": return buildSketchText(p(0), options.text, { heightMm: options.textHeightMm, rotationDeg: options.textRotationDeg }, ids);
