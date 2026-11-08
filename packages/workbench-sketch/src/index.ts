@@ -7,6 +7,16 @@ import {
   type WorkbenchSketch
 } from "../../workbench-core/src/index.js";
 import { CURVE_TOOL_LABELS, curveToolRequiredPoints, isFixedCurveTool, type CurveToolId, type FixedCurveToolId } from "./curve-tools.js";
+import { profileOutlineMm } from "./profile-outline.js";
+import { resolveProfileRegion, type ProfileRegion } from "./profile-select.js";
+import { detectProfilesOf, shapesOf } from "./profile-detect.js";
+import type { ProfileDetectionOptions } from "./profile-regions.js";
+
+import { sampleArc, sampleSpline } from "./curve-sampling.js";
+export { sampleArc, sampleSpline, CHORD_TOLERANCE_MM, isClosedFitSpline } from "./curve-sampling.js";
+export { PROFILE_GAP_TOLERANCE_MM } from "./arrangement.js";
+export { profileRefOf, parseProfileRef, type ProfileDetectionOptions } from "./profile-regions.js";
+export { profileOutlineMm, resolveProfileRegion, type ProfileRegion };
 
 /**
  * The short names remain the default Fusion-familiar variants so existing
@@ -82,14 +92,26 @@ export interface SketchProfileSegment {
   readonly entityId: string;
   readonly kind: "line" | "arc" | "spline";
   readonly edgeCount: number;
+  /** Names the stretch of the entity this segment is: the entity id, or `id#k/n` when the entity is split into n pieces. */
+  readonly key?: string;
 }
 
+/**
+ * One enclosed region of a sketch. `boundary` is its outer boundary and `holes` the boundaries of the islands inside it, so
+ * `areaMm2` is the net area. Every outline (outer and holes) winds counter-clockwise.
+ */
 export interface SketchProfile {
   readonly id: string;
   readonly entityIds: readonly string[];
   readonly boundary: SketchProfileBoundary;
   readonly areaMm2: number;
   readonly centroid: Vec2;
+  /** The id plus a geometric signature (area, centroid, holes). A feature stores this so it finds its region again after the sketch is edited. */
+  readonly ref?: string;
+  /** Islands inside the region, largest first. Each is a loop of its own, with its own id (the id of the region it bounds). */
+  readonly holes?: readonly SketchProfile[];
+  /** A point strictly inside the region (not inside a hole). */
+  readonly interiorPoint?: Vec2;
 }
 
 export interface QualifiedExtrusionCandidate {
@@ -435,128 +457,18 @@ export function sketchToolLabel(tool: SketchTool): string {
 }
 
 /**
- * Derives selectable closed profiles without mutating sketch geometry. Primitive
- * rectangles/circles are exact. Connected line-only loops are recognized when
- * every endpoint in the component has degree two.
+ * Derives the selectable closed regions of a sketch without mutating its geometry. All visible, non-construction curves are
+ * split at their mutual intersections and joints (see arrangement.ts), and every enclosed face is a profile: a rectangle with a
+ * diagonal gives two triangles, a grid of crossing lines gives its cells, overlapping shapes give their pieces and a ring between
+ * concentric loops is a profile with a hole. Isolated primitives and loops are exact and keep their ids.
  */
-export function detectSketchProfiles(sketch: WorkbenchSketch): readonly SketchProfile[] {
-  const profiles: SketchProfile[] = [];
-  // Hidden geometry never bounds a profile: what you cannot see must not become a solid or a hole.
-  const shown = sketch.entities.filter((entity) => entity.visible !== false);
-  for (const entity of shown) {
-    if (entity.construction) continue;
-    if (entity.kind === "rectangle") {
-      profiles.push({
-        id: profileId(entity.id),
-        entityIds: [entity.id],
-        boundary: { kind: "rectangle", center: entity.center, widthMm: entity.widthMm, heightMm: entity.heightMm, rotationDeg: entity.rotationDeg },
-        areaMm2: entity.widthMm * entity.heightMm,
-        centroid: entity.center
-      });
-    }
-    if (entity.kind === "circle") {
-      profiles.push({
-        id: profileId(entity.id),
-        entityIds: [entity.id],
-        boundary: { kind: "circle", center: entity.center, radiusMm: entity.radiusMm },
-        areaMm2: Math.PI * entity.radiusMm ** 2,
-        centroid: entity.center
-      });
-    }
-    if (entity.kind === "ellipse") {
-      profiles.push({
-        id: profileId(entity.id),
-        entityIds: [entity.id],
-        boundary: { kind: "ellipse", center: entity.center, majorRadiusMm: entity.majorRadiusMm, minorRadiusMm: entity.minorRadiusMm, rotationDeg: entity.rotationDeg },
-        areaMm2: Math.PI * entity.majorRadiusMm * entity.minorRadiusMm,
-        centroid: entity.center
-      });
-    }
-  }
-  profiles.push(...detectCurveLoops(shown.filter((entity): entity is Extract<SketchEntity, { kind: "line" | "arc" | "spline" }> => (entity.kind === "line" || entity.kind === "arc" || entity.kind === "spline") && !entity.construction)));
-  return profiles.sort((left, right) => right.areaMm2 - left.areaMm2 || left.id.localeCompare(right.id));
-}
-
-/** Closed polygon (millimetres) that outlines a profile: circles are sampled at 72 points, arcs at their sampled facets. */
-export function profileOutlineMm(boundary: SketchProfileBoundary): readonly Vec2[] {
-  if (boundary.kind === "circle") {
-    return Array.from({ length: 72 }, (_, index): Vec2 => {
-      const angle = (2 * Math.PI * index) / 72;
-      return [boundary.center[0] + boundary.radiusMm * Math.cos(angle), boundary.center[1] + boundary.radiusMm * Math.sin(angle)];
-    });
-  }
-  if (boundary.kind === "ellipse") {
-    const radians = (boundary.rotationDeg * Math.PI) / 180;
-    const cos = Math.cos(radians);
-    const sin = Math.sin(radians);
-    return Array.from({ length: 72 }, (_, index): Vec2 => {
-      const theta = (2 * Math.PI * index) / 72;
-      const localX = boundary.majorRadiusMm * Math.cos(theta);
-      const localY = boundary.minorRadiusMm * Math.sin(theta);
-      return [boundary.center[0] + localX * cos - localY * sin, boundary.center[1] + localX * sin + localY * cos];
-    });
-  }
-  if (boundary.kind === "rectangle") {
-    const halfWidth = boundary.widthMm / 2;
-    const halfHeight = boundary.heightMm / 2;
-    const radians = (boundary.rotationDeg * Math.PI) / 180;
-    const cos = Math.cos(radians);
-    const sin = Math.sin(radians);
-    const corners: readonly Vec2[] = [[-halfWidth, -halfHeight], [halfWidth, -halfHeight], [halfWidth, halfHeight], [-halfWidth, halfHeight]];
-    return corners.map(([x, y]): Vec2 => [boundary.center[0] + x * cos - y * sin, boundary.center[1] + x * sin + y * cos]);
-  }
-  return boundary.points;
+export function detectSketchProfiles(sketch: WorkbenchSketch, options: ProfileDetectionOptions = {}): readonly SketchProfile[] {
+  return detectProfilesOf(sketch, options);
 }
 
 /** Short stable token for a set of sketch entities, used to name kernel faces so names survive reordering and resizing. */
 export function stableEntityToken(entityIds: readonly string[]): string {
   return fnv1a([...entityIds].sort().join("|"));
-}
-
-export interface ProfileRegion {
-  readonly outer: SketchProfile;
-  /** Profiles that become holes through the outer profile, largest first. */
-  readonly holes: readonly SketchProfile[];
-}
-
-/**
- * Turns a profile selection into one outer profile plus the holes cut through it.
- * The largest selected profile is the outer boundary and every other selected profile must lie inside it.
- * With `includeIslands` a lone selection also takes the profiles that sit directly inside it, which is what
- * a CAD region click does: a rectangle with a circle in it extrudes as a plate with a hole.
- */
-export function resolveProfileRegion(
-  profiles: readonly SketchProfile[],
-  selectedIds: readonly string[],
-  options: { readonly includeIslands: boolean }
-): WorkbenchResult<ProfileRegion> {
-  const selected = profiles.filter((profile) => selectedIds.includes(profile.id)).sort((left, right) => right.areaMm2 - left.areaMm2);
-  const outer = selected[0] ?? profiles[0];
-  if (outer === undefined) return failure("INVALID_OPERATION", "Draw or select a closed profile first.", [], "Draw a closed profile in the sketch.");
-  const outerOutline = profileOutlineMm(outer.boundary);
-  const inside = (candidate: SketchProfile, ring: readonly Vec2[]): boolean => profileOutlineMm(candidate.boundary).every((point) => pointInPolygon(point, ring));
-  if (selected.length > 1) {
-    const holes = selected.slice(1);
-    const stray = holes.find((hole) => !inside(hole, outerOutline));
-    if (stray !== undefined) return failure("INVALID_OPERATION", "Every extra selected profile must lie inside the largest selected profile; it becomes a hole. One of the selected profiles is outside it.", stray.entityIds, "Select only the outer profile and the profiles inside it, or extrude them one at a time.");
-    const nested = holes.find((hole) => holes.some((other) => other !== hole && inside(hole, profileOutlineMm(other.boundary))));
-    if (nested !== undefined) return failure("INVALID_OPERATION", "A selected profile sits inside another hole, which would be a separate island. Extrude it on its own.", nested.entityIds, "Deselect the innermost profile.");
-    return { ok: true, value: { outer, holes } };
-  }
-  if (!options.includeIslands) return { ok: true, value: { outer, holes: [] } };
-  const contained = profiles.filter((candidate) => candidate !== outer && candidate.areaMm2 < outer.areaMm2 && inside(candidate, outerOutline));
-  const islands = contained.filter((candidate) => !contained.some((other) => other !== candidate && other.areaMm2 > candidate.areaMm2 && inside(candidate, profileOutlineMm(other.boundary))));
-  return { ok: true, value: { outer, holes: islands } };
-}
-
-function pointInPolygon(point: Vec2, ring: readonly Vec2[]): boolean {
-  let inside = false;
-  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index, index += 1) {
-    const a = ring[index]!;
-    const b = ring[previous]!;
-    if ((a[1] > point[1]) !== (b[1] > point[1]) && point[0] < ((b[0] - a[0]) * (point[1] - a[1])) / (b[1] - a[1]) + a[0]) inside = !inside;
-  }
-  return inside;
 }
 
 /**
@@ -571,7 +483,8 @@ export function resolveQualifiedExtrusion(
   if (!Number.isFinite(distanceMm) || distanceMm < 1 || distanceMm > 100) {
     return failure("OUTSIDE_SUPPORTED_ENVELOPE", "Qualified extrusion distance must be between 1 mm and 100 mm.", [], "Enter a bounded positive extrusion distance.");
   }
-  const profiles = detectSketchProfiles(sketch);
+  const detected = detectSketchProfiles(sketch);
+  const profiles = shapesOf(detected) ?? detected;
   const selected = profiles.filter((profile) => selectedProfileIds.includes(profile.id));
   const rectangles = selected.filter((profile) => profile.boundary.kind === "rectangle");
   if (rectangles.length !== 1) {
@@ -692,33 +605,6 @@ export function entityPoints(entity: SketchEntity): readonly Vec2[] {
   if (entity.kind === "point") return [entity.point];
   if (entity.kind === "spline") return entity.fitPoints;
   return [entity.start, entity.mid, entity.end];
-}
-
-/**
- * Smooth uniform Catmull-Rom curve through the fit points, sampled into short straight edges.
- * The first and last samples are exactly the first and last fit points.
- */
-export function sampleSpline(fitPoints: readonly Vec2[], samplesPerSpan = 8): readonly Vec2[] {
-  if (fitPoints.length < 3) return fitPoints;
-  const points: Vec2[] = [fitPoints[0]!];
-  for (let span = 0; span < fitPoints.length - 1; span += 1) {
-    const p0 = fitPoints[Math.max(0, span - 1)]!;
-    const p1 = fitPoints[span]!;
-    const p2 = fitPoints[span + 1]!;
-    const p3 = fitPoints[Math.min(fitPoints.length - 1, span + 2)]!;
-    for (let step = 1; step <= samplesPerSpan; step += 1) {
-      if (span === fitPoints.length - 2 && step === samplesPerSpan) {
-        points.push(p2);
-        break;
-      }
-      const t = step / samplesPerSpan;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const blend = (a: number, b: number, c: number, d: number): number => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
-      points.push([blend(p0[0], p1[0], p2[0], p3[0]), blend(p0[1], p1[1], p2[1], p3[1])]);
-    }
-  }
-  return points;
 }
 
 /** Returns the complete topological curve component that contains the seed. */
@@ -883,158 +769,6 @@ function circumcircle(a: Vec2, b: Vec2, c: Vec2): { readonly center: Vec2; reado
     (a2 * (c[0] - b[0]) + b2 * (a[0] - c[0]) + c2 * (b[0] - a[0])) / determinant
   ];
   return { center, radiusMm: distance(center, a) };
-}
-
-type LoopEdgeEntity = Extract<SketchEntity, { kind: "line" | "arc" | "spline" }>;
-
-function loopStart(entity: LoopEdgeEntity): Vec2 {
-  return entity.kind === "spline" ? entity.fitPoints[0]! : entity.start;
-}
-
-function loopEnd(entity: LoopEdgeEntity): Vec2 {
-  return entity.kind === "spline" ? entity.fitPoints[entity.fitPoints.length - 1]! : entity.end;
-}
-
-/** The entity's outline from its start to its end, with curves sampled into short straight edges. */
-function loopPath(entity: LoopEdgeEntity): readonly Vec2[] {
-  if (entity.kind === "arc") return sampleArc(entity.start, entity.mid, entity.end);
-  if (entity.kind === "spline") return sampleSpline(entity.fitPoints);
-  return [entity.start, entity.end];
-}
-
-/** Facet angle used when an arc is sampled into polygon edges (about 5.6 degrees, ~0.1% radial error). */
-const ARC_FACET_RADIANS = Math.PI / 32;
-
-/**
- * Points along a 3-point arc from `start` to `end` through `mid`, including both ends. Falls back to
- * the chord when the three points are collinear.
- */
-export function sampleArc(start: Vec2, mid: Vec2, end: Vec2): readonly Vec2[] {
-  const circle = circumcircle(start, mid, end);
-  if (circle === undefined) return [start, end];
-  const startAngle = Math.atan2(start[1] - circle.center[1], start[0] - circle.center[0]);
-  const endAngle = Math.atan2(end[1] - circle.center[1], end[0] - circle.center[0]);
-  const counterClockwise = cross(start, mid, end) > 0;
-  const full = Math.PI * 2;
-  let sweep = counterClockwise ? endAngle - startAngle : startAngle - endAngle;
-  sweep = ((sweep % full) + full) % full;
-  const steps = Math.min(128, Math.max(2, Math.ceil(sweep / ARC_FACET_RADIANS)));
-  const points: Vec2[] = [start];
-  for (let step = 1; step < steps; step += 1) {
-    const angle = startAngle + (counterClockwise ? 1 : -1) * (sweep * step) / steps;
-    points.push([circle.center[0] + circle.radiusMm * Math.cos(angle), circle.center[1] + circle.radiusMm * Math.sin(angle)]);
-  }
-  points.push(end);
-  return points;
-}
-
-/**
- * Finds closed loops made of lines and 3-point arcs where every joint is shared by exactly two edges.
- * A loop of lines only keeps the exact "line-loop" boundary; a loop with an arc becomes a "curve-loop"
- * whose arcs are sampled into short edges that stay grouped under their owning entity.
- */
-function detectCurveLoops(entities: readonly LoopEdgeEntity[]): readonly SketchProfile[] {
-  if (entities.length < 2) return [];
-  const endpoints = new Map<string, { readonly point: Vec2; readonly edgeIds: string[] }>();
-  const edges = new Map(entities.map((entity) => [entity.id, { entity, startKey: pointKey(loopStart(entity)), endKey: pointKey(loopEnd(entity)) }]));
-  for (const edge of edges.values()) {
-    registerEndpoint(endpoints, edge.startKey, loopStart(edge.entity), edge.entity.id);
-    registerEndpoint(endpoints, edge.endKey, loopEnd(edge.entity), edge.entity.id);
-  }
-  const unvisited = new Set(edges.keys());
-  const profiles: SketchProfile[] = [];
-  while (unvisited.size > 0) {
-    const seed = [...unvisited].sort()[0]!;
-    const componentIds: string[] = [];
-    const queue = [seed];
-    while (queue.length > 0) {
-      const edgeId = queue.pop()!;
-      if (!unvisited.delete(edgeId)) continue;
-      componentIds.push(edgeId);
-      const edge = edges.get(edgeId)!;
-      for (const key of [edge.startKey, edge.endKey]) {
-        for (const adjacent of endpoints.get(key)?.edgeIds ?? []) if (unvisited.has(adjacent)) queue.push(adjacent);
-      }
-    }
-    const hasArc = componentIds.some((id) => edges.get(id)!.entity.kind !== "line");
-    const componentKeys = new Set(componentIds.flatMap((id) => {
-      const edge = edges.get(id)!;
-      return [edge.startKey, edge.endKey];
-    }));
-    // Two edges close a loop only when one is an arc (a half-disc or lens); two lines would be degenerate.
-    if (componentIds.length < (hasArc ? 2 : 3) || [...componentKeys].some((key) => endpoints.get(key)?.edgeIds.filter((id) => componentIds.includes(id)).length !== 2)) continue;
-    const startKey = [...componentKeys].sort()[0]!;
-    const orderedPoints: Vec2[] = [];
-    const segments: SketchProfileSegment[] = [];
-    let currentKey = startKey;
-    let previousEdge: string | undefined;
-    for (let index = 0; index < componentIds.length; index += 1) {
-      const nextEdgeId = endpoints.get(currentKey)!.edgeIds.filter((id) => componentIds.includes(id) && id !== previousEdge).sort()[0];
-      if (nextEdgeId === undefined) break;
-      const edge = edges.get(nextEdgeId)!;
-      const forward = edge.startKey === currentKey;
-      const entity = edge.entity;
-      let path: readonly Vec2[] = loopPath(entity);
-      if (!forward) path = [...path].reverse();
-      path = [endpoints.get(currentKey)!.point, ...path.slice(1)];
-      // The last point is the start of the next edge, so each edge contributes all but its end.
-      orderedPoints.push(...path.slice(0, -1));
-      segments.push({ entityId: entity.id, kind: entity.kind, edgeCount: path.length - 1 });
-      currentKey = forward ? edge.endKey : edge.startKey;
-      previousEdge = nextEdgeId;
-    }
-    if (currentKey !== startKey || segments.length !== componentIds.length) continue;
-    const signedArea = polygonSignedArea(orderedPoints);
-    if (Math.abs(signedArea) < 1e-6) continue;
-    const centroid = polygonCentroid(orderedPoints, signedArea);
-    const entityIds = [...componentIds].sort();
-    profiles.push({
-      id: `profile:loop-${fnv1a(entityIds.join("|"))}`,
-      entityIds,
-      boundary: hasArc ? { kind: "curve-loop", points: orderedPoints, segments } : { kind: "line-loop", points: orderedPoints },
-      areaMm2: Math.abs(signedArea),
-      centroid
-    });
-  }
-  return profiles;
-}
-
-function registerEndpoint(map: Map<string, { readonly point: Vec2; readonly edgeIds: string[] }>, key: string, point: Vec2, edgeId: string): void {
-  const existing = map.get(key);
-  if (existing === undefined) map.set(key, { point, edgeIds: [edgeId] });
-  else existing.edgeIds.push(edgeId);
-}
-
-function pointKey(point: Vec2): string {
-  return `${Math.round(point[0] * 1e6)}:${Math.round(point[1] * 1e6)}`;
-}
-
-function polygonSignedArea(points: readonly Vec2[]): number {
-  let twiceArea = 0;
-  for (let index = 0; index < points.length; index += 1) {
-    const current = points[index]!;
-    const next = points[(index + 1) % points.length]!;
-    twiceArea += current[0] * next[1] - next[0] * current[1];
-  }
-  return twiceArea / 2;
-}
-
-function polygonCentroid(points: readonly Vec2[], signedArea: number): Vec2 {
-  let x = 0;
-  let y = 0;
-  for (let index = 0; index < points.length; index += 1) {
-    const current = points[index]!;
-    const next = points[(index + 1) % points.length]!;
-    const factor = current[0] * next[1] - next[0] * current[1];
-    x += (current[0] + next[0]) * factor;
-    y += (current[1] + next[1]) * factor;
-  }
-  const scale = 1 / (6 * signedArea);
-  return [x * scale, y * scale];
-}
-
-function profileId(entityId: string): string {
-  return `profile:${entityId.startsWith("entity:") ? entityId.slice("entity:".length) : entityId}`;
 }
 
 function fnv1a(value: string): string {
