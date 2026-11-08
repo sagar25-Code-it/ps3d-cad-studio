@@ -1,7 +1,7 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
-import { attachEdgeFlange, booleanMeshes, splitMeshPieces, flangeReliefs, holeCutter, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
+import { attachEdgeFlange, booleanMeshes, splitMeshPieces, threadBoreWall, flangeReliefs, holeCutter, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout, type HoleSpec } from "../../../packages/workbench-geometry/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 
 /**
@@ -470,8 +470,9 @@ export type HoleDrilling =
  * Cuts a hole step out of a body. The hole starts at `holePositionMm` on the face looking along `holeNormal` and goes the
  * other way; a depth of 0 (or none) drills through everything the axis meets.
  */
-export function drillHole(step: DesignSolidFeature, body: { readonly positionsMm: readonly number[]; readonly indices: readonly number[] }): HoleDrilling {
-  if (step.holePositionMm === undefined || step.holeNormal === undefined || step.holeDiameterMm === undefined || step.holeStyle === undefined) return { ok: false, message: "This hole has no position, direction or diameter recorded." };
+/** The HoleSpec a hole step describes for a body: the through-all depth is measured against the body as it is now. */
+export function holeSpecOf(step: DesignSolidFeature, body: { readonly positionsMm: readonly number[] }): HoleSpec | undefined {
+  if (step.holePositionMm === undefined || step.holeNormal === undefined || step.holeDiameterMm === undefined || step.holeStyle === undefined) return undefined;
   const normal = snapToAxis(step.holeNormal);
   const origin = step.holePositionMm;
   let depth = step.holeDepthMm ?? 0;
@@ -483,16 +484,30 @@ export function drillHole(step: DesignSolidFeature, body: { readonly positionsMm
     }
     depth = reach + 1;
   }
-  const cutter = holeCutter({
+  return {
     style: step.holeStyle, originMm: origin, normal, diameterMm: step.holeDiameterMm, depthMm: depth,
     ...(step.holeCounterDiameterMm === undefined ? {} : { counterDiameterMm: step.holeCounterDiameterMm }),
     ...(step.holeCounterDepthMm === undefined ? {} : { counterDepthMm: step.holeCounterDepthMm }),
     ...(step.holeSinkDiameterMm === undefined ? {} : { sinkDiameterMm: step.holeSinkDiameterMm }),
-    ...(step.holeSinkAngleDeg === undefined ? {} : { sinkAngleDeg: step.holeSinkAngleDeg })
-  });
+    ...(step.holeSinkAngleDeg === undefined ? {} : { sinkAngleDeg: step.holeSinkAngleDeg }),
+    ...(step.holeThread === undefined ? {} : { thread: { mode: step.holeThread.mode, pitchMm: step.holeThread.pitchMm, majorDiameterMm: step.holeThread.majorDiameterMm, handedness: step.holeThread.handedness, ...(step.holeThread.lengthMm === undefined ? {} : { lengthMm: step.holeThread.lengthMm }) } })
+  };
+}
+
+export function drillHole(step: DesignSolidFeature, body: { readonly positionsMm: readonly number[]; readonly indices: readonly number[] }): HoleDrilling {
+  const spec = holeSpecOf(step, body);
+  if (spec === undefined) return { ok: false, message: "This hole has no position, direction or diameter recorded." };
+  const cutter = holeCutter(spec);
   if (!cutter.ok) return { ok: false, message: cutter.message };
   const cut = booleanMeshes({ positionsMm: body.positionsMm, indices: body.indices }, { positionsMm: cutter.positionsMm, indices: cutter.indices }, "cut", { allowSplit: true });
   if (!cut.ok) return { ok: false, message: `The hole could not be cut: ${cut.message}` };
+  if (spec.thread?.mode === "modelled") {
+    // The plain tap-drill bore is cut first, then its wall is reshaped into the helical groove.
+    if (cut.value.pieceCount > 1) return { ok: false, message: "A modelled thread cannot be cut in a hole that severs the body; use a cosmetic thread or a smaller hole." };
+    const threaded = threadBoreWall({ positionsMm: cut.value.positionsMm, indices: cut.value.indices }, spec, spec.thread);
+    if (!threaded.ok) return { ok: false, message: threaded.message };
+    return { ok: true, positionsMm: threaded.positionsMm, indices: threaded.indices };
+  }
   if (cut.value.pieceCount <= 1) return { ok: true, positionsMm: cut.value.positionsMm, indices: cut.value.indices };
   // A hole wider than what it passes through severs the body: the largest piece stays the body, the others are returned beside it.
   const parts = splitMeshPieces(cut.value.positionsMm, cut.value.indices);

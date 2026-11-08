@@ -1196,6 +1196,14 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   /** Countersink hole only: the diameter at the face and the included cone angle. */
   readonly holeSinkDiameterMm?: number;
   readonly holeSinkAngleDeg?: number;
+  /**
+   * Plain hole only: a thread on a tapped hole. The hole's own diameter is the tap-drill (minor) diameter; the thread reaches
+   * `majorDiameterMm`. `cosmetic` only annotates the hole; `modelled` cuts the helical groove into the wall. `lengthMm` 0 or absent
+   * threads the hole's full depth.
+   */
+  readonly holeThread?: { readonly mode: "cosmetic" | "modelled"; readonly pitchMm: number; readonly majorDiameterMm: number; readonly lengthMm?: number; readonly handedness: "right" | "left" };
+  /** Sheet-edge-flange only: how the corner relief is cut where this flange meets a neighbour: a straight gap (default), or a square or round notch in the plate's corner of the relief's size. */
+  readonly flangeReliefShape?: "straight" | "square" | "round";
   /** Sheet-flange only: length of the flange in millimetres (how far the flange extends from the edge). */
   readonly flangeLengthMm?: number;
   /** Sheet-flange only: bend angle in degrees (90 is a right-angle flange). */

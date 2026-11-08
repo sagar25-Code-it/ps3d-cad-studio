@@ -329,7 +329,7 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "holeThread", "flangeReliefShape", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
   if (Object.hasOwn(value, "extent")) {
     // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
@@ -471,7 +471,11 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (Object.hasOwn(value, "flangeReliefMm")) {
     if (value.kind !== "sheet-edge-flange" || typeof value.flangeReliefMm !== "number" || !Number.isFinite(value.flangeReliefMm) || value.flangeReliefMm < 0 || value.flangeReliefMm > 1000) return false;
   }
-  const holeKeys = ["holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg"];
+  if (Object.hasOwn(value, "flangeReliefShape")) {
+    // How a corner relief is cut: a straight gap between the flanges, or a square or round notch taken out of the plate's corner.
+    if (value.kind !== "sheet-edge-flange" || !["straight", "square", "round"].includes(String(value.flangeReliefShape))) return false;
+  }
+  const holeKeys = ["holeThread", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg"];
   if (value.kind !== "hole" && holeKeys.some((key) => Object.hasOwn(value, key))) return false;
   if (value.kind === "hole") {
     const triple = (candidate: unknown, nonZero: boolean): boolean => Array.isArray(candidate) && candidate.length === 3 && candidate.every((entry) => typeof entry === "number" && Number.isFinite(entry) && Math.abs(entry) <= 1_000_000) && (!nonZero || candidate.some((entry) => entry !== 0));
@@ -487,6 +491,15 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
     if (!counterbore && (Object.hasOwn(value, "holeCounterDiameterMm") || Object.hasOwn(value, "holeCounterDepthMm"))) return false;
     if (!countersink && (Object.hasOwn(value, "holeSinkDiameterMm") || Object.hasOwn(value, "holeSinkAngleDeg"))) return false;
     if (counterbore && (!positive(value.holeCounterDiameterMm, 10_000) || !positive(value.holeCounterDepthMm, 100_000) || (value.holeCounterDiameterMm as number) <= (value.holeDiameterMm as number))) return false;
+    if (Object.hasOwn(value, "holeThread")) {
+      // A thread belongs on a plain hole: its diameter is the tap-drill (minor) diameter and the thread reaches the major diameter.
+      const thread = value.holeThread;
+      if (!isRecord(thread) || !hasOnly(thread, ["mode", "pitchMm", "majorDiameterMm", "handedness"], ["lengthMm"]) || value.holeStyle !== "simple") return false;
+      if (!["cosmetic", "modelled"].includes(String(thread.mode)) || !["right", "left"].includes(String(thread.handedness))) return false;
+      if (!positive(thread.pitchMm, 50) || !positive(thread.majorDiameterMm, 10_000) || (thread.majorDiameterMm as number) <= (value.holeDiameterMm as number)) return false;
+      if ((thread.majorDiameterMm as number) - (value.holeDiameterMm as number) > 2 * (thread.pitchMm as number)) return false;
+      if (Object.hasOwn(thread, "lengthMm") && !(typeof thread.lengthMm === "number" && Number.isFinite(thread.lengthMm) && thread.lengthMm >= 0 && thread.lengthMm <= 100_000)) return false;
+    }
     if (countersink && (!positive(value.holeSinkDiameterMm, 10_000) || typeof value.holeSinkAngleDeg !== "number" || !(value.holeSinkAngleDeg >= 10 && value.holeSinkAngleDeg <= 170) || (value.holeSinkDiameterMm as number) <= (value.holeDiameterMm as number))) return false;
   }
   if (value.kind === "sheet-edge-flange") {

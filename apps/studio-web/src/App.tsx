@@ -55,7 +55,7 @@ import {
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
 import { flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, nearestPickableEdge, pickableEdges, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
-import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
+import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS, COARSE_PITCH_MM, tapDrillDiameterMm } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
 import { createDrawingSvg } from "../../../packages/workbench-drawing/src/index.js";
@@ -144,6 +144,7 @@ import {
   type RenderStudioSettings
 } from "./workspaces/RenderStudioWorkspace.js";
 import { SurfaceInspector } from "./workspaces/SurfaceInspector.js";
+import { withCosmeticThreads } from "./hole-threads.js";
 import { DrawingWorkspace } from "./workspaces/DrawingWorkspace.js";
 import { AutomateWorkspace } from "./workspaces/AutomateWorkspace.js";
 import { ElectricalWorkspace } from "./workspaces/ElectricalWorkspace.js";
@@ -337,7 +338,7 @@ export function App(): React.JSX.Element {
     : { ...project.assembly, explodeMm: assemblyExplodePreviewMm }, [assemblyExplodePreviewMm, project.assembly]);
   const assemblyExplodePercent = Math.round(Math.min(100, displayedAssembly.explodeMm / assemblyExplodeMaxMm * 100));
   const assemblyScene = useMemo(() => buildAssemblyPreview(displayedAssembly), [displayedAssembly]);
-  const partScene = useMemo(() => buildPartPreview(project.part), [project.part]);
+  const partScene = useMemo(() => withCosmeticThreads(buildPartPreview(project.part), project), [project.part, project.design]);
   const interferences = useMemo(() => findAssemblyInterference(displayedAssembly), [displayedAssembly]);
   const surfacePreview = useMemo(() => buildSurfacePreview(project.surface), [project.surface]);
   const drawing = useMemo(() => createDrawingSvg(project.part, project.drawing), [project.part, project.drawing]);
@@ -948,9 +949,18 @@ export function App(): React.JSX.Element {
     if (!Number.isFinite(depth) || depth < 0) { setStatus("ready"); setStatusText("Hole Wizard: depth must be 0 (through) or a positive number."); return; }
     const round = (value: number): number => Number(value.toFixed(3));
     const normal = snapToAxis(picked.normalMm);
-    const diameter = typeRaw === "tapped" ? spec.nominalDiameterMm * 0.85 : spec.clearanceDiameterMm;
+    // A tapped hole is drilled at the tap-drill (minor) diameter and carries a real thread: cosmetic (annotated) or modelled (a helix cut into the wall).
+    const pitch = COARSE_PITCH_MM[spec.nominalDiameterMm];
+    let threadMode: "cosmetic" | "modelled" | undefined;
+    if (typeRaw === "tapped") {
+      const modeRaw = (ask("Thread (cosmetic = annotated only, modelled = helix cut into the hole):", "cosmetic") ?? "").trim().toLowerCase();
+      if (modeRaw === "") return;
+      if (modeRaw !== "cosmetic" && modeRaw !== "modelled") { setStatus("ready"); setStatusText("Hole Wizard: enter cosmetic or modelled."); return; }
+      threadMode = modeRaw;
+    }
+    const diameter = typeRaw === "tapped" ? (pitch === undefined ? spec.nominalDiameterMm * 0.85 : tapDrillDiameterMm(spec.nominalDiameterMm, pitch)) : spec.clearanceDiameterMm;
     const style = typeRaw === "counterbore" ? "counterbore" : typeRaw === "countersink" ? "countersink" : "simple";
-    const label = typeRaw === "tapped" ? `${fastenerRaw} tapped hole Ø${diameter.toFixed(2)}` : `${fastenerRaw} ${typeRaw} hole Ø${diameter.toFixed(2)}`;
+    const label = typeRaw === "tapped" ? `${fastenerRaw} tapped hole (${threadMode}) Ø${diameter.toFixed(2)}` : `${fastenerRaw} ${typeRaw} hole Ø${diameter.toFixed(2)}`;
     const feature: DesignSolidFeature = {
       id: `feature:hole-${crypto.randomUUID()}`, name: label, kind: "hole", suppressed: false,
       sketchFeatureId: base.sketchFeatureId, profileIds: [], valueMm: Math.max(0.01, diameter),
@@ -958,7 +968,8 @@ export function App(): React.JSX.Element {
       holeStyle: style, holePositionMm: [round(picked.pointMm[0]), round(picked.pointMm[1]), round(picked.pointMm[2])], holeNormal: normal,
       holeDiameterMm: diameter, holeDepthMm: depth,
       ...(style === "counterbore" ? { holeCounterDiameterMm: spec.counterboreDiameterMm, holeCounterDepthMm: spec.counterboreDepthMm } : {}),
-      ...(style === "countersink" ? { holeSinkDiameterMm: spec.countersinkDiameterMm, holeSinkAngleDeg: 90 } : {})
+      ...(style === "countersink" ? { holeSinkDiameterMm: spec.countersinkDiameterMm, holeSinkAngleDeg: 90 } : {}),
+      ...(threadMode !== undefined && pitch !== undefined ? { holeThread: { mode: threadMode, pitchMm: pitch, majorDiameterMm: spec.nominalDiameterMm, handedness: "right" as const } } : {})
     };
     void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) { setSelectedId(body.id); setStatusText(`Added ${label} to ${body.name}, drilled along (${normal.map((value) => -Number(value.toFixed(3)) || 0).join(", ")}) from (${feature.holePositionMm?.map((value) => value.toFixed(1)).join(", ")}) mm.`); } });
   };

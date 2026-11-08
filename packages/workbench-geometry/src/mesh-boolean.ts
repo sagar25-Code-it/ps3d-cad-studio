@@ -61,6 +61,14 @@ interface Poly {
 
 const PLANE_EPSILON = 1e-6;
 const WELD_QUANTUM = 1e-5;
+/**
+ * Vertices are welded by rounding to a grid of WELD_QUANTUM. A coordinate that sits exactly on a rounding boundary (a half quantum,
+ * which happens for round dimensions such as a 4.9175 mm hole at 60 degrees) would round either way depending on one part in 1e16 of
+ * floating-point noise, leaving two copies of one corner unwelded. Shifting the grid by an irrational-looking offset keeps every
+ * coordinate a "nice" number would produce far from a boundary.
+ */
+const WELD_OFFSET: readonly [number, number, number] = [0.003141592653589793, 0.002718281828459045, 0.001414213562373095];
+const weldKey = (x: number, y: number, z: number): string => `${Math.round((x + WELD_OFFSET[0]) / WELD_QUANTUM)},${Math.round((y + WELD_OFFSET[1]) / WELD_QUANTUM)},${Math.round((z + WELD_OFFSET[2]) / WELD_QUANTUM)}`;
 const MIN_TRIANGLE_AREA = 1e-10;
 const MAX_TRIANGLES_PER_INPUT = 30_000;
 const MAX_TREE_DEPTH = 3_000;
@@ -357,7 +365,7 @@ function weld(flat: readonly number[], indices: readonly number[]): WeldedMesh {
   const positions: V3[] = [];
   const lookup = new Map<string, number>();
   const idOf = (x: number, y: number, z: number): number => {
-    const key = `${Math.round(x / WELD_QUANTUM)},${Math.round(y / WELD_QUANTUM)},${Math.round(z / WELD_QUANTUM)}`;
+    const key = weldKey(x, y, z);
     const existing = lookup.get(key);
     if (existing !== undefined) return existing;
     positions.push([x, y, z]);
@@ -421,7 +429,7 @@ function cleanUp(polygons: readonly Poly[]): { positions: V3[]; triangles: Trian
   const positions: V3[] = [];
   const lookup = new Map<string, number>();
   const idOf = (vertex: V3): number => {
-    const key = `${Math.round(vertex[0] / WELD_QUANTUM)},${Math.round(vertex[1] / WELD_QUANTUM)},${Math.round(vertex[2] / WELD_QUANTUM)}`;
+    const key = weldKey(vertex[0], vertex[1], vertex[2]);
     const existing = lookup.get(key);
     if (existing !== undefined) return existing;
     positions.push([vertex[0], vertex[1], vertex[2]]);

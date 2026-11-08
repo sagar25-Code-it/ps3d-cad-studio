@@ -40,6 +40,31 @@ const vector = (id: string, label: string, read: (feature: DesignSolidFeature) =
   write: (feature, value) => write(feature, value as readonly [number, number, number])
 });
 
+type HoleThreadValue = NonNullable<DesignSolidFeature["holeThread"]>;
+const withThread = (feature: DesignSolidFeature, change: Partial<HoleThreadValue>): DesignSolidFeature => feature.holeThread === undefined ? feature : { ...feature, holeThread: { ...feature.holeThread, ...change } };
+
+/** A tapped hole's thread: none, a cosmetic annotation, or a modelled helical groove. The numbers only apply once a thread is chosen. */
+function holeThreadFields(feature: DesignSolidFeature): readonly ParameterField[] {
+  const pitch = feature.holeThread?.pitchMm ?? 1;
+  return [
+    { id: "thread", label: "Thread", unit: "", input: "select", options: [{ value: "none", label: "No thread (plain hole)" }, { value: "cosmetic", label: "Cosmetic thread" }, { value: "modelled", label: "Modelled thread" }],
+      read: (f) => f.holeThread?.mode ?? "none",
+      write: (f, v) => {
+        if (v === "none") { const { holeThread: _drop, ...rest } = f; void _drop; return rest; }
+        const mode = v === "modelled" ? "modelled" as const : "cosmetic" as const;
+        return f.holeThread === undefined ? { ...f, holeThread: { mode, pitchMm: pitch, majorDiameterMm: Number(((f.holeDiameterMm ?? 5) + 1.0825 * pitch).toFixed(3)), handedness: "right" } } : withThread(f, { mode });
+      } },
+    number("threadPitch", "Thread pitch", "mm", (f) => f.holeThread?.pitchMm ?? pitch, (f, v) => withThread(f, { pitchMm: v }), { ...positive, max: 50 }),
+    number("threadMajor", "Thread major diameter", "mm", (f) => f.holeThread?.majorDiameterMm ?? Number(((f.holeDiameterMm ?? 5) + 1.0825 * pitch).toFixed(3)), (f, v) => withThread(f, { majorDiameterMm: v }), { ...positive, max: 10_000, hint: "the hole's own diameter is the tap-drill (minor) diameter" }),
+    number("threadLength", "Thread length", "mm", (f) => f.holeThread?.lengthMm ?? 0, (f, v) => {
+      if (f.holeThread === undefined) return f;
+      const { lengthMm: _drop, ...rest } = f.holeThread; void _drop;
+      return { ...f, holeThread: v > 0 ? { ...rest, lengthMm: v } : rest };
+    }, { min: 0, max: 100_000, hint: "0 threads the hole's full depth" }),
+    handedness("threadHand", (f) => f.holeThread?.handedness, (f, v) => withThread(f, { handedness: v }))
+  ];
+}
+
 /** The fields to show for a step, or undefined when the step has none (extrude and revolve use their own dialog; an indent has no number to edit). */
 export function parameterFieldsOf(feature: DesignSolidFeature): readonly ParameterField[] | undefined {
   switch (feature.kind) {
@@ -121,7 +146,12 @@ export function parameterFieldsOf(feature: DesignSolidFeature): readonly Paramet
       number("radius", "Inner bend radius", "mm", (f) => f.sheetBendRadiusMm, (f, v) => ({ ...f, sheetBendRadiusMm: v }), { min: 0, max: 1000 }),
       number("length", "Flange length", "mm", (f) => f.flangeLengthMm, (f, v) => ({ ...f, flangeLengthMm: v, valueMm: v }), { ...positive, max: 10_000 }),
       number("angle", "Bend angle", "°", (f) => f.flangeAngleDeg, (f, v) => ({ ...f, flangeAngleDeg: v }), { ...positive, max: 180 }),
-      number("relief", "Corner relief", "mm", (f) => f.flangeReliefMm ?? 0, (f, v) => ({ ...f, flangeReliefMm: v }), { min: 0, max: 1000, hint: "gap left where this flange meets a neighbouring flange; 0 for none" })
+      number("relief", "Corner relief", "mm", (f) => f.flangeReliefMm ?? 0, (f, v) => ({ ...f, flangeReliefMm: v }), { min: 0, max: 1000, hint: "size of the relief where this flange meets a neighbouring flange; 0 for none" }),
+      { id: "reliefShape", label: "Relief shape", unit: "", input: "select", options: [{ value: "straight", label: "Straight gap" }, { value: "square", label: "Square notch" }, { value: "round", label: "Round notch" }],
+        read: (f) => f.flangeReliefShape ?? "straight", write: (f, v) => {
+          const { flangeReliefShape: _drop, ...rest } = f; void _drop;
+          return v === "square" ? { ...rest, flangeReliefShape: "square" as const } : v === "round" ? { ...rest, flangeReliefShape: "round" as const } : rest;
+        } }
     ];
     case "hole": return [
       vector("position", "Position on the face", (f) => f.holePositionMm, (f, v) => ({ ...f, holePositionMm: v })),
@@ -134,7 +164,8 @@ export function parameterFieldsOf(feature: DesignSolidFeature): readonly Paramet
       ...(feature.holeStyle === "countersink" ? [
         number("sinkDiameter", "Countersink diameter", "mm", (f) => f.holeSinkDiameterMm, (f, v) => ({ ...f, holeSinkDiameterMm: v }), { ...positive, max: 10_000 }),
         number("sinkAngle", "Countersink angle", "°", (f) => f.holeSinkAngleDeg, (f, v) => ({ ...f, holeSinkAngleDeg: v }), { min: 10, max: 170 })
-      ] : [])
+      ] : []),
+      ...(feature.holeStyle === "simple" ? holeThreadFields(feature) : [])
     ];
     case "move-body": return [
       vector("delta", "Move by", (f) => f.moveDeltaMm, (f, v) => ({ ...f, moveDeltaMm: v, valueMm: Math.max(0.01, Math.hypot(v[0], v[1], v[2])) }))
