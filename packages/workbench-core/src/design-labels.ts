@@ -1,5 +1,6 @@
 import { isFeatureActive, modifiesBody } from "./design.js";
 import { describePattern } from "./pattern.js";
+import { edgeBlendSummary } from "./edge-blend.js";
 import { planeWorldCoordinate } from "./planar-faces.js";
 import type { DesignFeature, DesignHistory, DesignSolidFeature } from "./types.js";
 
@@ -70,7 +71,9 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
           ? `${trimNumber(feature.valueMm)} mm sweep`
           : feature.kind === "loft"
             ? `${trimNumber(feature.valueMm)} mm loft · top ${trimNumber(feature.loftTopScale ?? 1)}×`
-            : feature.kind === "edge-fillet"
+            : feature.kind === "edge-blend"
+              ? edgeBlendSummary(feature)
+              : feature.kind === "edge-fillet"
               ? `${trimNumber(feature.valueMm)} mm · fillet ${trimNumber(feature.edge?.sizeMm ?? 0)} mm`
               : feature.kind === "edge-chamfer"
                 ? `${trimNumber(feature.valueMm)} mm · chamfer ${trimNumber(feature.edge?.sizeMm ?? 0)} mm`

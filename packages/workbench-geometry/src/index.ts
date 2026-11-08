@@ -18,3 +18,4 @@ export * from "./pattern.js";
 export * from "./extent-distance.js";
 export * from "./vertex-pick.js";
 export * from "./polygon-offset.js";
+export * from "./edge-blend.js";

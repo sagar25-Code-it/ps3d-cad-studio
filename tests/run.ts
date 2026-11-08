@@ -82,6 +82,8 @@ import { reachUiTests } from "./reach-ui.test.js";
 import { expressionTests } from "./expressions.test.js";
 import { designParameterTests } from "./design-parameters.test.js";
 import { parameterDialogTests } from "./parameter-dialogs.test.js";
+import { edgeBlendKernelTests, edgeBlendRimTests } from "./edge-blend.test.js";
+import { edgeBlendStepTests } from "./edge-blend-steps.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -168,7 +170,10 @@ const tests: readonly TestCase[] = [
   ...reachUiTests,
   ...expressionTests,
   ...designParameterTests,
-  ...parameterDialogTests
+  ...parameterDialogTests,
+  ...edgeBlendKernelTests,
+  ...edgeBlendRimTests,
+  ...edgeBlendStepTests
 ];
 let failures = 0;
 

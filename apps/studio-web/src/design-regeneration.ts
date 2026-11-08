@@ -6,6 +6,7 @@ import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "
 import { applyPatternStep } from "./pattern-replay.js";
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { createThinRevolveBody, startRevolveAt } from "./revolve-thin.js";
+import { blendBodyEdges } from "./edge-blend-step.js";
 
 /**
  * Rebuilds the solids of the parametric timeline. The kernel is asynchronous, so the work happens here and its results
@@ -52,7 +53,7 @@ function shifted(body: GeneralSolidBody, normal: readonly [number, number, numbe
 
 /** Builds the solid a feature describes from the sketch snapshot it is based on. For a join or cut this is the tool solid. */
 export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature, color = "#b9c2c8"): Promise<SolidRebuild> {
-  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "pattern") {
+  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "pattern" || feature.kind === "edge-blend") {
     return { ok: false, message: "A direct-edit / indent step is applied during timeline replay, not through the sketch-driven builder." };
   }
   const sketch = sketchFeature.sketch;
@@ -263,6 +264,15 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
       const { brep: _faceNames, ...withoutFaces } = current;
       void _faceNames;
       current = { ...withoutFaces, positionsMm: [...drilled.positionsMm], indices: [...drilled.indices] };
+      outcomes.set(step.id, { featureId: step.id });
+      continue;
+    }
+    // Edge blend: fillet or chamfer the picked edges, found again on the body as it stands after the earlier steps.
+    if (step.kind === "edge-blend") {
+      if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this blend rounds could not be built." }); continue; }
+      const blended = await blendBodyEdges(step, current);
+      if (!blended.ok) { outcomes.set(step.id, { featureId: step.id, message: blended.message }); continue; }
+      current = blended.body;
       outcomes.set(step.id, { featureId: step.id });
       continue;
     }
