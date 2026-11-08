@@ -25,8 +25,20 @@ export type FlexResult =
 
 const MAX_TRIANGLES = 120_000;
 
-/** Welds the mesh and cuts it along the given planes (unit normal, offset). Returns the welded, split mesh. */
-export function sliceMesh(mesh: MeshLike, planes: readonly { readonly normal: V3; readonly offset: number }[]): { readonly positions: V3[]; readonly triangles: [number, number, number][] } | string {
+/** A box in space; cuts are made only where they fall inside it. */
+export interface SliceWindow {
+  readonly min: V3;
+  readonly max: V3;
+}
+
+/**
+ * Welds the mesh and cuts it along the given planes (unit normal, offset). Returns the welded, split mesh.
+ *
+ * With a `window`, only the triangles whose bounding box touches the window are cut, so a few planes cut a large body only near
+ * the work. The edges those triangles cross are split for every triangle that shares them, so the mesh stays closed; a neighbour
+ * outside the window is only split along those edges, and the cut line simply stops there.
+ */
+export function sliceMesh(mesh: MeshLike, planes: readonly { readonly normal: V3; readonly offset: number }[], window?: SliceWindow): { readonly positions: V3[]; readonly triangles: [number, number, number][] } | string {
   const positions: V3[] = [];
   const byKey = new Map<string, number>();
   const weld = new Array<number>(mesh.positionsMm.length / 3);
@@ -42,10 +54,31 @@ export function sliceMesh(mesh: MeshLike, planes: readonly { readonly normal: V3
     const a = weld[mesh.indices[t]!]!; const b = weld[mesh.indices[t + 1]!]!; const c = weld[mesh.indices[t + 2]!]!;
     if (a !== b && b !== c && a !== c) triangles.push([a, b, c]);
   }
-  const eps = 1e-9;
+  // A vertex this close to a plane counts as on it, so no cut ever makes a vertex closer than the 1e-5 weld to another one.
+  const eps = 3e-5;
+  const touchesWindow = (t: readonly [number, number, number]): boolean => {
+    if (window === undefined) return true;
+    for (let k = 0; k < 3; k += 1) {
+      const a = positions[t[0]]![k]!; const b = positions[t[1]]![k]!; const c = positions[t[2]]![k]!;
+      if (Math.max(a, b, c) < window.min[k]! || Math.min(a, b, c) > window.max[k]!) return false;
+    }
+    return true;
+  };
   for (const plane of planes) {
     const side: number[] = positions.map((p) => { const d = dot(plane.normal, p) - plane.offset; return Math.abs(d) < eps ? 0 : d; });
     const splits = new Map<string, number>();
+    // The edges to split: those a triangle in the window crosses.
+    const marked = new Set<string>();
+    if (window !== undefined) {
+      for (const triangle of triangles) {
+        if (!touchesWindow(triangle)) continue;
+        for (let k = 0; k < 3; k += 1) {
+          const a = triangle[k]!; const b = triangle[(k + 1) % 3]!;
+          if (Math.sign(side[a]!) * Math.sign(side[b]!) < 0) marked.add(`${Math.min(a, b)}|${Math.max(a, b)}`);
+        }
+      }
+    }
+    /** The vertex where the plane crosses the edge, or -1 when no triangle in the window needs that edge split. */
     const split = (a: number, b: number): number => {
       const lo = Math.min(a, b); const hi = Math.max(a, b);
       const key = `${lo}|${hi}`;
@@ -53,9 +86,8 @@ export function sliceMesh(mesh: MeshLike, planes: readonly { readonly normal: V3
       if (id === undefined) {
         const t = side[lo]! / (side[lo]! - side[hi]!);
         const p0 = positions[lo]!; const p1 = positions[hi]!;
-        id = positions.length;
-        positions.push([p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t, p0[2] + (p1[2] - p0[2]) * t]);
-        side.push(0);
+        const point: V3 = [p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t, p0[2] + (p1[2] - p0[2]) * t];
+        if (window === undefined || marked.has(key)) { id = positions.length; positions.push(point); side.push(0); } else id = -1;
         splits.set(key, id);
       }
       return id;
@@ -74,14 +106,17 @@ export function sliceMesh(mesh: MeshLike, planes: readonly { readonly normal: V3
       const [a, b, c] = [triangle[rotation]!, triangle[(rotation + 1) % 3]!, triangle[(rotation + 2) % 3]!];
       if (zeroAt >= 0) {
         const m = split(b, c);
-        next.push([a, b, m], [a, m, c]);
+        if (m < 0) next.push(triangle); else next.push([a, b, m], [a, m, c]);
       } else {
         const p = split(a, b); const q = split(a, c);
-        next.push([a, p, q], [p, b, c], [p, c, q]);
+        if (p >= 0 && q >= 0) next.push([a, p, q], [p, b, c], [p, c, q]);
+        else if (p >= 0) next.push([a, p, c], [p, b, c]);
+        else if (q >= 0) next.push([a, b, q], [b, c, q]);
+        else next.push(triangle);
       }
     }
     triangles = next;
-    if (triangles.length > MAX_TRIANGLES) return "The body has too many triangles to bend; simplify it first.";
+    if (triangles.length > MAX_TRIANGLES) return "The body has too many triangles to cut here; simplify it first.";
   }
   return { positions, triangles };
 }

@@ -16,3 +16,5 @@ export * from "./face-edits.js";
 export { analyzeFaces, resolveFace, type FaceAnalysis, type FaceRegion, type FaceRefLike, type MeshLike } from "./face-analysis.js";
 export * from "./flex.js";
 export * from "./web.js";
+export * from "./wrap.js";
+export * from "./wrap-apply.js";
