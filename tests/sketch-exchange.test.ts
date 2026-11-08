@@ -8,6 +8,7 @@ import { asConstruction, planAsConstruction, planForDrawMode } from "../packages
 import { resolveSketchHotkey, type SketchHotkeyContext } from "../packages/workbench-sketch/src/hotkeys.js";
 import { buildCurveTool, DEFAULT_CURVE_TOOL_OPTIONS } from "../packages/workbench-sketch/src/curve-tools.js";
 import type { SketchEditPlan } from "../packages/workbench-sketch/src/edit-tools.js";
+import { buildWorkbenchMenus, type WorkbenchMenuActions, type WorkbenchMenuState } from "../apps/studio-web/src/ui/menu-model.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 let counter = 0;
@@ -627,6 +628,30 @@ export const sketchExchangeTests: readonly TestCase[] = [
       const profiles = detectSketchProfiles(project.sketch);
       equal(profiles.length, 1, "one closed profile");
       near(profiles[0]!.areaMm2, 50 * 30, 1e-6, "50 x 30 mm");
+    }
+  },
+  {
+    name: "sketch import and export are reachable from the Tools menu and run their actions; without the actions the entries are not listed",
+    run: () => {
+      const calls: string[] = [];
+      const noop = (): void => undefined;
+      const base: WorkbenchMenuActions = {
+        onUndo: noop, onRedo: noop, onCommandPalette: noop, onNewSketch: noop, onCreateSolidFromSketch: noop, onCreatePrimitive: noop, onCombine: noop, onInsertToAssembly: noop,
+        onMasterCart: noop, onRenderStudio: noop, onEditSelectedFeature: noop, onChangeParameters: noop, onToggleSuppressSelected: noop, onDeleteSelected: noop,
+        onMoveSelectedBody: noop, onResizeSelectedBody: noop, onModifyGeneralBody: noop, onPattern: noop, onFit: noop, onHome: noop, onToggleGrid: noop, onWorkspace: noop,
+        onDesignHealth: noop, onMeasure: noop, onExchange: noop, onAccess: noop, onConnectAi: noop, onExportStl: noop, onPlateJson: noop, onLearning: noop, onShortcuts: noop
+      };
+      const state: WorkbenchMenuState = { workspace: "part", masterCartOpen: false, renderStudioOpen: false, working: false, gridVisible: true, canUndo: false, canRedo: false, generalBodyCount: 0, previewBodySelected: false, generalBodySelected: false, selectionDeletable: false };
+      const without = buildWorkbenchMenus(state, base).flatMap((menu) => menu.items);
+      assert(!without.some((entry) => entry.id.startsWith("tools.sketch-")), "no entries without the actions");
+      const menus = buildWorkbenchMenus(state, { ...base, onSketchImport: () => { calls.push("import"); }, onSketchExport: () => { calls.push("export"); } });
+      const items = menus.flatMap((menu) => menu.items);
+      equal(new Set(items.map((entry) => entry.id)).size, items.length, "item ids stay unique");
+      const importEntry = items.find((entry) => entry.id === "tools.sketch-import");
+      const exportEntry = items.find((entry) => entry.id === "tools.sketch-export");
+      assert(importEntry !== undefined && exportEntry !== undefined && importEntry.disabled !== true && exportEntry.disabled !== true, "both are listed and enabled (they switch to the Sketch workspace)");
+      importEntry.action(); exportEntry.action();
+      equal(calls.join(","), "import,export", "and run their actions");
     }
   },
   // ------------------------------------------------------------------ draw as construction

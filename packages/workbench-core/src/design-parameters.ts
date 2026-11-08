@@ -18,6 +18,7 @@ import {
   type BindingResult
 } from "./parameter-graph.js";
 import { solveLiveSketch } from "./sketch-solve.js";
+import { reconcileSketchObjects } from "./sketch-objects.js";
 import type { DesignFeature, DesignHistory, DesignParameter, DesignSolidFeature, SketchEntity, WorkbenchOperation, WorkbenchProject, WorkbenchSketch } from "./types.js";
 import { failure } from "./validation.js";
 
@@ -86,6 +87,11 @@ function applySketchBindings(sketch: WorkbenchSketch, results: readonly BindingR
     }
     current = { ...moved, entities: solved.entities };
     updated += 1;
+  }
+  // Associative pattern copies follow the source curve that a parameter just resized.
+  if (updated > 0 && (current.patterns?.length ?? 0) > 0) {
+    const followed = reconcileSketchObjects(sketch, current, new Set());
+    if (followed.ok) current = followed.sketch;
   }
   return { sketch: current, updated, issues };
 }

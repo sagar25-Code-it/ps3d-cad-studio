@@ -283,6 +283,34 @@ export const sketchPatternObjectTests: readonly TestCase[] = [
     }
   },
   {
+    name: "associative pattern: a parameter that drives the source radius updates the copies, in the working sketch and in a committed one",
+    run: () => {
+      const base = patternProject({ kind: "rectangular", countX: 3, countY: 1, dxMm: 10, dyMm: 0, angleDeg: 0, extent: false });
+      const pattern = base.sketch.patterns![0]!;
+      const withParameter = run(base, { kind: "set-design-parameters", parameters: [{ name: "pin_r", expression: "3 mm", unit: "mm", comment: "" }] });
+      assert(withParameter.ok, "the parameter is accepted");
+      if (!withParameter.ok) return;
+      const bound = run(withParameter.value.project, { kind: "set-sketch-dimension", entityId: "entity:hole", dimension: "radius", valueMm: 3, expression: "pin_r" });
+      assert(bound.ok, `the radius binds to the parameter: ${bound.ok ? "" : bound.diagnostics[0]?.message}`);
+      if (!bound.ok) return;
+      const copyRadius = (project: WorkbenchProject): number | undefined => { const entity = project.sketch.entities.find((candidate) => candidate.id === sketchPatternInstanceEntityId(pattern.id, 2, 0)); return entity?.kind === "circle" ? entity.radiusMm : undefined; };
+      near(copyRadius(bound.value.project) ?? 0, 3, 1e-9, "the copy has the source radius");
+      const committed = run(bound.value.project, { kind: "commit-design-sketch", featureId: "feature:sketch-pins", name: "Pins" });
+      assert(committed.ok, "the sketch is finished");
+      if (!committed.ok) return;
+      const changed = run(committed.value.project, { kind: "set-design-parameters", parameters: [{ name: "pin_r", expression: "6 mm", unit: "mm", comment: "" }] });
+      assert(changed.ok, "the parameter changes");
+      if (!changed.ok) return;
+      near(copyRadius(changed.value.project) ?? 0, 6, 1e-9, "the copy in the working sketch follows the parameter");
+      const snapshot = changed.value.project.design!.features.find((feature) => feature.id === "feature:sketch-pins");
+      assert(snapshot?.kind === "sketch", "the committed sketch exists");
+      if (snapshot?.kind === "sketch") {
+        const copy = snapshot.sketch.entities.find((candidate) => candidate.id === sketchPatternInstanceEntityId(pattern.id, 2, 0));
+        assert(copy?.kind === "circle" && Math.abs(copy.radiusMm - 6) < 1e-9, "and so does the copy in the committed sketch");
+      }
+    }
+  },
+  {
     name: "patterns survive commit, reopen and a fresh sketch starts clean",
     run: () => {
       const project = patternProject();
