@@ -85,7 +85,9 @@ export function anchorsForConstraint(constraint: WorkbenchSketchConstraint, enti
  * turns keeps its length, and so does the second line of an angle dimension.
  */
 export function preserveForConstraint(constraint: WorkbenchSketchConstraint, entities: ReadonlyMap<string, SketchEntity>): readonly string[] {
-  const [, second] = constraint.entityIds;
+  const [first, second] = constraint.entityIds;
+  // The line turned to an angle with a sketch axis keeps its length.
+  if (constraint.kind === "angle" && constraint.driven !== true && first !== undefined && second !== undefined && isSketchDatumEntityId(second) && entities.get(first)?.kind === "line") return [first];
   if (second === undefined || entities.get(second)?.kind !== "line") return [];
   return constraint.kind === "parallel" || constraint.kind === "perpendicular" || constraint.kind === "collinear" || (constraint.kind === "angle" && constraint.driven !== true) ? [second] : [];
 }
@@ -158,6 +160,9 @@ export function anchorsForDimension(constraint: WorkbenchSketchConstraint, entit
       if (ids.length === 1) return [keep(first!, "center")];
       const a = entities.get(first!);
       const b = entities.get(second!);
+      // A line turned to an angle with a sketch axis keeps its start and its length and swings about the start.
+      if (a?.kind === "line" && second !== undefined && isSketchDatumEntityId(second)) return [keep(first!, "start")];
+      if (b?.kind === "line" && first !== undefined && isSketchDatumEntityId(first)) return [keep(second!, "start")];
       if (a?.kind !== "line" || b?.kind !== "line") return [hold(first!)];
       // The second line turns about the end it shares with the first, so the corner they form stays closed.
       const shared = (point: readonly [number, number]): boolean => [a.start, a.end].some((other) => Math.hypot(other[0] - point[0], other[1] - point[1]) <= 1e-6);

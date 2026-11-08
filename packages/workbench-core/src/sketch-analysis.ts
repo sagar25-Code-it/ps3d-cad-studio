@@ -15,6 +15,8 @@ export interface LiveSketchAnalysis {
   readonly rank: number;
   /** Consistent but dependent relations: one of each set adds nothing. */
   readonly redundant: readonly LiveRelationSet[];
+  /** The relations to draw as redundant: of each set in `redundant`, the one made last, which the others already imply. */
+  readonly redundantConstraintIds: readonly string[];
   /** Relations that contradict each other at the stored geometry. */
   readonly conflicting: readonly LiveRelationSet[];
   /** Relations that are recorded but not enforced (a pairing the solver cannot handle, or a spline). */
@@ -25,7 +27,15 @@ export interface LiveSketchAnalysis {
 
 export function analyzeLiveSketch(sketch: WorkbenchSketch): LiveSketchAnalysis {
   const translation = translateSketch(sketch);
-  const result = solveAnalyticSketch({ document: translation.document, mode: "validate", labels: translation.labels });
+  let result = solveAnalyticSketch({ document: translation.document, mode: "validate", labels: translation.labels });
+  if (result.dof.relationSets?.some((set) => set.kind === "conflicting") === true) {
+    // The stored numbers may merely be stale (a length that says 44 beside a dimension that says 50): relations that can all be met are
+    // not a conflict, so the sketch is read again at the geometry it solves to. Only relations that truly cannot hold together stay conflicts.
+    const regenerated = solveAnalyticSketch({ document: translation.document, mode: "regenerate", labels: translation.labels });
+    if (regenerated.status !== "failed" && !regenerated.diagnostics.some((diagnostic) => diagnostic.severity === "error" && !diagnostic.unsupported)) {
+      result = solveAnalyticSketch({ document: regenerated.document, mode: "validate", labels: translation.labels });
+    }
+  }
   const byEntity: Record<string, number> = { ...result.dof.byEntity };
   let degrees = result.dof.total;
   const reduce = (id: string, amount: number): void => {
@@ -57,13 +67,15 @@ export function analyzeLiveSketch(sketch: WorkbenchSketch): LiveSketchAnalysis {
       reduce(constraint.entityIds[1]!, 1);
     }
   }
+  const redundant = toLiveSets(result.dof.relationSets ?? [], "redundant");
   const unsolved = [...translation.unsolved];
   const enforced = active.filter((constraint) => constraint.driven !== true && !unsolved.some((entry) => entry.constraintId === constraint.id)).length;
   return {
     degreesOfFreedom: Math.max(0, degrees),
     entityFreedom: Object.fromEntries(Object.entries(byEntity).sort(([a], [b]) => (a < b ? -1 : 1))),
     rank: result.dof.rank ?? 0,
-    redundant: toLiveSets(result.dof.relationSets ?? [], "redundant"),
+    redundant,
+    redundantConstraintIds: [...new Set(redundant.map((set) => set.impliedConstraintId ?? set.constraintIds[set.constraintIds.length - 1]).filter((id): id is string => id !== undefined))].sort(),
     conflicting: toLiveSets(result.dof.relationSets ?? [], "conflicting"),
     unsolved,
     enforced

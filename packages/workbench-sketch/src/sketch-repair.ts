@@ -1,4 +1,4 @@
-import { type SketchEntity, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
+import { isSketchDatumEntityId, type SketchEntity, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
 import { solveLiveSketch } from "../../workbench-core/src/sketch-solve.js";
 import { analyzeWorkbenchSketch, detectSketchProfiles, sampleSpline } from "./index.js";
 import { arcFrame, editPlan, type SketchEditContext, type SketchEditPlan } from "./edit-tools.js";
@@ -296,7 +296,7 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
 
   // Relations that do not reference any curve still in the sketch.
   const entityIds = new Set(sketch.entities.map((entity) => entity.id));
-  const orphans = sketch.constraints.filter((constraint) => constraint.entityIds.some((id) => !entityIds.has(id)));
+  const orphans = sketch.constraints.filter((constraint) => constraint.entityIds.some((id) => !entityIds.has(id) && !isSketchDatumEntityId(id)));
   if (orphans.length > 0) {
     const plan = editPlan(`Removed ${orphans.length} orphan relation${orphans.length === 1 ? "" : "s"}`, { removeConstraintIds: orphans.map((constraint) => constraint.id) });
     issues.push({

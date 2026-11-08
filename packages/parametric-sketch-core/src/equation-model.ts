@@ -34,6 +34,14 @@ export interface Equation {
   readonly level?: number;
 }
 
+/** A line's variables (start x, y, end x, y from `base`) and the vector it ran along when the solve began. */
+export interface LineVector {
+  readonly entityId: string;
+  readonly base: number;
+  readonly vx: number;
+  readonly vy: number;
+}
+
 export interface EntityLayout {
   readonly id: string;
   readonly geometry: SketchGeometry;
@@ -62,6 +70,8 @@ export interface SolverModel {
   readonly soft: Equation[];
   /** Two-level solve: terms that pull each curve back toward its original shape (see SketchSolveRequest.keepShape). Empty unless asked for. */
   readonly keep: Equation[];
+  /** The lines of the document with the vector each began with; filled with `keep`. */
+  readonly lineVectors: LineVector[];
   readonly diagnostics: SketchDiagnostic[];
   readonly appliedConstraints: Set<string>;
   readonly appliedDimensions: Set<string>;
@@ -152,6 +162,7 @@ class ModelBuilder {
   readonly equations: Equation[] = [];
   readonly soft: Equation[] = [];
   readonly keep: Equation[] = [];
+  readonly lineVectors: LineVector[] = [];
   readonly diagnostics: SketchDiagnostic[] = [];
   readonly applied = { constraints: new Set<string>(), dimensions: new Set<string>() };
   x0: Float64Array;
@@ -579,12 +590,42 @@ class ModelBuilder {
     return this.invalid(id, "Equal requires two lines, two circles or arcs, two ellipses or two rectangles.");
   }
 
+  /** The end of a line that a Coincident relation puts on a circle or arc (on its end, or anywhere on it), if there is one. */
+  private contactPoint(lineId: string, circleId: string): PointFn | undefined {
+    for (const constraint of this.document.constraints) {
+      if (constraint.suppressed || constraint.kind !== "coincident") continue;
+      const [a, b] = [constraint.first, constraint.second];
+      const lineRef = a.entityId === lineId && b.entityId === circleId ? a : b.entityId === lineId && a.entityId === circleId ? b : undefined;
+      if (lineRef === undefined) continue;
+      const circleRef = lineRef === a ? b : a;
+      if (lineRef.selector !== "start" && lineRef.selector !== "end") continue;
+      if (circleRef.selector !== "start" && circleRef.selector !== "end" && circleRef.selector !== "curve") continue;
+      return this.point(lineRef);
+    }
+    return undefined;
+  }
+
   private buildTangent(constraint: Extract<SketchConstraint, { kind: "tangent" }>): readonly Equation[] | Failure {
     const id = constraint.id;
     const first = this.layout.get(constraint.first.entityId);
     const second = this.layout.get(constraint.second.entityId);
     const radial = (g: SketchGeometry | undefined): boolean => g?.kind === "circle" || g?.kind === "arc";
     const unsupportedPair = this.unsupported(id, "The solver makes a line tangent to a circle or arc, or two circles or arcs tangent.", "Use a line with a circle or arc, or two circles or arcs.");
+    // A sketch axis is an infinite line that never moves: a circle or arc can be tangent to it.
+    const axisSide = [constraint.first, constraint.second].find((reference) => reference.entityId === SKETCH_AXIS_X_ID || reference.entityId === SKETCH_AXIS_Y_ID);
+    if (axisSide !== undefined) {
+      const roundSide = axisSide === constraint.first ? second : first;
+      if (roundSide === undefined || !radial(roundSide.geometry)) return unsupportedPair;
+      const axis = this.line(axisSide)!;
+      const cb = roundSide.base;
+      const side = (x: Float64Array): number => {
+        const ux = axis.q.x(x) - axis.p.x(x);
+        const uy = axis.q.y(x) - axis.p.y(x);
+        return (ux * (x[cb + 1]! - axis.p.y(x)) - uy * (x[cb]! - axis.p.x(x))) / Math.max(Math.hypot(ux, uy), 1e-12);
+      };
+      const sign = side(this.x0) < 0 ? -1 : 1;
+      return [this.make(id, "constraint", 1, [roundSide.id], [[cb, cb + 1, cb + 2]], (x, out, o) => { out[o] = side(x) - sign * x[cb + 2]!; })];
+    }
     if (first === undefined || second === undefined) {
       return this.invalid(id, "Tangent requires two existing curves.");
     }
@@ -594,6 +635,17 @@ class ModelBuilder {
     if (lineSide !== undefined && circleSide !== undefined) {
       const line = this.line({ entityId: lineSide.id, selector: "curve" })!;
       const cb = circleSide.base;
+      // A line that already meets the circle or arc at one of its own ends is tangent exactly when it is square to the radius there. That
+      // is the relation the designer means, and unlike "distance to the line equals the radius" it does not go flat at the joint, so
+      // it removes a degree of freedom beyond the joint and the solver converges on it quickly.
+      const contact = this.contactPoint(lineSide.id, circleSide.id);
+      if (contact !== undefined) {
+        return [this.make(id, "constraint", 1, [lineSide.id, circleSide.id], [line.p.vars, line.q.vars, contact.vars, [cb, cb + 1]], (x, out, o) => {
+          const ux = line.q.x(x) - line.p.x(x);
+          const uy = line.q.y(x) - line.p.y(x);
+          out[o] = ((contact.x(x) - x[cb]!) * ux + (contact.y(x) - x[cb + 1]!) * uy) / Math.max(Math.hypot(ux, uy), 1e-12);
+        })];
+      }
       const side = (x: Float64Array): number => {
         const ux = line.q.x(x) - line.p.x(x);
         const uy = line.q.y(x) - line.p.y(x);
@@ -755,10 +807,14 @@ class ModelBuilder {
         const second = this.line(dimension.second);
         if (first === undefined || second === undefined) return this.invalidDimension(id, "Angular dimensions require two lines.");
         const wanted = wrapPi(target);
+        const turn = (x: Float64Array): number => Math.atan2(second.q.y(x) - second.p.y(x), second.q.x(x) - second.p.x(x)) - Math.atan2(first.q.y(x) - first.p.y(x), first.q.x(x) - first.p.x(x)) - wanted;
+        // The error is measured on the branch that is continuous where the lines start: half way between the starting error and zero, so
+        // a turn of exactly 180 degrees (where wrapping to (-pi, pi] jumps) can be made either way instead of being refused.
+        const start = wrapPi(turn(this.x0));
+        const centre = start / 2;
         return one([dimension.first.entityId, dimension.second.entityId], [first.p.vars, first.q.vars, second.p.vars, second.q.vars], (x) => {
-          const a = Math.atan2(first.q.y(x) - first.p.y(x), first.q.x(x) - first.p.x(x));
-          const b = Math.atan2(second.q.y(x) - second.p.y(x), second.q.x(x) - second.p.x(x));
-          return wrapPi(b - a - wanted);
+          const error = turn(x);
+          return error - TWO_PI * Math.round((error - centre) / TWO_PI);
         });
       }
       case "point-line-distance":
@@ -829,6 +885,7 @@ class ModelBuilder {
           const vy = x0[b + 3]! - x0[b + 1]!;
           const length0 = Math.hypot(vx, vy);
           if (length0 <= 1e-9) break;
+          this.lineVectors.push({ entityId: entry.id, base: b, vx, vy });
           // Direction: the turn from what it was, times its original length (millimetres). A line pointing the other way is a half turn off, not zero.
           if (!oriented.has(entry.id)) add(0, 1, [b, b + 1, b + 2, b + 3], (x, out, o) => {
             const ux = x[b + 2]! - x[b]!;
@@ -987,6 +1044,7 @@ export function buildSolverModel(document: ParametricSketchDocument, options: Bu
     equations: builder.equations,
     soft: builder.soft,
     keep: builder.keep,
+    lineVectors: builder.lineVectors,
     diagnostics: builder.diagnostics,
     appliedConstraints: builder.applied.constraints,
     appliedDimensions: builder.applied.dimensions,

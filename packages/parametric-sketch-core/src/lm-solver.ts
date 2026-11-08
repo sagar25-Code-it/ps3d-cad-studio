@@ -512,6 +512,47 @@ const KEEP_ITERATIONS = 14;
 const MAX_KEEP_FORCED = 240;
 
 /**
+ * A line the first level ran backwards (its end now lies behind its start, the other way round from where it began) is a fold, not a
+ * move: a cell of a grid pushed back over its neighbour. Folding is not what an edit means, so the relations are solved again from the
+ * original geometry with the length of every line kept as well: the lines beyond the fold then travel along instead of being
+ * overrun. If the relations leave no room for that (a triangle whose side no longer fits), the first answer stays. Returns whether
+ * the geometry was replaced; every unheld number is then free to have moved.
+ */
+function undoFolds(model: SolverModel, component: Component, held: Uint8Array, free: Uint8Array): boolean {
+  if (model.lineVectors.length === 0) return false;
+  const x = model.x;
+  const members = new Set(component.variables);
+  const lines = model.lineVectors.filter((line) => members.has(line.base));
+  const folded = (): boolean => lines.some((line) => {
+    const ux = x[line.base + 2]! - x[line.base]!;
+    const uy = x[line.base + 3]! - x[line.base + 1]!;
+    return ux * line.vx + uy * line.vy < -1e-9 * Math.hypot(line.vx, line.vy);
+  });
+  if (!folded()) return false;
+  // Keep the length of every line that the first level left alone or folded; a line the relations had to stretch (another cell of the
+  // same column) stays free to follow.
+  const foldedBases = new Set(lines.filter((line) => (x[line.base + 2]! - x[line.base]!) * line.vx + (x[line.base + 3]! - x[line.base + 1]!) * line.vy < -1e-9 * Math.hypot(line.vx, line.vy)).map((line) => line.base));
+  const out = new Float64Array(8);
+  const lengths = component.keep.filter((equation) => {
+    if (equation.level !== 1 || equation.vars.length !== 4) return false;
+    if (foldedBases.has(equation.vars[0]!)) return true;
+    equation.residual(x, out, 0);
+    return Math.abs(out[0]!) <= 1e-9;
+  });
+  if (lengths.length === 0) return false;
+  const saved = component.variables.map((variable) => x[variable]!);
+  for (const variable of component.variables) if (held[variable] === 0) x[variable] = model.x0[variable]!;
+  const trial: Component = { hard: [...component.hard, ...lengths], soft: [], keep: [], goals: [], variables: component.variables };
+  const result = levenbergMarquardt(model, trial, held, false, MAX_ITERATIONS);
+  if (result.hard <= 1e-11 && !folded()) {
+    for (const variable of component.variables) if (held[variable] === 0) free[variable] = 0;
+    return true;
+  }
+  component.variables.forEach((variable, index) => { x[variable] = saved[index]!; });
+  return false;
+}
+
+/**
  * Second level of the two-level solve. The geometry already meets every relation and has moved as little as it can. What the
  * relations forced to move is now brought back toward its original shape inside the freedom they leave, level by level: first the
  * direction of each line, then the length of each line and the radius of each circle, then the sweep of each arc. A shape term is
@@ -531,6 +572,7 @@ function keepShape(model: SolverModel, component: Component, held: Uint8Array): 
   }
   // A very large edit (a whole stale chain or grid moving at once) keeps the first level's answer: the shape pass would cost more than it can improve.
   if (forced === 0 || forced > MAX_KEEP_FORCED) return;
+  undoFolds(model, component, held, free);
   const touching = component.keep.filter((equation) => equation.vars.some((variable) => free[variable] === 0));
   if (touching.length === 0) return;
   const out = new Float64Array(8);

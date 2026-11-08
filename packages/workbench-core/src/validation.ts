@@ -241,6 +241,13 @@ export function validSketchPlaneFrame(value: unknown): boolean {
 }
 
 function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
+  // A sketch past its size limits says which limit and by how much, instead of the generic "invalid" message.
+  if (isRecord(value)) {
+    const curves = Array.isArray(value.entities) ? value.entities.length : 0;
+    const relations = Array.isArray(value.constraints) ? value.constraints.length : 0;
+    if (curves > WORKBENCH_LIMITS.maxEntities) return failure("RESOURCE_LIMIT", `The sketch has ${curves} curves; the limit is ${WORKBENCH_LIMITS.maxEntities}.`, [], "Delete or merge curves, or split the part into more than one sketch.");
+    if (relations > WORKBENCH_LIMITS.maxConstraints) return failure("RESOURCE_LIMIT", `The sketch has ${relations} relations and dimensions; the limit is ${WORKBENCH_LIMITS.maxConstraints.toLocaleString("en-US")}. Every Horizontal, Vertical, joint and dimension counts.`, [], "Delete relations you no longer need, or split the part into more than one sketch.");
+  }
   const optionalOffset = isRecord(value) && Object.hasOwn(value, "planeOffsetMm") ? ["planeOffsetMm"] : [];
   const optionalTilt = isRecord(value) && Object.hasOwn(value, "planeTilt") ? ["planeTilt"] : [];
   const optionalFrame = isRecord(value) && Object.hasOwn(value, "planeFrame") ? ["planeFrame"] : [];
