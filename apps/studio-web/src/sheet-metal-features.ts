@@ -22,7 +22,7 @@ export function plateFlangesOf(frame: SheetFrame, steps: readonly DesignSolidFea
   for (const step of steps) {
     if (step.kind !== "sheet-edge-flange" || !live(step)) continue;
     const common = { innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0, reliefMm: step.flangeReliefMm ?? 0 };
-    if (step.flangeMiterEdges === undefined) { flanges.push({ edgeIndex: step.flangeEdgeIndex ?? 0, ...common }); continue; }
+    if (step.flangeMiterEdges === undefined) { flanges.push({ edgeIndex: step.flangeEdgeIndex ?? 0, ...common, ...(step.flangeReliefShape === undefined ? {} : { reliefShape: step.flangeReliefShape }) }); continue; }
     const chain = miterChainOf(frame, flangeEdgesOf(step));
     if (!chain.ok) return { error: chain.message };
     chain.edges.forEach((edgeIndex, position) => {

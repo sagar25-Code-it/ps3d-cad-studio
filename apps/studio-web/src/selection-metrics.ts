@@ -1,5 +1,5 @@
 import type { GeneralSolidBody, PartPreviewBody, SketchEntity, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
-import { designOf, isNewPrimitiveShape, solidMetrics } from "../../../packages/workbench-core/src/index.js";
+import { designOf, isFormBody, isNewPrimitiveShape, isSurfaceBody, solidMetrics } from "../../../packages/workbench-core/src/index.js";
 import { primitiveVolumeMm3 } from "../../../packages/workbench-geometry/src/primitive-bodies.js";
 import { detectSketchProfiles } from "../../../packages/workbench-sketch/src/index.js";
 
@@ -87,6 +87,12 @@ function previewBodyMetrics(body: PartPreviewBody): SelectionMetricsReading {
 
 function solidMetricsReading(body: GeneralSolidBody): SelectionMetricsReading {
   const metrics = solidMetrics(body.positionsMm, body.indices);
+  // An open surface has area and size but no volume; a SubD form also says how many control points it has.
+  if (isSurfaceBody(body)) {
+    const [ux, uy, uz] = metrics.sizeMm;
+    return { title: body.name, metrics: [`Surface (open mesh) · Area: ${sigFigs(metrics.surfaceAreaMm2)} mm²`, `Size: ${sigFigs(ux)} × ${sigFigs(uy)} × ${sigFigs(uz)} mm · ${body.indices.length / 3} triangles`] };
+  }
+  if (isFormBody(body)) return { title: body.name, metrics: [`SubD form · ${body.subd!.verticesMm.length / 3} cage vertices, ${body.subd!.faces.length} faces, level ${body.subd!.levels}`, `Volume: ${sigFigs(metrics.volumeMm3)} mm³ · Surface area: ${sigFigs(metrics.surfaceAreaMm2)} mm²`] };
   const volumeCm3 = metrics.volumeMm3 / 1000;
   const [sx, sy, sz] = metrics.sizeMm;
   return { title: body.name, metrics: [

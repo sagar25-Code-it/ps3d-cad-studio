@@ -523,7 +523,9 @@ export interface PartPreviewBody {
 /** Every operation that can build a general solid body from a sketch profile; the body validators accept exactly these. */
 export const GENERAL_BODY_OPERATIONS = [
   "extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft",
-  "helix", "thread", "rib", "dome", "sheet-base", "sheet-flange", "sheet-hem"
+  "helix", "thread", "rib", "dome", "sheet-base", "sheet-flange", "sheet-hem",
+  // Surface workspace and SubD forms: an open mesh surface, a solid sewn from surfaces, an editable SubD form and a finished one.
+  "surface", "stitched-solid", "subd-form", "subd-solid"
 ] as const;
 
 export interface GeneralSolidBody {
@@ -535,6 +537,8 @@ export interface GeneralSolidBody {
   readonly positionsMm: readonly number[];
   /** Flat triangle vertex indices; length is a multiple of 3. */
   readonly indices: readonly number[];
+  /** SubD form bodies only: the control cage the mesh was subdivided from. Absent once the form is finished. */
+  readonly subd?: import("./subd-cage.js").SubdCageData;
   readonly feature?: {
     readonly operation: (typeof GENERAL_BODY_OPERATIONS)[number];
     readonly plane: "xy" | "xz" | "yz";
@@ -1352,6 +1356,14 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   readonly holeSinkAngleDeg?: number;
   /** Pattern only: the layout (rectangular, circular or mirror), what it copies and how the copies are kept. */
   readonly pattern?: PatternDefinition;
+  /**
+   * Plain hole only: a thread on a tapped hole. The hole's own diameter is the tap-drill (minor) diameter; the thread reaches
+   * `majorDiameterMm`. `cosmetic` only annotates the hole; `modelled` cuts the helical groove into the wall. `lengthMm` 0 or absent
+   * threads the hole's full depth.
+   */
+  readonly holeThread?: { readonly mode: "cosmetic" | "modelled"; readonly pitchMm: number; readonly majorDiameterMm: number; readonly lengthMm?: number; readonly handedness: "right" | "left" };
+  /** Sheet-edge-flange only: how the corner relief is cut where this flange meets a neighbour: a straight gap (default), or a square or round notch in the plate's corner of the relief's size. */
+  readonly flangeReliefShape?: "straight" | "square" | "round";
   /** Sheet-flange only: length of the flange in millimetres (how far the flange extends from the edge). */
   readonly flangeLengthMm?: number;
   /** Sheet-flange only: bend angle in degrees (90 is a right-angle flange). */
@@ -1477,7 +1489,7 @@ export type WorkbenchOperation = OperationEnvelope & (
    */
   | { readonly kind: "set-design-parameters"; readonly parameters: readonly DesignParameter[]; readonly renames?: readonly { readonly from: string; readonly to: string }[] }
   /** Applies the result of rebuilding features after a sketch changed: new solids, or the reason a feature failed. */
-  | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly message?: string }[] }
+  | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string }[] }
   | { readonly kind: "set-design-feature-suppressed"; readonly featureId: string; readonly suppressed: boolean }
   | { readonly kind: "delete-design-feature"; readonly featureId: string }
   | { readonly kind: "set-design-rollback"; readonly index: number }
@@ -1524,7 +1536,7 @@ export type WorkbenchOperation = OperationEnvelope & (
       /** Replaces the target body with the result of a mesh-level modify operation computed by the caller. */
       readonly kind: "modify-general-body";
       readonly targetBodyId: string;
-      readonly modifier: "hole" | "shell" | "chamfer" | "fillet" | "counterbore" | "countersink" | "tapped-hole";
+      readonly modifier: "hole" | "shell" | "chamfer" | "fillet" | "counterbore" | "countersink" | "tapped-hole" | "surface-edit" | "stitch" | "form-edit" | "form-finish";
       readonly label: string;
       readonly body: GeneralSolidBody;
     }

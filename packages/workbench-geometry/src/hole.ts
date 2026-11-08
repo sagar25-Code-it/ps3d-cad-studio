@@ -1,3 +1,5 @@
+import type { HoleThread } from "./hole-thread.js";
+
 type Vec3 = readonly [number, number, number];
 
 export type HoleStyle = "simple" | "counterbore" | "countersink";
@@ -18,6 +20,8 @@ export interface HoleSpec {
   /** Countersink: the diameter at the face and the included angle of the cone. */
   readonly sinkDiameterMm?: number;
   readonly sinkAngleDeg?: number;
+  /** A tapped hole's thread. The cutter is always the plain tap-drill bore; a modelled thread is then shaped into the cut wall (see threadBoreWall). */
+  readonly thread?: HoleThread;
 }
 
 export type HoleCutterResult =

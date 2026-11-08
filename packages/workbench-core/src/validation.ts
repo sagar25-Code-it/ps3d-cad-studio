@@ -31,6 +31,7 @@ import {
   type WorkbenchSketchConstraint,
   type WorkspaceId
 } from "./types.js";
+import { validSubdCageData } from "./subd-cage.js";
 import { createElectricalTemplate } from "./templates.js";
 import { validateDesignHistory } from "./design.js";
 import { MAX_EXPRESSION_LENGTH, parseExpression } from "./expressions.js";
@@ -416,7 +417,7 @@ function validatePart(value: unknown): WorkbenchResult<PartIntent> {
 
 function validateGeneralSolidBody(value: unknown): value is GeneralSolidBody {
   const required = ["id", "name", "visible", "color", "positionsMm", "indices"];
-  const optional = ["feature", "brep"];
+  const optional = ["feature", "brep", "subd"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || !stableId(value.id) || !shortText(value.name, 1, 120)
     || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)) return false;
@@ -432,6 +433,7 @@ function validateGeneralSolidBody(value: unknown): value is GeneralSolidBody {
     if (!isRecord(feature) || !(GENERAL_BODY_OPERATIONS as readonly string[]).includes(String(feature.operation)) || !["xy", "xz", "yz"].includes(String(feature.plane))
       || typeof feature.valueMm !== "number" || !Number.isFinite(feature.valueMm)) return false;
   }
+  if (Object.hasOwn(value, "subd") && !validSubdCageData(value.subd)) return false;
   if (Object.hasOwn(value, "brep")) {
     const brep = value.brep;
     if (!isRecord(brep) || !isRecord(brep.topology) || !Array.isArray(brep.faces) || brep.faces.length > 4_096 || !Array.isArray(brep.faceTriangles)) return false;

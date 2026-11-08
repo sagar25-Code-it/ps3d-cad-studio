@@ -156,10 +156,65 @@ export function sharedFlangeEnds(frame: SheetFrame, edgeIndex: number, flangedEd
   return { start, end };
 }
 
-/** A flange as far as corner relief goes: its edge and the gap it asks for at a corner it shares with another flange. */
+/** How a corner relief is cut: a straight gap between the two flanges, or a square or round notch taken out of the plate's corner. */
+export type ReliefShape = "straight" | "square" | "round";
+
+/** A flange as far as corner relief goes: its edge and the relief it asks for at a corner it shares with another flange. */
 export interface ReliefFlange {
   readonly edgeIndex: number;
   readonly reliefMm: number;
+  /** Straight (the default) leaves a gap of `reliefMm` between the flanges; a notch of `reliefMm` is cut from the plate's corner and each flange stops that far short. */
+  readonly shape?: ReliefShape;
+}
+
+/** The shape a corner takes when its two flanges disagree: the one asking for the larger relief wins, and a notch beats a gap on a tie. */
+export function cornerReliefShape(first: ReliefFlange, second: ReliefFlange): ReliefShape {
+  const rank = (shape: ReliefShape | undefined): number => (shape === "round" ? 2 : shape === "square" ? 1 : 0);
+  if (first.reliefMm !== second.reliefMm) return (first.reliefMm > second.reliefMm ? first : second).shape ?? "straight";
+  return rank(first.shape) >= rank(second.shape) ? first.shape ?? "straight" : second.shape ?? "straight";
+}
+
+/** A corner where two flanged edges meet and carry a notch relief. */
+export interface ReliefCorner {
+  /** The corner of the plate's top face. */
+  readonly pointMm: Vec3;
+  /** Unit vector along the edge that starts at the corner. */
+  readonly alongMm: Vec3;
+  /** Unit vector along the edge that ends at the corner, pointing back from the corner. */
+  readonly backMm: Vec3;
+  readonly sizeMm: number;
+  readonly shape: "square" | "round";
+  /** The edge that starts at the corner, and the edge that ends at it. */
+  readonly startEdge: number;
+  readonly endEdge: number;
+}
+
+/** The corners of the plate where two flanges meet and the relief is a notch (not a straight gap), in edge order. */
+export function reliefCorners(frame: SheetFrame, flanges: readonly ReliefFlange[]): readonly ReliefCorner[] {
+  const corners: ReliefCorner[] = [];
+  for (const own of flanges) {
+    const edge = frame.edges[own.edgeIndex];
+    if (edge === undefined) continue;
+    const startKey = pointKey(edge.startMm[0], edge.startMm[1], edge.startMm[2]);
+    for (const other of flanges) {
+      if (other.edgeIndex === own.edgeIndex) continue;
+      const previous = frame.edges[other.edgeIndex];
+      if (previous === undefined || pointKey(previous.endMm[0], previous.endMm[1], previous.endMm[2]) !== startKey) continue;
+      const shape = cornerReliefShape(own, other);
+      const size = Math.max(own.reliefMm, other.reliefMm);
+      if (shape === "straight" || !(size > 0)) continue;
+      // Only a convex corner (the outline turns left, seen from the top face) has plate to cut a notch from.
+      const turn = cross3(unit3([previous.endMm[0] - previous.startMm[0], previous.endMm[1] - previous.startMm[1], previous.endMm[2] - previous.startMm[2]]), unit3([edge.endMm[0] - edge.startMm[0], edge.endMm[1] - edge.startMm[1], edge.endMm[2] - edge.startMm[2]]));
+      if (dot3(turn, frame.normal) <= 1e-9) continue;
+      corners.push({
+        pointMm: edge.startMm,
+        alongMm: unit3([edge.endMm[0] - edge.startMm[0], edge.endMm[1] - edge.startMm[1], edge.endMm[2] - edge.startMm[2]]),
+        backMm: unit3([previous.startMm[0] - previous.endMm[0], previous.startMm[1] - previous.endMm[1], previous.startMm[2] - previous.endMm[2]]),
+        sizeMm: size, shape, startEdge: own.edgeIndex, endEdge: other.edgeIndex
+      });
+    }
+  }
+  return corners;
 }
 
 /**
@@ -180,9 +235,11 @@ export function flangeReliefs(frame: SheetFrame, edgeIndex: number, flanges: rea
     const neighbour = frame.edges[other.edgeIndex];
     if (neighbour === undefined) continue;
     const keys = [pointKey(neighbour.startMm[0], neighbour.startMm[1], neighbour.startMm[2]), pointKey(neighbour.endMm[0], neighbour.endMm[1], neighbour.endMm[2])];
+    // A straight relief leaves a gap between the flanges, half from each; a notch relief stops each flange its whole size short of the corner.
     const gap = Math.max(own.reliefMm, other.reliefMm);
-    if (keys.includes(startKey)) start = Math.max(start, gap / 2);
-    if (keys.includes(endKey)) end = Math.max(end, gap / 2);
+    const stop = cornerReliefShape(own, other) === "straight" ? gap / 2 : gap;
+    if (keys.includes(startKey)) start = Math.max(start, stop);
+    if (keys.includes(endKey)) end = Math.max(end, stop);
   }
   return { startMm: start, endMm: end };
 }

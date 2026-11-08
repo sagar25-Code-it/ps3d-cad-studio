@@ -32,6 +32,13 @@ export interface BooleanMeshOutput {
   /** One entry per result triangle. */
   readonly origins: readonly BooleanTriangleOrigin[];
   readonly volumeMm3: number;
+  /** How many separate closed pieces the result has (1 unless `allowSplit` let a cut sever the target). */
+  readonly pieceCount: number;
+}
+
+export interface BooleanOptions {
+  /** Let a cut or intersection leave several separate pieces instead of refusing; the caller splits the mesh into bodies. */
+  readonly allowSplit?: boolean;
 }
 
 export type BooleanMeshResult =
@@ -54,6 +61,14 @@ interface Poly {
 
 const PLANE_EPSILON = 1e-6;
 const WELD_QUANTUM = 1e-5;
+/**
+ * Vertices are welded by rounding to a grid of WELD_QUANTUM. A coordinate that sits exactly on a rounding boundary (a half quantum,
+ * which happens for round dimensions such as a 4.9175 mm hole at 60 degrees) would round either way depending on one part in 1e16 of
+ * floating-point noise, leaving two copies of one corner unwelded. Shifting the grid by an irrational-looking offset keeps every
+ * coordinate a "nice" number would produce far from a boundary.
+ */
+const WELD_OFFSET: readonly [number, number, number] = [0.003141592653589793, 0.002718281828459045, 0.001414213562373095];
+const weldKey = (x: number, y: number, z: number): string => `${Math.round((x + WELD_OFFSET[0]) / WELD_QUANTUM)},${Math.round((y + WELD_OFFSET[1]) / WELD_QUANTUM)},${Math.round((z + WELD_OFFSET[2]) / WELD_QUANTUM)}`;
 const MIN_TRIANGLE_AREA = 1e-10;
 const MAX_TRIANGLES_PER_INPUT = 30_000;
 const MAX_TREE_DEPTH = 3_000;
@@ -62,7 +77,7 @@ const FRONT = 1;
 const BACK = 2;
 const SPANNING = 3;
 
-export function booleanMeshes(target: BooleanMeshInput, tool: BooleanMeshInput, mode: BooleanMode): BooleanMeshResult {
+export function booleanMeshes(target: BooleanMeshInput, tool: BooleanMeshInput, mode: BooleanMode, options: BooleanOptions = {}): BooleanMeshResult {
   const first = readSolid(target, "target");
   if (typeof first === "string") return { ok: false, message: first };
   const second = readSolid(tool, "tool");
@@ -98,7 +113,8 @@ export function booleanMeshes(target: BooleanMeshInput, tool: BooleanMeshInput, 
   if (typeof cleaned === "string") return { ok: false, message: cleaned };
   const volume = signedVolume(cleaned.positions, cleaned.triangles);
   const tolerance = 1e-6 * (first.volume + second.volume) + 1e-6;
-  const verdict = judgeResult(mode, volume, first.volume, second.volume, tolerance, componentCount(cleaned.triangles));
+  const pieceCount = componentCount(cleaned.triangles);
+  const verdict = judgeResult(mode, volume, first.volume, second.volume, tolerance, pieceCount, options.allowSplit === true);
   if (verdict !== undefined) return { ok: false, message: verdict };
 
   return {
@@ -107,14 +123,15 @@ export function booleanMeshes(target: BooleanMeshInput, tool: BooleanMeshInput, 
       positionsMm: cleaned.positions.flat(),
       indices: cleaned.triangles.flatMap((triangle) => [triangle.a, triangle.b, triangle.c]),
       origins: cleaned.triangles.map((triangle): BooleanTriangleOrigin => ({ source: triangle.source === 0 ? "target" : "tool", face: triangle.face })),
-      volumeMm3: volume
+      volumeMm3: volume,
+      pieceCount
     }
   };
 }
 
-function judgeResult(mode: BooleanMode, volume: number, targetVolume: number, toolVolume: number, tolerance: number, components: number): string | undefined {
+function judgeResult(mode: BooleanMode, volume: number, targetVolume: number, toolVolume: number, tolerance: number, components: number, allowSplit: boolean): string | undefined {
   if (!(volume > tolerance)) return mode === "intersect" ? "The bodies do not overlap, so their intersection is empty." : "The result is empty.";
-  if (components > 1) {
+  if (components > 1 && !(allowSplit && mode !== "join")) {
     return mode === "join"
       ? "The bodies do not touch, so joining them would give two separate solids."
       : `The ${mode === "cut" ? "cut divides the target into" : "intersection is"} ${components} separate pieces, which is not supported yet.`;
@@ -348,7 +365,7 @@ function weld(flat: readonly number[], indices: readonly number[]): WeldedMesh {
   const positions: V3[] = [];
   const lookup = new Map<string, number>();
   const idOf = (x: number, y: number, z: number): number => {
-    const key = `${Math.round(x / WELD_QUANTUM)},${Math.round(y / WELD_QUANTUM)},${Math.round(z / WELD_QUANTUM)}`;
+    const key = weldKey(x, y, z);
     const existing = lookup.get(key);
     if (existing !== undefined) return existing;
     positions.push([x, y, z]);
@@ -412,7 +429,7 @@ function cleanUp(polygons: readonly Poly[]): { positions: V3[]; triangles: Trian
   const positions: V3[] = [];
   const lookup = new Map<string, number>();
   const idOf = (vertex: V3): number => {
-    const key = `${Math.round(vertex[0] / WELD_QUANTUM)},${Math.round(vertex[1] / WELD_QUANTUM)},${Math.round(vertex[2] / WELD_QUANTUM)}`;
+    const key = weldKey(vertex[0], vertex[1], vertex[2]);
     const existing = lookup.get(key);
     if (existing !== undefined) return existing;
     positions.push([vertex[0], vertex[1], vertex[2]]);

@@ -39,6 +39,21 @@ function fail(code: WorkbenchDiagnostic["code"], message: string, relatedIds: re
 
 const missing = (id: string, message: string): DesignChange => fail("BROKEN_REFERENCE", message, [id], "Refresh the project and pick an existing feature.");
 
+/** The ID of the `ordinal`-th piece (2, 3, ...) a body was split into by a cut or hole; piece 1 keeps the body's own ID. */
+export function splitPieceId(bodyId: string, ordinal: number): string {
+  return `${bodyId}.piece-${ordinal}`;
+}
+
+/** The display name of the `ordinal`-th piece of a split body. */
+export function splitPieceName(name: string, ordinal: number): string {
+  return `${name} (piece ${ordinal})`;
+}
+
+/** Whether `candidateId` names a piece that was split off the body `bodyId`. */
+export function isSplitPieceOf(bodyId: string, candidateId: string): boolean {
+  return candidateId.startsWith(`${bodyId}.piece-`);
+}
+
 export function emptyDesignHistory(): DesignHistory {
   return { features: [], rollbackIndex: 0, editingSketchId: null };
 }
@@ -252,7 +267,7 @@ export function updateDesignSolid(project: WorkbenchProject, feature: DesignSoli
   return changed(withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, next), [feature.id, body.id], `Updated ${feature.name}.`);
 }
 
-export function regenerateDesign(project: WorkbenchProject, results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly message?: string }[]): DesignChange {
+export function regenerateDesign(project: WorkbenchProject, results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string }[]): DesignChange {
   const history = designOf(project);
   const byId = new Map(results.map((result) => [result.featureId, result] as const));
   if (byId.size !== results.length) return fail("INVALID_OPERATION", "A feature appears twice in the rebuild results.", [], "Send one result per feature.");
@@ -260,13 +275,21 @@ export function regenerateDesign(project: WorkbenchProject, results: readonly { 
     const feature = history.features.find((candidate) => candidate.id === result.featureId);
     if (feature === undefined || feature.kind === "sketch") return missing(result.featureId, "A rebuilt feature does not exist or is not a solid feature.");
     if (result.body !== undefined && result.body.id !== feature.bodyId) return fail("INVALID_OPERATION", "A rebuilt solid must keep its feature's body ID.", [feature.id], "Build the solid with the feature's body ID.");
+    if (result.pieces !== undefined && (result.body === undefined || result.pieces.some((piece) => !isSplitPieceOf(feature.bodyId, piece.id)))) return fail("INVALID_OPERATION", "Pieces split off a solid must be named after the solid they came from.", [feature.id], "Name each piece with splitPieceId.");
   }
-  const bodies = (project.part.generalBodies ?? []).map((candidate) => {
+  const rebuiltRoots = results.flatMap((result) => result.body === undefined ? [] : [result.body.id]);
+  const existingBodies = project.part.generalBodies ?? [];
+  const priorVisibility = new Map(existingBodies.map((candidate) => [candidate.id, candidate.visible] as const));
+  // A rebuilt body replaces the pieces it split into last time; the new pieces (if any) come back after the bodies.
+  const kept = existingBodies.filter((candidate) => !rebuiltRoots.some((root) => isSplitPieceOf(root, candidate.id)));
+  const newPieces = results.flatMap((result) => (result.pieces ?? []).map((piece) => ({ ...piece, visible: priorVisibility.get(piece.id) ?? piece.visible })));
+  if (kept.length + newPieces.length > MAX_GENERAL_BODIES) return fail("RESOURCE_LIMIT", "Splitting the solid would pass the part's body limit.", [project.part.id], "Delete a general body before cutting the solid apart.");
+  const bodies = kept.map((candidate) => {
     for (const result of results) {
       if (result.body !== undefined && result.body.id === candidate.id) return { ...result.body, visible: candidate.visible };
     }
     return candidate;
-  });
+  }).concat(newPieces);
   const features = history.features.map((feature): DesignFeature => {
     const result = byId.get(feature.id);
     if (result === undefined) return feature;
@@ -277,7 +300,7 @@ export function regenerateDesign(project: WorkbenchProject, results: readonly { 
   return changed(
     withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, { ...history, features }),
     results.map((result) => result.featureId),
-    `Rebuilt ${results.length - failed} feature${results.length - failed === 1 ? "" : "s"}${failed === 0 ? "" : `; ${failed} could not be rebuilt`}.`
+    `Rebuilt ${results.length - failed} feature${results.length - failed === 1 ? "" : "s"}${failed === 0 ? "" : `; ${failed} could not be rebuilt`}.${newPieces.length === 0 ? "" : ` The solid was cut into ${newPieces.length + results.filter((result) => result.pieces !== undefined && result.body !== undefined).length} separate bodies (${newPieces.map((piece) => piece.name).join(", ")} split off).`}`
   );
 }
 
@@ -303,7 +326,7 @@ export function deleteDesignFeature(project: WorkbenchProject, featureId: string
     rollbackIndex: history.rollbackIndex - removedBeforeMarker,
     editingSketchId: history.editingSketchId !== null && removed.has(history.editingSketchId) ? null : history.editingSketchId
   };
-  const bodies = (project.part.generalBodies ?? []).filter((candidate) => !goneBodies.has(candidate.id));
+  const bodies = (project.part.generalBodies ?? []).filter((candidate) => !goneBodies.has(candidate.id) && ![...goneBodies].some((root) => isSplitPieceOf(root, candidate.id)));
   const extra = removed.size - 1;
   return changed(withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, next), [...removed], `Deleted ${feature.name}${extra === 0 ? "" : ` and the ${extra} feature${extra === 1 ? "" : "s"} built on it`}.`);
 }
@@ -384,7 +407,7 @@ function validDirectionAndThin(value: Record<string, unknown>): boolean {
 }
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "flangeReliefShape", ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
   if (!validExtent(value)) return false;
   if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "sheet-base", "sheet-flange", "sheet-hem", "sheet-edge-flange", "hole", "pattern", "edge-blend", ...BODY_EDIT_ONLY_KINDS, ...SHEET_FEATURE_KINDS].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
@@ -532,7 +555,11 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (Object.hasOwn(value, "flangeReliefMm")) {
     if (value.kind !== "sheet-edge-flange" || typeof value.flangeReliefMm !== "number" || !Number.isFinite(value.flangeReliefMm) || value.flangeReliefMm < 0 || value.flangeReliefMm > 1000) return false;
   }
-  const holeKeys = ["holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg"];
+  if (Object.hasOwn(value, "flangeReliefShape")) {
+    // How a corner relief is cut: a straight gap between the flanges, or a square or round notch taken out of the plate's corner.
+    if (value.kind !== "sheet-edge-flange" || !["straight", "square", "round"].includes(String(value.flangeReliefShape))) return false;
+  }
+  const holeKeys = ["holeThread", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg"];
   if (value.kind !== "hole" && holeKeys.some((key) => Object.hasOwn(value, key))) return false;
   if (value.kind === "hole") {
     const triple = (candidate: unknown, nonZero: boolean): boolean => Array.isArray(candidate) && candidate.length === 3 && candidate.every((entry) => typeof entry === "number" && Number.isFinite(entry) && Math.abs(entry) <= 1_000_000) && (!nonZero || candidate.some((entry) => entry !== 0));
@@ -548,6 +575,15 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
     if (!counterbore && (Object.hasOwn(value, "holeCounterDiameterMm") || Object.hasOwn(value, "holeCounterDepthMm"))) return false;
     if (!countersink && (Object.hasOwn(value, "holeSinkDiameterMm") || Object.hasOwn(value, "holeSinkAngleDeg"))) return false;
     if (counterbore && (!positive(value.holeCounterDiameterMm, 10_000) || !positive(value.holeCounterDepthMm, 100_000) || (value.holeCounterDiameterMm as number) <= (value.holeDiameterMm as number))) return false;
+    if (Object.hasOwn(value, "holeThread")) {
+      // A thread belongs on a plain hole: its diameter is the tap-drill (minor) diameter and the thread reaches the major diameter.
+      const thread = value.holeThread;
+      if (!isRecord(thread) || !hasOnly(thread, ["mode", "pitchMm", "majorDiameterMm", "handedness"], ["lengthMm"]) || value.holeStyle !== "simple") return false;
+      if (!["cosmetic", "modelled"].includes(String(thread.mode)) || !["right", "left"].includes(String(thread.handedness))) return false;
+      if (!positive(thread.pitchMm, 50) || !positive(thread.majorDiameterMm, 10_000) || (thread.majorDiameterMm as number) <= (value.holeDiameterMm as number)) return false;
+      if ((thread.majorDiameterMm as number) - (value.holeDiameterMm as number) > 2 * (thread.pitchMm as number)) return false;
+      if (Object.hasOwn(thread, "lengthMm") && !(typeof thread.lengthMm === "number" && Number.isFinite(thread.lengthMm) && thread.lengthMm >= 0 && thread.lengthMm <= 100_000)) return false;
+    }
     if (countersink && (!positive(value.holeSinkDiameterMm, 10_000) || typeof value.holeSinkAngleDeg !== "number" || !(value.holeSinkAngleDeg >= 10 && value.holeSinkAngleDeg <= 170) || (value.holeSinkDiameterMm as number) <= (value.holeDiameterMm as number))) return false;
   }
   if (value.kind === "sheet-edge-flange") {
