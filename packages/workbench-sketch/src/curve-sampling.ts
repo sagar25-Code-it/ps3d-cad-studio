@@ -14,7 +14,7 @@ import { isPeriodicSpline, splineDerivativesAt, splineSpanCount } from "../../wo
 export const CHORD_TOLERANCE_MM = 0.01;
 
 const TWO_PI = Math.PI * 2;
-const MAX_ARC_STEPS = 1440;
+const MAX_ARC_STEPS = 4096;
 /** At least 72 edges to a full turn (5 degrees), as circles have always been sampled; the chord bound only adds edges for big radii. */
 const MIN_STEP_RADIANS = (2 * Math.PI) / 72;
 

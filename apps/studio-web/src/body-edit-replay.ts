@@ -1,6 +1,6 @@
 import type { BodyEditSpec, DesignHistory, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
 import { addWebs, draftFaces, fitCylinder, flexBody, offsetRegion, replaceFaces, shellBody, wrapProfile, type FaceEditResult, type FlexResult, type WebResult, type WrapResult } from "../../../packages/workbench-geometry/src/index.js";
-import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion } from "../../../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, lostProfileRefs, profileOutlineMm, resolveProfileRegion } from "../../../packages/workbench-sketch/src/index.js";
 import { openChains, sketchPlaneNormal, sketchPointToWorld } from "./web-profile.js";
 
 /**
@@ -32,10 +32,11 @@ function wrapEdit(step: DesignSolidFeature, spec: Extract<BodyEditSpec, { readon
   const sketchFeature = context.history.features.find((feature): feature is DesignSketchFeature => feature.id === step.sketchFeatureId && feature.kind === "sketch");
   if (sketchFeature === undefined) return { ok: false, message: "The sketch this wrap was drawn in is no longer in the timeline." };
   const profiles = detectSketchProfiles(sketchFeature.sketch);
-  const missing = step.profileIds.find((id) => !profiles.some((profile) => profile.id === id));
-  if (missing !== undefined) return { ok: false, message: "A profile this wrap was built on no longer exists in its sketch. Edit the sketch to close it again, or delete the feature." };
+  const lost = lostProfileRefs(profiles, step.profileIds);
+  if (lost.length > 0) return { ok: false, message: `${step.name}: a profile this wrap was built on no longer exists in its sketch (${lost.join("; ")}). Edit the sketch to close it again, or delete the feature.` };
   const region = resolveProfileRegion(profiles, step.profileIds, { includeIslands: true });
   if (!region.ok) return { ok: false, message: region.diagnostics[0]?.message ?? "The sketch has no closed profile to wrap." };
+  if (region.value.groups.length > 1) return { ok: false, message: `${step.name}: a wrap follows one region, but ${region.value.groups.length} separate regions are selected. Select a single region.` };
   const mesh = { positionsMm: body.positionsMm, indices: body.indices };
   const fit = fitCylinder(mesh, spec.face);
   if (typeof fit === "string") return { ok: false, message: fit };

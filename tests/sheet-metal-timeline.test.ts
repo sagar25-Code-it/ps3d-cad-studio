@@ -1,7 +1,7 @@
 import type { DesignSketchFeature, DesignSolidFeature, WorkbenchOperation, WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { applyWorkbenchOperation, createWorkbenchProject, describeFeature, designOf, flangeEdgesOf, validSolidFeaturePayload, validateWorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { solidMetrics } from "../packages/workbench-core/src/solid-metrics.js";
-import { detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
+import { closedShapesOf, detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
 import { bentStripSection, DEFAULT_K_FACTOR, sheetBendAllowanceMm } from "../packages/workbench-geometry/src/sheet-metal.js";
 import { jogProfile } from "../packages/workbench-geometry/src/sheet-jog.js";
 import { bendReportCsv, bendTableRowsCsv, developBend, kFactorOfRow, lookupBendK, parseBendTableCsv, type BendTable } from "../packages/workbench-geometry/src/bend-table.js";
@@ -447,7 +447,7 @@ export const sheetMetalTimelineTests: readonly TestCase[] = [
         near(polygonArea(flat.layout.outlinesMm[0]!), lateral, lateral * 5e-4, "the blank's area is the neutral cone's lateral area");
       }
       // A rectangle-to-rectangle skin builds but has no honest flat pattern.
-      const rect = detectSketchProfiles(sketch.sketch).find((profile) => profile.boundary.kind === "rectangle")!;
+      const rect = closedShapesOf(detectSketchProfiles(sketch.sketch))!.find((profile) => profile.boundary.kind === "rectangle")!;
       const boxed = step(sketch, "sheet-lofted-bend", "boxed", { profileIds: [rect.id], valueMm: 20, sheetThicknessMm: 1.5, loftTopScale: 0.5, bodyId: "general-body:boxed" });
       const boxBuilt = await rebuildSolidFeature(boxed, sketch);
       assert(boxBuilt.ok && isClosedAndOriented(boxBuilt.body.indices), "a rectangular transition builds closed");

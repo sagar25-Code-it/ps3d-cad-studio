@@ -1,6 +1,6 @@
 import type { SketchEntity, WorkbenchOperation, WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { applyWorkbenchOperation } from "../packages/workbench-core/src/index.js";
-import { detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
+import { closedShapesOf, detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
 import { resolveSketchHotkey, type SketchHotkeyContext } from "../packages/workbench-sketch/src/hotkeys.js";
 import {
   clearSketchClipboard, copySketchSelection, cutSketchSelection, nextPasteNumber, parseClipboard, pasteOffset, pasteSketchClipboard,
@@ -69,7 +69,7 @@ export const sketchClipboardTests: readonly TestCase[] = [
       assert(newRelations.every((c) => !project.sketch.constraints.some((old) => old.id === c.id)), "with new relation ids");
       assert(newRelations.some((c) => c.kind === "distance" && c.valueMm === 10), "the 10 mm dimension came along");
       assert(relationsHold(pasted), "all relations hold");
-      equal(detectSketchProfiles(pasted.sketch).length, 3, "the square, the circle and the square copy are three closed profiles");
+      equal(closedShapesOf(detectSketchProfiles(pasted.sketch))?.length, 3, "the square, the circle and the square copy are three drawn closed outlines (the overlapping copy also splits the square into regions)");
       assert(!pasted.sketch.constraints.some((c) => c.kind === "fixed" && c.entityIds.some((id) => newIds.has(id))), "the copy is not pinned");
     }
   },
@@ -85,7 +85,7 @@ export const sketchClipboardTests: readonly TestCase[] = [
       assert(first[0] > 0 && first[1] < 0, "down and to the right");
       const once = commitOk(project, pasteSketchClipboard(context(project), copied.value, { pasteNumber: 1 }));
       const twice = commitOk(once, pasteSketchClipboard(context(once), copied.value, { pasteNumber: 2 }));
-      equal(detectSketchProfiles(twice.sketch).length, 4, "three squares and the circle");
+      equal(closedShapesOf(detectSketchProfiles(twice.sketch))?.length, 4, "three squares and the circle are four drawn closed outlines (overlapping copies also split into regions)");
       const explicit = planOf(pasteSketchClipboard(context(project), copied.value, { offsetMm: [100, 0] }));
       assert(explicit.addEntities.every((entity) => entity.kind !== "line" || entity.start[0] >= 100), "an explicit offset replaces the automatic one");
       storeSketchClipboard(copied.value);

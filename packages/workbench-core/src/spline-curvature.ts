@@ -34,8 +34,8 @@ export function splineSpanCount(fit: readonly SplinePoint[]): number {
 }
 
 /**
- * How far the knot spacing departs from uniform: 0 for evenly spaced fit points, up to 0.5 (centripetal) when neighbouring chords
- * differ by a factor of eight or more. A uniform Catmull-Rom curve loops or backtracks when the gaps differ much, a centripetal
+ * How far the knot spacing departs from uniform: 0 for evenly spaced fit points, up to 0.75 (between centripetal and chordal) when neighbouring chords
+ * differ by a factor of eight or more. A uniform Catmull-Rom curve loops or backtracks when the gaps differ much, a centripetal-to-chordal
  * one never does; between a factor of four and eight the exponent ramps so the curve changes smoothly with the points and evenly spaced splines keep
  * the exact uniform curve (and the curvature formulas that go with it).
  */
@@ -58,7 +58,7 @@ function knotExponent(ring: readonly SplinePoint[], closed: boolean): number {
     const right = chord(0);
     if (left > 1e-12 && right > 1e-12) ratio = Math.max(ratio, left / right, right / left);
   }
-  return 0.5 * Math.min(1, Math.max(0, (ratio - 4) / 4));
+  return 0.75 * Math.min(1, Math.max(0, (ratio - 4) / 4));
 }
 
 /**

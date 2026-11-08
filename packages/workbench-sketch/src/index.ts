@@ -7,16 +7,22 @@ import {
   type WorkbenchSketch
 } from "../../workbench-core/src/index.js";
 import { CURVE_TOOL_LABELS, curveToolRequiredPoints, isFixedCurveTool, type CurveToolId, type FixedCurveToolId } from "./curve-tools.js";
+import { pointInRing } from "./arrangement.js";
 import { profileOutlineMm } from "./profile-outline.js";
 import { resolveProfileRegion, type ProfileRegion } from "./profile-select.js";
 import { detectProfilesOf, shapesOf } from "./profile-detect.js";
-import type { ProfileDetectionOptions } from "./profile-regions.js";
+import { parseProfileRef, type ProfileDetectionOptions } from "./profile-regions.js";
 
 import { sampleArc, sampleSpline } from "./curve-sampling.js";
 export { sampleArc, sampleSpline, CHORD_TOLERANCE_MM, isClosedFitSpline } from "./curve-sampling.js";
 export { PROFILE_GAP_TOLERANCE_MM } from "./arrangement.js";
 export { profileRefOf, parseProfileRef, type ProfileDetectionOptions } from "./profile-regions.js";
 export { profileOutlineMm, resolveProfileRegion, type ProfileRegion };
+export { lostProfileRefs, matchProfileRef, profileInBox, type ProfileRegionGroup } from "./profile-select.js";
+export { diagnoseProfiles, explainNoProfiles, type ProfileDiagnosis, type ProfileProblem } from "./profile-diagnostics.js";
+export { breakAtIntersections } from "./break-intersections.js";
+export { arrangeSketch } from "./profile-detect.js";
+export { shapesOf as closedShapesOf } from "./profile-detect.js";
 
 /**
  * The short names remain the default Fusion-familiar variants so existing
@@ -485,7 +491,14 @@ export function resolveQualifiedExtrusion(
   }
   const detected = detectSketchProfiles(sketch);
   const profiles = shapesOf(detected) ?? detected;
-  const selected = profiles.filter((profile) => selectedProfileIds.includes(profile.id));
+  // A region id (the notched plate a crossing circle leaves) means the closed shape it was cut from.
+  const wanted = new Set(selectedProfileIds.map((id) => parseProfileRef(id).id).flatMap((id) => {
+    if (profiles.some((profile) => profile.id === id)) return [id];
+    const face = detected.find((profile) => profile.id === id);
+    const source = face === undefined ? undefined : profiles.filter((profile) => profile.entityIds.every((entityId) => face.entityIds.includes(entityId)) && (face.interiorPoint === undefined || pointInRing(face.interiorPoint, profileOutlineMm(profile.boundary)))).sort((left, right) => left.areaMm2 - right.areaMm2)[0];
+    return source === undefined ? [id] : [source.id];
+  }));
+  const selected = profiles.filter((profile) => wanted.has(profile.id));
   const rectangles = selected.filter((profile) => profile.boundary.kind === "rectangle");
   if (rectangles.length !== 1) {
     return failure("INVALID_OPERATION", "Extrude needs either one closed rectangle profile (with its concentric bore circle) for the qualified plate, or a single circle on its own for a cylinder.", selectedProfileIds, "Click inside one shaded rectangle region and Shift-select its concentric circle, or select a single circle to extrude a cylinder.");

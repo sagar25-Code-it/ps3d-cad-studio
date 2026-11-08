@@ -4,6 +4,9 @@ import {
   analyzeWorkbenchSketch,
   buildSketchEntity,
   detectSketchProfiles,
+  explainNoProfiles,
+  profileInBox,
+  resolveProfileRegion,
   isShapeTool,
   profileOutlineMm,
   requiredSketchPoints,
@@ -388,6 +391,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }), [workingSketch, visibleEntities]);
   const analysis = useMemo(() => analyzeWorkbenchSketch(workingSketch), [workingSketch]);
   const profiles = useMemo(() => detectSketchProfiles(visibleSketch), [visibleSketch]);
+  /** Why there is nothing to extrude: the open ends, gaps and missing curves, named. */
+  const noProfileReasons = useMemo(() => (profiles.length === 0 ? explainNoProfiles(visibleSketch) : []), [profiles, visibleSketch]);
+  /** A region is stored by its reference (id plus signature), which finds it again after the sketch is edited. */
+  const refsOf = (ids: readonly string[]): readonly string[] => ids.map((id) => profiles.find((profile) => profile.id === id)?.ref ?? id);
+  /** What the current selection would build, so the panel can warn before the solid is made. */
+  const regionWarnings = useMemo(() => {
+    if (profiles.length === 0) return [] as readonly string[];
+    const ids = selectedProfileIds.map((id) => profiles.find((profile) => profile.id === id)?.ref ?? id);
+    const region = resolveProfileRegion(profiles, ids, { includeIslands: true });
+    return region.ok ? region.value.warnings : [region.diagnostics[0]?.message ?? "These regions cannot be built together."];
+  }, [profiles, selectedProfileIds]);
   const fitExtents = useMemo(() => {
     if (visibleEntities.length === 0) return undefined;
     const bounds = sketchBounds(visibleEntities);
@@ -1110,16 +1124,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const rect = selectionRect(gesture.startMm, endMm);
     const mode: SketchSelectionBoxMode = selectionBoxMode(gesture.startMm, endMm);
     if (props.viewportState.selectionFilter === "profile") {
-      const picked = profiles.filter((profile) => {
-        const outline = profileOutlineMm(profile.boundary);
-        const xs = outline.map((point) => point[0]);
-        const ys = outline.map((point) => point[1]);
-        const min: Vec2 = [Math.min(...xs), Math.min(...ys)];
-        const max: Vec2 = [Math.max(...xs), Math.max(...ys)];
-        return mode === "window"
-          ? min[0] >= rect.min[0] && max[0] <= rect.max[0] && min[1] >= rect.min[1] && max[1] <= rect.max[1]
-          : max[0] >= rect.min[0] && min[0] <= rect.max[0] && max[1] >= rect.min[1] && min[1] <= rect.max[1];
-      }).map((profile) => profile.id);
+      const picked = profiles.filter((profile) => profileInBox(profile, rect, mode)).map((profile) => profile.id);
       const next = gesture.additive ? [...new Set([...selectedProfileIds, ...picked])] : picked;
       setSelectionIds([]);
       setSelectedProfileIds(next);
@@ -1620,7 +1625,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <small>mm</small>
             </>}
           </div>}
-          <button className="palette-action primary" disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying) || (solidOp !== "extrude" && solidOp !== "revolve" && solidResult !== "new-body")} onClick={() => {
+          <button className="palette-action primary" title={profiles.length === 0 ? `No closed region to build from. ${noProfileReasons.join(" ")} Validate Sketch lists every open end and gap.` : undefined} disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying) || (solidOp !== "extrude" && solidOp !== "revolve" && solidResult !== "new-body")} onClick={() => {
             const reachResult = solidOp === "extrude" || solidOp === "revolve" ? buildReach(solidOp, reach, Number(solidValue), props.targetBodies, props.selectedId) : undefined;
             if (reachResult !== undefined && !reachResult.ok) { props.onMessage(reachResult.message); return; }
             const sweepTwistValue = Number(sweepTwist);
@@ -1634,7 +1639,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               }
               : solidOp === "loft"
                 ? (loftMode === "two-profile" && selectedProfileIds.length >= 2
-                  ? { loftSecondaryProfileIds: selectedProfileIds.slice(1), loftContinuity, ...(loftRailEntityId !== "" ? { loftRailEntityId } : {}), ...(loftContinuity !== "position" && Number.isFinite(loftTangencyWeightValue) && loftTangencyWeightValue !== 1 ? { loftTangencyWeight: loftTangencyWeightValue } : {}) }
+                  ? { loftSecondaryProfileIds: refsOf(selectedProfileIds.slice(1)), loftContinuity, ...(loftRailEntityId !== "" ? { loftRailEntityId } : {}), ...(loftContinuity !== "position" && Number.isFinite(loftTangencyWeightValue) && loftTangencyWeightValue !== 1 ? { loftTangencyWeight: loftTangencyWeightValue } : {}) }
                   : { loftTopScale: Number(loftTopScale) })
                 : solidOp === "shell"
                   ? { shellThicknessMm: Number(shellThickness), shellOpenFace }
@@ -1655,9 +1660,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
                                 : solidOp === "sheet-hem"
                                   ? { sheetThicknessMm: Number(sheetThickness), sheetBendRadiusMm: Number(sheetBendRadius), flangeLengthMm: Number(flangeLength), hemStyle }
                                   : reachResult?.ok === true ? reachResult.params : undefined;
-            const effectiveProfileIds = solidOp === "loft" && loftMode === "two-profile" && selectedProfileIds.length >= 2
+            const effectiveProfileIds = refsOf(solidOp === "loft" && loftMode === "two-profile" && selectedProfileIds.length >= 2
               ? selectedProfileIds.slice(0, 1)
-              : selectedProfileIds;
+              : selectedProfileIds);
             const edgeForOp = solidOp === "edge-fillet"
               ? { kind: "fillet" as const, sizeMm: Number(modifierEdgeSize) }
               : solidOp === "edge-chamfer"
@@ -1676,7 +1681,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               advanced
             );
           }}><CommandIcon name={solidResult === "cut" ? "subtract" : solidResult === "join" ? "unite" : "box"} />{solidResult === "cut" ? "Cut solid" : solidResult === "join" ? "Join solid" : "Create solid"}</button>
-          {solidOp === "extrude" && <small className="make-solid-hint">{selectedProfileIds.length === 0 ? "Nothing selected: the outermost profile is used and profiles inside it become holes." : "Profiles drawn inside the outline become holes. Shift-select profiles to choose exactly which."}</small>}
+          {profiles.length === 0 && <small className="make-solid-hint make-solid-reason" role="status">No closed region yet. {noProfileReasons.join(" ")} Open Validate Sketch for every open end and gap.</small>}
+          {solidOp === "extrude" && profiles.length > 0 && <small className="make-solid-hint">{selectedProfileIds.length === 0 ? "Nothing selected: the outermost outline is used and outlines inside it become holes. Click regions to choose exactly which (Shift-click adds more, and several separate regions extrude together)." : selectedProfileIds.length === 1 ? "Only the clicked region is used. Shift-click the region inside a hole to fill it, or other separate regions to extrude them together." : `${selectedProfileIds.length} regions selected: touching regions merge, separate ones extrude together.`}</small>}
+          {regionWarnings.map((warning) => <small key={warning} className="make-solid-hint make-solid-warning" role="status">{warning}</small>)}
         </div>
         <details className="palette-shortcuts">
           <summary>Shortcuts</summary>

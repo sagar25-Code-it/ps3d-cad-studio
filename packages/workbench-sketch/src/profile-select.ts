@@ -306,6 +306,12 @@ function outlineRegion(profiles: readonly SketchProfile[], universe: readonly Sk
       warnings.push(`${describe(candidate)} lies exactly on the outline of ${shortId(root.id)} and was ignored.`);
     }
   }
+  // Holes that overlap each other are one void: build the region from the faces instead of from the outlines.
+  const overlappingHoles = inside.some((item, index) => inside.slice(index + 1).some((other) => relate(item.ring, other.ring).relation === "cross"));
+  if (overlappingHoles && profiles.every((profile) => profile.interiorPoint !== undefined)) {
+    const merged = regionFromFaces(profiles, everything, root, rootRing);
+    if (merged !== undefined) return merged.ok ? { ok: true, value: { ...merged.value, warnings: [...warnings, ...merged.value.warnings] } } : merged;
+  }
   const parentOf = new Map<SketchProfile, SketchProfile | undefined>();
   for (const item of inside) {
     let best: { profile: SketchProfile; area: number } | undefined;
@@ -564,4 +570,73 @@ function synthesize(points: readonly Vec2[], infos: readonly EdgeInfo[], area: n
   const entityIds = [...new Set(infos.map((info) => info.entityId))].sort();
   const id = `profile:region-${fnv1a(points.map((point) => `${Math.round(point[0] * 1e4)},${Math.round(point[1] * 1e4)}`).sort().join("|"))}`;
   return { id, entityIds, boundary, areaMm2: area, centroid };
+}
+
+/** The ids or references among `ids` that name no profile any more, described for a message ("a region of about 120 mm² near (10, 5)"). */
+export function lostProfileRefs(profiles: readonly SketchProfile[], ids: readonly string[]): string[] {
+  const lost: string[] = [];
+  const shapes = shapesOf(profiles);
+  for (const id of new Set(ids)) {
+    const parsed = parseProfileRef(id);
+    if (parsed.holeKeys !== undefined) {
+      if (matchProfileRef(id, profiles) !== undefined) continue;
+    } else if (profiles.some((profile) => profile.id === parsed.id) || (shapes?.some((shape) => shape.id === parsed.id) ?? false)) continue;
+    const round = (value: number): string => String(Math.round(value * 100) / 100);
+    lost.push(parsed.areaMm2 !== undefined && parsed.centroid !== undefined ? `a region of about ${round(parsed.areaMm2)} mm² near (${round(parsed.centroid[0])}, ${round(parsed.centroid[1])})` : shortId(parsed.id));
+  }
+  return lost;
+}
+
+/**
+ * The region an outline stands for, built from the faces inside it: a face is solid when the deepest outline covering it sits an
+ * even number of outlines down (the outline itself, an island in a hole ...) and a void otherwise. Outlines that merely overlap
+ * one another sit at the same depth, so overlapping holes are one void.
+ */
+function regionFromFaces(faces: readonly SketchProfile[], outlines: readonly SketchProfile[], root: SketchProfile, rootRing: Ring): WorkbenchResult<ProfileRegion> | undefined {
+  const rings = outlines.map((outline) => ({ outline, ring: ringOf(outline) }));
+  const within = rings.filter((item) => item.outline.id === root.id || (item.ring.area <= rootRing.area * (1 + 1e-9) && relate(rootRing, item.ring).relation === "inside"));
+  const depthOf = new Map<SketchProfile, number>();
+  for (const item of within) {
+    let depth = 0;
+    for (const other of within) if (other !== item && other.ring.area > item.ring.area && relate(other.ring, item.ring).relation === "inside") depth += 1;
+    depthOf.set(item.outline, depth);
+  }
+  const rootDepth = depthOf.get(within.find((item) => item.outline.id === root.id)?.outline ?? root) ?? 0;
+  const solid: ExactPick[] = [];
+  for (const face of faces) {
+    const point = face.interiorPoint;
+    if (point === undefined || point[0] < rootRing.box[0] || point[0] > rootRing.box[2] || point[1] < rootRing.box[1] || point[1] > rootRing.box[3] || !pointInRing(point, rootRing.points)) continue;
+    let deepest = rootDepth;
+    for (const item of within) {
+      if (item.outline.id === root.id || !pointInRing(point, item.ring.points)) continue;
+      deepest = Math.max(deepest, depthOf.get(item.outline) ?? 0);
+    }
+    if ((deepest - rootDepth) % 2 === 0) solid.push({ profile: face, keep: "all" });
+  }
+  if (solid.length === 0) return undefined;
+  return unionRegion(faces, solid, true);
+}
+
+/**
+ * Whether a selection box picks a region: a window box picks regions that lie wholly inside it; a crossing box picks regions it
+ * actually touches (an outline point inside the box, a box corner inside the region, or an edge crossing the box), not merely
+ * regions whose bounding box overlaps it.
+ */
+export function profileInBox(profile: SketchProfile, box: { readonly min: Vec2; readonly max: Vec2 }, mode: "window" | "crossing"): boolean {
+  const ring = ringOf(profile);
+  if (mode === "window") return ring.box[0] >= box.min[0] && ring.box[2] <= box.max[0] && ring.box[1] >= box.min[1] && ring.box[3] <= box.max[1];
+  if (ring.box[0] > box.max[0] || ring.box[2] < box.min[0] || ring.box[1] > box.max[1] || ring.box[3] < box.min[1]) return false;
+  const inside = (point: Vec2): boolean => point[0] >= box.min[0] && point[0] <= box.max[0] && point[1] >= box.min[1] && point[1] <= box.max[1];
+  if (ring.points.some(inside)) return true;
+  const corners: Vec2[] = [[box.min[0], box.min[1]], [box.max[0], box.min[1]], [box.max[0], box.max[1]], [box.min[0], box.max[1]]];
+  const holeRings = (profile.holes ?? []).map((hole) => ringOf(hole));
+  for (const corner of corners) {
+    if (pointInRing(corner, ring.points) && !holeRings.some((hole) => pointInRing(corner, hole.points))) return true;
+  }
+  for (let index = 0; index < ring.points.length; index += 1) {
+    const a = ring.points[index]!;
+    const b = ring.points[(index + 1) % ring.points.length]!;
+    for (let side = 0; side < 4; side += 1) if (segmentsCross(a, b, corners[side]!, corners[(side + 1) % 4]!)) return true;
+  }
+  return false;
 }

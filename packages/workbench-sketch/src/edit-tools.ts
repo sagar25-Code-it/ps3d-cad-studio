@@ -864,10 +864,14 @@ export function checkSketch(sketch: WorkbenchSketch): SketchCheckReport {
   const curves = sketch.entities.filter((entity) => !entity.construction && (entity.kind === "line" || entity.kind === "arc" || entity.kind === "spline"));
   const endOf = (entity: SketchEntity): readonly Vec2[] => (entity.kind === "line" || entity.kind === "arc" ? [entity.start, entity.end] : entity.kind === "spline" ? [entity.fitPoints[0]!, entity.fitPoints[entity.fitPoints.length - 1]!] : []);
   const ends = curves.flatMap((entity) => endOf(entity).map((point) => ({ entity, point })));
+  const junctions = new Set<string>();
   for (const end of ends) {
     const partners = ends.filter((other) => other !== end && distance(other.point, end.point) <= tolerance).length;
     if (partners === 0) items.push({ severity: "warning", message: `Open end at (${format(end.point[0])}, ${format(end.point[1])}) mm on ${shortId(end.entity.id)}; the curve does not close a profile there.`, entityIds: [end.entity.id] });
-    else if (partners > 1) items.push({ severity: "info", message: `More than two curves meet at (${format(end.point[0])}, ${format(end.point[1])}) mm; profiles need exactly two.`, entityIds: [end.entity.id] });
+    else if (partners > 1) {
+      const key = `${format(end.point[0])},${format(end.point[1])}`;
+      if (!junctions.has(key)) { junctions.add(key); items.push({ severity: "info", message: `${partners + 1} curve ends meet at (${format(end.point[0])}, ${format(end.point[1])}) mm; the regions on each side of every curve are separate.`, entityIds: [end.entity.id] }); }
+    }
   }
   for (const entity of sketch.entities) {
     if (entity.kind === "line" && distance(entity.start, entity.end) < 0.1) items.push({ severity: "warning", message: `${shortId(entity.id)} is shorter than 0.1 mm.`, entityIds: [entity.id] });
