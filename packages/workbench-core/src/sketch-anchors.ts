@@ -185,3 +185,28 @@ export function anchorsForDimension(constraint: WorkbenchSketchConstraint, entit
       return [];
   }
 }
+
+/**
+ * The construction circles that carry a line's corners (a regular polygon's guide circle): a Coincident of the line's start or end with the
+ * circle's curve. Resizing such a side scales the whole shape about the circle's centre, because the circle is what holds the polygon regular.
+ */
+export function guideCirclesOf(lineId: string, entities: ReadonlyMap<string, SketchEntity>, constraints: readonly WorkbenchSketchConstraint[]): readonly string[] {
+  const circles = new Set<string>();
+  for (const candidate of constraints) {
+    if (candidate.kind !== "coincident" || candidate.suppressed === true || candidate.points === undefined || !candidate.entityIds.includes(lineId)) continue;
+    candidate.entityIds.forEach((id, index) => {
+      const other = candidate.entityIds[1 - index];
+      const circle = entities.get(id);
+      if (other === lineId && circle?.kind === "circle" && circle.construction && candidate.points?.[index] === "curve") circles.add(id);
+    });
+  }
+  return [...circles];
+}
+
+/** The hints for the solve that follows a direct resize of the dimensioned curve: it keeps its place and its neighbours follow (a regular polygon's side scales the polygon about its centre). */
+export function anchorsAfterResize(target: SketchEntity, entities: ReadonlyMap<string, SketchEntity>, constraints: readonly WorkbenchSketchConstraint[]): readonly LiveAnchor[] {
+  if (target.kind !== "line") return [hold(target.id)];
+  const guides = guideCirclesOf(target.id, entities, constraints);
+  if (guides.length > 0) return guides.map((id) => keep(id, "center", 2));
+  return [hold(target.id), ...joinedRounds(target.id, entities, constraints).map((round) => keep(round, "radius", 1))];
+}
