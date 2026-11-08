@@ -138,7 +138,7 @@ export function anchorsForDimension(constraint: WorkbenchSketchConstraint, entit
       // The second line turns about the end it shares with the first, so the corner they form stays closed.
       const shared = (point: readonly [number, number]): boolean => [a.start, a.end].some((other) => Math.hypot(other[0] - point[0], other[1] - point[1]) <= 1e-6);
       const pivot: "start" | "end" = shared(b.end) && !shared(b.start) ? "end" : "start";
-      return [hold(first!), keep(second!, pivot)];
+      return [hold(first!), keep(second!, pivot, 1)];
     }
     case "arc-length":
       return [keep(first!, "radius"), keep(first!, "start")];

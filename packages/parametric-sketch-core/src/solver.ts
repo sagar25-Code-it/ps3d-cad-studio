@@ -1,3 +1,4 @@
+import { defaultAnchors, defaultPreserve } from "./default-anchors.js";
 import {
   buildSolverModel,
   directPointVariables,
@@ -54,8 +55,10 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
   const tolerance = request.toleranceMm ?? DEFAULT_TOLERANCE_MM;
   const diagnostics: SketchDiagnostic[] = [...validation.diagnostics];
   const labelOf = makeLabeler(request.document, request.labels);
-  const preserveOption = request.preserve === undefined || request.mode === "validate" ? {} : { preserve: new Set(request.preserve) };
-  let model = buildSolverModel(request.document, { ...(request.anchors === undefined ? {} : { anchors: request.anchors }), ...preserveOption });
+  const preserveOption = request.mode === "validate" ? {} : { preserve: new Set(request.preserve ?? defaultPreserve(request.document)) };
+  // Unless the caller says who stays put, the geometry a relation names first is the reference.
+  const anchors = request.mode === "validate" ? [] : request.anchors ?? defaultAnchors(request.document);
+  let model = buildSolverModel(request.document, { anchors, ...preserveOption });
   for (const candidate of model.diagnostics) addUniqueDiagnostic(diagnostics, candidate);
 
   let document = request.document;
@@ -84,7 +87,7 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
       failed = true;
     } else {
       let outcome = solveModel(model, { tolerance }, pointer?.frozen);
-      if (!outcome.ok && pointer === undefined && request.anchors !== undefined && request.anchors.length > 0) {
+      if (!outcome.ok && pointer === undefined && anchors.length > 0) {
         // The geometry the hints wanted to keep still cannot be kept (a Fix elsewhere, or a dimension on it): solve again with nothing preferred.
         const retry = buildSolverModel(request.document, preserveOption);
         const second = solveModel(retry, { tolerance });
@@ -146,8 +149,9 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
     diagnostics,
     dof,
     measurements,
-    appliedConstraintIds: failed ? [] : [...model.appliedConstraints].sort(),
-    appliedDimensionIds: failed ? [] : [...model.appliedDimensions].sort(),
+    // Validation applies nothing; it only reports which relations the stored geometry violates.
+    appliedConstraintIds: failed || request.mode === "validate" ? [] : [...model.appliedConstraints].sort(),
+    appliedDimensionIds: failed || request.mode === "validate" ? [] : [...model.appliedDimensions].sort(),
     deterministicFingerprint: fingerprint(nextDocument)
   };
 }

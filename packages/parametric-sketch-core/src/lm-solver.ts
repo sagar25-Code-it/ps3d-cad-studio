@@ -79,21 +79,30 @@ function maxHard(parts: readonly Part[], residual: Float64Array): number {
   return worst;
 }
 
-/** Central-difference Jacobian of the parts' residuals with respect to the component's active variables. */
-function jacobian(parts: readonly Part[], x: Float64Array, rowCount: number, scratchPlus: Float64Array, scratchMinus: Float64Array): Row[] {
+/**
+ * Five-point (fourth-order) central-difference Jacobian of the parts' residuals with respect to the component's active variables.
+ * The step is wide enough that round-off stays near 1e-12 and the formula is exact for anything polynomial up to degree four, so a
+ * relation that is linear in the coordinates (a joint, a midpoint) has a Jacobian that is exact to round-off.
+ */
+function jacobian(parts: readonly Part[], x: Float64Array, rowCount: number, scratch: readonly Float64Array[]): Row[] {
   const rows: Row[] = Array.from({ length: rowCount }, () => ({ cols: [], vals: [] }));
+  const [plus, minus, plusTwo, minusTwo] = scratch as readonly [Float64Array, Float64Array, Float64Array, Float64Array];
   for (const part of parts) {
     const size = part.equation.size;
     for (const variable of part.active) {
       const original = x[variable]!;
-      const step = 1e-6 * Math.max(1, Math.abs(original));
+      const step = 1e-4 * Math.max(1, Math.abs(original));
       x[variable] = original + step;
-      part.equation.eval(x, scratchPlus, 0);
+      part.equation.eval(x, plus, 0);
       x[variable] = original - step;
-      part.equation.eval(x, scratchMinus, 0);
+      part.equation.eval(x, minus, 0);
+      x[variable] = original + 2 * step;
+      part.equation.eval(x, plusTwo, 0);
+      x[variable] = original - 2 * step;
+      part.equation.eval(x, minusTwo, 0);
       x[variable] = original;
       for (let row = 0; row < size; row += 1) {
-        const derivative = (scratchPlus[row]! - scratchMinus[row]!) / (2 * step);
+        const derivative = (8 * (plus[row]! - minus[row]!) - (plusTwo[row]! - minusTwo[row]!)) / (12 * step);
         if (Number.isFinite(derivative) && Math.abs(derivative) > 1e-13) {
           const target = rows[part.rowStart + row]!;
           target.cols.push(variable);
@@ -201,8 +210,7 @@ function levenbergMarquardt(model: SolverModel, component: Component, frozen: Ui
   const invSqrtWeight = new Float64Array(n);
   variables.forEach((variable, index) => { invSqrtWeight[index] = 1 / Math.sqrt(model.weight[variable]!); });
   const residual = new Float64Array(rowCount);
-  const plus = new Float64Array(8);
-  const minus = new Float64Array(8);
+  const scratch = [new Float64Array(8), new Float64Array(8), new Float64Array(8), new Float64Array(8)];
   // In the soft phase the cost also charges (weighted) displacement from where the phase began.
   const stay = includeSoft ? variables.map((variable) => x[variable]!) : [];
   const stayCost = (): number => {
@@ -222,15 +230,13 @@ function levenbergMarquardt(model: SolverModel, component: Component, frozen: Ui
     const hardNow = maxHard(parts, residual);
     if (!includeSoft && hardNow <= CONVERGED) break;
     if (!Number.isFinite(cost)) break;
-    const rows = jacobian(parts, x, rowCount, plus, minus);
-    const diag = new Float64Array(n);
-    const lower: Map<number, number>[] = Array.from({ length: n }, () => new Map<number, number>());
-    const rhs = new Float64Array(n);
+    const rows = jacobian(parts, x, rowCount, scratch);
+    // Each residual row, with its columns mapped to the component's unknowns and scaled by the weights.
+    const prepared: { readonly columns: Int32Array; readonly scaled: Float64Array; readonly value: number }[] = [];
     for (const part of parts) {
       const factor = part.factor;
       for (let row = 0; row < part.equation.size; row += 1) {
         const entry = rows[part.rowStart + row]!;
-        const value = residual[part.rowStart + row]!;
         const count = entry.cols.length;
         const columns = new Int32Array(count);
         const scaled = new Float64Array(count);
@@ -239,22 +245,51 @@ function levenbergMarquardt(model: SolverModel, component: Component, frozen: Ui
           columns[k] = column;
           scaled[k] = entry.vals[k]! * invSqrtWeight[column]! * factor;
         }
-        for (let a = 0; a < count; a += 1) {
-          const ca = columns[a]!;
-          const va = scaled[a]!;
-          diag[ca] = diag[ca]! + va * va;
-          rhs[ca] = rhs[ca]! - va * value * factor;
+        prepared.push({ columns, scaled, value: residual[part.rowStart + row]! * factor });
+      }
+    }
+    // Hard-only: the least-norm step J'(JJ' + lambda I)^-1 r lies exactly in the row space, so geometry the relations do not touch cannot drift.
+    // With soft terms the unknowns carry their own cost, and the ordinary damped normal equations are used.
+    const dual = !includeSoft;
+    const diag = new Float64Array(dual ? prepared.length : n);
+    const lower: Map<number, number>[] = Array.from({ length: dual ? prepared.length : n }, () => new Map<number, number>());
+    const rhs = new Float64Array(dual ? prepared.length : n);
+    if (dual) {
+      const byColumn: { readonly row: number; readonly value: number }[][] = Array.from({ length: n }, () => []);
+      prepared.forEach((entry, rowIndex) => {
+        rhs[rowIndex] = -entry.value;
+        for (let k = 0; k < entry.columns.length; k += 1) byColumn[entry.columns[k]!]!.push({ row: rowIndex, value: entry.scaled[k]! });
+      });
+      for (const list of byColumn) {
+        for (let a = 0; a < list.length; a += 1) {
+          const left = list[a]!;
+          diag[left.row] = diag[left.row]! + left.value * left.value;
           for (let b = 0; b < a; b += 1) {
-            const cb = columns[b]!;
-            const high = Math.max(ca, cb);
-            const low = Math.min(ca, cb);
+            const right = list[b]!;
+            const high = Math.max(left.row, right.row);
+            const low = Math.min(left.row, right.row);
             const map = lower[high]!;
-            map.set(low, (map.get(low) ?? 0) + va * scaled[b]!);
+            map.set(low, (map.get(low) ?? 0) + left.value * right.value);
           }
         }
       }
-    }
-    if (includeSoft) {
+    } else {
+      for (const entry of prepared) {
+        const count = entry.columns.length;
+        for (let a = 0; a < count; a += 1) {
+          const ca = entry.columns[a]!;
+          const va = entry.scaled[a]!;
+          diag[ca] = diag[ca]! + va * va;
+          rhs[ca] = rhs[ca]! - va * entry.value;
+          for (let b = 0; b < a; b += 1) {
+            const cb = entry.columns[b]!;
+            const high = Math.max(ca, cb);
+            const low = Math.min(ca, cb);
+            const map = lower[high]!;
+            map.set(low, (map.get(low) ?? 0) + va * entry.scaled[b]!);
+          }
+        }
+      }
       for (let index = 0; index < n; index += 1) {
         const scaledGap = (x[variables[index]!]! - stay[index]!) / invSqrtWeight[index]!;
         diag[index] = diag[index]! + STAY_FACTOR;
@@ -265,8 +300,15 @@ function levenbergMarquardt(model: SolverModel, component: Component, frozen: Ui
     const backup = variables.map((variable) => x[variable]!);
     for (let attempt = 0; attempt < 14 && !accepted; attempt += 1) {
       const damped = Float64Array.from(diag);
-      for (let index = 0; index < n; index += 1) damped[index] = damped[index]! + lambda;
-      const step = solveSymmetric(n, damped, lower, rhs);
+      for (let index = 0; index < damped.length; index += 1) damped[index] = damped[index]! + lambda;
+      const solved = solveSymmetric(damped.length, damped, lower, rhs);
+      let step = solved;
+      if (dual && solved !== undefined) {
+        step = new Float64Array(n);
+        prepared.forEach((entry, rowIndex) => {
+          for (let k = 0; k < entry.columns.length; k += 1) step![entry.columns[k]!] = step![entry.columns[k]!]! + entry.scaled[k]! * solved[rowIndex]!;
+        });
+      }
       if (step !== undefined && step.every((value) => Number.isFinite(value))) {
         // A long way off, the angles and sizes are far from linear: take the same direction in shorter steps.
         let shrink = 1;
@@ -345,12 +387,14 @@ export function solveModel(model: SolverModel, options: SolveOptions, frozenOver
       failing.push(...failingReport(model, component.hard, model.x, options.tolerance));
       continue;
     }
+    // Anchored geometry that barely moved goes back to exactly where it was, if the relations still hold with it held there.
+    const held = snapAnchored(model, component, frozen);
     // Keep the shape: pull toward unchanged lengths and radii inside the freedom the hard relations leave.
     if (component.soft.length > 0 || component.goals.length > 0) {
-      for (let cycle = 0; cycle < 4; cycle += 1) {
+      for (let cycle = 0; cycle < 8; cycle += 1) {
         const before = component.variables.map((variable) => model.x[variable]!);
-        const soft = levenbergMarquardt(model, component, frozen, true, 40);
-        const polish = levenbergMarquardt(model, { ...component, soft: [], goals: [] }, frozen, false, MAX_ITERATIONS);
+        const soft = levenbergMarquardt(model, component, held, true, 40);
+        const polish = levenbergMarquardt(model, { ...component, soft: [], goals: [] }, held, false, MAX_ITERATIONS);
         iterations += soft.iterations + polish.iterations;
         if (polish.hard > options.tolerance) {
           // The soft pull wandered off the manifold: go back to the plain answer.
@@ -361,12 +405,15 @@ export function solveModel(model: SolverModel, options: SolveOptions, frozenOver
         if (change <= 1e-12) break;
       }
     }
-    snapAnchored(model, component, frozen);
-    // Numbers that did not move are exactly what they were; the rest are cleaned of round-off.
+    // Numbers that did not move are exactly what they were; the rest are cleaned of round-off, and a value within 5e-11 of a
+    // round number (to a millionth of a millimetre) becomes that number, so 7.99999999999 reads 8.
     component.variables.forEach((variable, index) => {
       const value = model.x[variable]!;
       if (Math.abs(value - snapshot[index]!) <= 1e-13) model.x[variable] = snapshot[index]!;
-      else if (Math.abs(value) < 9e4) model.x[variable] = Math.round(value * 1e11) / 1e11;
+      else if (Math.abs(value) < 9e4) {
+        const clean = Math.round(value * 1e6) / 1e6;
+        model.x[variable] = (Math.abs(value - clean) <= 5e-11 ? clean : Math.round(value * 1e11) / 1e11) + 0;
+      }
     });
     const verify = maxHard(makeParts({ ...component, soft: [], goals: [] }, frozen, false).parts, evaluateRows(component, model.x, frozen));
     if (verify > options.tolerance) failing.push(...failingReport(model, component.hard, model.x, options.tolerance));
@@ -383,10 +430,13 @@ function evaluateRows(component: Component, x: Float64Array, frozen: Uint8Array)
   return residual;
 }
 
-/** Anchored variables that barely moved go back to exactly where they were, if the relations still hold with them held there. */
-function snapAnchored(model: SolverModel, component: Component, frozen: Uint8Array): void {
+/**
+ * Anchored variables that barely moved go back to exactly where they were, if the relations still hold with them held there.
+ * Returns the mask of unknowns that are now constants (the input mask when nothing was snapped).
+ */
+function snapAnchored(model: SolverModel, component: Component, frozen: Uint8Array): Uint8Array {
   const candidates = component.variables.filter((variable) => model.anchored[variable] === 1 && frozen[variable] === 0 && model.x[variable] !== model.x0[variable] && Math.abs(model.x[variable]! - model.x0[variable]!) < 5e-3);
-  if (candidates.length === 0) return;
+  if (candidates.length === 0) return frozen;
   const backup = component.variables.map((variable) => model.x[variable]!);
   const held = Uint8Array.from(frozen);
   for (const variable of candidates) {
@@ -394,5 +444,9 @@ function snapAnchored(model: SolverModel, component: Component, frozen: Uint8Arr
     held[variable] = 1;
   }
   const result = levenbergMarquardt(model, { ...component, soft: [], goals: [] }, held, false, MAX_ITERATIONS);
-  if (result.hard > 1e-9) component.variables.forEach((variable, index) => { model.x[variable] = backup[index]!; });
+  if (result.hard > 1e-9) {
+    component.variables.forEach((variable, index) => { model.x[variable] = backup[index]!; });
+    return frozen;
+  }
+  return held;
 }

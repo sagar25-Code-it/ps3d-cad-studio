@@ -374,7 +374,12 @@ test("parameter edits rebuild driving expressions and constrained drag remains o
   const session = beginDragSolveSession(free, { entityId: "line:drag", selector: "end" }, "drag:horizontal");
   const dragged = updateDragSolveSession(session, [9, 7]);
   const moved = dragged.latestResult.document.geometry[0];
-  if (moved?.kind === "line") assert.deepEqual(moved.end, [9, 0]);
+  // The dragged end is held at the pointer; the Horizontal relation keeps the line level, so the other end follows the pointer's height.
+  if (moved?.kind === "line") {
+    assert.deepEqual(moved.end, [9, 7]);
+    assert.equal(moved.start[1], 7);
+    assert.equal(moved.start[0], 0);
+  }
 });
 
 test("fixed drag and contradictory fixed geometry return conflict diagnostics and DOF state", () => {
