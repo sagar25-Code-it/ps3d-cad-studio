@@ -575,6 +575,7 @@ export const sketchArrangementTests: readonly TestCase[] = [
       const profiles = detect(base);
       const byKind = (kind: string): SketchProfile => profiles.find((profile) => profile.boundary.kind === kind)!;
       equal(profileBaseOf(byKind("circle").id), "profile:c", "a circle keeps the profile:<entity> name, followed by its signature");
+      equal(profileBaseOf(detect(polyline("s", [[0, 0], [10, 0], [10, 10], [0, 10]]))[0]!.id), "profile:loop-578968ff", "a square of four lines keeps exactly the loop hash it always had, so saved features still find it");
       equal(profileBaseOf(byKind("rectangle").id), "profile:rr", "a rectangle too");
       near(byKind("ellipse").areaMm2, Math.PI * 8 * 4, 1e-9, "an ellipse keeps its exact area");
       assert(profiles.some((profile) => /^profile:loop-[0-9a-f]{8}_a/u.test(profile.id)), "a loop of lines keeps the loop-<hash> name");
