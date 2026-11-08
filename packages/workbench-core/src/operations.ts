@@ -1,3 +1,4 @@
+import { isNewPrimitiveShape, NEW_PRIMITIVE_SHAPES, normalizePrimitiveSize, validPrimitiveBody } from "./primitive-bodies.js";
 import type {
   AppliedWorkbenchOperation,
   AssemblyMate,
@@ -375,7 +376,8 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
         || !vec3(input.translationMm, WORKBENCH_LIMITS.maxCoordinateMm) || !vec3(input.rotationDeg, 360)) return invalidOperation("The preview-body transform is invalid.");
       break;
     case "set-part-preview-body-size":
-      if (!keys(input, [...common, "bodyId", "sizeMm"]) || !stableId(input.bodyId) || !partPreviewSize(input.sizeMm)) return invalidOperation("The preview-body size is invalid.");
+      if (!keysWithOptional(input, [...common, "bodyId", "sizeMm"], ["primitiveParams"]) || !stableId(input.bodyId) || !partPreviewSize(input.sizeMm)
+        || (Object.hasOwn(input, "primitiveParams") && !isRecord(input.primitiveParams))) return invalidOperation("The preview-body size is invalid.");
       break;
     case "set-part-preview-body-color":
       if (!keys(input, [...common, "bodyId", "color"]) || !stableId(input.bodyId) || typeof input.color !== "string" || !COLOR_PATTERN.test(input.color)) return invalidOperation("The preview-body color is invalid.");
@@ -850,9 +852,12 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       if (target === undefined) return broken(operation.bodyId, "The preview body does not exist.");
       const resized = normalizePartPreviewSize(target.shape, operation.sizeMm);
       if (resized === undefined) return invalidOperation(`The ${target.shape} size tuple is invalid.`);
+      const nextParams = operation.primitiveParams ?? target.primitiveParams;
+      const resizedBody: PartPreviewBody = { ...target, sizeMm: resized, ...(nextParams === undefined ? {} : { primitiveParams: nextParams }) };
+      if (!validPrimitiveBody(resizedBody)) return invalidOperation(`The ${target.shape} parameters are invalid.`);
       return changed({
         ...project,
-        part: { ...project.part, previewBodies: currentBodies.map((body) => body.id === target.id ? { ...body, sizeMm: resized } : body) }
+        part: { ...project.part, previewBodies: currentBodies.map((body) => body.id === target.id ? resizedBody : body) }
       }, [target.id], `Resized ${target.name} to ${resized.map(formatNumber).join(" × ")} mm.`);
     }
     case "set-part-preview-body-color": {
@@ -1369,6 +1374,11 @@ function keys(value: Record<string, unknown>, expected: readonly string[]): bool
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
 }
 
+function keysWithOptional(value: Record<string, unknown>, required: readonly string[], optional: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return required.every((key) => actual.includes(key)) && actual.every((key) => required.includes(key) || optional.includes(key));
+}
+
 function stableId(value: unknown): value is string {
   return typeof value === "string" && value.length <= 128 && ID_PATTERN.test(value);
 }
@@ -1411,11 +1421,11 @@ function partPreviewSize(value: unknown): value is readonly [number, number, num
 
 function validPartPreviewBodyPayload(value: unknown): value is PartPreviewBody {
   const required = ["id", "name", "shape", "visible", "color", "translationMm", "rotationDeg", "sizeMm"];
-  const optional = ["boreDiameterMm", "edgeTreatment", "shellThicknessMm", "draftAngleDeg", "revolveAngleDeg", "featureTrace"];
+  const optional = ["boreDiameterMm", "edgeTreatment", "shellThicknessMm", "draftAngleDeg", "revolveAngleDeg", "featureTrace", "primitiveParams"];
   if (!isRecord(value)
     || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || !stableId(value.id) || !shortText(value.name, 1, 120)
-    || !["block", "cylinder", "cone", "sphere", "torus", "revolved"].includes(String(value.shape))
+    || !["block", "cylinder", "cone", "sphere", "torus", "revolved", ...NEW_PRIMITIVE_SHAPES].includes(String(value.shape))
     || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)
     || !vec3(value.translationMm, WORKBENCH_LIMITS.maxCoordinateMm) || !vec3(value.rotationDeg, 360)
     || !partPreviewSize(value.sizeMm)) return false;
@@ -1429,6 +1439,7 @@ function validPartPreviewBodyPayload(value: unknown): value is PartPreviewBody {
   if (Object.hasOwn(value, "draftAngleDeg") && !finiteRange(value.draftAngleDeg, 0.001, 20)) return false;
   if (Object.hasOwn(value, "edgeTreatment") && !validPartEdgeTreatment(value.edgeTreatment)) return false;
   if (Object.hasOwn(value, "featureTrace") && !validPartFeatureTrace(value.featureTrace)) return false;
+  if (!validPrimitiveBody(value as unknown as PartPreviewBody)) return false;
   return validatePartFeatureStack(value as unknown as PartPreviewBody).ok;
 }
 
@@ -1560,6 +1571,7 @@ function normalizePartPreviewSize(shape: PartPreviewBody["shape"], size: readonl
   if (!partPreviewSize(size)) return undefined;
   if (shape === "cylinder") return [size[0], size[0], size[2]];
   if (shape === "sphere") return [size[0], size[0], size[0]];
+  if (isNewPrimitiveShape(shape)) return normalizePrimitiveSize(shape, size);
   if (shape === "cone" && size[0] <= 0 && size[1] <= 0) return undefined;
   if (shape === "revolved" && (size[1] <= 0 || size[1] >= size[0])) return undefined;
   return [size[0], size[1], size[2]];

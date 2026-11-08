@@ -52,8 +52,11 @@ import {
   type SketchPlaneTilt,
   type WorkbenchSketchConstraint,
   type Vec3,
-  type WorkspaceId
+  type WorkspaceId,
+  defaultPrimitive,
+  isNewPrimitiveShape
 } from "../../../packages/workbench-core/src/index.js";
+import { newPrimitiveMesh } from "../../../packages/workbench-geometry/src/primitive-bodies.js";
 import { flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, nearestPickableEdge, pickableEdges, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
 import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
@@ -842,6 +845,7 @@ export function App(): React.JSX.Element {
     const current = projectRef.current;
     const ordinal = (current.part.previewBodies?.length ?? 0) + 1;
     const sizeMm = defaultPartPreviewSize(shape);
+    const primitiveParams = isNewPrimitiveShape(shape) ? defaultPrimitive(shape).primitiveParams : undefined;
     const body: PartPreviewBody = {
       id: `part-body:user-${crypto.randomUUID()}`,
       name: `${partPreviewShapeLabel(shape)} ${ordinal}`,
@@ -850,7 +854,8 @@ export function App(): React.JSX.Element {
       color: partPreviewColor(shape),
       translationMm: [current.part.widthMm / 2 + 28 + ((ordinal - 1) % 4) * 38, (Math.floor((ordinal - 1) / 4) - 0.5) * 34, sizeMm[2] / 2],
       rotationDeg: [0, 0, 0],
-      sizeMm
+      sizeMm,
+      ...(primitiveParams === undefined ? {} : { primitiveParams })
     };
     if (applyProjectOperation({ kind: "add-part-preview-bodies", bodies: [body] })) setSelectedId(body.id);
   };
@@ -1679,17 +1684,20 @@ export function App(): React.JSX.Element {
   };
 
   const createComponentFromPartBody = (body: PartPreviewBody): void => {
+    // The newer primitives have no component shape of their own, so they travel as a mesh snapshot in the body's local frame.
+    const primitiveMesh = newPrimitiveMesh(body);
     const component: ComponentInstance = {
       id: `component:part-body-${crypto.randomUUID()}`,
       name: `${body.name} · component`,
-      shape: body.shape === "block" ? "box" : body.shape === "revolved" ? "ring" : body.shape,
+      shape: primitiveMesh !== undefined ? "mesh" : body.shape === "block" ? "box" : body.shape === "revolved" ? "ring" : (body.shape as Exclude<PartPreviewBody["shape"], "revolved" | "block" | "ellipsoid" | "prism" | "wedge" | "spiral" | "tube">),
       grounded: false,
       visible: true,
       color: body.color,
       translationMm: body.translationMm,
       rotationDeg: body.rotationDeg,
       sizeMm: body.sizeMm,
-      explosionDirection: [0.2, -0.14, 0.62]
+      explosionDirection: [0.2, -0.14, 0.62],
+      ...(primitiveMesh === undefined ? {} : { mesh: { positionsMm: primitiveMesh.positions, indices: primitiveMesh.indices } })
     };
     if (!applyProjectOperation({ kind: "add-assembly-component", component })) return;
     switchWorkspace("assembly");
@@ -3431,7 +3439,7 @@ export function App(): React.JSX.Element {
         {quickMeasure !== undefined && <div className="quick-measure-bar" role="status" aria-live="polite" aria-label="Quick measure"><span className="quick-measure-title">{quickMeasure.title}</span>{quickMeasure.metrics.map((metric, index) => <span key={index}>{metric}</span>)}</div>}
       </section>}
       {!masterCartOpen && <>
-      {project.activeWorkspace === "part" && activeImport === undefined && <PartInspector onGeneralBodyToAssembly={createComponentFromGeneralBody} onGeneralBodyVisibility={(bodyId) => { applyProjectOperation({ kind: "toggle-general-body-visibility", bodyId }); }} onGeneralBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-general-body", bodyId })) setSelectedId(null); }} design={designOf(project)} onEditFeature={editTimelineFeature} part={project.part} model={model} working={status === "working"} bodyColor={viewportState.bodyColor} shadingMode={viewportState.shadingMode} selectedId={selectedId} selectedFace={selectedFace !== null && selectedFace.bodyId === selectedId ? selectedFace.faceIndex : null} onSelectFace={(bodyId, faceIndex) => setSelectedFace(faceIndex === null ? null : { bodyId, faceIndex })} onSelect={setSelectedId} onBodyColor={(color) => viewportRef.current?.setBodyColor(color)} onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)} onCommit={(parameter, value) => void commitPartParameter(parameter, value)} onInsertIntoAssembly={insertCurrentPartIntoAssembly} onCreatePreviewBody={createPartPreviewBody} onPreviewBodyTransform={(bodyId, translationMm, rotationDeg) => applyProjectOperation({ kind: "set-part-preview-body-transform", bodyId, translationMm, rotationDeg })} onPreviewBodySize={(bodyId, sizeMm) => applyProjectOperation({ kind: "set-part-preview-body-size", bodyId, sizeMm })} onPreviewBodyColor={(bodyId, color) => applyProjectOperation({ kind: "set-part-preview-body-color", bodyId, color })} onPreviewBodyVisibility={(bodyId) => applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId })} onPreviewBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId })) setSelectedId(null); }} />}
+      {project.activeWorkspace === "part" && activeImport === undefined && <PartInspector onGeneralBodyToAssembly={createComponentFromGeneralBody} onGeneralBodyVisibility={(bodyId) => { applyProjectOperation({ kind: "toggle-general-body-visibility", bodyId }); }} onGeneralBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-general-body", bodyId })) setSelectedId(null); }} design={designOf(project)} onEditFeature={editTimelineFeature} part={project.part} model={model} working={status === "working"} bodyColor={viewportState.bodyColor} shadingMode={viewportState.shadingMode} selectedId={selectedId} selectedFace={selectedFace !== null && selectedFace.bodyId === selectedId ? selectedFace.faceIndex : null} onSelectFace={(bodyId, faceIndex) => setSelectedFace(faceIndex === null ? null : { bodyId, faceIndex })} onSelect={setSelectedId} onBodyColor={(color) => viewportRef.current?.setBodyColor(color)} onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)} onCommit={(parameter, value) => void commitPartParameter(parameter, value)} onInsertIntoAssembly={insertCurrentPartIntoAssembly} onCreatePreviewBody={createPartPreviewBody} onPreviewBodyTransform={(bodyId, translationMm, rotationDeg) => applyProjectOperation({ kind: "set-part-preview-body-transform", bodyId, translationMm, rotationDeg })} onPreviewBodySize={(bodyId, sizeMm, primitiveParams) => applyProjectOperation({ kind: "set-part-preview-body-size", bodyId, sizeMm, ...(primitiveParams === undefined ? {} : { primitiveParams }) })} onPreviewBodyColor={(bodyId, color) => applyProjectOperation({ kind: "set-part-preview-body-color", bodyId, color })} onPreviewBodyVisibility={(bodyId) => applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId })} onPreviewBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId })) setSelectedId(null); }} />}
       {project.activeWorkspace === "part" && activeImport !== undefined && <ImportedModelInspector result={activeImport} onExchange={() => setExchangeOpen(true)} onClear={clearActiveImport} />}
       {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={displayedAssembly} maxExplodeMm={assemblyExplodeMaxMm} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplodePreview={previewAssemblyExplode} onExplodeCommit={commitAssemblyExplode} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onAddMate={(mate) => applyProjectOperation({ kind: "add-assembly-mate", mate })} onSolveMates={() => applyProjectOperation({ kind: "solve-assembly-mates" })} onDeleteMate={(mateId) => { if (applyProjectOperation({ kind: "delete-assembly-mate", mateId }) && selectedId === mateId) setSelectedId(null); }} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
       {project.activeWorkspace === "surface" && <SurfaceInspector surface={project.surface} metrics={surfacePreview.metrics} onParameter={(parameter, value) => applyProjectOperation({ kind: "set-surface-parameter", parameter, value })} />}
@@ -3516,6 +3524,7 @@ function ViewportMetrics(props: { readonly workspace: WorkspaceId; readonly mode
 }
 
 function defaultPartPreviewSize(shape: PartPreviewBodyShape): Vec3 {
+  if (isNewPrimitiveShape(shape)) return defaultPrimitive(shape).sizeMm;
   if (shape === "block") return [36, 28, 20];
   if (shape === "sphere") return [26, 26, 26];
   if (shape === "cone") return [28, 14, 34];
@@ -3525,6 +3534,7 @@ function defaultPartPreviewSize(shape: PartPreviewBodyShape): Vec3 {
 }
 
 function partPreviewShapeLabel(shape: PartPreviewBodyShape): string {
+  if (isNewPrimitiveShape(shape)) return shape.charAt(0).toUpperCase() + shape.slice(1);
   if (shape === "block") return "Block";
   if (shape === "cylinder") return "Cylinder";
   if (shape === "cone") return "Cone";
@@ -3552,7 +3562,7 @@ function clonePartPreviewBody(body: PartPreviewBody, suffix: string, deltaMm: Ve
 
 function orientedPreviewEnvelope(body: PartPreviewBody): Vec3 {
   if (body.shape === "sphere") return body.sizeMm;
-  const half: Vec3 = body.shape === "block"
+  const half: Vec3 = body.shape === "block" || body.shape === "ellipsoid" || body.shape === "wedge"
     ? [body.sizeMm[0] / 2, body.sizeMm[1] / 2, body.sizeMm[2] / 2]
     : [body.sizeMm[0] / 2, body.sizeMm[0] / 2, body.sizeMm[2] / 2];
   const rx = body.rotationDeg[0] * Math.PI / 180;

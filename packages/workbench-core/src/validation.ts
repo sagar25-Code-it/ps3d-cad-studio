@@ -1,3 +1,4 @@
+import { NEW_PRIMITIVE_SHAPES, validPrimitiveBody } from "./primitive-bodies.js";
 import {
   WORKBENCH_FORMAT,
   WORKBENCH_SCHEMA_VERSION,
@@ -486,10 +487,10 @@ function validateConstructionUcs(value: unknown): value is import("./types.js").
 
 function validatePartPreviewBody(value: unknown): value is PartPreviewBody {
   const required = ["id", "name", "shape", "visible", "color", "translationMm", "rotationDeg", "sizeMm"];
-  const optional = ["boreDiameterMm", "edgeTreatment", "shellThicknessMm", "draftAngleDeg", "revolveAngleDeg", "featureTrace"];
+  const optional = ["boreDiameterMm", "edgeTreatment", "shellThicknessMm", "draftAngleDeg", "revolveAngleDeg", "featureTrace", "primitiveParams"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || !stableId(value.id) || !shortText(value.name, 1, 120)
-    || !["block", "cylinder", "cone", "sphere", "torus", "revolved"].includes(String(value.shape))
+    || !["block", "cylinder", "cone", "sphere", "torus", "revolved", ...NEW_PRIMITIVE_SHAPES].includes(String(value.shape))
     || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)
     || !vec3(value.translationMm) || !vec3(value.rotationDeg, 360)
     || !Array.isArray(value.sizeMm) || value.sizeMm.length !== 3
@@ -510,6 +511,7 @@ function validatePartPreviewBody(value: unknown): value is PartPreviewBody {
     || !["primitive", "revolve", "pattern", "mirror", "unite", "subtract", "trim", "face-edit", "edge-treatment", "draft", "shell", "heal"].includes(String(value.featureTrace.kind))
     || !stableId(value.featureTrace.operationId) || !Array.isArray(value.featureTrace.parentIds) || value.featureTrace.parentIds.length < 1 || value.featureTrace.parentIds.length > 8
     || value.featureTrace.parentIds.some((id) => !stableId(id)))) return false;
+  if (!validPrimitiveBody(value as unknown as PartPreviewBody)) return false;
   return validatePartFeatureStack(value as unknown as PartPreviewBody).ok;
 }
 

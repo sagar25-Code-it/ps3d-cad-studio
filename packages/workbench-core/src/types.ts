@@ -284,7 +284,15 @@ export interface PartIntent {
   readonly constructionUcses?: readonly ConstructionUcs[];
 }
 
-export type PartPreviewBodyShape = "block" | "cylinder" | "cone" | "sphere" | "torus";
+export type PartPreviewBodyShape = "block" | "cylinder" | "cone" | "sphere" | "torus" | "ellipsoid" | "prism" | "wedge" | "spiral" | "tube";
+
+/** Count-like inputs of the newer primitives that are not lengths; see primitive-bodies.ts for the full sizeMm encoding. */
+export interface PartPrimitiveParams {
+  /** Prism: number of flat sides, 3 to 64. */
+  readonly sides?: number;
+  /** Spiral: number of turns, 0.5 to 20. */
+  readonly turns?: number;
+}
 
 /**
  * A user-authored datum plane in the Part workspace. These sit alongside the
@@ -416,6 +424,8 @@ export interface PartPreviewBody {
   readonly draftAngleDeg?: number;
   /** Sweep angle for a revolved annular rectangular profile. */
   readonly revolveAngleDeg?: number;
+  /** Prism side count / spiral turn count; present exactly for those two shapes. */
+  readonly primitiveParams?: PartPrimitiveParams;
   /** Stable trace used by feature history, Update Model, and MCP inspection. */
   readonly featureTrace?: PartBodyFeatureTrace;
 }
@@ -1320,7 +1330,7 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly body: GeneralSolidBody;
     }
   | { readonly kind: "set-part-preview-body-transform"; readonly bodyId: string; readonly translationMm: Vec3; readonly rotationDeg: Vec3 }
-  | { readonly kind: "set-part-preview-body-size"; readonly bodyId: string; readonly sizeMm: Vec3 }
+  | { readonly kind: "set-part-preview-body-size"; readonly bodyId: string; readonly sizeMm: Vec3; readonly primitiveParams?: PartPrimitiveParams }
   | { readonly kind: "set-part-preview-body-color"; readonly bodyId: string; readonly color: string }
   | { readonly kind: "toggle-part-preview-body-visibility"; readonly bodyId: string }
   | { readonly kind: "isolate-part-preview-body"; readonly bodyId: string }

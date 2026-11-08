@@ -191,6 +191,11 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="cone" label="Cone" hint="preview body" onClick={() => props.onCreatePartPreviewBody("cone")} />
         <RibbonButton icon="sphere" label="Sphere" hint="preview body" onClick={() => props.onCreatePartPreviewBody("sphere")} />
         <RibbonButton icon="torus" label="Torus" hint="preview body" onClick={() => props.onCreatePartPreviewBody("torus")} />
+        <RibbonButton icon="ellipsoid" label="Ellipsoid" hint="three axes" onClick={() => props.onCreatePartPreviewBody("ellipsoid")} />
+        <RibbonButton icon="prism" label="Prism" hint="n sides" onClick={() => props.onCreatePartPreviewBody("prism")} />
+        <RibbonButton icon="wedge" label="Wedge" hint="sloped" onClick={() => props.onCreatePartPreviewBody("wedge")} />
+        <RibbonButton icon="spiral" label="Spiral" hint="flat ribbon" onClick={() => props.onCreatePartPreviewBody("spiral")} />
+        <RibbonButton icon="tube" label="Tube" hint="hollow" onClick={() => props.onCreatePartPreviewBody("tube")} />
       </RibbonGroup>
       <RibbonGroup label="Direct body edit">
         <RibbonButton icon="move" label="Move" hint="XYZ / rotate" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-transform", "Move Body")} />

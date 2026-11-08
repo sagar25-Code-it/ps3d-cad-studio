@@ -1,6 +1,7 @@
 import type { ConstructionAxis, ConstructionPlane, ConstructionPoint, PartIntent, PartPreviewBody, Vec3 } from "../../workbench-core/src/index.js";
 import { boundsFromPoints } from "./assembly.js";
 import { constructionPlaneCorners, evaluateConstructionAxis, evaluateConstructionPlane, evaluateConstructionPoint } from "./construction-geometry.js";
+import { newPrimitiveMesh } from "./primitive-bodies.js";
 import type { PreviewPrimitive, PreviewScene } from "./types.js";
 
 const RADIAL_SEGMENTS = 64;
@@ -191,6 +192,8 @@ function partPreviewPrimitive(body: PartPreviewBody): PreviewPrimitive {
 }
 
 function analyticBodyMesh(body: PartPreviewBody): TriangleMesh | undefined {
+  const primitive = newPrimitiveMesh(body);
+  if (primitive !== undefined) return primitive;
   if (body.shape === "torus") return torusMesh(body.sizeMm[0] / 2, body.sizeMm[2] / 2);
   if (body.shape === "revolved") return annularSectorMesh(body.sizeMm[0], body.sizeMm[1], body.sizeMm[2], body.revolveAngleDeg ?? 360);
   if (body.boreDiameterMm !== undefined && body.shape === "block") return boredBlockMesh(body.sizeMm[0], body.sizeMm[1], body.sizeMm[2], body.boreDiameterMm);
@@ -435,7 +438,7 @@ function previewBodyBounds(body: PartPreviewBody): readonly Vec3[] {
       [body.translationMm[0] + radius, body.translationMm[1] + radius, body.translationMm[2] + radius]
     ];
   }
-  const localHalf: Vec3 = body.shape === "block"
+  const localHalf: Vec3 = body.shape === "block" || body.shape === "ellipsoid" || body.shape === "wedge"
     ? [body.sizeMm[0] / 2, body.sizeMm[1] / 2, body.sizeMm[2] / 2]
     : [Math.max(body.sizeMm[0], body.sizeMm[1]) / 2, Math.max(body.sizeMm[0], body.sizeMm[1]) / 2, body.sizeMm[2] / 2];
   const half = rotatedHalfExtents(localHalf, body.rotationDeg);
