@@ -103,6 +103,25 @@ const SKETCH_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; r
   { id: "arc-tangent", icon: "arc", label: "Tangent arc", key: "A3" }
 ];
 
+/** The extra sketch curve tools, grouped under "More curves" (their geometry lives in packages/workbench-sketch/src/curve-tools.ts). */
+const CURVE_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; readonly label: string; readonly hint: string }[] = [
+  { id: "line-midpoint", icon: "line", label: "Midpoint line", hint: "centre + end" },
+  { id: "centerline", icon: "construction", label: "Centerline", hint: "long axis" },
+  { id: "parallelogram", icon: "rectangle", label: "Parallelogram", hint: "3 corners" },
+  { id: "rectangle-rounded", icon: "rectangle", label: "Rounded rectangle", hint: "corner radius" },
+  { id: "slot-arc-three-point", icon: "slot", label: "3-pt arc slot", hint: "arc + width" },
+  { id: "slot-arc-center", icon: "slot", label: "Centre arc slot", hint: "bend + width" },
+  { id: "spline-control", icon: "spline", label: "Control spline", hint: "control polygon" },
+  { id: "parabola", icon: "arc", label: "Parabola", hint: "ends + apex" },
+  { id: "hyperbola", icon: "arc", label: "Hyperbola", hint: "centre + vertex" },
+  { id: "conic", icon: "arc", label: "Conic (rho)", hint: "ends + apex" },
+  { id: "conic-five", icon: "ellipse", label: "Conic (5 pts)", hint: "five points" },
+  { id: "blend", icon: "spline", label: "Blend curve", hint: "two curve ends" },
+  { id: "profile", icon: "line", label: "Profile", hint: "lines + arcs" },
+  { id: "text", icon: "text", label: "Text", hint: "stroke font" },
+  { id: "block", icon: "copy", label: "Insert block", hint: "saved group" }
+];
+
 const PART_FEATURES = [
   { id: "feature:plate-extrusion", icon: "extrude", label: "Extrude", level: "qualified" },
   { id: "feature:centered-through-hole", icon: "bore", label: "Bore", level: "qualified" }
@@ -144,6 +163,9 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="slot" label="Straight slot" hint="ends + width" active={props.sketchTool === "slot-straight"} onClick={() => props.onSketchTool("slot-straight")} />
         <RibbonButton icon="spline" label="Spline" hint="fit points" active={props.sketchTool === "spline"} onClick={() => props.onSketchTool("spline")} />
         <RibbonButton icon="insert" label="Point" hint="reference" active={props.sketchTool === "point"} onClick={() => props.onSketchTool("point")} />
+      </RibbonGroup>
+      <RibbonGroup label="More curves">
+        {CURVE_TOOLS.map((tool) => <RibbonButton key={tool.id} icon={tool.icon} label={tool.label} hint={tool.hint} active={props.sketchTool === tool.id} onClick={() => props.onSketchTool(tool.id)} />)}
       </RibbonGroup>
       <RibbonGroup label="Sketch session">
         <RibbonButton icon="save" label="Finish Sketch" hint="to timeline" onClick={props.onFinishSketch} />
