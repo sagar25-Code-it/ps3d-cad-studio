@@ -31,6 +31,7 @@ import {
   baseFeatureOf,
   isFeatureActive,
   designOf,
+  edgeBlendTitle,
   type ComponentInstance,
   type DesignFeature,
   type DesignSolidFeature,
@@ -54,7 +55,7 @@ import {
   type Vec3,
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
-import { flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, nearestPickableEdge, pickableEdges, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
+import { describePickedEdge, flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, nearestPickableEdge, pickableEdges, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
 import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
@@ -74,6 +75,7 @@ import {
 } from "../../../packages/exchange-3d/src/index.js";
 import { detectSketchProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
+import { facesOfBody, parseBlendSizes } from "./edge-blend-step.js";
 import { flatPatternForBody, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
@@ -1412,10 +1414,10 @@ export function App(): React.JSX.Element {
     const selected = bodies.find((candidate) => candidate.id === selectedId);
     const name = modifierLabelOf(modifier);
     if (selected === undefined) { setStatus("ready"); setStatusText(`${name} needs a general solid body selected first.`); return; }
-    const edgesOf = (target: GeneralSolidBody): ReturnType<typeof pickableEdges> => pickableEdges({ positionsMm: target.positionsMm, indices: target.indices });
+    const edgesOf = (target: GeneralSolidBody): ReturnType<typeof pickableEdges> => pickableEdges({ positionsMm: target.positionsMm, indices: target.indices }, 5, { includeConcave: true });
     const edges = edgesOf(selected);
     if (typeof edges === "string") { setStatus("ready"); setStatusText(`${name}: ${edges}`); return; }
-    if (edges.length === 0) { setStatus("ready"); setStatusText(`${name}: ${selected.name} has no sharp convex edge to pick.`); return; }
+    if (edges.length === 0) { setStatus("ready"); setStatusText(`${name}: ${selected.name} has no sharp edge to pick.`); return; }
     const guides: ViewportGuideSegment[] = edges.map((edge) => [edge.a, edge.b]);
     const runs = new Set(edges.map((edge) => edge.chain)).size;
     const picked = await requestViewportPick(`${name}: click an edge of ${selected.name} (${runs} ${runs === 1 ? "edge" : "edges"} outlined)`, guides);
@@ -1424,22 +1426,45 @@ export function App(): React.JSX.Element {
     const bodyEdges = body === selected ? edges : edgesOf(body);
     if (typeof bodyEdges === "string") { setStatus("ready"); setStatusText(`${name}: ${bodyEdges}`); return; }
     const nearest = nearestPickableEdge(bodyEdges, picked.pointMm);
-    if (nearest === undefined) { setStatus("ready"); setStatusText(`${name}: ${body.name} has no sharp convex edge to pick.`); return; }
+    if (nearest === undefined) { setStatus("ready"); setStatusText(`${name}: ${body.name} has no sharp edge to pick.`); return; }
     const chainIndexes = bodyEdges.flatMap((edge, index) => edge.chain === nearest.edge.chain ? [index] : []);
     const viewport = viewportRef.current;
     viewport?.setGuideSegments(bodyEdges.map((edge) => [edge.a, edge.b] as ViewportGuideSegment), chainIndexes);
     const clearHighlight = (): void => viewport?.setGuideSegments([]);
     window.setTimeout(clearHighlight, 4000);
     const pieces = nearest.chain.length;
-    const where = `${pieces === 1 ? `a ${Math.hypot(nearest.edge.b[0] - nearest.edge.a[0], nearest.edge.b[1] - nearest.edge.a[1], nearest.edge.b[2] - nearest.edge.a[2]).toFixed(1)} mm edge` : `a run of ${pieces} edges`} of ${body.name}, ${nearest.distanceMm.toFixed(1)} mm from your click`;
+    const inside = nearest.edge.concave === true;
+    const where = `${inside ? "an inside corner, " : ""}${pieces === 1 ? `a ${Math.hypot(nearest.edge.b[0] - nearest.edge.a[0], nearest.edge.b[1] - nearest.edge.a[1], nearest.edge.b[2] - nearest.edge.a[2]).toFixed(1)} mm edge` : `a run of ${pieces} edges`} of ${body.name}, ${nearest.distanceMm.toFixed(1)} mm from your click`;
     setStatusText(`${name}: picked ${where}.`);
-    const raw = typeof window === "undefined" ? "2" : window.prompt(modifier === "fillet" ? "Fillet radius (mm):" : "Chamfer distance (mm):", "2");
-    if (raw === null) { clearHighlight(); return; }
-    const value = Number.parseFloat(raw);
-    if (!Number.isFinite(value) || value <= 0) { clearHighlight(); setStatus("ready"); setStatusText(`${name}: enter a positive number in millimetres.`); return; }
+    const sizeText = typeof window === "undefined" ? "2" : window.prompt(modifier === "fillet" ? "Fillet radius in mm (2), or a radius that changes along the edge (1-4):" : "Chamfer distance in mm (3), two distances (5x2), or a distance and an angle with the first face (4@30):", "2");
+    if (sizeText === null) { clearHighlight(); return; }
+    const sizes = parseBlendSizes(modifier, sizeText);
+    if (!sizes.ok) { clearHighlight(); setStatus("ready"); setStatusText(`${name}: ${sizes.message}`); return; }
+    // The picked run is remembered with the faces beside it, so a timeline step can find the same edge again after the model is rebuilt.
+    const group = describePickedEdge(nearest.chain, facesOfBody(body));
+    const base = baseFeatureOf(designOf(projectRef.current), body.id);
+    if (base !== undefined) {
+      const draft: DesignSolidFeature = {
+        id: `feature:edge-blend-${crypto.randomUUID()}`, name: modifier === "fillet" ? "Fillet" : "Chamfer", kind: "edge-blend", suppressed: false,
+        sketchFeatureId: base.sketchFeatureId, profileIds: [], valueMm: sizes.valueMm, bodyId: body.id, operation: "direct-edit",
+        blendType: modifier, blendEdges: [group],
+        ...(sizes.endSizeMm === undefined ? {} : { blendEndSizeMm: sizes.endSizeMm }),
+        ...(sizes.secondSizeMm === undefined ? {} : { blendSecondSizeMm: sizes.secondSizeMm }),
+        ...(sizes.angleDeg === undefined ? {} : { blendAngleDeg: sizes.angleDeg })
+      };
+      const feature: DesignSolidFeature = { ...draft, name: edgeBlendTitle(draft) };
+      clearHighlight();
+      const added = await commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id);
+      if (added) { setSelectedId(body.id); setStatusText(`Added ${feature.name} to ${body.name}: ${where}. It is a timeline step, so you can edit it, suppress it or roll back past it.`); }
+      return;
+    }
+    // A body with no timeline step of its own (for example one made by Combine) is treated in one go, as before.
+    const value = sizes.valueMm;
     const input = { positionsMm: body.positionsMm, indices: body.indices };
-    const onlyEdges = nearest.chain.map((edge) => [edge.a, edge.b] as const);
-    const result = modifier === "fillet" ? meshFillet(input, { sizeMm: value, onlyEdges }) : meshChamfer(input, { sizeMm: value, onlyEdges });
+    const onlyEdges = group.segments;
+    const result = modifier === "fillet"
+      ? meshFillet(input, { sizeMm: value, onlyEdges, ...(inside ? { concave: true } : {}), ...(sizes.endSizeMm === undefined ? {} : { endSizeMm: sizes.endSizeMm }) })
+      : meshChamfer(input, { sizeMm: value, onlyEdges, ...(inside ? { concave: true } : {}), ...(sizes.secondSizeMm === undefined ? {} : { secondSizeMm: sizes.secondSizeMm }), ...(sizes.angleDeg === undefined ? {} : { angleDeg: sizes.angleDeg }) });
     clearHighlight();
     if (!result.ok) { setStatus("ready"); setStatusText(`${name} failed: ${result.message}`); return; }
     const label = modifier === "fillet" ? `Fillet R ${value} mm (picked edge)` : `Chamfer ${value} mm (picked edge)`;

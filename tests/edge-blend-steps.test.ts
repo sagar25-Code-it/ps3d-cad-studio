@@ -3,7 +3,7 @@ import { applyWorkbenchOperation, createWorkbenchProject, designOf, validateWork
 import { solidMetrics } from "../packages/workbench-core/src/solid-metrics.js";
 import { describePickedEdge, nearestPickableEdge, pickableEdges } from "../packages/workbench-geometry/src/index.js";
 import { applyParameterValues, parameterFieldsOf } from "../apps/studio-web/src/feature-parameters.js";
-import { blendBodyEdges, facesOfBody } from "../apps/studio-web/src/edge-blend-step.js";
+import { blendBodyEdges, facesOfBody, parseBlendSizes } from "../apps/studio-web/src/edge-blend-step.js";
 import { rebuildSolidFeature, replayAllBodies } from "../apps/studio-web/src/design-regeneration.js";
 import { assert, near, type TestCase } from "./test-kit.js";
 import { isClosedAndOriented } from "./relief-pick-hole-drag.test.js";
@@ -277,6 +277,31 @@ export const edgeBlendStepTests: readonly TestCase[] = [
       // A step whose edges are not on the body at all is reported, never applied to something else.
       const lost = await blendBodyEdges({ ...step, blendEdges: [{ segments: [[[500, 500, 500], [510, 500, 500]]] }] }, bodyOf(base));
       assert(!lost.ok && /no longer exists/.test(lost.message), `a lost edge is reported: ${lost.ok ? "" : lost.message}`);
+    }
+  }
+,
+  {
+    name: "The size typed into the Fillet and Chamfer prompts is read as a radius, a changing radius, two distances or a distance and an angle, and a size too big for the faces is reported by the replay",
+    run: async () => {
+      const read = (type: "fillet" | "chamfer", text: string): string => { const sizes = parseBlendSizes(type, text); return sizes.ok ? JSON.stringify(sizes) : "refused"; };
+      assert(read("fillet", "2") === '{"ok":true,"valueMm":2}', "a plain radius");
+      assert(read("fillet", " 2.5 mm ") === '{"ok":true,"valueMm":2.5}', "units and spaces are ignored");
+      assert(read("fillet", "1-4") === '{"ok":true,"valueMm":1,"endSizeMm":4}', "a radius that changes along the edge");
+      assert(read("fillet", "3 to 3") === '{"ok":true,"valueMm":3}', "the same radius at both ends is a constant fillet");
+      assert(read("chamfer", "3") === '{"ok":true,"valueMm":3}', "a plain distance");
+      assert(read("chamfer", "5x2") === '{"ok":true,"valueMm":5,"secondSizeMm":2}', "two distances");
+      assert(read("chamfer", "4 @ 30°") === '{"ok":true,"valueMm":4,"angleDeg":30}', "a distance and an angle");
+      for (const [type, text] of [["fillet", "0"], ["fillet", "-2"], ["fillet", "5x2"], ["fillet", "abc"], ["chamfer", "1-4"], ["chamfer", "4@0"], ["chamfer", "4@180"], ["chamfer", "0x3"], ["chamfer", ""]] as const) assert(read(type, text) === "refused", `${type} "${text}" is refused`);
+
+      const { project: base, sketch } = await projectWith([rectangle(60, 40)], 20);
+      const group = pickedGroup(base, [0, -20, 20]);
+      const added = run(base, { kind: "add-design-solid", feature: blendStep(sketch, "fillet-huge", [group], { valueMm: 45, name: "Fillet R 45 mm" }), body: bodyOf(base) });
+      const results = await replayAllBodies(added);
+      const huge = results.find((result) => result.featureId === "feature:fillet-huge");
+      assert(huge?.message !== undefined && /reaches past the face/.test(huge.message), `an R45 fillet on a 40 mm block is refused with a reason: ${huge?.message}`);
+      const applied = run(added, { kind: "regenerate-design", results });
+      near(volumeOf(bodyOf(applied)), 60 * 40 * 20, 60 * 40 * 20 * 1e-6, "the block is left whole, not cut about");
+      assert(designOf(applied).features.find((feature) => feature.id === "feature:fillet-huge")?.health !== undefined, "the step is flagged");
     }
   }
 ];

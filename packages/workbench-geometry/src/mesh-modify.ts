@@ -943,6 +943,14 @@ function sinkDepth(size: number): number {
 // sweep: every cross-section across the edge is the exact arc of the radius at that point.
 // ---------------------------------------------------------------------------------------------
 
+/*
+ * What a G2 (curvature-continuous) blend would need, which this fillet is not: a circular arc is tangent (G1) to both faces, but its
+ * curvature jumps from 0 on the flat face to 1/r on the arc, so a reflection line breaks at the seam. A G2 blend needs a cross-section
+ * whose curvature starts at the faces' own curvature (0 for a plane) and grows smoothly, such as a conic, a superellipse or a
+ * degree-5 curve with matched end curvatures, plus a way to trim and patch it where blends meet (vertex blends), and a surface kind that
+ * can hold it exactly. The tessellated kernel can sweep any profile, so a curve could be sampled, but the faces stay facets and
+ * the continuity could not be checked or kept through later edits. It is left out rather than approximated and called G2.
+ */
 export function meshFillet(body: ModifyMeshInput, options: EdgeTreatmentOptions): ModifyMeshResult {
   const radius = options.sizeMm;
   if (!Number.isFinite(radius) || radius <= 0) return { ok: false, message: "Fillet radius must be a positive length." };

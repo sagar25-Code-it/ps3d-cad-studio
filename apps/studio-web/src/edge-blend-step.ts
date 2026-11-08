@@ -76,7 +76,8 @@ export type BlendSizes =
   | { readonly ok: true; readonly valueMm: number; readonly endSizeMm?: number; readonly secondSizeMm?: number; readonly angleDeg?: number }
   | { readonly ok: false; readonly message: string };
 
-const NUMBER = "(\d+(?:[.,]\d+)?)";
+const NUMBER = String.raw`(\d+(?:[.,]\d+)?)`;
+const pattern = (middle: string): RegExp => new RegExp(`^${NUMBER}${middle}${NUMBER}$`, "u");
 const asNumber = (text: string): number => Number(text.replace(",", "."));
 
 /**
@@ -93,21 +94,21 @@ export function parseBlendSizes(type: "fillet" | "chamfer", text: string): Blend
     return positive(value) ? { ok: true, valueMm: value } : bad("Enter a positive size in millimetres.");
   }
   if (type === "fillet") {
-    const range = new RegExp(`^${NUMBER}\s*(?:-|:|→|to)\s*${NUMBER}$`, "u").exec(raw);
+    const range = pattern(String.raw`\s*(?:-|:|→|to)\s*`).exec(raw);
     if (range === null) return bad("Enter a radius such as 2, or a radius that changes along the edge such as 1-4.");
     const start = asNumber(range[1]!);
     const end = asNumber(range[2]!);
     if (!positive(start) || !positive(end)) return bad("Both radii must be positive.");
     return start === end ? { ok: true, valueMm: start } : { ok: true, valueMm: start, endSizeMm: end };
   }
-  const pair = new RegExp(`^${NUMBER}\s*(?:x|\*|×|,)\s*${NUMBER}$`, "u").exec(raw);
+  const pair = pattern(String.raw`\s*(?:x|\*|×|,)\s*`).exec(raw);
   if (pair !== null) {
     const first = asNumber(pair[1]!);
     const second = asNumber(pair[2]!);
     if (!positive(first) || !positive(second)) return bad("Both distances must be positive.");
     return first === second ? { ok: true, valueMm: first } : { ok: true, valueMm: first, secondSizeMm: second };
   }
-  const angled = new RegExp(`^${NUMBER}\s*(?:@|at)\s*${NUMBER}$`, "u").exec(raw);
+  const angled = pattern(String.raw`\s*(?:@|at)\s*`).exec(raw);
   if (angled !== null) {
     const distance = asNumber(angled[1]!);
     const angle = asNumber(angled[2]!);
