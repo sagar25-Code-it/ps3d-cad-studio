@@ -41,6 +41,7 @@ import { findTextObject, planSketchText, planSketchTextEdit, textSpecFromFields 
 import type { SketchTextObject } from "../../../../packages/workbench-core/src/index.js";
 import { SketchExportPanel, SketchImportPanel, SketchUnderlayPanel, type UnderlayPickState } from "./sketch/SketchExchangePanel.js";
 import { SketchPatternPanel } from "./sketch/SketchPatternPanel.js";
+import { convertLengthField, parseLengthField } from "../../../../packages/workbench-sketch/src/edit-fields.js";
 import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
 import { autoConstraintsFor, dropConstraintFor, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
@@ -398,9 +399,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setStretchWindowState((current) => (current !== undefined && next !== undefined && current.x1 === next.x1 && current.y1 === next.y1 && current.x2 === next.x2 && current.y2 === next.y2) || (current === undefined && next === undefined) ? current : next);
   }, []);
   /** Jog values typed in the Jog panel, read when a line is clicked. */
-  const [jogParams, setJogParams] = useSketchPref<JogParams>("jogParams", DEFAULT_JOG_PARAMS);
+  const [jogParams, setJogParams] = useSketchPref<JogParams>("jogParams", { offset: convertLengthField(DEFAULT_JOG_PARAMS.offset, "mm", props.displayUnit ?? "mm"), width: convertLengthField(DEFAULT_JOG_PARAMS.width, "mm", props.displayUnit ?? "mm") });
   /** Fillet and chamfer values typed in their panel, read when a vertex is clicked. */
-  const [cornerParams, setCornerParams] = useState<CornerParams>(DEFAULT_CORNER_PARAMS);
+  const [cornerParams, setCornerParams] = useState<CornerParams>(() => ({ radius: convertLengthField(DEFAULT_CORNER_PARAMS.radius, "mm", props.displayUnit ?? "mm"), bevel: convertLengthField(DEFAULT_CORNER_PARAMS.bevel, "mm", props.displayUnit ?? "mm") }));
   /** The ghost of what the open edit tool would do for the values typed now. */
   const [editPreview, setEditPreview] = useState<readonly SketchEntity[]>([]);
   /** Power Trim: the path a press-and-drag has swept so far while the Trim tool is active. */
@@ -485,6 +486,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   setDimensionLabelUnit(unit);
   /** A millimetre value as the text the dimension editor starts with, in the display unit. */
   const lengthText = (valueMm: number): string => formatLength(valueMm, unit);
+  // The Jog and Fillet / Chamfer values are typed text in the display unit and read by the canvas: switching the document unit converts them,
+  // so "3" typed in millimetres does not silently become 3 inches.
+  const previousUnit = useRef<SketchLengthUnit>(unit);
+  useEffect(() => {
+    const before = previousUnit.current;
+    if (before === unit) return;
+    previousUnit.current = unit;
+    setJogParams((current) => ({ offset: convertLengthField(current.offset, before, unit), width: convertLengthField(current.width, before, unit) }));
+    setCornerParams((current) => ({ radius: convertLengthField(current.radius, before, unit), bevel: convertLengthField(current.bevel, before, unit) }));
+  }, [unit]);
   const [selectedProfileIds, setSelectedProfileIds] = useState<readonly string[]>([]);
   // What a revolve turns about: "" is the sketch Y axis, "x" the sketch X axis, otherwise the ID of a line of this sketch (a centerline or construction line).
   const [revolveAxisChoice, setRevolveAxisChoice] = useState("");
@@ -894,7 +905,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         : props.editTool === "extend" ? extendAt(context, target, point)
         : props.editTool === "split" ? splitAt(context, target, point, { snapMm: PICK_PIXELS * px })
         : props.editTool === "delete-curve" ? deleteCurveHeal(context, target)
-        : jogLine(context, target, point, { offsetMm: parseDecimal(jogParams.offset), widthMm: parseDecimal(jogParams.width) });
+        : jogLine(context, target, point, { offsetMm: parseLengthField(jogParams.offset, unit), widthMm: parseLengthField(jogParams.width, unit) });
       if (!result.ok) { props.onMessage(result.diagnostics[0]?.message ?? "The sketch edit was rejected."); return; }
       props.onApplyEdit(result.value);
       setSelectionIds([]);
@@ -1796,7 +1807,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     else if ((props.editTool === "fillet" || props.editTool === "chamfer") && props.tool === "select" && selectionIds.length === 0) {
       // With nothing selected, a click on a vertex where two curves meet rounds or cuts that corner at once.
       const click = camera.toSketch(event.clientX, event.clientY);
-      const size = parseDecimal(props.editTool === "fillet" ? cornerParams.radius : cornerParams.bevel);
+      const size = parseLengthField(props.editTool === "fillet" ? cornerParams.radius : cornerParams.bevel, unit);
       const done = cornerByClick(editContext(), click, PICK_PIXELS * px, props.editTool === "fillet" ? { kind: "fillet", radiusMm: size, dimension: true } : { kind: "chamfer", firstMm: size, secondMm: size });
       if (done.ok) { props.onApplyEdit(done.value); setSelectionIds([]); }
       else if (Number.isFinite(size) && !/Click on a vertex/u.test(done.diagnostics[0]?.message ?? "")) props.onMessage(done.diagnostics[0]?.message ?? "That corner could not be changed.");
@@ -2350,11 +2361,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       {dynamicMirrorEntity !== undefined && props.editTool !== "dynamic-mirror" && <div className="inline-warning movable-note" role="status" aria-label="Dynamic mirror active">
         Dynamic mirror is on: what you draw is mirrored about {entityNames.get(dynamicMirrorEntity.id) ?? "the axis"}. <button className="palette-action" onClick={() => { setDynamicMirrorAxis(null); props.onMessage("Dynamic mirror stopped."); }}><CommandIcon name="cancel" />Stop</button>
       </div>}
-      {props.editTool === "pattern" && <SketchPatternPanel sketch={props.sketch} selectionIds={selectionIds} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
+      {props.editTool === "pattern" && <SketchPatternPanel key={`pattern-${unit}`} unit={unit} sketch={props.sketch} selectionIds={selectionIds} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} onPreview={setEditPreview} />}
       {props.editTool === "import-drawing" && <SketchImportPanel sketch={props.sketch} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
       {props.editTool === "export-drawing" && <SketchExportPanel sketch={props.sketch} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
       {props.editTool === "underlay" && <SketchUnderlayPanel sketch={props.sketch} pick={underlayPick} onPickStart={() => { setUnderlayPick({ active: true, points: [] }); props.onMessage("Picture: click the first point on the picture."); }} onPickCancel={() => setUnderlayPick({ active: false, points: [] })} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
-      {props.editTool !== null && props.editTool !== "pattern" && props.editTool !== "import-drawing" && props.editTool !== "export-drawing" && props.editTool !== "underlay" && <SketchEditPanel tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} jog={jogParams} onJog={setJogParams} corner={cornerParams} onCorner={setCornerParams} onPreview={setEditPreview} dynamicMirrorAxis={dynamicMirrorAxis} onDynamicMirror={(axisId) => { setDynamicMirrorAxis(axisId); props.onMessage(axisId === null ? "Dynamic mirror stopped." : `Dynamic mirror on: pick a drawing tool; everything you draw is mirrored about ${axisId.replace(/^entity:/u, "")}.`); }} />}
+      {props.editTool !== null && props.editTool !== "pattern" && props.editTool !== "import-drawing" && props.editTool !== "export-drawing" && props.editTool !== "underlay" && <SketchEditPanel key={`${props.editTool}-${unit}`} unit={unit} tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} jog={jogParams} onJog={setJogParams} corner={cornerParams} onCorner={setCornerParams} onPreview={setEditPreview} dynamicMirrorAxis={dynamicMirrorAxis} onDynamicMirror={(axisId) => { setDynamicMirrorAxis(axisId); props.onMessage(axisId === null ? "Dynamic mirror stopped." : `Dynamic mirror on: pick a drawing tool; everything you draw is mirrored about ${axisId.replace(/^entity:/u, "")}.`); }} />}
       {props.checkOpen && <SketchRepairPanel sketch={props.sketch} onApplyEdit={props.onApplyEdit} onSetSuppressed={props.onSetSuppressed} onSelect={(ids) => { setSelectionIds(ids); props.onSelect(ids.at(-1) ?? null); }} onMessage={props.onMessage} onClose={props.onCloseCheck} />}
       {props.showMovable && <div className="inline-warning movable-note">{movableIds.size === 0 ? "Show Movable: every entity is fully constrained." : `Show Movable: ${movableIds.size} entit${movableIds.size === 1 ? "y has" : "ies have"} estimated degrees of freedom (amber).`}</div>}
       <section className="inspector-section point-relations"><header><strong>Point relations</strong><span>{pickRelation === null ? "pick points" : pickRelation}</span></header>

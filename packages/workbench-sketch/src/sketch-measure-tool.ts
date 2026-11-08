@@ -1,6 +1,7 @@
 import type { SketchEntity, Vec2, WorkbenchSketch } from "../../workbench-core/src/index.js";
 import { arcShape } from "../../workbench-core/src/sketch-measure.js";
 import { entityPoints } from "./index.js";
+import { describeLength } from "./sketch-units.js";
 
 /**
  * The sketch Measure tool: pick two points for the distance and its components, two lines for the angle (and the gap when they
@@ -143,11 +144,13 @@ export function pickMeasureTarget(sketch: Pick<WorkbenchSketch, "entities">, poi
 }
 
 const n3 = (value: number): string => String(Number(value.toFixed(3)));
+/** A length measured in millimetres, written in the unit the sketch is shown in ("25.4 mm" or "1 in"). */
+const len = (valueMm: number): string => describeLength(valueMm);
 
 /** One readable line per measurement for the status bar and the canvas readout. */
 export function describeMeasurement(measurement: Measurement): string {
-  if (measurement.kind === "points") return `Distance ${n3(measurement.distanceMm)} mm (ΔX ${n3(measurement.dxMm)} mm, ΔY ${n3(measurement.dyMm)} mm, direction ${n3(measurement.angleDeg)}°)`;
-  if (measurement.kind === "point-line") return `Distance from the point to the line ${n3(measurement.distanceMm)} mm`;
-  if (measurement.parallel) return `The lines are parallel, ${n3(measurement.gapMm ?? 0)} mm apart`;
+  if (measurement.kind === "points") return `Distance ${len(measurement.distanceMm)} (ΔX ${len(measurement.dxMm)}, ΔY ${len(measurement.dyMm)}, direction ${n3(measurement.angleDeg)}°)`;
+  if (measurement.kind === "point-line") return `Distance from the point to the line ${len(measurement.distanceMm)}`;
+  if (measurement.parallel) return `The lines are parallel, ${len(measurement.gapMm ?? 0)} apart`;
   return `Angle between the lines ${n3(measurement.angleDeg)}° (acute ${n3(measurement.acuteDeg)}°)`;
 }

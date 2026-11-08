@@ -69,3 +69,23 @@ export function setDimensionLabelUnit(unit: SketchLengthUnit): void {
 export function formatDimensionLabelValue(valueMm: number): string {
   return formatLength(valueMm, labelUnit, 3);
 }
+
+/** The unit the descriptions and dimension labels are written in right now (millimetres until the workspace says otherwise). */
+export function getDimensionLabelUnit(): SketchLengthUnit {
+  return labelUnit;
+}
+
+/** A length in millimetres as text with its unit in the current label unit: "25.4 mm" or "1 in". For status lines, titles and tooltips. */
+export function describeLength(valueMm: number, digits = 3): string {
+  return formatLengthWithUnit(valueMm, labelUnit, labelUnit === "in" ? Math.max(digits, 4) : digits);
+}
+
+/** The same without the symbol, for lists such as "from 0, 0 to 25, 0". */
+export function describeLengthNumber(valueMm: number, digits = 2): string {
+  return formatLength(valueMm, labelUnit, labelUnit === "in" ? Math.max(digits, 4) : digits);
+}
+
+/** "millimetres" or "inches" in the current label unit, for spoken text. */
+export function describeUnitWord(): string {
+  return unitWord(labelUnit);
+}

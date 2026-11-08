@@ -1,5 +1,6 @@
 import type { SketchConstraintKind, SketchEntity, SketchPointRef, Vec2, WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
 import { arcShape } from "../../workbench-core/src/sketch-measure.js";
+import { describeLength } from "./sketch-units.js";
 
 /**
  * Pure model of the relation glyphs drawn on the sketch canvas: what each kind looks like, which relations are shown for a
@@ -87,7 +88,7 @@ export function describeConstraint(constraint: WorkbenchSketchConstraint, labels
   const info = CONSTRAINT_GLYPH_INFO[constraint.kind];
   const who = constraint.entityIds.map((id) => labels.get(id) ?? "missing curve").join(", ");
   const dimensionName = constraint.kind === "distance" && constraint.dimension !== undefined ? `${constraint.dimension[0]!.toUpperCase()}${constraint.dimension.slice(1)}` : info.name;
-  const value = constraint.valueDeg !== undefined ? ` = ${Number(constraint.valueDeg.toFixed(3))}°` : constraint.valueMm !== undefined ? ` = ${Number(constraint.valueMm.toFixed(3))} mm` : "";
+  const value = constraint.valueDeg !== undefined ? ` = ${Number(constraint.valueDeg.toFixed(3))}°` : constraint.valueMm !== undefined ? ` = ${describeLength(constraint.valueMm)}` : "";
   const flags = `${constraint.driven === true ? " (reference)" : ""}${constraint.suppressed === true ? " (relaxed)" : ""}`;
   return `${dimensionName}: ${who}${value}${flags}`;
 }
