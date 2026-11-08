@@ -65,8 +65,16 @@ function isRound(entity: SketchEntity | undefined): entity is Round {
   return entity?.kind === "line" || entity?.kind === "arc";
 }
 
-function joinTolerance(sketch: WorkbenchSketch): number {
-  return Math.max(1e-6, Math.min(sketch.snapToleranceMm, 0.05));
+/**
+ * How close two ends must be to count as one vertex. It is the sketch's snap distance (at most 0.05 mm), but never more than a quarter of
+ * the shortest curve being joined: a 0.05 mm square would otherwise have all four corners "within tolerance" of each other and report
+ * a branch of six curves.
+ */
+function joinTolerance(sketch: WorkbenchSketch, curves: readonly Round[] = []): number {
+  const base = Math.max(1e-6, Math.min(sketch.snapToleranceMm, 0.05));
+  if (curves.length === 0) return base;
+  const shortest = Math.min(...curves.map((curve) => dist(curve.start, curve.end)));
+  return Math.max(1e-6, Math.min(base, shortest / 4));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -87,9 +95,9 @@ function endTangent(entity: Round, end: "start" | "end"): Vec2 {
  */
 export function expandOffsetSelection(sketch: WorkbenchSketch, ids: readonly string[], mode: OffsetChainMode): readonly string[] {
   if (mode === "none") return [...ids];
-  const tolerance = joinTolerance(sketch);
   const reached = new Set(ids);
   const queue = ids.map((id) => sketch.entities.find((entity) => entity.id === id)).filter(isRound);
+  const tolerance = joinTolerance(sketch, queue);
   while (queue.length > 0) {
     const current = queue.shift()!;
     for (const end of ["start", "end"] as const) {
@@ -637,9 +645,12 @@ export function offsetEntities(context: SketchEditContext, ids: readonly string[
   }
 
   if (lines.length > 0) {
-    let built = buildChains(lines, joinTolerance(sketch));
+    let built = buildChains(lines, joinTolerance(sketch, lines));
     // Pulling in tangent neighbours must never be what makes a selection branch: fall back to exactly what was selected.
-    if ("error" in built && chainIds.length > ids.length) built = buildChains(ids.map((id) => sketch.entities.find((entity) => entity.id === id)).filter(isRound), joinTolerance(sketch));
+    if ("error" in built && chainIds.length > ids.length) {
+      const exact = ids.map((id) => sketch.entities.find((entity) => entity.id === id)).filter(isRound);
+      built = buildChains(exact, joinTolerance(sketch, exact));
+    }
     if ("error" in built) return reject(built.error, built.ids, "Select one chain or loop at a time, or choose the chain option 'none' and pick the curves yourself.");
     for (const chain of built.chains) {
       const ids = chain.pieces.map((piece) => piece.entity.id);
@@ -673,7 +684,7 @@ export function offsetEntities(context: SketchEditContext, ids: readonly string[
   }
   const total = selected.length;
   const sides = options.both === true ? " (both sides)" : "";
-  return finishPlan(context, { label: `Offset ${total} curve${total === 1 ? "" : "s"} by ${fmt(distanceMm)} mm${sides}`, removeEntityIds: [], updateEntities: [], addEntities: added, addConstraints: constraints });
+  return finishPlan(context, { label: `Offset ${total} curve${total === 1 ? "" : "s"} by ${fmt(distanceMm)} mm${sides}`, removeEntityIds: [], updateEntities: [], addEntities: added, addConstraints: constraints }, { prune: true });
 }
 
 function offsetRelations(context: SketchEditContext, chain: Chain, built: Built): readonly WorkbenchSketchConstraint[] {

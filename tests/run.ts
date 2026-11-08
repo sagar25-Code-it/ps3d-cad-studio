@@ -118,6 +118,7 @@ import { sketchUnderlayTests } from "./sketch-underlay.test.js";
 import { sketchExchangeUiTests } from "./sketch-exchange-ui.test.js";
 import { sketchChromeTests } from "./sketch-chrome.test.js";
 import { sketchCanvasUxTests } from "./sketch-canvas-ux.test.js";
+import { sketchUi2EditTests } from "./sketch-ui2-edit.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import type { TestCase } from "./test-kit.js";
 
@@ -247,7 +248,8 @@ const tests: readonly TestCase[] = [
   ...sketchUnderlayTests,
   ...sketchExchangeUiTests,
   ...sketchCanvasUxTests,
-  ...sketchCanvasHandleTests
+  ...sketchCanvasHandleTests,
+  ...sketchUi2EditTests
 ];
 let failures = 0;
 

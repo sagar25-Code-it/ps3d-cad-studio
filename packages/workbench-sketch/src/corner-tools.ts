@@ -317,8 +317,22 @@ interface FilletSolution {
   readonly mid: Vec2;
 }
 
-function solveFillet(a: Cut, b: Cut, radius: number): FilletSolution | string {
+/** How far along the retained path of `cut` (from the meeting point) the point `x` of its carrier lies; negative when it lies behind the meeting point. */
+function alongOf(cut: Cut, x: Vec2): number {
+  if (cut.travel === undefined) return (x[0] - cut.at[0]) * cut.tangent[0] + (x[1] - cut.at[1]) * cut.tangent[1];
+  const { center, radius } = cut.travel;
+  const from = Math.atan2(cut.at[1] - center[1], cut.at[0] - center[0]);
+  return radius * wrap(cut.sgn * (Math.atan2(x[1] - center[1], x[0] - center[0]) - from));
+}
+
+/**
+ * `crossings` are the other places the two carriers cross. A fillet circle whose tangent point on either curve lies beyond the next
+ * crossing would round the far crossing instead of this corner, cutting away the whole lobe between them, so it is not a candidate.
+ */
+function solveFillet(a: Cut, b: Cut, radius: number, crossings: readonly Vec2[] = []): FilletSolution | string {
   let tooLarge = false;
+  let crossesAgain: Vec2 | undefined;
+  const lobes = crossings.map((x) => ({ point: x, a: alongOf(a, x), b: alongOf(b, x) })).filter((x) => x.a > 1e-6 && x.a < a.retained - 1e-6 && x.b > 1e-6 && x.b < b.retained - 1e-6);
   let best: { readonly first: Vec2; readonly second: Vec2; readonly center: Vec2; readonly score: number } | undefined;
   for (const la of lociOf(a, radius)) {
     for (const lb of lociOf(b, radius)) {
@@ -328,10 +342,15 @@ function solveFillet(a: Cut, b: Cut, radius: number): FilletSolution | string {
         if (ta === undefined || tb === undefined) continue;
         if (ta.along <= 1e-9 || tb.along <= 1e-9) continue;
         if (ta.along > a.retained - MIN_PIECE_MM || tb.along > b.retained - MIN_PIECE_MM) { tooLarge = true; continue; }
+        const beyond = lobes.find((x) => ta.along >= x.a - 1e-6 || tb.along >= x.b - 1e-6);
+        if (beyond !== undefined) { crossesAgain = beyond.point; continue; }
         const score = dist(center, a.at);
         if (best === undefined || score < best.score) best = { first: ta.point, second: tb.point, center, score };
       }
     }
+  }
+  if (best === undefined && crossesAgain !== undefined) {
+    return `The two curves cross again at (${fmt(crossesAgain[0])}, ${fmt(crossesAgain[1])}), and a fillet of this radius does not fit between that crossing and this corner. Use a smaller radius, or click the other crossing to round that corner instead.`;
   }
   if (best === undefined) return tooLarge ? "The fillet radius is too large for these curves." : "No fillet of this radius fits between these curves.";
   const v1: Vec2 = [best.first[0] - best.center[0], best.first[1] - best.center[1]];
@@ -409,7 +428,7 @@ function planCorner(context: SketchEditContext, firstId: string, secondId: strin
     secondEdge = meeting;
     label = "Corner";
   } else if (spec.kind === "fillet") {
-    const solution = solveFillet(cutA, cutB, spec.radiusMm);
+    const solution = solveFillet(cutA, cutB, spec.radiusMm, carrierIntersections(first, second).filter((x) => dist(x, meeting) > 1e-6));
     if (typeof solution === "string") return solution;
     firstEdge = solution.first;
     secondEdge = solution.second;
@@ -436,7 +455,7 @@ function planCorner(context: SketchEditContext, firstId: string, secondId: strin
       const theta = (spec.angleDeg * Math.PI) / 180;
       const limit = Math.PI - angle;
       if (theta >= limit - (0.5 * Math.PI) / 180) {
-        return `The chamfer angle must be smaller than ${fmt(180 - (angle * 180) / Math.PI)}° for this ${fmt((angle * 180) / Math.PI)}° corner; at that angle or more the cut never meets the second line.`;
+        return `The chamfer angle can be at most ${fmt(Math.max(0, 180 - (angle * 180) / Math.PI - 0.5))}° for this ${fmt((angle * 180) / Math.PI)}° corner; any larger and the cut barely meets, or never meets, the second line.`;
       }
       d1 = spec.distanceMm;
       d2 = (spec.distanceMm * Math.sin(theta)) / Math.sin(theta + angle);

@@ -1,6 +1,8 @@
 import {
   failure,
   WORKBENCH_LIMITS,
+  SPLINE_MAX_FIT_POINTS,
+  SPLINE_MIN_FIT_POINTS,
   type SketchEntity,
   type SketchPointRef,
   type Vec2,
@@ -8,9 +10,11 @@ import {
   type WorkbenchSketchConstraint
 } from "../../workbench-core/src/index.js";
 import { solveLiveSketch } from "../../workbench-core/src/sketch-solve.js";
+import { friendlySketchText, sketchEntityNames } from "../../workbench-core/src/sketch-names.js";
 import { arcShape, isDimensionConstraint, measureDimensionConstraint } from "../../workbench-core/src/sketch-measure.js";
 import { applyPlanToSketch, pinnedAmong } from "./sketch-clone.js";
 import { editPlan, type SketchEditContext, type SketchEditPlan, type SketchEditResult } from "./edit-tools.js";
+import { pruneRedundantAdditions } from "./edit-prune.js";
 
 /**
  * What every sketch edit does around its geometry: it builds the relations the result should carry (joints, tangents, radius
@@ -20,13 +24,25 @@ import { editPlan, type SketchEditContext, type SketchEditPlan, type SketchEditR
 
 const HOLD_TOLERANCE_MM = 1e-6;
 
-export function nameOf(id: string): string {
+const GENERATED_ID_TAIL = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/u;
+
+/**
+ * What a message calls a curve: the name the rest of the app shows ("Line 3"), when the sketch is known. The ids the app generates
+ * ("entity:user-<uuid>") are never printed; a short hand-written id (a test, an MCP recipe) still reads as itself.
+ */
+export function nameOf(id: string, sketch?: Pick<WorkbenchSketch, "entities">): string {
+  if (sketch !== undefined) {
+    const named = sketchEntityNames(sketch.entities).get(id);
+    if (named !== undefined) return named;
+  }
   const bare = id.replace(/^entity:/u, "").replace(/^user-/u, "");
-  return bare.length > 12 ? `${bare.slice(0, 8)}…` : bare;
+  return GENERATED_ID_TAIL.test(bare) ? "a sketch curve" : bare.length > 12 ? `${bare.slice(0, 8)}…` : bare;
 }
 
-function kindLabel(entity: SketchEntity): string {
-  return `${entity.kind} ${nameOf(entity.id)}`;
+function kindLabel(entity: SketchEntity, sketch?: Pick<WorkbenchSketch, "entities">): string {
+  // A curve the edit is about to add is not in the sketch yet: "the new arc" says what it is without an id.
+  if (sketch !== undefined && !sketch.entities.some((candidate) => candidate.id === entity.id)) return `the new ${entity.kind}`;
+  return nameOf(entity.id, sketch);
 }
 
 function dist(a: Vec2, b: Vec2): number {
@@ -209,8 +225,13 @@ function pointProblem(point: readonly number[], label: string): string | undefin
 }
 
 /** A sentence naming the limit an entity would break, or undefined when it is a valid entity. */
-export function entityProblem(entity: SketchEntity): string | undefined {
-  const label = kindLabel(entity);
+export function entityProblem(entity: SketchEntity, sketch?: Pick<WorkbenchSketch, "entities">): string | undefined {
+  const text = entityProblemText(entity, sketch);
+  return text === undefined ? undefined : `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+}
+
+function entityProblemText(entity: SketchEntity, sketch?: Pick<WorkbenchSketch, "entities">): string | undefined {
+  const label = kindLabel(entity, sketch);
   const sized = (value: number, what: string, maximum: number): string | undefined => {
     if (!Number.isFinite(value)) return `${label} would have a ${what} that is not a number.`;
     if (value < MIN_MM) return `${label} would have a ${what} of ${Math.round(value * 10000) / 10000} mm; the minimum is ${MIN_MM} mm.`;
@@ -236,7 +257,7 @@ export function entityProblem(entity: SketchEntity): string | undefined {
     case "point":
       return pointProblem(entity.point, label);
     case "spline": {
-      if (entity.fitPoints.length < 3 || entity.fitPoints.length > 24) return `${label} would have ${entity.fitPoints.length} fit points; a spline takes 3 to 24.`;
+      if (entity.fitPoints.length < SPLINE_MIN_FIT_POINTS || entity.fitPoints.length > SPLINE_MAX_FIT_POINTS) return `${label} would have ${entity.fitPoints.length} fit points; a spline takes ${SPLINE_MIN_FIT_POINTS} to ${SPLINE_MAX_FIT_POINTS}.`;
       for (let index = 0; index < entity.fitPoints.length; index += 1) {
         const point = entity.fitPoints[index]!;
         const problem = pointProblem(point, label);
@@ -269,6 +290,8 @@ export interface FinishOptions {
   readonly keep?: ReadonlySet<string>;
   /** False for the intermediate steps of a multi-step edit: only the final plan needs the live solver's verdict. */
   readonly solve?: boolean;
+  /** Drop, from the relations the plan adds, the ones the solver's rank analysis shows the others already imply (mirror, pattern, split, offset). */
+  readonly prune?: boolean;
 }
 
 /**
@@ -286,7 +309,7 @@ export function finishPlan(context: SketchEditContext, plan: SketchEditPlan, opt
   const moved = [...updates.map((entity) => entity.id), ...plan.removeEntityIds];
   const pinned = pinnedAmong(sketch, moved).filter((id) => !(options.allowPinned ?? []).includes(id));
   if (pinned.length > 0) {
-    const names = pinned.map((id) => nameOf(id)).join(", ");
+    const names = pinned.map((id) => nameOf(id, sketch)).join(", ");
     return failure(
       "CONSTRAINT_CONFLICT",
       `${pinned.length === 1 ? `Curve ${names} is` : `Curves ${names} are`} fixed, so this edit would have to move ${pinned.length === 1 ? "it" : "them"}.`,
@@ -308,12 +331,13 @@ export function finishPlan(context: SketchEditContext, plan: SketchEditPlan, opt
     return failure("RESOURCE_LIMIT", `This edit would add or remove ${Math.max(plan.addConstraints.length, plan.removeConstraintIds?.length ?? 0)} relations at once; one edit can handle at most ${EDIT_CONSTRAINT_LIMIT}.`, [], "Select fewer curves, then repeat the edit.");
   }
   for (const entity of [...updates, ...plan.addEntities]) {
-    const problem = entityProblem(entity);
+    const problem = entityProblem(entity, sketch);
     if (problem !== undefined) return reject(problem, [entity.id], "Use a smaller or larger value, or move the geometry closer to the origin.");
   }
   const cleaned: SketchEditPlan = { ...plan, updateEntities: updates, label: plan.label.length > 80 ? `${plan.label.slice(0, 77)}...` : plan.label };
-  const settled = settleRelations(sketch, cleaned, options);
-  if (typeof settled === "string") return reject(settled);
+  const settledRaw = settleRelations(sketch, cleaned, options);
+  if (typeof settledRaw === "string") return reject(settledRaw);
+  const settled = options.prune === true ? pruneRedundantAdditions(sketch, settledRaw) : settledRaw;
   const constraintTotal = sketch.constraints.length - (settled.removeConstraintIds?.length ?? 0) + settled.addConstraints.length;
   if (constraintTotal > WORKBENCH_LIMITS.maxConstraints) {
     return failure("RESOURCE_LIMIT", `The sketch would hold ${constraintTotal} relations; the limit is ${WORKBENCH_LIMITS.maxConstraints}.`, [], "Delete a relation before applying this edit.");
@@ -321,7 +345,35 @@ export function finishPlan(context: SketchEditContext, plan: SketchEditPlan, opt
   if ((settled.removeConstraintIds?.length ?? 0) > EDIT_CONSTRAINT_LIMIT) {
     return failure("RESOURCE_LIMIT", `This edit would remove ${settled.removeConstraintIds?.length} relations at once; one edit can handle at most ${EDIT_CONSTRAINT_LIMIT}.`, [], "Select fewer curves, then repeat the edit.");
   }
+  // The operation re-solves the sketch and refuses an edit that would have to move something: say so now, in plain words, instead of
+  // offering a plan that fails with a solver message when the user presses Apply.
+  if (options.solve !== false) {
+    const verdict = applyCheck(sketch, settled);
+    if (verdict !== undefined) return failure("CONSTRAINT_CONFLICT", verdict.message, verdict.ids, "Relax the relations on those curves first (Relax Relations), delete the one that conflicts, or use a smaller edit.");
+  }
   return editPlan(settled.label, settled);
+}
+
+/** Why `apply-sketch-edit` would refuse the plan (a relation conflict), named with the curves' friendly names; undefined when it would go through. */
+export function applyCheck(sketch: WorkbenchSketch, plan: SketchEditPlan): { readonly message: string; readonly ids: readonly string[] } | undefined {
+  const applied = applyPlanToSketch(sketch, plan);
+  if (typeof applied === "string") return undefined;
+  let solved: ReturnType<typeof solveLiveSketch>;
+  try {
+    solved = solveLiveSketch(applied.sketch, applied.focus);
+  } catch {
+    return undefined;
+  }
+  const names = (ids: readonly string[]): string => {
+    const known = new Map(sketchEntityNames(applied.sketch.entities));
+    const list = [...new Set(ids)].map((id) => known.get(id) ?? "a sketch curve");
+    return list.length <= 3 ? list.join(", ") : `${list.slice(0, 3).join(", ")} and ${list.length - 3} more`;
+  };
+  if (!solved.ok) return { message: friendlySketchText(`The relations in the sketch could not all hold after this edit. ${solved.message}`, [applied.sketch, sketch]), ids: solved.relatedIds };
+  if (solved.movedIds.length > 0) {
+    return { message: `This edit would have to move ${names(solved.movedIds)} to keep ${solved.movedIds.length === 1 ? "its" : "their"} relations, and the sketch does not allow that.`, ids: solved.movedIds };
+  }
+  return undefined;
 }
 
 /** Adds to `removeConstraintIds` every existing relation the plan's geometry breaks. A string means the plan does not fit the sketch. */

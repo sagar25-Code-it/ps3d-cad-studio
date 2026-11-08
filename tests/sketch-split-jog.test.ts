@@ -14,7 +14,7 @@ function near2(actual: readonly [number, number], expected: readonly [number, nu
 
 export const sketchSplitJogTests: readonly TestCase[] = [
   {
-    name: "split cuts a line at the pick into two joined, collinear lines and keeps its horizontal relation",
+    name: "split cuts a line at the pick into two joined, parallel (in-line) lines and keeps its horizontal relation",
     run: () => {
       const project = projectWith([line("a", [0, 0], [10, 0])], [constraint("h", "horizontal", ["a"])]);
       const next = commitOk(project, splitAt(context(project), "entity:a", [4, 0.3]));
@@ -28,7 +28,9 @@ export const sketchSplitJogTests: readonly TestCase[] = [
       near2(second.end, [10, 0], "second keeps the original end");
       near(Math.hypot(first.end[0] - first.start[0], 0) + Math.hypot(second.end[0] - second.start[0], 0), 10, 1e-9, "no length is lost");
       assert(next.sketch.constraints.some((c) => c.kind === "coincident" && c.entityIds.includes(first.id) && c.entityIds.includes(second.id)), "the pieces are joined");
-      assert(next.sketch.constraints.some((c) => c.kind === "collinear" && c.entityIds.includes(second.id)), "the pieces stay in line");
+      // Joined end to end and parallel is "one straight line in two pieces" without stating the line offset twice (Collinear next to the joint is redundant).
+      assert(next.sketch.constraints.some((c) => c.kind === "parallel" && c.entityIds.includes(second.id)), "the pieces stay in line");
+      assert(!next.sketch.constraints.some((c) => c.kind === "collinear"), "no redundant Collinear next to the joint");
       assert(next.sketch.constraints.some((c) => c.kind === "horizontal" && c.entityIds[0] === "entity:a"), "the original relation is kept");
       assert(relationsHold(next), "every recorded relation holds after the split");
       // Dragging the joint through the live solver now moves along the line only: the new piece obeys the horizontal via the collinear relation.

@@ -5,6 +5,7 @@ import { mapEntity, type SketchEditContext, type SketchEditResult } from "./edit
 import { arcTravel } from "./corner-tools.js";
 import { alignParallelDirections, constraintHolds, finishPlan, finiteVec, nameOf, pairRelation } from "./edit-relations.js";
 import { internalRelations } from "./sketch-clone.js";
+import { SYMMETRY_DETERMINED_KINDS, isSizeDimension } from "./edit-prune.js";
 
 /**
  * Mirror, Pattern, Move / Rotate / Scale (with copies and a non-uniform scale) and Stretch. Copies carry the relations between the copied
@@ -148,15 +149,19 @@ export function mirrorEntities(context: SketchEditContext, ids: readonly string[
     const angle = (Math.atan2(axis.end[1] - axis.start[1], axis.end[0] - axis.start[0]) * 180) / Math.PI;
     reflect = (point) => reflectAcross(point, axis);
     rotation = (degrees) => 2 * angle - degrees;
-    description = nameOf(axis.id);
+    description = nameOf(axis.id, context.sketch);
   }
   const cloned = cloneSet(context, sources, (entity, id) => mapEntity(entity, id, reflect, rotation));
   if (typeof cloned === "string") return reject(cloned);
-  const constraints = [...cloned.constraints];
+  // About a line axis every line, circle and point copy is tied to its source by a symmetry relation, which already fixes its size and its
+  // joints. Copying the source's dimensions and joints as well would make the sketch over-defined: editing the source dimension would
+  // then contradict the copy's own value. (An arc, rectangle, ellipse or spline copy keeps its relations: symmetry does not solve those.)
+  const determined = new Set(axisEntity === undefined ? [] : sources.filter((source) => SYMMETRY_DETERMINED_KINDS.has(source.kind)).map((source) => cloned.idMap.get(source.id)!));
+  const constraints = cloned.constraints.filter((relation) => relation.entityIds.length === 0 || !relation.entityIds.every((id) => determined.has(id)));
   if (axisEntity !== undefined) {
     for (const source of sources) constraints.push({ id: context.newId("constraint"), kind: "symmetry", entityIds: [source.id, cloned.idMap.get(source.id)!, axisEntity.id] });
   }
-  return finishPlan(context, { label: `Mirrored ${cloned.entities.length} ${plural(cloned.entities.length, "entity", "entities")} about ${description}`, removeEntityIds: [], updateEntities: [], addEntities: cloned.entities, addConstraints: constraints });
+  return finishPlan(context, { label: `Mirrored ${cloned.entities.length} ${plural(cloned.entities.length, "entity", "entities")} about ${description}`, removeEntityIds: [], updateEntities: [], addEntities: cloned.entities, addConstraints: constraints }, { prune: true });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -241,18 +246,31 @@ export function patternEntities(context: SketchEditContext, ids: readonly string
     if (typeof cloned === "string") return reject(cloned);
     for (const copy of cloned.entities) {
       const original = sources.find((source) => cloned.idMap.get(source.id) === copy.id)!;
-      if (sameGeometry(original, copy)) return reject(`A copy of ${nameOf(original.id)} would land exactly on the original, so the pattern would only stack duplicates.`, [original.id], "Move the pattern centre away from the entity, or choose a different spacing.");
+      if (sameGeometry(original, copy)) return reject(`A copy of ${nameOf(original.id, context.sketch)} would land exactly on the original, so the pattern would only stack duplicates.`, [original.id], "Move the pattern centre away from the entity, or choose a different spacing.");
     }
     added.push(...cloned.entities);
     constraints.push(...cloned.constraints);
   }
-  return finishPlan(context, { label, removeEntityIds: [], updateEntities: [], addEntities: added, addConstraints: addSizeLinks(context, sources, added, instances.length, constraints) });
+  const linked = addSizeLinks(context, sources, added, instances.length, constraints);
+  return finishPlan(context, { label, removeEntityIds: [], updateEntities: [], addEntities: added, addConstraints: linked }, { prune: true });
 }
 
 /** Equal-size relations from each source to its copies, when they fit in the edit's relation budget. */
 function addSizeLinks(context: SketchEditContext, sources: readonly SketchEntity[], added: readonly SketchEntity[], instanceCount: number, existing: readonly WorkbenchSketchConstraint[]): readonly WorkbenchSketchConstraint[] {
   const linkable = sources.filter((source) => source.kind === "line" || source.kind === "circle" || source.kind === "arc");
   if (existing.length + linkable.length * instanceCount > 360) return existing;
+  // A copy that is linked to its source by Equal gets its size from the source: the copied length or radius dimension would only fight
+  // it (editing the source dimension would make the sketch over-defined), so the copy keeps no dimension of its own for that size.
+  const linkedCopies = new Set<string>();
+  for (let instance = 0; instance < instanceCount; instance += 1) {
+    sources.forEach((source, index) => {
+      if (source.kind !== "line" && source.kind !== "circle" && source.kind !== "arc") return;
+      const copy = added[instance * sources.length + index];
+      if (copy !== undefined) linkedCopies.add(copy.id);
+    });
+  }
+  const kept = existing.filter((relation) => !(isSizeDimension(relation) && linkedCopies.has(relation.entityIds[0]!)));
+  existing = kept;
   const links: WorkbenchSketchConstraint[] = [];
   for (let instance = 0; instance < instanceCount; instance += 1) {
     sources.forEach((source, index) => {
@@ -459,7 +477,7 @@ export function stretchEntities(context: SketchEditContext, ids: readonly string
       const newTop = halfH + (top ? localDy : 0);
       const width = newRight - newLeft;
       const height = newTop - newBottom;
-      if (width < 0.01 || height < 0.01) return reject(`The stretch would collapse ${nameOf(entity.id)}; use a smaller distance.`, [entity.id]);
+      if (width < 0.01 || height < 0.01) return reject(`The stretch would collapse ${nameOf(entity.id, context.sketch)}; use a smaller distance.`, [entity.id]);
       const centerX = (newLeft + newRight) / 2;
       const centerY = (newBottom + newTop) / 2;
       updated.push({ ...entity, widthMm: width, heightMm: height, center: [entity.center[0] + centerX * cos - centerY * sin, entity.center[1] + centerX * sin + centerY * cos] });

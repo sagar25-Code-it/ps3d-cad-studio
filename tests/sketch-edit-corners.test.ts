@@ -172,7 +172,8 @@ export const sketchEditCornerTests: readonly TestCase[] = [
       near(a.end[1], 0, 1e-12, "the line is still on y = 0");
       const centerY = (made.start[1] + made.end[1] + 2 * made.mid[1]) / 4;
       assert(centerY > 0 && centerY < 6, "the fillet sits above the line, inside the corner");
-      const twoArcs = projectWith([arc("a", [0, 0], [10, 10], [20, 0]), arc("b", [20, 0], [25, 10], [30, 0])]);
+      // The second arc bulges away from the first (they meet only at the corner). The earlier fixture, arc (20,0)-(25,10)-(30,0), crosses the first arc again at (18.8, 4.7), where no radius-2 fillet fits in the corner (re-audit N5).
+      const twoArcs = projectWith([arc("a", [0, 0], [10, 10], [20, 0]), arc("b", [20, 0], [27, 5], [34, 0])]);
       const both = applyOk(twoArcs, filletCorners(ctx(twoArcs), ids("a", "b"), 2));
       deepProblems(both);
       near(radiusOfArc(ofKind(both, "arc").find((candidate) => candidate.id !== "entity:a" && candidate.id !== "entity:b")!), 2, 1e-8, "arc-arc fillet radius");

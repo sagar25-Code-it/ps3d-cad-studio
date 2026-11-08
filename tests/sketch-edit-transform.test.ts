@@ -30,11 +30,19 @@ export const sketchEditTransformTests: readonly TestCase[] = [
       const copies = mirrored.sketch.entities.filter((entity) => !["a", "b", "r", "axis"].some((name) => entity.id === `entity:${name}`));
       equal(copies.length, 3, "one copy per mirrored entity");
       equal(relationsOf(mirrored, "symmetry").length, 3, "line, line and arc all get a symmetry relation about the axis");
-      equal(relationsOf(mirrored, "horizontal").length, 2, "the horizontal relation is copied");
-      equal(relationsOf(mirrored, "distance").length, 2, "and the length dimension");
-      equal(relationsOf(mirrored, "coincident").length, 2, "and the joint between the lines");
-      const copiedAngle = relationsOf(mirrored, "angle").find((relation) => relation.id !== "constraint:ang")!;
-      near(copiedAngle.valueDeg!, 270, 1e-6, "a mirrored right angle measures 270 degrees from line to line (re-measured, not copied)");
+      // Symmetry about the axis already fixes each line copy (its length, its joint, its direction), so the copy carries no relations of its own
+      // for them: copying them as well made the sketch over-defined and turned an edit of the source dimension into a conflict (re-audit N1).
+      equal(relationsOf(mirrored, "horizontal").length, 1, "the horizontal relation stays on the source; the copy follows it by symmetry");
+      equal(relationsOf(mirrored, "distance").length, 1, "and so does the length dimension");
+      equal(relationsOf(mirrored, "coincident").length, 1, "and the joint between the lines");
+      equal(relationsOf(mirrored, "angle").length, 1, "and the angle");
+      const plain = projectWith(
+        [line("a", [10, 0], [30, 0]), line("b", [30, 0], [30, 20])],
+        [con("j", "coincident", ["a", "b"], { points: ["end", "start"] }), con("ang", "angle", ["a", "b"], { valueDeg: 90 })]
+      );
+      const aboutX = applyOk(plain, mirrorEntities(ctx(plain), ids("a", "b").concat(MIRROR_AXIS_X)));
+      const copiedAngle = relationsOf(aboutX, "angle").find((relation) => relation.id !== "constraint:ang")!;
+      near(copiedAngle.valueDeg!, 270, 1e-6, "with no symmetry relation (the sketch axis) the copies keep their relations: a mirrored right angle measures 270 degrees (re-measured, not copied)");
     }
   },
   {
@@ -63,7 +71,7 @@ export const sketchEditTransformTests: readonly TestCase[] = [
       equal(grid.sketch.entities.length, 6, "two copies of both lines");
       equal(relationsOf(grid, "coincident").length, 3, "each instance keeps its joint");
       equal(relationsOf(grid, "horizontal").length, 3, "and its horizontal relation");
-      equal(relationsOf(grid, "distance").length, 3, "and its length dimension");
+      equal(relationsOf(grid, "distance").length, 1, "only the source keeps its length dimension: the copies are tied to it by Equal, so editing the source dimension cannot contradict them");
       assert(relationsOf(grid, "equal").length >= 4, "copies are tied to their source by equal relations");
       const crowd = projectWith(Array.from({ length: 40 }, (_, index) => circle(`c${index}`, [index * 3, 0], 1)));
       const tooMany = patternEntities(ctx(crowd), crowd.sketch.entities.map((entity) => entity.id), { kind: "rectangular", countX: 100, countY: 1, dxMm: 400, dyMm: 0 });
