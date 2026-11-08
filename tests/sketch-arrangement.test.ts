@@ -10,6 +10,7 @@ import {
   explainNoProfiles,
   lostProfileRefs,
   matchProfileRef,
+  profileBaseOf,
   profileInBox,
   profileOutlineMm,
   resolveProfileRegion,
@@ -18,7 +19,7 @@ import {
   type SketchProfile
 } from "../packages/workbench-sketch/src/index.js";
 import { breakAtIntersections } from "../packages/workbench-sketch/src/break-intersections.js";
-import { filletCorners, chamferCorners } from "../packages/workbench-sketch/src/edit-tools.js";
+import { checkSketch, filletCorners, chamferCorners } from "../packages/workbench-sketch/src/edit-tools.js";
 import { analyzeSketch } from "../packages/workbench-sketch/src/sketch-repair.js";
 import { splitAt } from "../packages/workbench-sketch/src/split-jog.js";
 import { commitOk, context, newId, projectWith } from "./sketch-edit-kit.js";
@@ -202,11 +203,28 @@ export const sketchArrangementTests: readonly TestCase[] = [
     }
   },
   {
+    name: "Diagnostics P-09/P-13/P-04: a closed spline, a rib on an edge and an overlapped edge are not reported as open chains or open ends",
+    run: async () => {
+      const closedSpline = analyzeSketch(context(projectWith([spline("s", [[10, 0], [0, 10], [-10, 0], [0, -10], [10, 0]])])));
+      equal(closedSpline.closedProfiles, 1, "the closed spline is a profile");
+      assert(!closedSpline.issues.some((issue) => issue.category === "open-chain"), `and not an open chain with two free ends: ${closedSpline.issues.map((issue) => issue.title).join("; ")}`);
+      const overlapped = analyzeSketch(context(projectWith([line("b1", [0, 0], [6, 0]), line("b2", [4, 0], [10, 0]), line("r", [10, 0], [10, 10]), line("t", [10, 10], [0, 10]), line("l", [0, 10], [0, 0])])));
+      assert(!overlapped.issues.some((issue) => issue.category === "open-chain" || issue.category === "gap"), "an edge drawn as two overlapping lines is an overlap, not a gap the repair would close with a third line");
+      assert(overlapped.issues.some((issue) => issue.category === "region" && /run over each other/u.test(issue.detail)), "the overlap is named");
+      const rib = checkSketch(sketchOf([...polyline("s", [[0, 0], [10, 0], [10, 10], [0, 10]]), line("m", [5, 0], [5, 10])]));
+      assert(!rib.items.some((item) => /Open end/u.test(item.message)), `a rib whose ends sit on the edges has no open ends: ${rib.items.map((item) => item.message).join(" | ")}`);
+      const stub = checkSketch(sketchOf([...polyline("s", [[0, 0], [10, 0], [10, 10], [0, 10]]), line("tail", [10, 10], [15, 15])]));
+      assert(stub.items.some((item) => /Open end at \(15, 15\)/u.test(item.message)), "a stub's free end still is one");
+      const twice = await volumeOf([rect("p", [0, 0], 20, 20), circle("h1", [0, 0], 3), circle("h2", [0, 0], 3)], []);
+      near(twice.volume, (400 - Math.PI * 9) * 10, 8, "two identical circles in a plate are one hole (the kernel refuses a doubled hole)");
+    }
+  },
+  {
     name: "Profile identity P-05/P06/P07: a feature built on a region survives a fillet, a chamfer, a split and unrelated geometry",
     run: async () => {
       const rectangle = rect("r", [0, 0], 20, 10);
       const original = detect([rectangle])[0]!;
-      assert(original.ref !== undefined && original.ref.startsWith("profile:r~"), `a profile carries a geometric reference: ${original.ref}`);
+      assert(original.ref !== undefined && original.ref.startsWith("profile:r_a200_x0_y0_h"), `a profile carries a geometric reference: ${original.ref}`);
       const before = await volumeOf([rectangle], [original.ref!]);
       near(before.volume, 2000, 1e-6, "the rectangle extrudes to 20 x 10 x 10");
       // Fillet all four corners: the rectangle is replaced by eight entities and its id disappears.
@@ -341,7 +359,7 @@ export const sketchArrangementTests: readonly TestCase[] = [
       near(merged.volume, (1600 - union) * 10, 40, "two overlapping holes are one void of their union area");
       const unknown = resolveProfileRegion(detect(plate), ["profile:gone"], { includeIslands: true });
       assert(!unknown.ok && /gone/u.test(unknown.diagnostics[0]?.message ?? ""), "an unknown id fails and names the id instead of using the largest profile");
-      const unknownRef = resolveProfileRegion(detect(plate), ["profile:gone~a100~x500~y500~h0"], { includeIslands: true });
+      const unknownRef = resolveProfileRegion(detect(plate), ["profile:gone_a100_x500_y500_h0"], { includeIslands: true });
       assert(!unknownRef.ok, "and so does an unknown reference far from every region");
       const simple = [rect("q", [0, 0], 20, 20), circle("h", [0, 0], 3)];
       const regions = detect(simple);
@@ -469,7 +487,7 @@ export const sketchArrangementTests: readonly TestCase[] = [
     name: "Region detection P-18: a crossing box picks the region it touches, not every region whose bounding box overlaps",
     run: () => {
       const profiles = detect([circle("big", [0, 0], 20), circle("small", [60, 0], 5)]);
-      const big = profiles.find((profile) => profile.id === "profile:big")!;
+      const big = profiles.find((profile) => profile.entityIds.includes("entity:big"))!;
       const cornerBox = { min: [16, 16] as P, max: [30, 30] as P };
       equal(profileInBox(big, cornerBox, "crossing"), false, "a box in the corner of the circle's bounding box misses the circle");
       equal(profileInBox(big, { min: [10, 10], max: [30, 30] }, "crossing"), true, "a box that reaches into the disc picks it");
@@ -540,10 +558,10 @@ export const sketchArrangementTests: readonly TestCase[] = [
       }
       const profiles = detect(base);
       const byKind = (kind: string): SketchProfile => profiles.find((profile) => profile.boundary.kind === kind)!;
-      equal(byKind("circle").id, "profile:c", "a circle keeps the profile:<entity> id");
-      equal(byKind("rectangle").id, "profile:rr", "a rectangle too");
+      equal(profileBaseOf(byKind("circle").id), "profile:c", "a circle keeps the profile:<entity> name, followed by its signature");
+      equal(profileBaseOf(byKind("rectangle").id), "profile:rr", "a rectangle too");
       near(byKind("ellipse").areaMm2, Math.PI * 8 * 4, 1e-9, "an ellipse keeps its exact area");
-      assert(profiles.some((profile) => /^profile:loop-[0-9a-f]{8}$/u.test(profile.id)), "a loop of lines keeps the loop-<hash> id");
+      assert(profiles.some((profile) => /^profile:loop-[0-9a-f]{8}_a/u.test(profile.id)), "a loop of lines keeps the loop-<hash> name");
       const shapes = closedShapesOf(profiles);
       assert(shapes !== undefined && shapes.length >= profiles.length, "the drawn outlines are available for bare ids");
     }

@@ -418,7 +418,7 @@ export const sheetMetalTimelineTests: readonly TestCase[] = [
     run: async () => {
       const started = run(createWorkbenchProject("project:test-lofted"), { kind: "commit-design-sketch", featureId: "feature:sketch-1", name: "Sketch 1" });
       const sketch = designOf(started).features[0] as DesignSketchFeature;
-      const circle = detectSketchProfiles(sketch.sketch).find((profile) => profile.boundary.kind === "circle" && profile.id === "profile:centered-bore-profile")!;
+      const circle = detectSketchProfiles(sketch.sketch).find((profile) => profile.boundary.kind === "circle" && profile.entityIds.includes("entity:centered-bore-profile"))!;
       const lofted = step(sketch, "sheet-lofted-bend", "lofted", { profileIds: [circle.id], valueMm: 20, sheetThicknessMm: 1.5, loftTopScale: 3, bodyId: "general-body:lofted" });
       assert(validSolidFeaturePayload(lofted), "the step is valid");
       assert(!validSolidFeaturePayload({ ...lofted, sheetThicknessMm: undefined } as unknown as DesignSolidFeature), "a lofted bend needs its thickness");

@@ -134,43 +134,63 @@ function describeLoop(steps: readonly CycleStep[], entities: ReadonlyMap<string,
   return { id, entityIds, boundary, areaMm2: Math.abs(areaPolygon), centroid: centroidOf(points, areaPolygon), points };
 }
 
-const fixed = (value: number): string => {
-  const rounded = Math.round(value * 1000) / 1000;
-  return Object.is(rounded, -0) ? "0" : String(rounded);
+const num = (value: number): string => {
+  const text = value.toFixed(3);
+  return Number(text) === 0 ? "0" : String(Number(text));
 };
 
 const MAX_REF_HOLES = 16;
+const SIGNATURE = /^(.*?)_a(-?\d+(?:\.\d+)?)_x(-?\d+(?:\.\d+)?)_y(-?\d+(?:\.\d+)?)(?:_h([0-9a-f.]*|all))?$/u;
 
-/** The geometric reference a feature stores for a region: id, area, centroid and the holes it had. */
-export function profileRefOf(profile: Pick<SketchProfile, "id" | "areaMm2" | "centroid"> & { readonly holes?: readonly Pick<SketchProfile, "id">[] }): string {
+/**
+ * A profile id: the old entity-based name of the loop (`profile:<entity>`, `profile:loop-<hash>`, `profile:rg-<hash>`) followed by the
+ * geometric signature of its outline (area, centroid). The name keeps the id when the curves are moved or resized; the signature
+ * finds the region again when the curves that made it were replaced (a fillet, chamfer, split or trim).
+ */
+export function signedProfileId(base: string, areaMm2: number, centroid: Vec2): string {
+  return `${base}_a${num(areaMm2)}_x${num(centroid[0])}_y${num(centroid[1])}`;
+}
+
+/** The geometric reference a feature stores for a region: its id plus the holes it had, which pins exactly that region. */
+export function profileRefOf(profile: Pick<SketchProfile, "id"> & { readonly holes?: readonly Pick<SketchProfile, "id">[] }): string {
   const holes = profile.holes ?? [];
-  const holeKeys = holes.length === 0 ? "0" : holes.length > MAX_REF_HOLES ? "all" : holes.map((hole) => fnv1a(hole.id).slice(0, 4)).sort().join(".");
-  return `${profile.id}~a${fixed(profile.areaMm2)}~x${fixed(profile.centroid[0])}~y${fixed(profile.centroid[1])}~h${holeKeys}`;
+  const holeKeys = holes.length === 0 ? "0" : holes.length > MAX_REF_HOLES ? "all" : holes.map((hole) => holeKeyOf(hole.id)).sort().join(".");
+  return `${profile.id}_h${holeKeys}`;
 }
 
 export interface ParsedProfileRef {
+  /** The id without any hole list. */
   readonly id: string;
-  /** Present when the reference carries a geometric signature. */
+  /** The loop's name without the signature: what stays the same when the curves are only moved or resized. */
+  readonly base: string;
+  /** Present when the id carries a geometric signature (the area and centroid of the outline). */
   readonly areaMm2?: number;
   readonly centroid?: Vec2;
-  /** The holes the region had when the reference was made: 4-hex keys, "all", or empty for none. Absent for a bare id. */
+  /** The holes the region had when the reference was made: 4-hex keys, "all", or empty for none. Absent for an id or a bare legacy id. */
   readonly holeKeys?: readonly string[] | "all";
 }
 
 export function parseProfileRef(ref: string): ParsedProfileRef {
-  const parts = ref.split("~");
-  const id = parts[0]!;
-  if (parts.length < 5) return { id };
-  const area = Number(parts[1]!.slice(1));
-  const x = Number(parts[2]!.slice(1));
-  const y = Number(parts[3]!.slice(1));
-  if (parts[1]![0] !== "a" || parts[2]![0] !== "x" || parts[3]![0] !== "y" || parts[4]![0] !== "h" || ![area, x, y].every(Number.isFinite)) return { id };
-  const holes = parts[4]!.slice(1);
-  return { id, areaMm2: area, centroid: [x, y], holeKeys: holes === "all" ? "all" : holes === "0" || holes === "" ? [] : holes.split(".") };
+  const match = SIGNATURE.exec(ref);
+  if (match === null) return { id: ref, base: ref };
+  const area = Number(match[2]);
+  const x = Number(match[3]);
+  const y = Number(match[4]);
+  if (![area, x, y].every(Number.isFinite)) return { id: ref, base: ref };
+  const holes = match[5];
+  return {
+    id: `${match[1]}_a${match[2]}_x${match[3]}_y${match[4]}`, base: match[1]!, areaMm2: area, centroid: [x, y],
+    ...(holes === undefined ? {} : { holeKeys: holes === "all" ? "all" as const : holes === "0" || holes === "" ? [] : holes.split(".") })
+  };
+}
+
+/** The name of a profile's loop without its signature. */
+export function profileBaseOf(id: string): string {
+  return parseProfileRef(id).base;
 }
 
 export function holeKeyOf(holeId: string): string {
-  return fnv1a(holeId).slice(0, 4);
+  return fnv1a(profileBaseOf(holeId)).slice(0, 4);
 }
 
 /** The profiles of an arrangement, largest first. */
@@ -196,7 +216,8 @@ export function profilesOfArrangement(arrangement: Arrangement, sketchEntities: 
     const interiorPoint = interiorPointOf(outer.points, holeLoops.map((hole) => hole.points));
     const count = seen.get(outer.id) ?? 0;
     seen.set(outer.id, count + 1);
-    const id = count === 0 ? outer.id : `${outer.id}-${count + 1}`;
+    // The id signs the outline, not the net region, so a circle added or moved inside does not rename the region around it.
+    const id = signedProfileId(count === 0 ? outer.id : `${outer.id}-${count + 1}`, outer.areaMm2, outer.centroid);
     const base = { id, entityIds: outer.entityIds, boundary: outer.boundary, areaMm2: net, centroid, interiorPoint };
     const profile: SketchProfile = { ...base, ...(holeProfiles.length === 0 ? {} : { holes: holeProfiles }), ref: profileRefOf({ ...base, holes: holeProfiles }) };
     profiles.push(profile);
@@ -205,7 +226,8 @@ export function profilesOfArrangement(arrangement: Arrangement, sketchEntities: 
 }
 
 function holeProfile(loop: Loop): SketchProfile {
-  const base = { id: loop.id, entityIds: loop.entityIds, boundary: loop.boundary, areaMm2: loop.areaMm2, centroid: loop.centroid };
+  const id = signedProfileId(loop.id, loop.areaMm2, loop.centroid);
+  const base = { id, entityIds: loop.entityIds, boundary: loop.boundary, areaMm2: loop.areaMm2, centroid: loop.centroid };
   return { ...base, interiorPoint: interiorPointOf(loop.points, []), ref: profileRefOf(base) };
 }
 

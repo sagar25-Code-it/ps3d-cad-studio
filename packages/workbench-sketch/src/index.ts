@@ -9,14 +9,14 @@ import {
 import { CURVE_TOOL_LABELS, curveToolRequiredPoints, isFixedCurveTool, type CurveToolId, type FixedCurveToolId } from "./curve-tools.js";
 import { pointInRing } from "./arrangement.js";
 import { profileOutlineMm } from "./profile-outline.js";
-import { resolveProfileRegion, type ProfileRegion } from "./profile-select.js";
+import { matchProfileRef, resolveProfileRegion, type ProfileRegion } from "./profile-select.js";
 import { detectProfilesOf, shapesOf } from "./profile-detect.js";
-import { parseProfileRef, type ProfileDetectionOptions } from "./profile-regions.js";
+import type { ProfileDetectionOptions } from "./profile-regions.js";
 
 import { sampleArc, sampleSpline } from "./curve-sampling.js";
 export { sampleArc, sampleSpline, CHORD_TOLERANCE_MM, isClosedFitSpline } from "./curve-sampling.js";
 export { PROFILE_GAP_TOLERANCE_MM } from "./arrangement.js";
-export { profileRefOf, parseProfileRef, type ProfileDetectionOptions } from "./profile-regions.js";
+export { profileBaseOf, profileRefOf, parseProfileRef, signedProfileId, type ProfileDetectionOptions } from "./profile-regions.js";
 export { profileOutlineMm, resolveProfileRegion, type ProfileRegion };
 export { lostProfileRefs, matchProfileRef, profileInBox, type ProfileRegionGroup } from "./profile-select.js";
 export { diagnoseProfiles, explainNoProfiles, type ProfileDiagnosis, type ProfileProblem } from "./profile-diagnostics.js";
@@ -492,11 +492,12 @@ export function resolveQualifiedExtrusion(
   const detected = detectSketchProfiles(sketch);
   const profiles = shapesOf(detected) ?? detected;
   // A region id (the notched plate a crossing circle leaves) means the closed shape it was cut from.
-  const wanted = new Set(selectedProfileIds.map((id) => parseProfileRef(id).id).flatMap((id) => {
-    if (profiles.some((profile) => profile.id === id)) return [id];
-    const face = detected.find((profile) => profile.id === id);
+  const wanted = new Set(selectedProfileIds.flatMap((id) => {
+    const direct = matchProfileRef(id, profiles, false)?.profile;
+    if (direct !== undefined) return [direct.id];
+    const face = matchProfileRef(id, detected, false)?.profile;
     const source = face === undefined ? undefined : profiles.filter((profile) => profile.entityIds.every((entityId) => face.entityIds.includes(entityId)) && (face.interiorPoint === undefined || pointInRing(face.interiorPoint, profileOutlineMm(profile.boundary)))).sort((left, right) => left.areaMm2 - right.areaMm2)[0];
-    return source === undefined ? [id] : [source.id];
+    return source === undefined ? [] : [source.id];
   }));
   const selected = profiles.filter((profile) => wanted.has(profile.id));
   const rectangles = selected.filter((profile) => profile.boundary.kind === "rectangle");

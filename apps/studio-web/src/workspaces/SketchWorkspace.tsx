@@ -5,6 +5,7 @@ import {
   buildSketchEntity,
   detectSketchProfiles,
   explainNoProfiles,
+  matchProfileRef,
   profileInBox,
   resolveProfileRegion,
   isShapeTool,
@@ -577,7 +578,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     else setSelectionIds((current) => current.includes(props.selectedId!) ? current : [props.selectedId!]);
     if (props.selectedId?.startsWith("profile:") === true && profiles.some((profile) => profile.id === props.selectedId)) setSelectedProfileIds([props.selectedId]);
   }, [profiles, props.selectedId]);
-  useEffect(() => setSelectedProfileIds((current) => current.filter((id) => profiles.some((profile) => profile.id === id))), [profiles]);
+  // A profile id carries the outline's signature, so dragging a corner renames the region; the selection follows it instead of being dropped.
+  useEffect(() => setSelectedProfileIds((current) => {
+    const next = [...new Set(current.flatMap((id) => { const match = matchProfileRef(id, profiles); return match === undefined ? [] : [match.profile.id]; }))];
+    return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next;
+  }), [profiles]);
   useEffect(() => {
     const currentHandles = visibleEntities.flatMap(dimensionHandles);
     setDimensionPoints((current) => current.flatMap((point) => currentHandles.find((candidate) => candidate.id === point.id) ?? []));

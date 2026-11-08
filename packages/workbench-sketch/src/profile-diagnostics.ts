@@ -81,12 +81,23 @@ export function diagnoseArrangement(arrangement: Arrangement, sketch: Pick<Workb
       });
       continue;
     }
-    // A free end that stops just short of another curve's side.
+    // A free end that stops just short of another curve's side, in the direction the curve is heading (an overshoot past a corner is not that).
+    const incident = arrangement.edges.find((edge) => edge.u === end.index || edge.v === end.index);
+    let heading: Vec2 | undefined;
+    if (incident !== undefined) {
+      const last = incident.points.length - 1;
+      const [from, to] = incident.v === end.index ? [incident.points[last - 1]!, incident.points[last]!] : [incident.points[1]!, incident.points[0]!];
+      const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+      heading = length === 0 ? undefined : [(to[0] - from[0]) / length, (to[1] - from[1]) / length];
+    }
     let shortOf: { readonly id: string; readonly distance: number } | undefined;
     for (const edge of arrangement.edges) {
       if (edge.u === end.index || edge.v === end.index) continue;
       const distance = distanceToPolyline(end.vertex.point, edge.points);
-      if (distance <= reach && distance > tolerance && (shortOf === undefined || distance < shortOf.distance)) shortOf = { id: edge.owners[0]!.entityId, distance };
+      if (distance > reach || distance <= tolerance || (shortOf !== undefined && distance >= shortOf.distance)) continue;
+      const nearest = nearestPointOnPolyline(end.vertex.point, edge.points);
+      const ahead = heading === undefined ? 1 : ((nearest[0] - end.vertex.point[0]) * heading[0] + (nearest[1] - end.vertex.point[1]) * heading[1]) / (distance || 1);
+      if (ahead >= 0.5) shortOf = { id: edge.owners[0]!.entityId, distance };
     }
     used.add(end.index);
     if (shortOf !== undefined) {
@@ -151,3 +162,20 @@ export function explainNoProfiles(sketch: WorkbenchSketch): readonly string[] {
 }
 
 export { PROFILE_GAP_TOLERANCE_MM, profileGapToleranceOf };
+
+function nearestPointOnPolyline(point: Vec2, points: readonly Vec2[]): Vec2 {
+  let best: Vec2 = points[0]!;
+  let bestDistance = Infinity;
+  for (let index = 0; index + 1 < points.length; index += 1) {
+    const a = points[index]!;
+    const b = points[index + 1]!;
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const lengthSquared = dx * dx + dy * dy;
+    const w = lengthSquared === 0 ? 0 : Math.min(1, Math.max(0, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / lengthSquared));
+    const candidate: Vec2 = [a[0] + dx * w, a[1] + dy * w];
+    const distance = Math.hypot(point[0] - candidate[0], point[1] - candidate[1]);
+    if (distance < bestDistance) { bestDistance = distance; best = candidate; }
+  }
+  return best;
+}

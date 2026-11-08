@@ -4,6 +4,7 @@ import { analyzeWorkbenchSketch, detectSketchProfiles, sampleSpline } from "./in
 import { arcFrame, editPlan, type SketchEditContext, type SketchEditPlan } from "./edit-tools.js";
 import { curveEnd, isOpenCurve, jointBetween, withCurveEnd, type CurveEnd } from "./endpoint-join.js";
 import { applyPlanToSketch, planHolds } from "./sketch-clone.js";
+import { arrangeSketch } from "./profile-detect.js";
 import { diagnoseProfiles } from "./profile-diagnostics.js";
 import { profileGapToleranceOf } from "./profile-regions.js";
 
@@ -403,17 +404,21 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
   }
 
   // Gaps between curve ends that almost meet.
+  // Only ends that really are free count: one that sits on another curve (a rib on an edge), that an overlap covers, or that joins its own
+  // curve (a closed spline) is part of a region and needs no gap fix.
+  const freeVertexPoints = arrangeSketch(sketch).vertices.filter((vertex) => vertex.degree === 1).map((vertex) => vertex.point);
+  const isFreeEnd = (point: Vec2): boolean => freeVertexPoints.some((free) => dist(free, point) <= Math.max(profileTolerance * 2, 1e-6));
   const ends = endsOfSketch(sketch).filter((end) => !duplicated.has(end.entity.id) && (measureOf(end.entity) ?? 1) >= ZERO_MM);
   const partnersWithin = (end: EndRef, limit: number): EndRef[] => ends.filter((other) => other.entity.id !== end.entity.id && dist(other.point, end.point) <= limit);
   const gapPairs = new Set<string>();
   const gapJoins: { readonly a: string; readonly b: string }[] = [];
   const gapEnds = new Set<EndRef>();
   for (const end of ends) {
-    if (partnersWithin(end, COINCIDENT_MM).length > 0) continue;
-    const candidates = partnersWithin(end, gapLimit).filter((other) => partnersWithin(other, COINCIDENT_MM).length === 0).sort((a, b) => dist(a.point, end.point) - dist(b.point, end.point));
+    if (!isFreeEnd(end.point) || partnersWithin(end, COINCIDENT_MM).length > 0) continue;
+    const candidates = partnersWithin(end, gapLimit).filter((other) => isFreeEnd(other.point) && partnersWithin(other, COINCIDENT_MM).length === 0).sort((a, b) => dist(a.point, end.point) - dist(b.point, end.point));
     const partner = candidates[0];
     if (partner === undefined) continue;
-    const mutual = ends.filter((other) => other.entity.id !== partner.entity.id && dist(other.point, partner.point) <= gapLimit && partnersWithin(other, COINCIDENT_MM).length === 0).sort((a, b) => dist(a.point, partner.point) - dist(b.point, partner.point))[0];
+    const mutual = ends.filter((other) => other.entity.id !== partner.entity.id && dist(other.point, partner.point) <= gapLimit && isFreeEnd(other.point) && partnersWithin(other, COINCIDENT_MM).length === 0).sort((a, b) => dist(a.point, partner.point) - dist(b.point, partner.point))[0];
     if (mutual !== end) continue;
     const key = [end.entity.id + end.which, partner.entity.id + partner.which].sort().join("|");
     if (gapPairs.has(key)) continue;
@@ -466,9 +471,10 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
   for (const pair of gapJoins) join(pair.a, pair.b);
   const groups = new Map<string, EndRef[]>();
   for (const end of ends) { const key = root(end.entity.id); groups.set(key, [...(groups.get(key) ?? []), end]); }
+  const detectedNow = detectSketchProfiles(sketch);
   for (const members of groups.values()) {
     const curveIds = [...new Set(members.map((end) => end.entity.id))];
-    const freeEnds = members.filter((end) => !gapEnds.has(end) && partnersWithin(end, snap).length === 0);
+    const freeEnds = members.filter((end) => !gapEnds.has(end) && partnersWithin(end, snap).length === 0 && isFreeEnd(end.point));
     if (freeEnds.length === 0) continue;
     const lone = curveIds.length === 1 && members[0]!.entity.kind === "line";
     if (lone) continue;
@@ -492,9 +498,11 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
         ...(fix === undefined ? { noFixReason: "A closing line between the two ends would not make a valid closed profile (it would cross other curves)." } : {})
       });
     } else {
+      // A chain that already bounds a region and only has a stub left over is not a broken loop; it is worth a note, not a warning.
+      const stub = detectedNow.some((profile) => profile.entityIds.some((id) => curveIds.includes(id)));
       issues.push({
-        id: `open-chain:${curveIds.slice().sort().join("|")}`, category: "open-chain", severity: "warning", title: `Open chain of ${curveIds.length} curve${curveIds.length === 1 ? "" : "s"} with ${freeEnds.length} free end${freeEnds.length === 1 ? "" : "s"}`,
-        detail: `Free ends at ${freeEnds.map((end) => `(${fmt(end.point[0])}, ${fmt(end.point[1])})`).join(", ")}. A branching or single-ended chain cannot be closed automatically.`,
+        detail: `Free ends at ${freeEnds.map((end) => `(${fmt(end.point[0])}, ${fmt(end.point[1])})`).join(", ")}. ${stub ? "They bound no region of their own; trim them if they are leftovers." : "A branching or single-ended chain cannot be closed automatically."}`,
+        id: `open-chain:${curveIds.slice().sort().join("|")}`, category: "open-chain", severity: stub ? "info" : "warning", title: stub ? `Free end on a closed outline (${freeEnds.length})` : `Open chain of ${curveIds.length} curve${curveIds.length === 1 ? "" : "s"} with ${freeEnds.length} free end${freeEnds.length === 1 ? "" : "s"}`,
         entityIds: curveIds, constraintIds: [], fixes: [], noFixReason: "Join or trim the free ends by hand (Extend, Trim or Corner)."
       });
     }

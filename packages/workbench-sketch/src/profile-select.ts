@@ -3,7 +3,7 @@ import { pointInRing } from "./arrangement.js";
 import type { SketchProfile, SketchProfileBoundary, SketchProfileSegment } from "./index.js";
 import { profileOutlineMm } from "./profile-outline.js";
 import { shapesOf } from "./profile-detect.js";
-import { fnv1a, holeKeyOf, parseProfileRef } from "./profile-regions.js";
+import { fnv1a, holeKeyOf, parseProfileRef, profileBaseOf } from "./profile-regions.js";
 
 /**
  * Turns a profile selection into the solid-ready region: one or more groups, each an outer outline with the holes cut through it.
@@ -145,7 +145,7 @@ function relate(a: Ring, b: Ring): Related {
 }
 
 const shortId = (id: string): string => {
-  const bare = id.replace(/^profile:/u, "").replace(/^entity:/u, "");
+  const bare = profileBaseOf(id).replace(/^profile:/u, "").replace(/^entity:/u, "");
   return bare.length > 18 ? `${bare.slice(0, 12)}…` : bare;
 };
 
@@ -155,27 +155,41 @@ const shortId = (id: string): string => {
 
 export interface MatchedProfile {
   readonly profile: SketchProfile;
-  /** The reference named the region exactly (id still present), or it was found again by its geometry. */
-  readonly how: "id" | "geometry";
+  /** The id still names a profile ("id"), only its loop name does ("name": the curves were moved or resized), or the region was found by its geometry. */
+  readonly how: "id" | "name" | "geometry";
+}
+
+/** The area and centroid of a profile's outline, read from its id (the same numbers a stored reference carries). */
+function outlineSignature(profile: SketchProfile): { readonly areaMm2: number; readonly centroid: Vec2 } {
+  const parsed = parseProfileRef(profile.id);
+  if (parsed.areaMm2 !== undefined && parsed.centroid !== undefined) return { areaMm2: parsed.areaMm2, centroid: parsed.centroid };
+  return { areaMm2: profile.areaMm2 + (profile.holes ?? []).reduce((total, hole) => total + hole.areaMm2, 0), centroid: profile.centroid };
 }
 
 /**
- * Finds the region a stored id or reference means among the current profiles: the same id if it still exists, otherwise the region
- * whose area and centroid are closest to the signature in the reference (a fillet, chamfer, split or trim of the outline changes the
- * id but hardly the region). Returns undefined when nothing fits well enough.
+ * Finds the region a stored id or reference means among the current profiles. In order of trust:
+ *  1. the same id (nothing about the region changed);
+ *  2. the same loop name (the curves that bound it were moved or resized: the id carries the entities, not the size);
+ *  3. the region whose outline area and centroid are closest to the signature in the id (a fillet, chamfer, split or trim replaces the
+ *     curves and so the name, but hardly the region).
+ * Returns undefined when nothing fits well enough, so a lost region is reported instead of guessed.
  */
-export function matchProfileRef(ref: string, profiles: readonly SketchProfile[]): MatchedProfile | undefined {
+export function matchProfileRef(ref: string, profiles: readonly SketchProfile[], useGeometry = true): MatchedProfile | undefined {
   const parsed = parseProfileRef(ref);
   const byId = profiles.find((profile) => profile.id === parsed.id);
   if (byId !== undefined) return { profile: byId, how: "id" };
-  if (parsed.areaMm2 === undefined || parsed.centroid === undefined || parsed.areaMm2 <= 0) return undefined;
   const wantedArea = parsed.areaMm2;
   const wantedCentroid = parsed.centroid;
+  const sameName = profiles.filter((profile) => profileBaseOf(profile.id) === parsed.base);
+  if (sameName.length === 1) return { profile: sameName[0]!, how: "name" };
+  if (!useGeometry && sameName.length === 0) return undefined;
+  if (wantedArea === undefined || wantedCentroid === undefined || wantedArea <= 0) return sameName.length > 1 ? { profile: sameName.sort((left, right) => right.areaMm2 - left.areaMm2)[0]!, how: "name" } : undefined;
   const size = Math.sqrt(wantedArea);
-  const scored = profiles
+  const scored = (sameName.length > 1 ? sameName : profiles)
     .map((profile) => {
-      const ratio = profile.areaMm2 / wantedArea;
-      const offset = Math.hypot(profile.centroid[0] - wantedCentroid[0], profile.centroid[1] - wantedCentroid[1]);
+      const signature = outlineSignature(profile);
+      const ratio = signature.areaMm2 / wantedArea;
+      const offset = Math.hypot(signature.centroid[0] - wantedCentroid[0], signature.centroid[1] - wantedCentroid[1]);
       return { profile, ratio, offset, score: offset / size + Math.abs(Math.log(Math.max(ratio, 1e-9))) };
     })
     .filter((item) => item.ratio >= 0.4 && item.ratio <= 2.5 && item.offset <= 0.35 * size)
@@ -186,6 +200,7 @@ export function matchProfileRef(ref: string, profiles: readonly SketchProfile[])
   if (second !== undefined && second.score < best.score * 1.5 && best.score > 0.05) return undefined;
   return { profile: best.profile, how: "geometry" };
 }
+
 
 // ---------------------------------------------------------------------------------------------
 // Resolving a selection
@@ -223,10 +238,11 @@ export function resolveProfileRegion(
       exact.push({ profile: match.profile, keep });
       continue;
     }
-    const face = profiles.find((profile) => profile.id === parsed.id);
-    const shape = face ?? shapes?.find((candidate) => candidate.id === parsed.id);
-    if (shape === undefined) return missing(id);
-    legacy.push(shape);
+    // A bare or signed id means the outline as drawn: the region of that name, else the drawn shape of that name (a rectangle a circle
+    // crosses is one shape but several regions), else the region closest to its signature.
+    const found = matchProfileRef(id, profiles, false)?.profile ?? (shapes === undefined ? undefined : matchProfileRef(id, shapes, false)?.profile) ?? matchProfileRef(id, profiles)?.profile;
+    if (found === undefined) return missing(id);
+    legacy.push(found);
   }
   if (exact.length > 0) {
     // Bare ids mixed into a reference selection are regions with all their holes.
@@ -305,6 +321,11 @@ function outlineRegion(profiles: readonly SketchProfile[], universe: readonly Sk
     } else if (related.relation === "same") {
       warnings.push(`${describe(candidate)} lies exactly on the outline of ${shortId(root.id)} and was ignored.`);
     }
+  }
+  // Two identical outlines drawn on top of each other are one hole.
+  for (let index = inside.length - 1; index >= 0; index -= 1) {
+    const item = inside[index]!;
+    if (inside.slice(0, index).some((other) => Math.abs(other.ring.area - item.ring.area) <= 1e-6 * (1 + item.ring.area) && relate(other.ring, item.ring).relation === "same")) inside.splice(index, 1);
   }
   // Holes that overlap each other are one void: build the region from the faces instead of from the outlines.
   const overlappingHoles = inside.some((item, index) => inside.slice(index + 1).some((other) => relate(item.ring, other.ring).relation === "cross"));
@@ -578,11 +599,9 @@ export function lostProfileRefs(profiles: readonly SketchProfile[], ids: readonl
   const shapes = shapesOf(profiles);
   for (const id of new Set(ids)) {
     const parsed = parseProfileRef(id);
-    if (parsed.holeKeys !== undefined) {
-      if (matchProfileRef(id, profiles) !== undefined) continue;
-    } else if (profiles.some((profile) => profile.id === parsed.id) || (shapes?.some((shape) => shape.id === parsed.id) ?? false)) continue;
+    if (matchProfileRef(id, profiles, false) !== undefined || (shapes !== undefined && matchProfileRef(id, shapes, false) !== undefined) || matchProfileRef(id, profiles) !== undefined) continue;
     const round = (value: number): string => String(Math.round(value * 100) / 100);
-    lost.push(parsed.areaMm2 !== undefined && parsed.centroid !== undefined ? `a region of about ${round(parsed.areaMm2)} mm² near (${round(parsed.centroid[0])}, ${round(parsed.centroid[1])})` : shortId(parsed.id));
+    lost.push(parsed.areaMm2 !== undefined && parsed.centroid !== undefined ? `a region of about ${round(parsed.areaMm2)} mm² near (${round(parsed.centroid[0])}, ${round(parsed.centroid[1])})` : shortId(parsed.base));
   }
   return lost;
 }
