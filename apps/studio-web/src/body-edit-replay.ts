@@ -1,5 +1,6 @@
 import type { BodyEditSpec, DesignHistory, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { addWebs, draftFaces, flexBody, offsetRegion, replaceFaces, shellBody, type FaceEditResult, type FlexResult, type WebResult } from "../../../packages/workbench-geometry/src/index.js";
+import { addWebs, draftFaces, fitCylinder, flexBody, offsetRegion, replaceFaces, shellBody, wrapProfile, type FaceEditResult, type FlexResult, type WebResult, type WrapResult } from "../../../packages/workbench-geometry/src/index.js";
+import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion } from "../../../packages/workbench-sketch/src/index.js";
 import { openChains, sketchPlaneNormal, sketchPointToWorld } from "./web-profile.js";
 
 /**
@@ -26,7 +27,22 @@ function webEdit(step: DesignSolidFeature, spec: Extract<BodyEditSpec, { readonl
   return addWebs({ positionsMm: body.positionsMm, indices: body.indices }, world, { thicknessMm: spec.thicknessMm, direction: spec.direction, extendToBody: spec.extendToBody, flip: spec.flip, normal: sketchPlaneNormal(sketchFeature.sketch) });
 }
 
-function meshEdit(step: DesignSolidFeature, spec: BodyEditSpec, body: GeneralSolidBody, context: BodyEditContext): FaceEditResult | FlexResult | WebResult | undefined {
+/** A wrap uses the closed profile of the sketch the step names, bent onto the cylinder face it was picked on. */
+function wrapEdit(step: DesignSolidFeature, spec: Extract<BodyEditSpec, { readonly kind: "wrap" }>, body: GeneralSolidBody, context: BodyEditContext): WrapResult {
+  const sketchFeature = context.history.features.find((feature): feature is DesignSketchFeature => feature.id === step.sketchFeatureId && feature.kind === "sketch");
+  if (sketchFeature === undefined) return { ok: false, message: "The sketch this wrap was drawn in is no longer in the timeline." };
+  const profiles = detectSketchProfiles(sketchFeature.sketch);
+  const missing = step.profileIds.find((id) => !profiles.some((profile) => profile.id === id));
+  if (missing !== undefined) return { ok: false, message: "A profile this wrap was built on no longer exists in its sketch. Edit the sketch to close it again, or delete the feature." };
+  const region = resolveProfileRegion(profiles, step.profileIds, { includeIslands: true });
+  if (!region.ok) return { ok: false, message: region.diagnostics[0]?.message ?? "The sketch has no closed profile to wrap." };
+  const mesh = { positionsMm: body.positionsMm, indices: body.indices };
+  const fit = fitCylinder(mesh, spec.face);
+  if (typeof fit === "string") return { ok: false, message: fit };
+  return wrapProfile(mesh, { outer: profileOutlineMm(region.value.outer.boundary), holes: region.value.holes.map((hole) => profileOutlineMm(hole.boundary)) }, fit, spec.face, { mode: spec.mode, heightMm: spec.heightMm });
+}
+
+function meshEdit(step: DesignSolidFeature, spec: BodyEditSpec, body: GeneralSolidBody, context: BodyEditContext): FaceEditResult | FlexResult | WebResult | WrapResult | undefined {
   const mesh = { positionsMm: body.positionsMm, indices: body.indices };
   switch (spec.kind) {
     case "shell": return shellBody(mesh, { thicknessMm: spec.thicknessMm, side: spec.side, openFaces: spec.openFaces });
@@ -34,6 +50,7 @@ function meshEdit(step: DesignSolidFeature, spec: BodyEditSpec, body: GeneralSol
     case "offset-region": return offsetRegion(mesh, { distanceMm: spec.distanceMm, faces: spec.faces });
     case "replace-face": return replaceFaces(mesh, { faces: spec.faces, toFace: spec.toFace, toPlane: spec.toPlane });
     case "web": return webEdit(step, spec, body, context);
+    case "wrap": return wrapEdit(step, spec, body, context);
     case "flex": return flexBody(mesh, { mode: spec.mode, angleDeg: spec.angleDeg, axisPointMm: spec.axisPointMm, axisDirectionMm: spec.axisDirectionMm, lengthDirectionMm: spec.lengthDirectionMm, zoneLengthMm: spec.zoneLengthMm });
     default: return undefined;
   }

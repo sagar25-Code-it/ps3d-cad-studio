@@ -70,6 +70,11 @@ export function bodyEditFields(feature: DesignSolidFeature): readonly ParameterF
     case "web": return [
       numberField("web", "thickness", "Thickness", "mm", (s) => s.thicknessMm, (s, v) => ({ ...s, thicknessMm: v }), (s) => (s.kind === "web" ? s.thicknessMm : 1), { ...positive, max: 10_000 }),
       selectField("web", "direction", "Thickness grows", [{ value: "symmetric", label: "Both sides of the profile" }, { value: "one-side", label: "One side" }], (s) => s.direction, (s, v) => ({ ...s, direction: v === "one-side" ? "one-side" as const : "symmetric" as const })),
+      selectField("web", "side", "Side of the profile", [{ value: "auto", label: "The side that meets the body" }, { value: "normal", label: "Profile normal x direction" }, { value: "flipped", label: "The opposite side" }], (s) => (s.flip === undefined ? "auto" : s.flip ? "flipped" : "normal"), (s, v) => {
+        const { flip: _previous, ...rest } = s;
+        void _previous;
+        return v === "flipped" ? { ...rest, flip: true } : v === "normal" ? { ...rest, flip: false } : rest;
+      }),
       selectField("web", "extend", "Ends", [{ value: "to-body", label: "Extend until they meet the body" }, { value: "as-drawn", label: "As drawn" }], (s) => (s.extendToBody ? "to-body" : "as-drawn"), (s, v) => ({ ...s, extendToBody: v !== "as-drawn" }))
     ];
     case "wrap": return [

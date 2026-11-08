@@ -1,10 +1,12 @@
-import type { BodyEditSpec, DesignSolidFeature, FaceRef, GeneralSolidBody, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
+import type { BodyEditSpec, DesignSketchFeature, DesignSolidFeature, FaceRef, GeneralSolidBody, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { baseFeatureOf, describeBodyEdit, designOf } from "../../../packages/workbench-core/src/index.js";
-import { analyzeFaces, faceOutlineSegments, resolveFace, shellBody } from "../../../packages/workbench-geometry/src/index.js";
+import { analyzeFaces, faceOutlineSegments, fitCylinder, resolveFace, shellBody } from "../../../packages/workbench-geometry/src/index.js";
+import { detectSketchProfiles } from "../../../packages/workbench-sketch/src/index.js";
+import { openCurveIds } from "./web-profile.js";
 import type { ViewportGuideSegment, ViewportMeasurePoint } from "../../../packages/viewport-three/src/index.js";
 
 /** The face-driven edits the ribbon offers; each records a replayable timeline step. */
-export type BodyEditMode = "shell" | "draft" | "offset-region" | "replace-face";
+export type BodyEditMode = "shell" | "draft" | "offset-region" | "replace-face" | "web" | "wrap" | "flex";
 
 /** What the handlers need from the app: the live project, viewport picking, the timeline commit and a status line. */
 export interface BodyEditDeps {
@@ -28,16 +30,18 @@ const faceRefOf = (picked: ViewportMeasurePoint): FaceRef | undefined => picked.
 
 const numbers = (text: string): number[] => text.split(/[,\s]+/u).map((part) => Number.parseFloat(part.trim())).filter((value) => Number.isFinite(value));
 
+const STEP_LABEL: Readonly<Partial<Record<DesignSolidFeature["kind"], string>>> = { shell: "Shell", draft: "Draft", "offset-region": "Offset region", "replace-face": "Replace face", web: "Rib / Web", wrap: "Wrap", flex: "Flex" };
+
 /** Builds the timeline step for a body edit. `valueMm` is the size the timeline shows (thickness, angle or distance). */
-export function bodyEditFeature(kind: DesignSolidFeature["kind"], bodyEdit: BodyEditSpec, base: DesignSolidFeature, bodyId: string, valueMm: number): DesignSolidFeature {
+export function bodyEditFeature(kind: DesignSolidFeature["kind"], bodyEdit: BodyEditSpec, base: DesignSolidFeature, bodyId: string, valueMm: number, sketchFeatureId: string = base.sketchFeatureId): DesignSolidFeature {
   return {
-    id: `feature:${kind}-${crypto.randomUUID()}`, name: `${kind === "shell" ? "Shell" : kind === "draft" ? "Draft" : kind === "offset-region" ? "Offset region" : kind === "replace-face" ? "Replace face" : kind} · ${describeBodyEdit(bodyEdit)}`.slice(0, 120),
-    kind, suppressed: false, sketchFeatureId: base.sketchFeatureId, profileIds: [], valueMm: Math.max(0.01, Math.abs(valueMm)), bodyId, operation: "direct-edit", bodyEdit
+    id: `feature:${kind}-${crypto.randomUUID()}`, name: `${STEP_LABEL[kind] ?? kind} · ${describeBodyEdit(bodyEdit)}`.slice(0, 120),
+    kind, suppressed: false, sketchFeatureId, profileIds: [], valueMm: Math.max(0.01, Math.abs(valueMm)), bodyId, operation: "direct-edit", bodyEdit
   };
 }
 
 export function createBodyEditHandlers(deps: BodyEditDeps): { readonly run: (mode: BodyEditMode) => Promise<void> } {
-  const NAMES: Readonly<Record<BodyEditMode, string>> = { shell: "Shell", draft: "Draft", "offset-region": "Offset region", "replace-face": "Replace face" };
+  const NAMES: Readonly<Record<BodyEditMode, string>> = { shell: "Shell", draft: "Draft", "offset-region": "Offset region", "replace-face": "Replace face", web: "Rib / Web", wrap: "Wrap", flex: "Flex" };
 
   /** The selected solid and the step that made it, or a reason the edit cannot be recorded. */
   const target = (mode: BodyEditMode): { readonly body: GeneralSolidBody; readonly base: DesignSolidFeature | undefined } | undefined => {
@@ -161,11 +165,105 @@ export function createBodyEditHandlers(deps: BodyEditDeps): { readonly run: (mod
     await finish(bodyEditFeature("replace-face", spec, base, body.id, 1), body, `Replaced faces of ${body.name}: ${describeBodyEdit(spec)}.`);
   };
 
+  /** The most recent finished sketch in the timeline that has what `wanted` looks for. */
+  const latestSketch = (wanted: (sketch: DesignSketchFeature) => boolean): DesignSketchFeature | undefined => {
+    const features = designOf(deps.project()).features;
+    for (let index = features.length - 1; index >= 0; index -= 1) {
+      const feature = features[index]!;
+      if (feature.kind === "sketch" && !feature.suppressed && wanted(feature)) return feature;
+    }
+    return undefined;
+  };
+
+  const web = async (): Promise<void> => {
+    const found = target("web");
+    if (found === undefined) return;
+    const { body, base } = found;
+    if (base === undefined) { deps.say("ready", "Rib / Web: this body is not in the timeline, so the rib cannot be recorded."); return; }
+    const sketch = latestSketch((candidate) => openCurveIds(candidate.sketch).length > 0);
+    if (sketch === undefined) { deps.say("ready", "Rib / Web: draw an open profile (a line, arc or spline that does not close into a loop) in a sketch and finish the sketch first."); return; }
+    const entityIds = openCurveIds(sketch.sketch);
+    const thicknessRaw = deps.ask(`Rib thickness (mm) for the ${entityIds.length} open ${entityIds.length === 1 ? "curve" : "curves"} of ${sketch.name}:`, "2");
+    if (thicknessRaw === null) return;
+    const thickness = Number.parseFloat(thicknessRaw);
+    if (!Number.isFinite(thickness) || thickness <= 0) { deps.say("ready", "Rib / Web: enter a positive thickness in millimetres."); return; }
+    const directionRaw = (deps.ask("Thickness grows (symmetric or one-side):", "symmetric") ?? "").trim().toLowerCase();
+    if (directionRaw === "") return;
+    if (directionRaw !== "symmetric" && directionRaw !== "one-side") { deps.say("ready", "Rib / Web: enter symmetric or one-side."); return; }
+    const spec: BodyEditSpec = { kind: "web", thicknessMm: thickness, direction: directionRaw, entityIds, extendToBody: true };
+    await finish(bodyEditFeature("web", spec, base, body.id, thickness, sketch.id), body, `Added a ${entityIds.length === 1 ? "rib" : "web"} to ${body.name}: ${describeBodyEdit(spec)}.`);
+  };
+
+  const wrap = async (): Promise<void> => {
+    const found = target("wrap");
+    if (found === undefined) return;
+    const { body, base } = found;
+    if (base === undefined) { deps.say("ready", "Wrap: this body is not in the timeline, so the wrap cannot be recorded."); return; }
+    const sketch = latestSketch((candidate) => detectSketchProfiles(candidate.sketch).length > 0);
+    if (sketch === undefined) { deps.say("ready", "Wrap: draw a closed profile (a shape or a letter outline) in a sketch and finish the sketch first."); return; }
+    const picked = await deps.pick(`Wrap: click the round wall of ${body.name} where the middle of ${sketch.name} should go`);
+    if (picked === null) return;
+    if (picked.semanticId !== body.id) { deps.say("ready", `Wrap: click on ${body.name}.`); return; }
+    const ref = faceRefOf(picked);
+    if (ref === undefined) { deps.say("ready", "Wrap: the clicked surface has no direction to work from."); return; }
+    const fit = fitCylinder({ positionsMm: body.positionsMm, indices: body.indices }, ref);
+    if (typeof fit === "string") { deps.say("ready", `Wrap: ${fit}`); return; }
+    const modeRaw = (deps.ask(`Wrap ${sketch.name} onto the Ø${(2 * fit.radiusMm).toFixed(1)} mm cylinder: emboss (raise) or deboss (cut in)?`, "emboss") ?? "").trim().toLowerCase();
+    if (modeRaw === "") return;
+    if (modeRaw !== "emboss" && modeRaw !== "deboss") { deps.say("ready", "Wrap: enter emboss or deboss."); return; }
+    const heightRaw = deps.ask(modeRaw === "emboss" ? "Height above the surface (mm):" : "Depth into the surface (mm):", "1");
+    if (heightRaw === null) return;
+    const height = Number.parseFloat(heightRaw);
+    if (!Number.isFinite(height) || height <= 0) { deps.say("ready", "Wrap: enter a positive distance in millimetres."); return; }
+    const spec: BodyEditSpec = { kind: "wrap", mode: modeRaw, heightMm: height, face: ref };
+    await finish(bodyEditFeature("wrap", spec, base, body.id, height, sketch.id), body, `Wrapped ${sketch.name} onto ${body.name}: ${describeBodyEdit(spec)}.`);
+  };
+
+  const flex = async (): Promise<void> => {
+    const found = target("flex");
+    if (found === undefined) return;
+    const { body, base } = found;
+    if (base === undefined) { deps.say("ready", "Flex: this body is not in the timeline, so the flex cannot be recorded."); return; }
+    const picked = await deps.pick(`Flex: click the point on ${body.name} where the bend (or the start of the twist) should be`);
+    if (picked === null) return;
+    const point: [number, number, number] = [round(picked.pointMm[0]), round(picked.pointMm[1]), round(picked.pointMm[2])];
+    const size = [0, 1, 2].map((axis) => { const values = body.positionsMm.filter((_, index) => index % 3 === axis); return Math.max(...values) - Math.min(...values); });
+    const longest = size.indexOf(Math.max(...size));
+    const others = [0, 1, 2].filter((axis) => axis !== longest);
+    const across = size[others[0]!]! <= size[others[1]!]! ? others[0]! : others[1]!;
+    const defaultAxis = [0, 1, 2].map((axis) => (axis === across ? 1 : 0)).join(", ");
+    const modeRaw = (deps.ask("Flex mode (bend or twist):", "bend") ?? "").trim().toLowerCase();
+    if (modeRaw === "") return;
+    if (modeRaw !== "bend" && modeRaw !== "twist") { deps.say("ready", "Flex: enter bend or twist."); return; }
+    const axisRaw = deps.ask(modeRaw === "bend" ? "Bend axis direction x, y, z (the line the part curves around):" : "Twist axis direction x, y, z (the line the part turns about):", modeRaw === "bend" ? defaultAxis : [0, 1, 2].map((axis) => (axis === longest ? 1 : 0)).join(", "));
+    if (axisRaw === null) return;
+    const axis = numbers(axisRaw);
+    if (axis.length !== 3 || axis.every((value) => value === 0)) { deps.say("ready", "Flex: enter three numbers for the axis direction."); return; }
+    const angleRaw = deps.ask(modeRaw === "bend" ? "Bend angle (° up to 180; negative bends the other way):" : "Twist angle (°):", "45");
+    if (angleRaw === null) return;
+    const angle = Number.parseFloat(angleRaw);
+    if (!Number.isFinite(angle) || angle === 0 || (modeRaw === "bend" && Math.abs(angle) > 180) || Math.abs(angle) > 360) { deps.say("ready", "Flex: enter a non-zero angle (a bend up to 180°, a twist up to 360°)."); return; }
+    let zone: number | undefined;
+    if (modeRaw === "bend") {
+      const zoneRaw = deps.ask("Length of the curved zone in mm (blank bends over the rest of the body):", "");
+      if (zoneRaw === null) return;
+      if (zoneRaw.trim() !== "") {
+        zone = Number.parseFloat(zoneRaw);
+        if (!Number.isFinite(zone) || zone <= 0) { deps.say("ready", "Flex: enter a positive length in millimetres."); return; }
+      }
+    }
+    const spec: BodyEditSpec = { kind: "flex", mode: modeRaw, angleDeg: angle, axisPointMm: point, axisDirectionMm: [axis[0]!, axis[1]!, axis[2]!], ...(zone === undefined ? {} : { zoneLengthMm: zone }) };
+    await finish(bodyEditFeature("flex", spec, base, body.id, angle), body, `Flexed ${body.name}: ${describeBodyEdit(spec)}.`);
+  };
+
   return {
     run: async (mode) => {
       if (mode === "shell") return shell();
       if (mode === "draft") return draft();
       if (mode === "offset-region") return offsetRegion();
+      if (mode === "web") return web();
+      if (mode === "wrap") return wrap();
+      if (mode === "flex") return flex();
       return replaceFace();
     }
   };

@@ -63,6 +63,8 @@ export interface WorkbenchMenuActions {
   readonly onMoveSelectedBody: () => void;
   readonly onResizeSelectedBody: () => void;
   readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell", scope?: "picked" | "all") => void;
+  /** Face-driven edits that record a timeline step; menu entries are disabled while this is absent. */
+  readonly onBodyEdit?: (mode: "shell" | "draft" | "offset-region" | "replace-face" | "web" | "wrap" | "flex") => void;
   readonly onFit: () => void;
   readonly onHome: () => void;
   readonly onToggleGrid: () => void;
@@ -128,7 +130,18 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
     { id: "modify.chamfer-all", label: "Chamfer all edges…", icon: "chamfer", disabled: !state.generalBodySelected,
       hint: state.generalBodySelected ? "Bevel every sharp convex edge on the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("chamfer", "all") },
     { id: "modify.shell", label: "Shell…", icon: "shell", disabled: !state.generalBodySelected,
-      hint: state.generalBodySelected ? "Hollow the selected solid; click the face(s) to leave open" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("shell") }
+      hint: state.generalBodySelected ? "Hollow the selected solid; click the face(s) to leave open" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("shell") },
+    ...([
+      ["draft", "Draft faces…", "draft", "Pick a neutral face, a pull direction and the faces to lean"],
+      ["offset-region", "Offset region…", "offset-face", "Pick flat faces and move them along their normals"],
+      ["replace-face", "Replace face…", "replace-face", "Pick faces and put them on another face's plane or a plane"],
+      ["web", "Rib / Web…", "extrude", "Grow a wall from the open curves of a sketch down to the solid"],
+      ["wrap", "Wrap…", "move", "Emboss or deboss a closed sketch onto a cylindrical face"],
+      ["flex", "Flex…", "move", "Bend or twist the selected solid about an axis"]
+    ] as const).map(([mode, label, icon, hint]): WorkbenchMenuItem => ({
+      id: `modify.${mode}`, label, icon, disabled: !state.generalBodySelected || actions.onBodyEdit === undefined,
+      hint: state.generalBodySelected ? hint : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onBodyEdit?.(mode)
+    }))
   ] };
 
   const view: WorkbenchMenu = { id: "view", label: "View", icon: "view", items: [

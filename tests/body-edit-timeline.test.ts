@@ -172,7 +172,7 @@ export const bodyEditTimelineTests: readonly TestCase[] = [
 ];
 
 /** Drives the real ribbon handler with scripted clicks and prompt answers; commits exactly as the app does (apply, replay, regenerate). */
-async function driveHandler(initial: WorkbenchProject, mode: BodyEditMode, clicks: readonly (ViewportMeasurePoint | null)[], answers: readonly (string | null)[]): Promise<{ readonly project: WorkbenchProject; readonly statuses: string[]; readonly guides: number }> {
+export async function driveHandler(initial: WorkbenchProject, mode: BodyEditMode, clicks: readonly (ViewportMeasurePoint | null)[], answers: readonly (string | null)[], bodyId: string = BODY): Promise<{ readonly project: WorkbenchProject; readonly statuses: string[]; readonly guides: number }> {
   let project = initial;
   const queue = [...clicks];
   const replies = [...answers];
@@ -180,7 +180,7 @@ async function driveHandler(initial: WorkbenchProject, mode: BodyEditMode, click
   let guideCalls = 0;
   const handlers = createBodyEditHandlers({
     project: () => project,
-    selectedBodyId: () => BODY,
+    selectedBodyId: () => bodyId,
     pick: async (instruction) => { statuses.push(instruction); return queue.length === 0 ? null : queue.shift()!; },
     commit: async (intent, mustApply) => {
       const first = applyWorkbenchOperation(project, { ...intent, operationId: `operation:test-handler-${++serial}`, expectedRevision: project.revision } as WorkbenchOperation);
@@ -201,7 +201,7 @@ async function driveHandler(initial: WorkbenchProject, mode: BodyEditMode, click
   await handlers.run(mode);
   return { project, statuses, guides: guideCalls };
 }
-const click = (point: readonly [number, number, number], normal: readonly [number, number, number]): ViewportMeasurePoint => ({ pointMm: point, semanticId: BODY, normalMm: normal });
+export const click = (point: readonly [number, number, number], normal: readonly [number, number, number], bodyId: string = BODY): ViewportMeasurePoint => ({ pointMm: point, semanticId: bodyId, normalMm: normal });
 
 export const bodyEditHandlerTests: readonly TestCase[] = [
   {

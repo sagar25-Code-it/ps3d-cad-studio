@@ -55,7 +55,7 @@ interface WorkbenchRibbonProps {
   readonly zebra: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null;
   readonly onZebra: (next: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null) => void;
   readonly onDirectEdit: (mode: "move-body" | "scale-body" | "move-face" | "offset-face" | "emboss") => void;
-  readonly onBodyEdit: (mode: "shell" | "draft" | "offset-region" | "replace-face") => void;
+  readonly onBodyEdit: (mode: "shell" | "draft" | "offset-region" | "replace-face" | "web" | "wrap" | "flex") => void;
   readonly onIndent: () => void;
   readonly onHoleWizard: () => void;
   readonly onInsertComponent: (shape: "box" | "cylinder") => void;
@@ -254,6 +254,9 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="draft" label="Draft Faces" hint="neutral · pull · faces" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("draft")} />
         <RibbonButton icon="offset-face" label="Offset Region" hint="faces · ±mm" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("offset-region")} />
         <RibbonButton icon="replace-face" label="Replace Face" hint="face → plane" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("replace-face")} />
+        <RibbonButton icon="extrude" label="Rib / Web" hint="open sketch · thickness" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("web")} />
+        <RibbonButton icon="move" label="Wrap" hint="sketch → cylinder" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("wrap")} />
+        <RibbonButton icon="move" label="Flex" hint="bend · twist" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("flex")} />
         <RibbonButton icon="subtract" label="Indent" hint="press a tool in" disabled={!generalBodySelected || (props.project.part.generalBodies?.length ?? 0) < 2} onClick={props.onIndent} />
       </RibbonGroup>
       <RibbonGroup label="Detail features">

@@ -3239,6 +3239,7 @@ export function App(): React.JSX.Element {
     onMoveSelectedBody: () => runSelectedPartPreviewAction("edit-transform", "Move Body"),
     onResizeSelectedBody: () => runSelectedPartPreviewAction("edit-size", "Scale Body"),
     onModifyGeneralBody: handleModifyGeneralBody,
+    onBodyEdit: handleBodyEdit,
     onFit: fitViewport,
     onHome: homeViewport,
     onToggleGrid: () => setViewportGrid(!viewportState.gridVisible),

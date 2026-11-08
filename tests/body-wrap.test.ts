@@ -2,6 +2,9 @@ import { solidMetrics } from "../packages/workbench-core/src/solid-metrics.js";
 import { analyzeFaces } from "../packages/workbench-geometry/src/face-analysis.js";
 import { fitCylinder, type CylinderFit, type WrapProfile } from "../packages/workbench-geometry/src/wrap.js";
 import { wrapProfile } from "../packages/workbench-geometry/src/wrap-apply.js";
+import type { DesignSolidFeature, WorkbenchOperation, WorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { applyWorkbenchOperation, createWorkbenchProject, designOf, validSolidFeaturePayload } from "../packages/workbench-core/src/index.js";
+import { rebuildSolidFeature, replayAllBodies } from "../apps/studio-web/src/design-regeneration.js";
 import { assert, near, type TestCase } from "./test-kit.js";
 import { isClosedAndOriented } from "./relief-pick-hole-drag.test.js";
 import { boxMesh, extrudeMesh, face, roundMesh, volumeOf, type Mesh } from "./body-edits.test.js";
@@ -103,6 +106,63 @@ export const bodyWrapTests: readonly TestCase[] = [
       assert(!wrapProfile(body, { outer: rectangle(6, 6), holes: [] }, fit, pick, { mode: "emboss", heightMm: 0 }).ok, "zero height");
       assert(!wrapProfile(body, { outer: rectangle(6, 6), holes: [] }, fit, pick, { mode: "deboss", heightMm: 15 }).ok, "a deboss as deep as the radius");
       assert(isClosedAndOriented(body.indices), "the source mesh was not disturbed");
+    }
+  }
+];
+
+let serial = 0;
+type Op = WorkbenchOperation extends infer T ? T extends { readonly kind: infer K } ? Omit<T, "operationId" | "expectedRevision"> & { readonly kind: K } : never : never;
+function apply(project: WorkbenchProject, operation: Op): WorkbenchProject {
+  serial += 1;
+  const result = applyWorkbenchOperation(project, { ...operation, operationId: `operation:test-wrap-${serial}`, expectedRevision: project.revision } as WorkbenchOperation);
+  assert(result.ok, `${operation.kind} is accepted: ${result.ok ? "" : result.diagnostics[0]?.message ?? ""}`);
+  return result.value.project;
+}
+const BODY = "general-body:can";
+
+export const bodyWrapTimelineTests: readonly TestCase[] = [
+  {
+    name: "A wrap step embosses a rectangle sketch onto a cylinder through the timeline, follows a change of the can's height, can be suppressed and is flagged when its face is gone",
+    run: async () => {
+      let project = apply(createWorkbenchProject("project:test-wrap"), { kind: "new-design-sketch", plane: "datum:xy" });
+      project = apply(project, { kind: "add-sketch-entity", entity: { id: "entity:can", kind: "circle", center: [0, 0], radiusMm: 15, construction: false } });
+      project = apply(project, { kind: "commit-design-sketch", featureId: "feature:sketch-1", name: "Can sketch" });
+      const base: DesignSolidFeature = { id: "feature:extrude-1", name: "Extrude 1", kind: "extrude", suppressed: false, sketchFeatureId: "feature:sketch-1", profileIds: [], valueMm: 20, bodyId: BODY };
+      const built = await rebuildSolidFeature(base, designOf(project).features[0] as never);
+      assert(built.ok, "the can builds");
+      if (!built.ok) return;
+      project = apply(project, { kind: "add-design-solid", feature: base, body: built.body });
+      project = apply(project, { kind: "new-design-sketch", plane: "datum:xy" });
+      project = apply(project, { kind: "add-sketch-entity", entity: { id: "entity:label", kind: "rectangle", center: [0, 0], widthMm: 10, heightMm: 8, rotationDeg: 0, construction: false } });
+      project = apply(project, { kind: "commit-design-sketch", featureId: "feature:sketch-2", name: "Label sketch" });
+      const volume = (current: WorkbenchProject): number => volumeOf(current.part.generalBodies!.find((body) => body.id === BODY)!);
+      const plain = volume(project);
+      const wrap: DesignSolidFeature = {
+        id: "feature:wrap-1", name: "Wrap · emboss", kind: "wrap", suppressed: false, sketchFeatureId: "feature:sketch-2", profileIds: [], valueMm: 1, bodyId: BODY, operation: "direct-edit",
+        bodyEdit: { kind: "wrap", mode: "emboss", heightMm: 1, face: { pointMm: [15, 0, 10], normalMm: [1, 0, 0] } }
+      };
+      assert(validSolidFeaturePayload(wrap), "a wrap step is a valid feature");
+      const replay = async (current: WorkbenchProject): Promise<WorkbenchProject> => apply(current, { kind: "regenerate-design", results: await replayAllBodies(current) });
+      project = apply(project, { kind: "add-design-solid", feature: wrap, body: project.part.generalBodies!.find((body) => body.id === BODY)! });
+      project = await replay(project);
+      const flagged = designOf(project).features.find((feature) => feature.id === wrap.id);
+      assert(flagged !== undefined && flagged.health === undefined, `the wrap applied: ${flagged?.health?.message ?? ""}`);
+      near(volume(project) - plain, 80 * (1 + 1 / 30), 80 * 0.03, "the embossed label added its area times its height");
+      assert(typeof analyzeFaces(project.part.generalBodies!.find((body) => body.id === BODY)!) !== "string", "the wrapped can is a closed outward solid");
+      // A taller can: the label sits at the same height on the wall and adds the same volume.
+      const taller: DesignSolidFeature = { ...base, valueMm: 30 };
+      const rebuilt = await rebuildSolidFeature(taller, designOf(project).features[0] as never);
+      assert(rebuilt.ok, "the taller can builds");
+      if (!rebuilt.ok) return;
+      project = apply(project, { kind: "update-design-solid", feature: taller, body: rebuilt.body });
+      project = await replay(project);
+      near(volume(project), Math.PI * 225 * 30 + 80 * (1 + 1 / 30), 0.01 * Math.PI * 225 * 30, "after the base edit the can is 30 mm tall and still carries the label");
+      assert(designOf(project).features.every((feature) => feature.health === undefined), "nothing is flagged after the base edit");
+      const off = apply(project, { kind: "set-design-feature-suppressed", featureId: wrap.id, suppressed: true });
+      near(volume(await replay(off)), Math.PI * 225 * 30, 0.01 * Math.PI * 225 * 30, "a suppressed wrap leaves the plain can");
+      const lost: DesignSolidFeature = { ...wrap, bodyEdit: { kind: "wrap", mode: "emboss", heightMm: 1, face: { pointMm: [500, 0, 10], normalMm: [1, 0, 0] } } };
+      const broken = await replay(apply(project, { kind: "update-design-solid", feature: lost, body: project.part.generalBodies!.find((body) => body.id === BODY)! }));
+      assert(designOf(broken).features.find((feature) => feature.id === wrap.id)?.health?.message.includes("gone") === true, "a wrap whose face is gone says so on its step");
     }
   }
 ];
