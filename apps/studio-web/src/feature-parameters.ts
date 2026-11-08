@@ -1,5 +1,6 @@
 import type { DesignSolidFeature, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { bindFeatureExpressions, edgeBlendTitle, findBindableField, validSolidFeaturePayload } from "../../../packages/workbench-core/src/index.js";
+import { bodyEditFields, bodyEditName } from "./body-edit-parameters.js";
 
 /**
  * The editable parameters of every solid step in the timeline. The edit dialog renders `parameterFieldsOf(feature)` and
@@ -42,6 +43,7 @@ const vector = (id: string, label: string, read: (feature: DesignSolidFeature) =
 
 /** The fields to show for a step, or undefined when the step has none (extrude and revolve use their own dialog; an indent has no number to edit). */
 export function parameterFieldsOf(feature: DesignSolidFeature): readonly ParameterField[] | undefined {
+  if (feature.bodyEdit !== undefined) return bodyEditFields(feature);
   switch (feature.kind) {
     case "sweep": return [
       number("valueMm", "Distance", "mm", (f) => Math.abs(f.valueMm), (f, v) => ({ ...f, valueMm: v }), positive),
@@ -243,6 +245,7 @@ export function applyParameterValues(feature: DesignSolidFeature, values: Readon
  * date, but only the part the app wrote: a name the user has changed to something else is left alone.
  */
 export function refreshedName(feature: DesignSolidFeature): string {
+  if (feature.bodyEdit !== undefined) return bodyEditName(feature);
   const name = feature.name;
   const vectorText = (v: readonly number[] | undefined): string => (v ?? [0, 0, 0]).map((value) => value.toFixed(1)).join(", ");
   switch (feature.kind) {

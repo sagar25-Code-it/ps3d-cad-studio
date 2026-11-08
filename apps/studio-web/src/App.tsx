@@ -61,7 +61,7 @@ import {
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
 import { describePickedEdge, flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, nearestPickableEdge, pickableEdges, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
-import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
+import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
 import { listPierceHits, pierceRefreshEdit, refreshPierceConstraints } from "../../../packages/workbench-geometry/src/sketch-pierce.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
@@ -85,6 +85,7 @@ import { edgesToPick, isSketchProjectCommand, needsPick, pickedEdgeRun, planSket
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
 import { facesOfBody, parseBlendSizes } from "./edge-blend-step.js";
+import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
 import { flatPatternForBody, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
@@ -1557,16 +1558,16 @@ export function App(): React.JSX.Element {
 
   const handleModifyGeneralBody = (modifier: "hole" | "fillet" | "chamfer" | "shell", scope: "picked" | "all" = "picked"): void => {
     if ((modifier === "fillet" || modifier === "chamfer") && scope === "picked") { void handleEdgeTreatment(modifier); return; }
+    if (modifier === "shell") { handleBodyEdit("shell"); return; }
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
     const body = bodies.find((candidate) => candidate.id === selectedId);
     if (body === undefined) { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)} needs a general solid body selected first.`); return; }
-    const defaults = { hole: 6, fillet: 2, chamfer: 2, shell: 2 } as const;
+    const defaults = { hole: 6, fillet: 2, chamfer: 2 } as const;
     const prompt: Record<typeof modifier, string> = {
       hole: "Hole diameter (mm):",
       fillet: "Fillet radius (mm):",
-      chamfer: "Chamfer distance (mm):",
-      shell: "Shell wall thickness (mm):"
+      chamfer: "Chamfer distance (mm):"
     };
     const raw = typeof window === "undefined" ? String(defaults[modifier]) : window.prompt(prompt[modifier], String(defaults[modifier]));
     if (raw === null) return;
@@ -1589,8 +1590,8 @@ export function App(): React.JSX.Element {
       result = meshChamfer(input, { sizeMm: value });
       label = `Chamfer ${value} mm`;
     } else {
-      result = meshShell(input, { thicknessMm: value, openFace: "+z" });
-      label = `Shell ${value} mm`;
+      // Shell is handled above by the face-picking body edit.
+      return;
     }
     if (!result.ok) { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)} failed: ${result.message}`); return; }
     const { feature: _feature, brep: _brep, ...keep } = body;
@@ -2417,6 +2418,24 @@ export function App(): React.JSX.Element {
     setStatusText(summary);
     return true;
   };
+
+  /** Face-driven edits (general shell, draft, offset region, replace face): pick faces in the viewport, then record a replayable step. */
+  const bodyEditHandlers = createBodyEditHandlers({
+    project: () => projectRef.current,
+    selectedBodyId: () => selectedId,
+    pick: requestViewportPick,
+    commit: commitWithReplay,
+    say: (state, text) => { setStatus(state); setStatusText(text); },
+    ask: (label, defaultValue) => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue),
+    select: setSelectedId,
+    showGuides: (guides) => viewportRef.current?.setGuideSegments(guides),
+    replaceMesh: (body, label, positionsMm, indices) => {
+      const { feature: _feature, brep: _brep, ...keep } = body;
+      void _feature; void _brep;
+      return applyProjectOperation({ kind: "modify-general-body", targetBodyId: body.id, modifier: "shell", label, body: { ...keep, positionsMm: Array.from(positionsMm), indices: Array.from(indices) } });
+    }
+  });
+  const handleBodyEdit = (mode: BodyEditMode): void => { void bodyEditHandlers.run(mode); };
 
   /** A timeline change that only shows or hides solids is cheap; once a body has joins or cuts it is replayed with the change. */
   const timelineOperation = (intent: OperationIntent, then?: () => void): void => {
@@ -3439,6 +3458,7 @@ export function App(): React.JSX.Element {
     onResizeSelectedBody: () => runSelectedPartPreviewAction("edit-size", "Scale Body"),
     onModifyGeneralBody: handleModifyGeneralBody,
     onPattern: openPatternDialog,
+    onBodyEdit: handleBodyEdit,
     onFit: fitViewport,
     onHome: homeViewport,
     onToggleGrid: () => setViewportGrid(!viewportState.gridVisible),
@@ -3557,6 +3577,7 @@ export function App(): React.JSX.Element {
       onIndent={handleIndent}
       onFlatPattern={(format) => void handleFlatPattern(format)}
       onDirectEdit={handleDirectEdit}
+      onBodyEdit={handleBodyEdit}
       onHoleWizard={handleHoleWizard}
       onFit={fitViewport}
       onMeasure={() => setViewportNavigation("measure")}

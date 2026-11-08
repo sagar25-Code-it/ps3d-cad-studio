@@ -41,7 +41,7 @@ export interface WorkbenchMenuState {
   /** A general solid body (built from a sketch extrude or revolve) is selected. */
   readonly generalBodySelected: boolean;
   /** The timeline feature the current selection resolves to, if any. */
-  readonly selectedFeature?: { readonly name: string; readonly suppressed: boolean; readonly kind: "sketch" | "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "pattern" | "edge-blend" };
+  readonly selectedFeature?: { readonly name: string; readonly suppressed: boolean; readonly kind: "sketch" | "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "pattern" | "edge-blend" | "offset-region" | "replace-face" | "web" | "wrap" | "flex" };
   /** Something deletable is selected: a timeline feature, a solid body, or a preview body. */
   readonly selectionDeletable: boolean;
 }
@@ -66,6 +66,8 @@ export interface WorkbenchMenuActions {
   readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell", scope?: "picked" | "all") => void;
   /** Opens the pattern dialog (counts, spacing, axis or plane) for the selected solid. */
   readonly onPattern: (kind: "rectangular" | "circular" | "mirror") => void;
+  /** Face-driven edits that record a timeline step; menu entries are disabled while this is absent. */
+  readonly onBodyEdit?: (mode: "shell" | "draft" | "offset-region" | "replace-face" | "web" | "wrap" | "flex") => void;
   readonly onFit: () => void;
   readonly onHome: () => void;
   readonly onToggleGrid: () => void;
@@ -132,7 +134,18 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
     { id: "modify.chamfer-all", label: "Chamfer all edges…", icon: "chamfer", disabled: !state.generalBodySelected,
       hint: state.generalBodySelected ? "Bevel every sharp convex edge on the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("chamfer", "all") },
     { id: "modify.shell", label: "Shell…", icon: "shell", disabled: !state.generalBodySelected,
-      hint: state.generalBodySelected ? "Hollow the selected solid with the +Z face left open" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("shell") },
+      hint: state.generalBodySelected ? "Hollow the selected solid; click the face(s) to leave open" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("shell") },
+    ...([
+      ["draft", "Draft faces…", "draft", "Pick a neutral face, a pull direction and the faces to lean"],
+      ["offset-region", "Offset region…", "offset-face", "Pick flat faces and move them along their normals"],
+      ["replace-face", "Replace face…", "replace-face", "Pick faces and put them on another face's plane or a plane"],
+      ["web", "Rib / Web…", "extrude", "Grow a wall from the open curves of a sketch down to the solid"],
+      ["wrap", "Wrap…", "move", "Emboss or deboss a closed sketch onto a cylindrical face"],
+      ["flex", "Flex…", "move", "Bend or twist the selected solid about an axis"]
+    ] as const).map(([mode, label, icon, hint]): WorkbenchMenuItem => ({
+      id: `modify.${mode}`, label, icon, disabled: !state.generalBodySelected || actions.onBodyEdit === undefined,
+      hint: state.generalBodySelected ? hint : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onBodyEdit?.(mode)
+    })),
     { id: "modify.pattern-rectangular", label: "Rectangular pattern…", icon: "pattern", divider: true, disabled: !state.generalBodySelected,
       hint: state.generalBodySelected ? "Copies of the solid, or of its holes and cuts, in one or two directions; a timeline step that follows the source" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onPattern("rectangular") },
     { id: "modify.pattern-circular", label: "Circular pattern…", icon: "pattern", disabled: !state.generalBodySelected,

@@ -1,5 +1,5 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
-import { dependentsOf, designOf, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
+import { dependentsOf, designOf, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
 import { attachEdgeFlange, booleanMeshes, flangeReliefs, holeCutter, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
@@ -7,6 +7,7 @@ import { applyPatternStep } from "./pattern-replay.js";
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { createThinRevolveBody, startRevolveAt } from "./revolve-thin.js";
 import { blendBodyEdges } from "./edge-blend-step.js";
+import { applyBodyEdit } from "./body-edit-replay.js";
 
 /**
  * Rebuilds the solids of the parametric timeline. The kernel is asynchronous, so the work happens here and its results
@@ -53,7 +54,7 @@ function shifted(body: GeneralSolidBody, normal: readonly [number, number, numbe
 
 /** Builds the solid a feature describes from the sketch snapshot it is based on. For a join or cut this is the tool solid. */
 export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature, color = "#b9c2c8"): Promise<SolidRebuild> {
-  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "pattern" || feature.kind === "edge-blend") {
+  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "pattern" || feature.kind === "edge-blend" || feature.kind === "offset-region" || feature.kind === "replace-face" || feature.kind === "web" || feature.kind === "wrap" || feature.kind === "flex" || feature.bodyEdit !== undefined) {
     return { ok: false, message: "A direct-edit / indent step is applied during timeline replay, not through the sketch-driven builder." };
   }
   const sketch = sketchFeature.sketch;
@@ -273,6 +274,15 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
       const blended = await blendBodyEdges(step, current);
       if (!blended.ok) { outcomes.set(step.id, { featureId: step.id, message: blended.message }); continue; }
       current = blended.body;
+      outcomes.set(step.id, { featureId: step.id });
+      continue;
+    }
+    // Body edits (general shell, draft, offset region, replace face, web, wrap, flex) reshape the current body from picked faces or a transform.
+    if (isBodyEditFeature(step)) {
+      if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this step changes could not be built, so there is nothing to modify." }); continue; }
+      const edited = await applyBodyEdit(step, current, { history });
+      if (!edited.ok) { outcomes.set(step.id, { featureId: step.id, message: edited.message }); continue; }
+      current = edited.body;
       outcomes.set(step.id, { featureId: step.id });
       continue;
     }

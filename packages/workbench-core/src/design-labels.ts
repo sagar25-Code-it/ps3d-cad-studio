@@ -1,3 +1,4 @@
+import { describeBodyEdit } from "./body-edit.js";
 import { isFeatureActive, modifiesBody } from "./design.js";
 import { describePattern } from "./pattern.js";
 import { edgeBlendSummary } from "./edge-blend.js";
@@ -61,6 +62,7 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
     const repeated = (pattern.featureIds ?? []).map((id) => history.features.find((candidate) => candidate.id === id)?.name ?? "a deleted step");
     return `${describePattern(pattern)}${repeated.length === 0 ? "" : ` · ${repeated.join(", ")}`}${pattern.copyIndex === undefined ? "" : ` · copy ${pattern.copyIndex}`}`;
   }
+  if (feature.bodyEdit !== undefined) return describeBodyEdit(feature.bodyEdit);
   const source = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
   const amount = feature.extent === "through-all" ? "through all"
     : feature.kind === "extrude"
