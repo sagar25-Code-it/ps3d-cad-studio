@@ -1,6 +1,12 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ConstraintDisplayPanel, ConstraintGlyphLayer, ConstraintRecordList } from "../apps/studio-web/src/workspaces/sketch/ConstraintGlyphs.js";
+import { DimensionEditor } from "../apps/studio-web/src/workspaces/sketch/DimensionEditor.js";
+import { DimensionMarks } from "../apps/studio-web/src/workspaces/sketch/DimensionMarks.js";
+import { ExtraDimensionMarks } from "../apps/studio-web/src/workspaces/sketch/ConstraintExtras.js";
 import type { SketchEntity, Vec2, WorkbenchOperation, WorkbenchProject, WorkbenchSketchConstraint } from "../packages/workbench-core/src/index.js";
 import { applyWorkbenchOperation, createWorkbenchProject } from "../packages/workbench-core/src/index.js";
-import { constraintKindsPresent, constraintRows, constraintsToDraw, DEFAULT_CONSTRAINT_DISPLAY, describeConstraint, entityOrdinalLabels, glyphAt, layoutConstraintGlyphs, parseConstraintDisplay, redundantConstraintIds, relatedEntityIds, toggleHiddenKind, type ConstraintDisplaySettings, type GlyphFocus, type PlacedGlyph } from "../packages/workbench-sketch/src/constraint-glyph-layout.js";
+import { CONSTRAINT_GLYPH_INFO, constraintKindsPresent, constraintRows, constraintsToDraw, DEFAULT_CONSTRAINT_DISPLAY, describeConstraint, entityOrdinalLabels, glyphAt, layoutConstraintGlyphs, parseConstraintDisplay, redundantConstraintIds, relatedEntityIds, toggleHiddenKind, type ConstraintDisplaySettings, type GlyphFocus, type PlacedGlyph } from "../packages/workbench-sketch/src/constraint-glyph-layout.js";
 import { MAX_DIMENSION_OFFSET_PX, MIN_DIMENSION_OFFSET_PX, clampPrecision, dimensionEditText, dimensionForClick, dragDimensionOffset, formatAngleLabel, formatLengthLabel, isRepositionable, parseDimensionDisplay, parseDimensionInput, parseDimensionOffsets, sameDimensionValue, serializeDimensionOffsets, stackDimensionLabels } from "../packages/workbench-sketch/src/dimension-display.js";
 import { dimensionLayout } from "../packages/workbench-sketch/src/dimension-layout.js";
 import { MAX_SPLINE_FIT_POINTS } from "../packages/workbench-core/src/spline-limits.js";
@@ -88,6 +94,8 @@ const glyphTests: readonly TestCase[] = [
       equal(ids({ level: "none", hiddenKinds: [] }, { ...none, selectedConstraintIds: ["c:p"] }), "c:p", "but a selected relation is still shown so the person can see what was picked");
       equal(ids({ level: "all", hiddenKinds: ["parallel"] }, none), "c:h,c:v", "per-type hide removes one kind");
       equal(ids({ level: "all", hiddenKinds: ["parallel"] }, { ...none, hoveredConstraintId: "c:p" }), "c:h,c:v,c:p", "a hovered relation shows even when its kind is hidden");
+      equal(ids({ level: "selected", hiddenKinds: ["parallel"] }, { ...none, alwaysShowIds: new Set(["c:p"]) }), "c:p", "a redundant relation is shown whatever the level or hidden kinds say, so it cannot hide");
+      equal(ids({ level: "none", hiddenKinds: [] }, { ...none, alwaysShowIds: new Set(["c:p"]) }), "", "except at level none, which hides everything");
       equal(JSON.stringify(constraintKindsPresent(constraints)), JSON.stringify(["horizontal", "vertical", "parallel"]), "the legend lists only the geometric kinds present");
       equal(JSON.stringify(toggleHiddenKind(DEFAULT_CONSTRAINT_DISPLAY, "parallel").hiddenKinds), JSON.stringify(["parallel"]), "toggling hides a kind");
       equal(toggleHiddenKind(toggleHiddenKind(DEFAULT_CONSTRAINT_DISPLAY, "parallel"), "parallel").hiddenKinds.length, 0, "and toggling again shows it");
@@ -403,4 +411,61 @@ const navigationTests: readonly TestCase[] = [
   }
 ];
 
-export const sketchCanvasHandleTests: readonly TestCase[] = [...glyphTests, ...dimensionTests, ...handleTests, ...navigationTests];
+const componentTests: readonly TestCase[] = [
+  {
+    name: "Sketch edit E09 (rendered): the relation list shows all 30 relations with readable delete buttons, and glyphs are buttons with names, selection and a leader while hovered",
+    run: () => {
+      const entities: SketchEntity[] = Array.from({ length: 30 }, (_, n) => line(`entity:user-${n}-4f2c9e1a-77aa-4b1c`, [0, n * 5], [10, n * 5]));
+      const constraints = entities.map((entity, n) => rel(`constraint:r-${n}`, "horizontal", [entity.id]));
+      const labels = entityOrdinalLabels(entities);
+      const list = renderToStaticMarkup(createElement(ConstraintRecordList, { rows: constraintRows(constraints, labels), selectedIds: ["constraint:r-4"], redundantIds: new Set<string>(), onHover: () => undefined, onSelect: () => undefined, onDelete: () => undefined, onToggleRelaxed: () => undefined }));
+      equal((list.match(/class="record-row/g) ?? []).length, 30, "thirty rows are rendered");
+      equal((list.match(/aria-label="Delete Horizontal: Line \d+"/g) ?? []).length, 30, "each has a delete button that says what it deletes");
+      assert(!/entity:user|4f2c9e1a/.test(list), "no raw ID in the markup");
+      assert(list.includes("record-row selected"), "the selected relation is marked");
+      assert(list.includes("Delete 1 selected relation"), "and can be deleted from the footer button");
+      const glyphs = layoutConstraintGlyphs(constraints.slice(0, 3), entities, { mmPerPx: 0.2 });
+      const titles = new Map(constraints.map((constraint) => [constraint.id, describeConstraint(constraint, labels)] as const));
+      const drawn = renderToStaticMarkup(createElement("svg", null, createElement(ConstraintGlyphLayer, { glyphs, px: 0.2, selectedIds: ["constraint:r-1"], hoveredId: "constraint:r-2", interactive: true, titles, onHover: () => undefined, onSelect: () => undefined })));
+      equal((drawn.match(/role="button"/g) ?? []).length, 3, "three interactive glyphs");
+      assert(drawn.includes('aria-label="Horizontal: Line 2, selected"'), "a glyph's accessible name says what it is and that it is selected");
+      assert(drawn.includes("constraint-glyph selected interactive") && drawn.includes("constraint-glyph hover interactive"), "selected and hovered states are drawn");
+      equal((drawn.match(/constraint-leader/g) ?? []).length, 2, "a leader line to the anchor is drawn for the selected and the hovered glyph only");
+      const inert = renderToStaticMarkup(createElement("svg", null, createElement(ConstraintGlyphLayer, { glyphs, px: 0.2, selectedIds: [], hoveredId: null, interactive: false, titles, onHover: () => undefined, onSelect: () => undefined })));
+      assert(!inert.includes('role="button"'), "while a drawing tool is active the glyphs are only drawn");
+    }
+  },
+  {
+    name: "Walkthrough item 5 (rendered): the Constraints panel offers the three levels and one checkbox per relation type, with a legend letter and name",
+    run: () => {
+      const panelMarkup = renderToStaticMarkup(createElement(ConstraintDisplayPanel, { settings: { level: "selected", hiddenKinds: ["parallel"] }, present: ["horizontal", "parallel"], onChange: () => undefined }));
+      for (const level of ["All", "Selected", "None"]) assert(panelMarkup.includes(`>${level}</button>`), `the ${level} level is offered`);
+      assert(/aria-checked="true"[^>]*>Selected/.test(panelMarkup), "the current level is marked");
+      equal((panelMarkup.match(/type="checkbox"/g) ?? []).length, Object.keys(CONSTRAINT_GLYPH_INFO).filter((kind) => !CONSTRAINT_GLYPH_INFO[kind as keyof typeof CONSTRAINT_GLYPH_INFO].dimension).length, "one checkbox per geometric relation type");
+      assert(panelMarkup.includes("Parallel") && panelMarkup.includes("Tangent"), "each type is named, not just a letter");
+      equal((panelMarkup.match(/checked=""/g) ?? []).length, Object.keys(CONSTRAINT_GLYPH_INFO).filter((kind) => !CONSTRAINT_GLYPH_INFO[kind as keyof typeof CONSTRAINT_GLYPH_INFO].dimension).length - 1, "every type but the hidden one is checked");
+    }
+  },
+  {
+    name: "Sketch edit E24 and walkthrough item 4 (rendered): a dimension shows its value with a unit, is selectable, draggable and editable in place, and the editor offers a Reference toggle",
+    run: () => {
+      const bar = line("entity:bar", [0, 0], [25.4, 0]);
+      const layout = dimensionLayout(bar, "length", 25.4, 0.2, { format: (value) => formatLengthLabel(value, { unit: "in", precision: 3, showUnit: true }) })!;
+      const markup = renderToStaticMarkup(createElement("svg", null, createElement(DimensionMarks, { constraintId: "constraint:d", entityId: bar.id, layout, px: 0.2, relaxed: false, selected: true, interactive: true, repositionable: isRepositionable(layout), title: "Length: Line 1 = 25.4 mm", onPress: () => undefined, onEdit: () => undefined })));
+      assert(markup.includes(">1.000 in</text>"), "the label reads 1.000 in");
+      assert(markup.includes("driving-dimension selected repositionable"), "the dimension is selected and can be dragged");
+      assert(markup.includes("double-click to edit, drag to move"), "the hit target says how to use it");
+      const frozen = renderToStaticMarkup(createElement("svg", null, createElement(DimensionMarks, { constraintId: "constraint:d", entityId: bar.id, layout, px: 0.2, relaxed: false, selected: false, interactive: false, repositionable: true, title: "t", onPress: () => undefined, onEdit: () => undefined })));
+      assert(frozen.includes('pointer-events="none"'), "while a drawing tool is active the dimension ignores the pointer");
+      const editor = renderToStaticMarkup(createElement(DimensionEditor, { label: "Length", text: "25.4", unitLabel: "mm", position: [10, 10], reference: false, onChange: () => undefined, onReferenceChange: () => undefined, onCommit: () => undefined, onCancel: () => undefined }));
+      assert(editor.includes("Reference (measured, does not drive)") && editor.includes('value="25.4"') && editor.includes("<small>mm</small>"), "the editor starts at the stored value, shows the unit and offers the toggle");
+      const plain = renderToStaticMarkup(createElement(DimensionEditor, { label: "Length", text: "1", unitLabel: "mm", position: [0, 0], onChange: () => undefined, onCommit: () => undefined, onCancel: () => undefined }));
+      assert(!plain.includes("Reference"), "without a reference state there is no toggle");
+      const sketch = { ...emptyProject().sketch, entities: [line("entity:a", [0, 0], [10, 0]), line("entity:b", [0, 0], [0, 10])], constraints: [rel("constraint:ang", "angle", ["entity:a", "entity:b"], { valueDeg: 90 })] };
+      const extra = renderToStaticMarkup(createElement("svg", null, createElement(ExtraDimensionMarks, { sketch, px: 0.5, selectedIds: ["constraint:ang"], onSelect: () => undefined, onEdit: () => undefined })));
+      assert(extra.includes("driving-dimension extra selected") && extra.includes("driving-dimension-hit"), "an angle dimension is selectable and editable");
+    }
+  }
+];
+
+export const sketchCanvasHandleTests: readonly TestCase[] = [...glyphTests, ...dimensionTests, ...handleTests, ...navigationTests, ...componentTests];

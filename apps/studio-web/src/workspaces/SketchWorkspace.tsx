@@ -2005,7 +2005,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       <div className="canvas-hud"><span>{planePlacement} · {planeInfo.horizontalLabel} → · {planeInfo.verticalLabel} ↑</span><span>{props.dimensionMode ? "Dimension" : sketchToolLabel(props.tool)}</span><span>Grid {props.viewportState.gridVisible ? `${format(grid.minorMm)} mm` : "off"}</span><span>Snap {snapEnabled ? `${SNAP_PIXELS} px` : "off"}</span><span>{pointerInside ? `${planeInfo.horizontalLabel} ${format(cursor[0])}  ${planeInfo.verticalLabel} ${format(cursor[1])} mm` : "Cursor outside the sketch"}</span><span>{visibleEntities.length}/{props.sketch.entities.length} entities visible</span><strong>{analysis.classification.replace("-", " ")}</strong></div>
       <div className="confirmation-corner" role="group" aria-label="Sketch confirmation corner">
         <small>Sketch</small>
-        <button type="button" onClick={props.onCancelSketch} title="Cancel the sketch and return to Design. Pending points are dropped."><CommandIcon name="cancel" />Cancel</button>
+        <button type="button" onClick={props.onCancelSketch} title="Discard the changes made in this sketch session and return to Design. Ctrl+Z brings them back."><CommandIcon name="cancel" />Cancel</button>
         <button type="button" className="primary" onClick={props.onFinishSketch} title="Finish the sketch and commit it to the timeline."><CommandIcon name="save" />OK</button>
       </div>
     </section>
