@@ -80,3 +80,12 @@ export function withDynamicMirror(context: SketchEditContext, axisId: string | n
   // The solver could not take the symmetry relations (for example alongside the drawing's own relations): keep the exact mirror geometry.
   return { plan: build(false), mirrored: images.length, skipped, withoutRelations: relations.length > 0 };
 }
+
+/** The mirror images of entities that are still being drawn (the live ghost), without relations; entities on the axis are left out. */
+export function mirrorImages(axis: Line, entities: readonly SketchEntity[]): readonly SketchEntity[] {
+  const axisAngleDeg = Math.atan2(axis.end[1] - axis.start[1], axis.end[0] - axis.start[0]) * 180 / Math.PI;
+  return entities.flatMap((entity) => {
+    const image = mapEntity(entity, `${entity.id}:mirror`, (point) => reflectAcross(point, axis), (degrees) => 2 * axisAngleDeg - degrees);
+    return sameShape(entity, image, 1e-6) ? [] : [image];
+  });
+}
