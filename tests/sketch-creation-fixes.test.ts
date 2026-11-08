@@ -20,7 +20,8 @@ const ids = { entity: (): string => `entity:fix-${(counter += 1)}`, constraint: 
 const newConstraintId = (): string => `constraint:fix-${(counter += 1)}`;
 
 function emptyProject(): WorkbenchProject {
-  return createWorkbenchProject("project:test-creation-fixes");
+  const base = createWorkbenchProject("project:test-creation-fixes");
+  return { ...base, sketch: { ...base.sketch, entities: [], constraints: [] } };
 }
 
 /** Adds entities and relations through the real operation layer, the way the canvas does, and returns the new project. */
@@ -98,6 +99,16 @@ export const sketchCreationFixTests: readonly TestCase[] = [
       const analysis = analyzeWorkbenchSketch(project.sketch);
       equal(analysis.degreesOfFreedom, 4, "a rectangle of four lines has 4 degrees of freedom (position, width, height)");
       equal(analysis.conflicts.length, 0, "no conflicts");
+    }
+  },
+  {
+    name: "Sketch creation A1: a rectangle that starts on the origin closes with its first corner joined and the last side Vertical (4 degrees of freedom)",
+    run: () => {
+      const { project, lineIds } = drawLineChain([[0, 0], [30, 0], [30, 20], [0, 20], [0, 0]]);
+      const closing = project.sketch.constraints.filter((constraint) => constraint.entityIds.includes(lineIds[3]!));
+      assert(closing.some((constraint) => constraint.kind === "vertical"), "the closing side is Vertical");
+      assert(closing.some((constraint) => constraint.kind === "coincident" && constraint.entityIds.includes(lineIds[0]!)), "and its end is joined to the first side");
+      equal(analyzeWorkbenchSketch(project.sketch).degreesOfFreedom, 4, "4 degrees of freedom even from the origin");
     }
   },
   {

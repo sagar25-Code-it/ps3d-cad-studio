@@ -426,7 +426,9 @@ export function inferSketchPoint(pointer: Vec2, sketch: WorkbenchSketch, options
     }
   }
 
-  const ranked = [...candidates].sort((left, right) => TIER[left.kind] - TIER[right.kind] || left.distanceMm - right.distanceMm);
+  // At the very same distance a point of existing geometry beats the bare origin: a shape that starts on the origin and is
+  // closed on its own first point must join that point (a Coincident relation), not just land on the origin.
+  const ranked = [...candidates].sort((left, right) => TIER[left.kind] - TIER[right.kind] || (Math.abs(left.distanceMm - right.distanceMm) > 1e-12 ? left.distanceMm - right.distanceMm : Number(left.entityId === undefined) - Number(right.entityId === undefined)));
   const best = ranked[0];
   if (best !== undefined) return { point: best.point, snapped: true, primary: best, guides: [] };
 
