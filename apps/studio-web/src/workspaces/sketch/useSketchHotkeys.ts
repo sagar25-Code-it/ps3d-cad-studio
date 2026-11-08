@@ -28,7 +28,7 @@ export function useSketchHotkeys(options: SketchHotkeyOptions): void {
     const listener = (event: KeyboardEvent): void => {
       const current = latest.current;
       if (!current.enabled || event.repeat || shouldIgnore(event.target)) return;
-      const action = resolveSketchHotkey({ key: event.key, ctrl: event.ctrlKey, meta: event.metaKey, alt: event.altKey, shift: event.shiftKey }, current.context);
+      const action = resolveSketchHotkey({ key: event.key, code: event.code, ctrl: event.ctrlKey, meta: event.metaKey, alt: event.altKey, shift: event.shiftKey }, current.context);
       if (action === undefined) return;
       event.preventDefault();
       event.stopPropagation();

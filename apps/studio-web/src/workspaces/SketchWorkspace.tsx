@@ -24,20 +24,24 @@ import { gridSteps, sketchToScreen } from "../../../../packages/workbench-sketch
 import { buildFitSpline } from "../../../../packages/workbench-sketch/src/spline-fit.js";
 import { advanceArcSweepTrack, arcSweepDirection, startArcSweepTrack, type ArcSweepTrack } from "../../../../packages/workbench-sketch/src/arc-sweep.js";
 import { mergeTyped, typedIntentConstraints } from "../../../../packages/workbench-sketch/src/typed-intent.js";
-import { dynamicFieldsFor, measureFromCursor, parseDynamicNumber, pointFromDynamicInput, type DynamicFieldId, type DynamicValues } from "../../../../packages/workbench-sketch/src/dynamic-input.js";
+import { dynamicFieldsFor, measureFromCursor, parseDynamicNumber, type DynamicFieldId, type DynamicValues } from "../../../../packages/workbench-sketch/src/dynamic-input.js";
+import { fieldErrorsFor, plainEvaluator, resolveDynamicEntry, type EvaluateText } from "../../../../packages/workbench-sketch/src/dynamic-entry.js";
+import { DEFAULT_SNAP_ASSIST, anchorFor, assistedInference, type SnapAssistSettings, type SnapModifiers } from "../../../../packages/workbench-sketch/src/snap-assist.js";
+import { entitiesUnderPoint, nextInCycle, sameCandidates, type SelectOtherCandidate } from "../../../../packages/workbench-sketch/src/select-other.js";
+import { firstClickPrompt, nextClickPrompt } from "../../../../packages/workbench-sketch/src/tool-prompts.js";
 import { sketchCurvatureCombs } from "../../../../packages/workbench-sketch/src/curvature-comb.js";
 import { constraintsOnEntities, extendAt, nearestEntityId, powerTrim, trimAt, type SketchEditPlan } from "../../../../packages/workbench-sketch/src/edit-tools.js";
 import { cornerByClick } from "../../../../packages/workbench-sketch/src/corner-tools.js";
 import { deleteCurveHeal, jogLine, splitAt } from "../../../../packages/workbench-sketch/src/split-jog.js";
 import { mirrorImages, withDynamicMirror } from "../../../../packages/workbench-sketch/src/dynamic-mirror.js";
 import { copySketchSelection, cutSketchSelection, nextPasteNumber, parseClipboard, pasteSketchClipboard, readSketchClipboard, serializeClipboard, storeSketchClipboard, type SketchClipboard } from "../../../../packages/workbench-sketch/src/sketch-clipboard.js";
-import { SKETCH_HOTKEY_HELP, type SketchHotkeyAction } from "../../../../packages/workbench-sketch/src/hotkeys.js";
+import { keyLabelForCommand, sketchHotkeyHelp, type SketchHotkeyAction } from "../../../../packages/workbench-sketch/src/hotkeys.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
 import { autoConstraintsFor, dropConstraintFor, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, buildPolygon, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
-import { CURVE_TOOL_PROMPTS, buildControlPointSpline, buildCurveTool, isFixedCurveTool } from "../../../../packages/workbench-sketch/src/curve-tools.js";
+import { buildControlPointSpline, buildCurveTool, isFixedCurveTool } from "../../../../packages/workbench-sketch/src/curve-tools.js";
 import { extendProfileChain, startProfileChain, type ProfileChain } from "../../../../packages/workbench-sketch/src/blend-profile.js";
 import { DEFAULT_CURVE_OPTION_FIELDS, SketchCurveOptionsPanel, curveOptionsFromFields } from "./SketchCurveOptions.js";
 import { createBlockLibrary, makeSketchBlock } from "../../../../packages/workbench-sketch/src/sketch-blocks.js";
@@ -52,6 +56,11 @@ import { angleDimensionLayout } from "../../../../packages/workbench-sketch/src/
 import { angleBetweenLinesDeg, arcShape, entityLengthMm } from "../../../../packages/workbench-core/src/sketch-measure.js";
 import { useSketchCamera } from "./sketch/useSketchCamera.js";
 import { useSketchHotkeys } from "./sketch/useSketchHotkeys.js";
+import { loadStoredSnapAssist, storeSnapAssist, useSketchKeymap } from "./sketch/useSketchKeymap.js";
+import { useModifierKeys } from "./sketch/useModifierKeys.js";
+import { SketchInputPalette } from "./sketch/SketchInputPalette.js";
+import { SelectOtherPopup } from "./sketch/SelectOtherPopup.js";
+import { ShortcutEditorDialog } from "./sketch/ShortcutEditorDialog.js";
 import {
   type NavigationMode,
   type SelectionFilter,
@@ -241,6 +250,8 @@ interface SketchWorkspaceProps {
   readonly onFinishSketch: () => void;
   /** Cancel click in the viewport Confirmation Corner: drop pending points and leave the sketch workspace. */
   readonly onCancelSketch: () => void;
+  /** Evaluates typed text (units, expressions, parameter names) for the dynamic input; without it only numbers, units and functions work. */
+  readonly evaluateText?: EvaluateText;
 }
 
 /** A press on a curve or one of its handles that may turn into a drag. */
@@ -328,7 +339,22 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   /** Dynamic Mirror: the line new curves are mirrored about, or null when off. It outlives the edit panel so drawing tools can use it. */
   const [dynamicMirrorAxis, setDynamicMirrorAxis] = useState<string | null>(null);
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
-  const [snapEnabled, setSnapEnabled] = useState(true);
+  // Snapping aids (snap on/off, snap step, polar tracking, ortho) live in the browser; Ctrl and Shift held on the keyboard override them while down.
+  const [assist, setAssist] = useState<SnapAssistSettings>(() => { try { return loadStoredSnapAssist(); } catch { return DEFAULT_SNAP_ASSIST; } });
+  const updateAssist = (patch: Partial<SnapAssistSettings>): void => { const next = { ...assist, ...patch }; setAssist(next); storeSnapAssist(next); };
+  const snapEnabled = assist.snap;
+  const setSnapEnabled = (snap: boolean): void => updateAssist({ snap });
+  const sketchKeymap = useSketchKeymap();
+  const heldKeys = useModifierKeys(props.tool !== "select");
+  const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
+  // Typed-input problems found when Enter was pressed (the unreadable-text errors are derived live from what is typed).
+  const [commitErrors, setCommitErrors] = useState<Partial<Record<DynamicFieldId, string>>>({});
+  const typedNotes = useRef<readonly string[]>([]);
+  const lastRaw = useRef<Vec2 | undefined>(undefined);
+  const lastPlaced = useRef<Vec2 | undefined>(undefined);
+  // Select Other: the curves under the pointer while Select is active, and the list popup opened by Alt-click or Tab.
+  const [hoverStack, setHoverStack] = useState<readonly SelectOtherCandidate[]>([]);
+  const [selectOther, setSelectOther] = useState<{ readonly candidates: readonly SelectOtherCandidate[]; readonly at: readonly [number, number] } | undefined>(undefined);
   const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem">("extrude");
   const [solidValue, setSolidValue] = useState("10");
   const [sweepDx, setSweepDx] = useState("0");
@@ -596,6 +622,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (props.tool !== "select" || props.dimensionMode || props.editTool !== null) { setPickRelation(null); setPickedPoint(undefined); }
   }, [props.tool, props.dimensionMode, props.editTool]);
   useEffect(() => { setFieldText({}); }, [props.tool, props.cancelVersion, pending.length]);
+  // A new tool says what its first click means, and that the point can be typed instead.
+  useEffect(() => {
+    if (props.tool === "select" || pending.length > 0) return;
+    const prompt = firstClickPrompt(props.tool);
+    if (prompt !== undefined) props.onMessage(`${sketchToolLabel(props.tool)}: click ${prompt}, or type its X and Y and press Enter.`);
+  }, [props.tool]);
   useEffect(() => {
     if (focusRequest === undefined) return;
     const element = fieldRefs.current[focusRequest.id];
@@ -629,15 +661,40 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setHoverId((current) => current !== null && visibleEntities.some((entity) => entity.id === current) ? current : null);
   }, [visibleEntities]);
 
+  const assistedAt = (point: Vec2, modifiers: SnapModifiers): InferenceResult => assistedInference({
+    tool: props.tool,
+    pointer: point,
+    sketch: props.sketch,
+    toleranceMm: SNAP_PIXELS * px,
+    gridMm: grid.minorMm,
+    anchor: anchorFor(props.tool, pending),
+    settings: assist,
+    modifiers
+  });
+  // Holding or releasing Ctrl / Shift re-evaluates the preview at once, without waiting for the pointer to move.
+  useEffect(() => {
+    const raw = lastRaw.current;
+    if (raw === undefined || props.tool === "select" || !pointerInside) return;
+    const result = assistedAt(raw, heldKeys);
+    setCursor(result.point);
+    setInference(result);
+  }, [heldKeys, assist]);
+  const updateHoverStack = (point: Vec2): void => {
+    const next = entitiesUnderPoint(props.sketch, point, PICK_PIXELS * px);
+    setHoverStack((current) => sameCandidates(current, next) ? current : next);
+  };
+
   const pointer = (event: React.PointerEvent<SVGSVGElement>, commit: boolean): void => {
     const point = camera.toSketch(event.clientX, event.clientY);
     // Placing tools infer from the sketch (endpoints, centres, midpoints, intersections, alignment...). A line or spline also
     // infers from the last point it placed, which enables perpendicular, tangent and level/plumb hints.
     const placing = props.tool !== "select";
-    const anchor = (props.tool === "line" || props.tool === "spline" || props.tool === "spline-control" || props.tool === "profile") ? pending.at(-1) : undefined;
-    const result: InferenceResult = snapEnabled && placing
-      ? inferSketchPoint(point, props.sketch, { toleranceMm: SNAP_PIXELS * px, gridMm: grid.minorMm, ...(anchor === undefined ? {} : { anchor }) })
+    lastRaw.current = point;
+    // Every tool aligns with its last point; polar tracking, the ortho lock, Ctrl (no snapping) and Shift (constrain) apply on top (see snap-assist.ts).
+    const result: InferenceResult = placing
+      ? assistedAt(point, { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey })
       : { point, snapped: false, guides: [] };
+    if (!placing && !commit) updateHoverStack(point);
     const snapped = { point: result.point, snapped: result.snapped, label: result.primary === undefined ? "" : INFERENCE_LABELS[result.primary.kind].toLowerCase() };
     setCursor(snapped.point);
     if (props.tool === "arc-center" && pending.length === 2) arcTrack.current = advanceArcSweepTrack(arcTrack.current ?? startArcSweepTrack(pending[0]!, pending[1]!), pending[0]!, snapped.point);
@@ -698,6 +755,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (props.tool === "select" || props.tool === "spline" || props.tool === "spline-control") return;
     setFieldText({});
     if (typed !== undefined) typedTrail.current = mergeTyped(typedTrail.current, typed);
+    lastPlaced.current = point;
+    // What typed input did that the user may not expect (a negative size flipped, an angle wrapped) is appended to the status line once.
+    const say = (message: string): void => { const notes = typedNotes.current; typedNotes.current = []; props.onMessage(notes.length === 0 ? message : `${message} ${notes.join(" ")}`); };
     if (props.tool === "profile") { placeProfilePoint(point); return; }
     const points = [...pending, point];
     const previous = pending.at(-1);
@@ -710,8 +770,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (points.length < requiredSketchPoints(props.tool)) {
       setPending(points);
       setPendingInference(placed);
-      const nextPrompt = isFixedCurveTool(props.tool) ? CURVE_TOOL_PROMPTS[props.tool][points.length] : undefined;
-      props.onMessage(`${sketchToolLabel(props.tool)}: point ${points.length} accepted${label === "" ? "" : ` (${label})`}.${nextPrompt === undefined ? "" : ` Next: ${nextPrompt}.`}`);
+      const nextPrompt = nextClickPrompt(props.tool, points.length);
+      say(`${sketchToolLabel(props.tool)}: point ${points.length} accepted${label === "" ? "" : ` (${label})`}.${nextPrompt === undefined ? "" : ` Next: ${nextPrompt}.`}`);
       return;
     }
     if (isShapeTool(props.tool)) {
@@ -723,10 +783,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       const accepted = applyDrawn({ label: `Added ${sketchToolLabel(props.tool).toLowerCase()} (${shape.value.entities.length} curves, ${shape.value.constraints.length} relations)`, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shape.value.constraints });
       if (accepted === false) return;
       setPending([]);
-      props.onMessage(`Added ${sketchToolLabel(props.tool).toLowerCase()} with ${shape.value.entities.length} curve${shape.value.entities.length === 1 ? "" : "s"} and ${shape.value.constraints.length} relation${shape.value.constraints.length === 1 ? "" : "s"}.`);
+      say(`Added ${sketchToolLabel(props.tool).toLowerCase()} with ${shape.value.entities.length} curve${shape.value.entities.length === 1 ? "" : "s"} and ${shape.value.constraints.length} relation${shape.value.constraints.length === 1 ? "" : "s"}.`);
       return;
     }
-    if (props.tool === "arc-center" && arcTrack.current !== undefined) arcTrack.current = advanceArcSweepTrack(arcTrack.current, points[0]!, point);
+    if (props.tool === "arc-center" && typed?.sweep !== undefined && typed.sweep !== 0) {
+      // A typed sweep names its own way round (positive is counter-clockwise), so it does not depend on where the pointer happened to travel.
+      arcTrack.current = { angle: Math.atan2(point[1] - points[0]![1], point[0] - points[0]![0]), sweepRad: (typed.sweep * Math.PI) / 180 };
+    } else if (props.tool === "arc-center" && arcTrack.current !== undefined) arcTrack.current = advanceArcSweepTrack(arcTrack.current, points[0]!, point);
     const built = buildSketchEntity(props.tool, points, `entity:user-${crypto.randomUUID()}`, arcBuildOptions());
     if (!built.ok) {
       // Keep the points already placed so one bad click does not throw the whole gesture away.
@@ -753,18 +816,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       const start = chainStart.current;
       if (segments >= 3 && start !== undefined && Math.hypot(point[0] - start[0], point[1] - start[1]) < 1e-6) {
         setPending([]);
-        props.onMessage(`Closed the loop after ${segments} lines. The shape is now a closed profile.`);
+        say(`Closed the loop after ${segments} lines. The shape is now a closed profile.`);
         return;
       }
       chainSegments.current = segments;
       setPending([point]);
       // The next segment starts where this one ended, so it is joined to it automatically.
       setPendingInference([{ point, primary: { kind: "endpoint", point, entityId: built.value.id, selector: "end", distanceMm: 0 } }]);
-      props.onMessage(`Added line ${segments}${relationNote}. Keep clicking to continue the chain, click the first point to close it, or press Esc to stop.`);
+      say(`Added line ${segments}${relationNote}. Keep clicking to continue the chain, click the first point to close it, or press Esc to stop.`);
       return;
     }
     setPending([]);
-    props.onMessage(`Added ${sketchToolLabel(props.tool)}${relationNote} with stable ID ${built.value.id}.`);
+    say(`Added ${sketchToolLabel(props.tool)}${relationNote} with stable ID ${built.value.id}.`);
   };
 
   const dynamicFields = useMemo(() => dynamicFieldsFor(props.tool, pending.length), [props.tool, pending.length]);
@@ -774,17 +837,35 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     return value === "" ? rest : { ...rest, [id]: value };
   });
   const requestFieldFocus = (id: DynamicFieldId): void => { focusSerial.current += 1; setFocusRequest({ id, serial: focusSerial.current }); };
-  const commitDynamicInput = (): void => {
-    const typed: DynamicValues = {};
-    for (const field of dynamicFields) {
-      const text = fieldText[field.id];
-      const parsed = text === undefined ? undefined : parseDynamicNumber(text);
-      if (parsed !== undefined) typed[field.id] = parsed;
+  const evaluateTyped = props.evaluateText ?? plainEvaluator;
+  // Text the parser cannot read is marked on its field while it is typed; Enter refuses it (it used to place the cursor's value instead).
+  const liveFieldErrors = useMemo(() => fieldErrorsFor(dynamicFields, fieldText, evaluateTyped), [dynamicFields, fieldText, props.evaluateText]);
+  const fieldErrors = { ...commitErrors, ...liveFieldErrors };
+  useEffect(() => { setCommitErrors({}); }, [fieldText, props.tool, pending.length]);
+  /** Places the typed point. Returns false (and keeps the typed text and the focus) when the input was refused. */
+  const commitDynamicInput = (): boolean => {
+    const result = resolveDynamicEntry({ tool: props.tool, placed: pending, cursor, fields: dynamicFields, texts: fieldText, evaluate: evaluateTyped, ...(lastPlaced.current === undefined ? {} : { lastPoint: lastPlaced.current }) });
+    if (!result.ok) {
+      setCommitErrors(result.errors);
+      props.onMessage(`${result.message} Nothing was placed.`);
+      return false;
     }
-    const target = pointFromDynamicInput(props.tool, pending, cursor, typed);
-    if (target === undefined) { props.onMessage("Type a size greater than zero, or click to place the point."); return; }
     setDynamicFocused(false);
-    placePoint(target, "typed", undefined, typed);
+    typedNotes.current = result.notes;
+    // The guides of a typed 0 / 90 / 180 / 270 degree angle make the same Horizontal / Vertical relation a snapped point does.
+    const found: InferenceResult = { point: result.point, snapped: result.guides.length > 0, guides: result.guides };
+    if (props.tool === "spline" || props.tool === "spline-control") {
+      const next = [...pending, result.point];
+      if (props.tool === "spline" && next.length > SPLINE_MAX_FIT_POINTS) { props.onMessage(`A spline takes at most ${SPLINE_MAX_FIT_POINTS} fit points. Press Enter to finish.`); return false; }
+      lastPlaced.current = result.point;
+      setPending(next);
+      setFieldText({});
+      props.onMessage(`${sketchToolLabel(props.tool)}: point ${next.length} accepted (typed).${next.length >= 3 ? " Press Enter to finish." : ""}${result.notes.length === 0 ? "" : ` ${result.notes.join(" ")}`}`);
+      typedNotes.current = [];
+      return true;
+    }
+    placePoint(result.point, "typed", found, result.typed);
+    return true;
   };
 
   const finishSpline = (points: readonly Vec2[]): void => {
@@ -1097,6 +1178,23 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     else props.onMessage(`The selection has no ${family === "relations" ? "geometric relations" : "driving dimensions"} to relax or restore.`);
   }, [props.request]);
 
+  /** Select Other: picks the next curve among the ones under the pointer, and shows the list so any of them can be picked directly. */
+  const cycleSelectOther = (candidates: readonly SelectOtherCandidate[], fromKeyboard: boolean, canvasAt?: readonly [number, number]): void => {
+    if (candidates.length === 0) { props.onMessage("No curve under the pointer."); return; }
+    const current = selectionIds.length === 1 ? selectionIds[0] : undefined;
+    const next = nextInCycle(candidates, current);
+    if (next === undefined) return;
+    // The list opens next to the pointer (Alt-click) or the cursor (Tab), kept inside the canvas.
+    const screen = canvasAt ?? sketchToScreen(cursor, { left: 0, top: 0, width: camera.size.width, height: camera.size.height }, camera.camera);
+    const at: readonly [number, number] = [Math.max(8, Math.min(screen[0] + 14, camera.size.width - 240)), Math.max(8, Math.min(screen[1] + 14, camera.size.height - 40 - candidates.length * 28))];
+    setSelectionIds([next]);
+    setSelectedProfileIds([]);
+    props.onSelect(next);
+    setSelectOther({ candidates, at });
+    const label = candidates.find((candidate) => candidate.id === next)?.label ?? next;
+    props.onMessage(`Select other: ${label} (${candidates.findIndex((candidate) => candidate.id === next) + 1} of ${candidates.length} under the pointer). ${fromKeyboard ? "Tab" : "Alt-click"} again for the next.`);
+  };
+
   const handleHotkey = (action: SketchHotkeyAction): void => {
     switch (action.kind) {
       case "tool": props.onActivateTool(action.tool); return;
@@ -1121,6 +1219,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       case "exit-dimension": props.onExitDimension(); return;
       case "exit-edit-tool": props.onCloseEditTool(); return;
       case "clear-selection":
+        setSelectOther(undefined);
         setSelectionIds([]);
         setSelectedProfileIds([]);
         props.onSelect(null);
@@ -1158,6 +1257,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         if (first !== undefined) requestFieldFocus(first.id);
         return;
       }
+      case "commit-dynamic": void commitDynamicInput(); return;
+      case "select-other": cycleSelectOther(hoverStack, true); return;
+      case "toggle-snap": updateAssist({ snap: !assist.snap }); props.onMessage(`Snap ${assist.snap ? "off" : "on"}.`); return;
+      case "toggle-ortho": updateAssist({ ortho: !assist.ortho }); props.onMessage(`Ortho lock ${assist.ortho ? "off" : "on"}.`); return;
+      case "toggle-polar": updateAssist({ polar: !assist.polar }); props.onMessage(assist.polar ? "Polar tracking off." : `Polar tracking on (${assist.polarIncrementDeg}° steps).`); return;
       case "copy": copySelection(false); return;
       case "cut": copySelection(true); return;
       case "paste": pasteClipboard(); return;
@@ -1173,7 +1277,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
   useSketchHotkeys({
     enabled: true,
-    context: { tool: props.tool, pendingPoints: pending.length, selectionCount: selectionIds.length + selectedProfileIds.length, curveSelectionCount: selectionIds.length, dimensionMode: props.dimensionMode, editToolActive: props.editTool !== null, pickingRelation: pickRelation !== null, dragging: dragLive !== undefined || (dragGesture.current?.moved ?? false), dynamicFieldCount: dynamicFields.length },
+    context: { tool: props.tool, pendingPoints: pending.length, selectionCount: selectionIds.length + selectedProfileIds.length, curveSelectionCount: selectionIds.length, dimensionMode: props.dimensionMode, editToolActive: props.editTool !== null, pickingRelation: pickRelation !== null, dragging: dragLive !== undefined || (dragGesture.current?.moved ?? false), dynamicFieldCount: dynamicFields.length, dynamicTyped: Object.keys(fieldText).length > 0, overlapUnderCursor: hoverStack.length },
     onAction: handleHotkey
   });
 
@@ -1223,9 +1327,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const updateDrag = (event: React.PointerEvent<SVGSVGElement>, gesture: DragGesture): void => {
     const raw = camera.toSketch(event.clientX, event.clientY);
     // Points snap to other geometry while they are dragged; moving a whole curve follows the pointer exactly.
-    const snapping = snapEnabled && gesture.handle.kind !== "body";
+    // Holding Ctrl while dragging a point switches snapping off, and the palette's snap step replaces the grid step.
+    const snapping = snapEnabled && !(event.ctrlKey || event.metaKey) && gesture.handle.kind !== "body";
     const snap: InferenceResult | undefined = snapping
-      ? inferSketchPoint(raw, gesture.base, { toleranceMm: SNAP_PIXELS * px, gridMm: grid.minorMm, excludeEntityIds: [gesture.entityId, ...jointNeighbours(gesture.entityId)] })
+      ? inferSketchPoint(raw, gesture.base, { toleranceMm: SNAP_PIXELS * px, gridMm: assist.snapStepMm ?? grid.minorMm, excludeEntityIds: [gesture.entityId, ...jointNeighbours(gesture.entityId)] })
       : undefined;
     const target = snap?.point ?? raw;
     setCursor(target);
@@ -1269,6 +1374,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const handleCanvasPointerDownCapture = (event: React.PointerEvent<SVGSVGElement>): void => {
     // Panning wins over everything underneath the pointer, including curves, so a middle or Space drag never selects.
     const wantsPan = event.button === 1 || (event.button === 0 && (camera.spaceHeld || navigationPan));
+    // Alt-click on curves that overlap cycles through them (Select Other) instead of taking the top one.
+    if (!wantsPan && event.button === 0 && event.altKey && props.tool === "select" && !props.dimensionMode && pickRelation === null && !isClickEditTool(props.editTool)) {
+      event.stopPropagation();
+      event.preventDefault();
+      const box = event.currentTarget.getBoundingClientRect();
+      cycleSelectOther(entitiesUnderPoint(props.sketch, camera.toSketch(event.clientX, event.clientY), PICK_PIXELS * px), false, [event.clientX - box.left, event.clientY - box.top]);
+      return;
+    }
     if (!wantsPan) return;
     event.stopPropagation();
     camera.beginPan(event);
@@ -1276,6 +1389,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   const handleCanvasPointerDown = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (event.button !== 0) return;
+    setSelectOther(undefined);
     if (pickRelation !== null) return;
     const selecting = props.tool === "select" && !isClickEditTool(props.editTool) && !props.dimensionMode;
     if (selecting) {
@@ -1486,10 +1600,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         onCommit={commitDimensionEdit}
         onCancel={() => setDimensionEdit(undefined)}
       />}
-      {dynamicFields.length > 0 && (pointerInside || dynamicFocused) && !camera.panning && <DynamicInputBox
+      {dynamicFields.length > 0 && (pointerInside || dynamicFocused || Object.keys(fieldText).length > 0) && !camera.panning && <DynamicInputBox
         fields={dynamicFields}
         live={liveValues}
         text={fieldText}
+        errors={fieldErrors}
         position={(() => {
           const anchor = dynamicFocused && frozenAt !== undefined ? frozenAt : cursor;
           const at = sketchToScreen(anchor, { left: 0, top: 0, width: camera.size.width, height: camera.size.height }, camera.camera);
@@ -1510,12 +1625,22 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
       {props.dimensionMode && <div className="dimension-mode-banner"><CommandIcon name="dimension" /><span><strong>Sketch Dimension</strong>Select a curve, or pick two blue definition points. Esc to finish.</span></div>}
 
+      {selectOther !== undefined && props.tool === "select" && <SelectOtherPopup
+        candidates={selectOther.candidates}
+        selectedId={selectionIds.length === 1 ? selectionIds[0]! : null}
+        position={selectOther.at}
+        onPick={(id) => { setSelectionIds([id]); setSelectedProfileIds([]); props.onSelect(id); }}
+        onClose={() => setSelectOther(undefined)}
+      />}
+      <ShortcutEditorDialog open={shortcutEditorOpen} onClose={() => setShortcutEditorOpen(false)} />
+
       <ViewportChrome workspace="sketch" state={props.viewportState} measurePoints={[]} onNavigationMode={props.onNavigationMode} onSelectionFilter={props.onSelectionFilter} onOrientation={props.onOrientation} onViewAngles={props.onViewAngles} onProjection={props.onProjection} onGrid={props.onGrid} onAxes={props.onAxes} onShadingMode={() => undefined} onBodyColor={() => undefined} onBackgroundTone={() => undefined} onFit={camera.fit} onHome={camera.fit} onClearMeasure={() => undefined} />
 
       <div className="sketch-palette" ref={paletteRef} aria-label="Sketch palette">
         <header><div><span>SKETCH</span><strong>Palette</strong></div><button onClick={props.onChangePlane} title="Move this sketch to another datum plane"><CommandIcon name="view" />Plane</button></header>
         <PaletteToggle label="Sketch grid" active={props.viewportState.gridVisible} onToggle={props.onGrid} />
-        <PaletteToggle label="Snap" active={snapEnabled} onToggle={setSnapEnabled} />
+        <PaletteToggle label={`Snap${keyLabelForCommand("toggle-snap", sketchKeymap) === undefined ? "" : ` (${keyLabelForCommand("toggle-snap", sketchKeymap)})`}`} active={snapEnabled} onToggle={setSnapEnabled} />
+        <SketchInputPalette settings={assist} gridMm={grid.minorMm} onChange={updateAssist} onOpenShortcuts={() => setShortcutEditorOpen(true)} />
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
         {props.tool === "polygon" && <label className="palette-number"><span>Polygon sides</span><input type="number" min={POLYGON_MIN_SIDES} max={POLYGON_MAX_SIDES} step={1} value={polygonSides} aria-label="Number of polygon sides" onChange={(event) => setPolygonSides(event.target.value)} /></label>}
         <SketchCurveOptionsPanel tool={props.tool} fields={curveFields} onChange={setCurveFields} blockNames={blockNames} selectedCount={selectedEntities.length} onSaveBlock={saveSelectionAsBlock} />
@@ -1785,7 +1910,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         </div>
         <details className="palette-shortcuts">
           <summary>Shortcuts</summary>
-          <dl>{SKETCH_HOTKEY_HELP.map((entry) => <div key={entry.keys}><dt>{entry.keys}</dt><dd>{entry.action}</dd></div>)}</dl>
+          <dl>{sketchHotkeyHelp(sketchKeymap).map((entry) => <div key={entry.keys}><dt>{entry.keys}</dt><dd>{entry.action}</dd></div>)}</dl>
         </details>
       </div>
 
@@ -1920,12 +2045,14 @@ function DynamicInputBox(props: {
   readonly fields: readonly { readonly id: DynamicFieldId; readonly label: string; readonly unit: string }[];
   readonly live: DynamicValues;
   readonly text: Partial<Record<DynamicFieldId, string>>;
+  /** A message per field whose text cannot be used; the field is marked and the point is not placed. */
+  readonly errors: Partial<Record<DynamicFieldId, string>>;
   readonly position: readonly [number, number];
   readonly setRef: (id: DynamicFieldId, element: HTMLInputElement | null) => void;
   readonly onChange: (id: DynamicFieldId, value: string) => void;
   readonly onFocus: (id: DynamicFieldId) => void;
   readonly onBlur: () => void;
-  readonly onCommit: () => void;
+  readonly onCommit: () => boolean;
   readonly onCancel: () => void;
   readonly onTab: (id: DynamicFieldId, backwards: boolean) => void;
 }): React.JSX.Element {
@@ -1936,11 +2063,14 @@ function DynamicInputBox(props: {
     return live === undefined ? "" : String(Number(live.toFixed(2)));
   };
   return <div className="dynamic-input" style={{ left: props.position[0], top: props.position[1] }} role="group" aria-label="Typed input">
-    {props.fields.map((field) => <label key={field.id} className={props.text[field.id] === undefined ? "" : "locked"}>
+    {props.fields.map((field) => <label key={field.id} className={props.errors[field.id] !== undefined ? "invalid" : props.text[field.id] === undefined ? "" : "locked"}>
       <span>{field.label}</span>
       <input
         ref={(element) => props.setRef(field.id, element)}
-        inputMode="decimal"
+        inputMode="text"
+        autoComplete="off"
+        spellCheck={false}
+        aria-invalid={props.errors[field.id] !== undefined}
         aria-label={`${field.label} in ${field.unit}`}
         value={show(field.id)}
         onFocus={() => props.onFocus(field.id)}
@@ -1948,14 +2078,15 @@ function DynamicInputBox(props: {
         onChange={(event) => props.onChange(field.id, event.target.value)}
         onKeyDown={(event) => {
           // After placing, give the keyboard back to the canvas so Esc, tool letters and Delete work again.
-          if (event.key === "Enter") { event.preventDefault(); props.onCommit(); event.currentTarget.blur(); }
+          if (event.key === "Enter") { event.preventDefault(); if (props.onCommit()) event.currentTarget.blur(); }
           else if (event.key === "Tab") { event.preventDefault(); props.onTab(field.id, event.shiftKey); }
           else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel(); event.currentTarget.blur(); }
         }}
       />
       <small>{field.unit}</small>
     </label>)}
-    <em>Type a value · Tab next · Enter place</em>
+    {props.fields.map((field) => props.errors[field.id] === undefined ? null : <em key={`error-${field.id}`} className="dynamic-error" role="alert">{field.label}: {props.errors[field.id]}</em>)}
+    <em>Type a value or 12 mm, 0.5 in, 2*name · Tab next · Enter place · #x,y or @dx,dy</em>
   </div>;
 }
 
@@ -1984,7 +2115,7 @@ function InferenceMarks({ inference, px }: { readonly inference: InferenceResult
   return <g className="inference-marks" pointerEvents="none">
     {inference.guides.map((guide, index) => <line key={index} className="inference-guide" x1={guide.from[0]} y1={-guide.from[1]} x2={guide.to[0]} y2={-guide.to[1]} />)}
     {primary !== undefined && primary.kind !== "grid" && <g className="inference-glyph">{glyph()}</g>}
-    {primary !== undefined && primary.kind !== "grid" && <text className="inference-label" x={x + 11 * px} y={y - 9 * px} style={{ fontSize: 11.5 * px, strokeWidth: 3 * px }}>{INFERENCE_LABELS[primary.kind]}</text>}
+    {((primary !== undefined && primary.kind !== "grid") || inference.note !== undefined) && <text className="inference-label" x={x + 11 * px} y={y - 9 * px} style={{ fontSize: 11.5 * px, strokeWidth: 3 * px }}>{inference.note ?? (primary === undefined ? "" : INFERENCE_LABELS[primary.kind])}</text>}
   </g>;
 }
 

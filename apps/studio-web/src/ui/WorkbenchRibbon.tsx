@@ -1,6 +1,8 @@
 import type { DisplayUnit } from "../../../../packages/model-schema/src/index.js";
 import type { AssemblyTemplateId, DrawingDatumScheme, DrawingDisplayStyle, DrawingDraftingStandard, DrawingSettings, ElectricalComponentKind, ElectricalStandard, ElectricalTemplateId, PartPreviewBodyShape, SurfaceIntent, VehicleLayerId, VehicleSimulationState, VehicleTemplateId, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { SketchTool } from "../../../../packages/workbench-sketch/src/index.js";
+import { keyChipForTool } from "../../../../packages/workbench-sketch/src/hotkeys.js";
+import { useSketchKeymap } from "../workspaces/sketch/useSketchKeymap.js";
 import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/index.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, iconTone } from "./CommandIcon.js";
@@ -140,6 +142,8 @@ const PART_FEATURES = [
 ] as const;
 
 export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element {
+  // The key chips on the sketch tools are read from the live keymap, so they follow the shortcut editor and never name a key that does nothing.
+  const sketchKeymap = useSketchKeymap();
   const level = props.project.activeWorkspace === "part" ? "qualified" : "preview";
   const selectedComponent = props.project.assembly.components.find((component) => component.id === props.selectedId);
   const selectedSketchEntity = props.project.sketch.entities.find((entity) => entity.id === props.selectedId);
@@ -169,7 +173,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
     </>}
     {!props.masterCartOpen && props.project.activeWorkspace === "sketch" && <>
       <RibbonGroup label="Create geometry">
-        {SKETCH_TOOLS.map((tool) => <RibbonButton key={tool.id} icon={tool.icon} label={tool.label} hint={tool.key} active={props.sketchTool === tool.id} onClick={() => props.onSketchTool(tool.id)} />)}
+        {SKETCH_TOOLS.map((tool) => <RibbonButton key={tool.id} icon={tool.icon} label={tool.label} hint={keyChipForTool(tool.id, sketchKeymap) ?? "no key"} active={props.sketchTool === tool.id} onClick={() => props.onSketchTool(tool.id)} />)}
         <RibbonButton icon="polygon" label="Polygon" hint="centre + corner" active={props.sketchTool === "polygon"} onClick={() => props.onSketchTool("polygon")} />
         <RibbonButton icon="slot" label="Slot" hint="centres + width" active={props.sketchTool === "slot"} onClick={() => props.onSketchTool("slot")} />
         <RibbonButton icon="slot" label="Straight slot" hint="ends + width" active={props.sketchTool === "slot-straight"} onClick={() => props.onSketchTool("slot-straight")} />

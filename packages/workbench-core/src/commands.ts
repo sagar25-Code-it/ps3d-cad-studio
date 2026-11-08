@@ -1,9 +1,13 @@
 import type { AssemblyTemplateId, CapabilityLevel, ComponentShape, ElectricalComponentKind, ElectricalTemplateId, PartPreviewBodyShape, VehicleLayerId, VehicleSimulationState, VehicleTemplateId, WorkspaceId } from "./types.js";
 
 export type CadCommandCategory = "create" | "modify" | "construct" | "assemble" | "inspect" | "document" | "automate";
-export type CadSketchTool = "select" | "line" | "rectangle" | "rectangle-center" | "rectangle-three-point" | "circle" | "circle-two-point" | "circle-three-point" | "arc" | "point" | "spline" | "polygon" | "slot";
+export type CadSketchTool = "select" | "line" | "rectangle" | "rectangle-center" | "rectangle-three-point" | "circle" | "circle-two-point" | "circle-three-point" | "arc" | "point" | "spline" | "polygon" | "slot"
+  /** The tools below are listed in the command search by apps/studio-web/src/ui/sketch-tool-commands.ts, not by CAD_COMMANDS. */
+  | "ellipse" | "arc-center" | "arc-tangent" | "slot-straight"
+  | "line-midpoint" | "centerline" | "parallelogram" | "rectangle-rounded" | "slot-arc-three-point" | "slot-arc-center" | "parabola" | "hyperbola" | "conic" | "conic-five" | "blend" | "text" | "block" | "spline-control" | "profile";
 /** Selection-driven or click-driven sketch edit tools (each applies one atomic `apply-sketch-edit`). */
-export type CadSketchEditTool = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "stretch" | "corner" | "fillet" | "chamfer" | "trim" | "extend";
+export type CadSketchEditTool = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "stretch" | "corner" | "fillet" | "chamfer" | "trim" | "extend"
+  | "split" | "jog" | "delete-curve" | "offset-move" | "make-path" | "dynamic-mirror";
 /** One-shot sketch commands that act on the current selection or toggle a display mode. */
 export type CadSketchCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check" | "project-body" | "project-edge" | "intersect-body" | "silhouette-body" | "convert-face" | "project-reference";
 

@@ -22,6 +22,8 @@ export type InferenceKind =
   | "on-curve"
   | "horizontal"
   | "vertical"
+  /** A direction from the last placed point at a multiple of the polar increment (see snap-assist.ts). */
+  | "polar"
   | "grid";
 
 /** Which defining point of an entity an inference landed on. */
@@ -37,7 +39,7 @@ export interface InferenceCandidate {
 }
 
 export interface InferenceGuide {
-  readonly kind: "horizontal" | "vertical";
+  readonly kind: "horizontal" | "vertical" | "polar";
   readonly from: Vec2;
   readonly to: Vec2;
 }
@@ -47,6 +49,8 @@ export interface InferenceResult {
   readonly snapped: boolean;
   readonly primary?: InferenceCandidate;
   readonly guides: readonly InferenceGuide[];
+  /** A short extra label for the canvas, for example "Polar 30°" or "Ortho". */
+  readonly note?: string;
 }
 
 export interface InferenceOptions {
@@ -56,6 +60,11 @@ export interface InferenceOptions {
   readonly gridMm?: number;
   /** The last point placed by the active tool: enables perpendicular, tangent and alignment from it. */
   readonly anchor?: Vec2;
+  /**
+   * What the anchor is used for. "full" (the default) adds perpendicular and tangent hints from it, which only make sense for
+   * a line or spline; "align" uses it for horizontal and vertical alignment only, which every other tool can use.
+   */
+  readonly anchorUse?: "full" | "align";
   /** Entities to ignore, for example the ones being dragged. */
   readonly excludeEntityIds?: readonly string[];
 }
@@ -72,6 +81,7 @@ export const INFERENCE_LABELS: Readonly<Record<InferenceKind, string>> = {
   "on-curve": "On curve",
   horizontal: "Horizontal",
   vertical: "Vertical",
+  polar: "Polar",
   grid: "Grid"
 };
 
@@ -82,7 +92,7 @@ const TIER: Readonly<Record<InferenceKind, number>> = {
   intersection: 1, midpoint: 1.1, quadrant: 1.2,
   perpendicular: 2, tangent: 2,
   "on-curve": 3,
-  horizontal: 4, vertical: 4,
+  horizontal: 4, vertical: 4, polar: 4.5,
   grid: 5
 };
 
@@ -403,7 +413,8 @@ export function inferSketchPoint(pointer: Vec2, sketch: WorkbenchSketch, options
   for (const entity of entities) {
     for (const interest of pointsOfInterest(entity)) {
       add({ kind: interest.kind, point: interest.point, entityId: entity.id, selector: interest.selector });
-      if (interest.kind === "endpoint" || interest.kind === "center") alignmentSources.push(interest.point);
+      // Midpoints and quadrants line things up too (a level slot through the middle of a line, a hole level with a circle's side).
+      alignmentSources.push(interest.point);
     }
     const primitives = primitivesOf(entity);
     for (const [index, primitive] of primitives.entries()) {
@@ -411,7 +422,7 @@ export function inferSketchPoint(pointer: Vec2, sketch: WorkbenchSketch, options
       nearby.push({ entity, primitive, index, count: primitives.length });
       const nearest = nearestOnPrimitive(pointer, primitive);
       if (nearest !== undefined) add({ kind: "on-curve", point: nearest.point, entityId: entity.id }, tolerance * ON_CURVE_REACH);
-      if (options.anchor !== undefined) {
+      if (options.anchor !== undefined && options.anchorUse !== "align") {
         for (const foot of perpendicularFeet(options.anchor, primitive)) add({ kind: "perpendicular", point: foot, entityId: entity.id });
         for (const touch of tangentPoints(options.anchor, primitive)) add({ kind: "tangent", point: touch, entityId: entity.id });
       }

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { CAD_COMMANDS, type CadCommandRecord, type WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
+import type { CadCommandRecord, WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
+import { searchableCommands } from "./sketch-tool-commands.js";
+import { useSketchKeymap } from "../workspaces/sketch/useSketchKeymap.js";
 import { CommandIcon, inferCommandIcon } from "./CommandIcon.js";
 import { useDialogFocus } from "./useDialogFocus.js";
 
@@ -28,6 +30,9 @@ export function CommandPalette({ open, workspace, onClose, onCommand }: CommandP
   const [showUnavailable, setShowUnavailable] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const dialogRef = useDialogFocus<HTMLElement>(open, onClose);
+  // The catalog plus every sketch tool on the ribbon, each carrying its key from the live keymap.
+  const sketchKeymap = useSketchKeymap();
+  const commands = useMemo(() => searchableCommands(sketchKeymap), [sketchKeymap]);
 
   useEffect(() => {
     if (!open) return;
@@ -39,7 +44,7 @@ export function CommandPalette({ open, workspace, onClose, onCommand }: CommandP
 
   const matching = useMemo(() => {
     const queryTokens = query.trim().toLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
-    return CAD_COMMANDS.filter((command) => {
+    return commands.filter((command) => {
       if (scope !== "all" && command.workspace !== scope) return false;
       const haystack = [
         command.name, command.description, command.workspace, command.category, command.group, command.level,
@@ -49,7 +54,7 @@ export function CommandPalette({ open, workspace, onClose, onCommand }: CommandP
       const searchTokens = haystack.split(/[^a-z0-9]+/u).filter(Boolean);
       return queryTokens.every((token) => searchTokens.some((candidate) => candidate.startsWith(token)));
     });
-  }, [query, scope]);
+  }, [query, scope, commands]);
   // Runnable commands first-class: gated ones are hidden until asked for, so the list is what the app can actually do.
   const filtered = useMemo(() => showUnavailable ? matching : matching.filter((command) => command.level !== "unavailable"), [matching, showUnavailable]);
   const hiddenCount = matching.length - filtered.length;
@@ -120,7 +125,7 @@ export function CommandPalette({ open, workspace, onClose, onCommand }: CommandP
         <CommandGuide command={filtered[activeIndex]} onRun={execute} />
       </div>
       <footer>
-        <span><strong>{filtered.length}</strong> of {CAD_COMMANDS.length} commands</span>
+        <span><strong>{filtered.length}</strong> of {commands.length} commands</span>
         <label className="palette-unavailable-toggle"><input type="checkbox" checked={showUnavailable} onChange={(event) => setShowUnavailable(event.target.checked)} />Show gated ({hiddenCount === 0 && !showUnavailable ? "none here" : showUnavailable ? "shown" : hiddenCount})</label>
         <span>↑ ↓ inspect · Enter run · double-click run</span>
         <button onClick={onClose}>Esc close</button>
