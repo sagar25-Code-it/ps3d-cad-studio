@@ -54,7 +54,7 @@ import { DEFAULT_CONSTRAINT_DISPLAY, constraintKindsPresent, constraintRows, con
 import { DEFAULT_DIMENSION_DISPLAY, clampPrecision, dimensionEditText, dimensionNormal, dragDimensionOffset, formatLengthLabel, isRepositionable, parseDimensionDisplay, parseDimensionInput, parseDimensionOffsets, sameDimensionValue, serializeDimensionOffsets, stackDimensionLabels, type DimensionDisplaySettings, type DimensionOffsets } from "../../../../packages/workbench-sketch/src/dimension-display.js";
 import { EMPTY_LINE_CHAIN, extendLineChain, keepResolvableConstraints, lineChainSegments, profileChainStillValid, reconcileLineChain, startLineChain, type LineChainState } from "../../../../packages/workbench-sketch/src/line-chain.js";
 import { constrainEachPlan, constructionSelectionPlan, deleteSelectionPlan, fixSelectionPlan, selectionIsFixed, sketchSelectionTotal, unfixSelectionPlan, visibilitySelectionPlan, type SelectionActionResult } from "../../../../packages/workbench-sketch/src/selection-actions.js";
-import { insertSplineFitPoint, removeSplineFitPoint } from "../../../../packages/workbench-sketch/src/spline-edit.js";
+import { insertSplineFitPoint, nearestPointOnSpline, removeSplineFitPoint } from "../../../../packages/workbench-sketch/src/spline-edit.js";
 import { canvasHitSizes, describeEntityForAccessibility, focusAfter, resolveCanvasKey } from "../../../../packages/workbench-sketch/src/canvas-keyboard.js";
 import { selectionExtents, zoomWindowExtents } from "../../../../packages/workbench-sketch/src/camera-zoom.js";
 import { EMPTY_MEASURE, addMeasurePick, describeMeasurement, pickMeasureTarget, type MeasureState } from "../../../../packages/workbench-sketch/src/sketch-measure-tool.js";
@@ -306,7 +306,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [dimensionDisplay, setDimensionDisplay] = usePersistedState<DimensionDisplaySettings>("ps3d.sketch.dimensionDisplay", DEFAULT_DIMENSION_DISPLAY, parseDimensionDisplay, JSON.stringify);
   const [paletteCollapsed, setPaletteCollapsed] = usePersistedState<boolean>("ps3d.sketch.paletteCollapsed", false, (text) => text === "1", (value) => (value ? "1" : "0"));
   const [dimensionOffsets, setDimensionOffsets] = usePersistedState<DimensionOffsets>(`ps3d.sketch.dimensionOffsets.${props.sketch.id}`, {}, parseDimensionOffsets, serializeDimensionOffsets);
-  const dimensionDrag = useRef<{ readonly pointerId: number; readonly constraintId: string; readonly startMm: Vec2; readonly startOffsetPx: number; readonly layoutAt: (offsetPx: number) => DimensionLayout | undefined; moved: boolean } | undefined>(undefined);
+  const dimensionDrag = useRef<{ readonly pointerId: number; readonly constraintId: string; readonly startMm: Vec2; readonly startClient: readonly [number, number]; readonly startOffsetPx: number; readonly layoutAt: (offsetPx: number) => DimensionLayout | undefined; moved: boolean } | undefined>(undefined);
   const [dimensionDragOffset, setDimensionDragOffset] = useState<{ readonly constraintId: string; readonly offsetPx: number } | undefined>(undefined);
   // Keyboard access to the canvas, spline fit-point work, zoom window and the Measure tool.
   const [focusedId, setFocusedId] = useState<string | null>(null);
@@ -683,6 +683,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       if (event.shiftKey || event.ctrlKey || event.metaKey) return;
       setSelectionIds([]);
       setSelectedProfileIds([]);
+      setSelectedConstraintIds([]);
+      setActiveFit(undefined);
       if (props.dimensionMode) setDimensionPoints([]);
       props.onSelect(null);
       return;
@@ -1306,6 +1308,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const handleCanvasPointerDown = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (event.button !== 0) return;
     if (pickRelation !== null) return;
+    if (zoomWindowMode) {
+      // Zoom window: the next drag on the canvas draws the rectangle to zoom to.
+      event.currentTarget.setPointerCapture(event.pointerId);
+      boxGesture.current = { pointerId: event.pointerId, startClient: [event.clientX, event.clientY], startMm: camera.toSketch(event.clientX, event.clientY), additive: false, profileId: undefined, dragging: false };
+      return;
+    }
+    if (measureMode) { measureClick(camera.toSketch(event.clientX, event.clientY)); return; }
     const selecting = props.tool === "select" && !isClickEditTool(props.editTool) && !props.dimensionMode;
     if (selecting) {
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -1324,6 +1333,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   const handleCanvasPointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (camera.movePan(event)) return;
+    const labelDrag = dimensionDrag.current;
+    if (labelDrag !== undefined && labelDrag.pointerId === event.pointerId) {
+      // Dragging a dimension label moves its dimension line; the pointer is only captured once the press has become a drag, so a plain click or double-click still reaches the label.
+      if (!labelDrag.moved) {
+        if (Math.hypot(event.clientX - labelDrag.startClient[0], event.clientY - labelDrag.startClient[1]) < 4) return;
+        labelDrag.moved = true;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
+      const layout = labelDrag.layoutAt(labelDrag.startOffsetPx);
+      if (layout !== undefined) setDimensionDragOffset({ constraintId: labelDrag.constraintId, offsetPx: dragDimensionOffset(layout, labelDrag.startOffsetPx, labelDrag.startMm, camera.toSketch(event.clientX, event.clientY), px) });
+      return;
+    }
     const grab = dragGesture.current;
     if (grab !== undefined && grab.pointerId === event.pointerId) {
       if (!grab.moved && Math.hypot(event.clientX - grab.startClient[0], event.clientY - grab.startClient[1]) < 4) return;
@@ -1342,6 +1363,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   const finishCanvasDrag = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (camera.endPan(event)) return;
+    const labelDrag = dimensionDrag.current;
+    if (labelDrag !== undefined && labelDrag.pointerId === event.pointerId) {
+      dimensionDrag.current = undefined;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      const dragged = dimensionDragOffset;
+      setDimensionDragOffset(undefined);
+      if (labelDrag.moved && event.type !== "pointercancel" && dragged !== undefined && dragged.constraintId === labelDrag.constraintId) {
+        setDimensionOffsets((current) => ({ ...current, [labelDrag.constraintId]: dragged.offsetPx }));
+        props.onMessage("Moved the dimension. Its position is remembered in this browser; it is not part of the model.");
+      }
+      return;
+    }
     const grab = dragGesture.current;
     if (grab !== undefined && grab.pointerId === event.pointerId) {
       dragGesture.current = undefined;
@@ -1356,6 +1389,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setSelectionBox(undefined);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (event.type === "pointercancel") return;
+    if (zoomWindowMode) {
+      const extents = gesture.dragging ? zoomWindowExtents(gesture.startMm, camera.toSketch(event.clientX, event.clientY), px) : undefined;
+      if (extents === undefined) { props.onMessage("Drag a rectangle to zoom to it, or press Esc to cancel."); return; }
+      camera.frame(extents);
+      setZoomWindowMode(false);
+      props.onMessage("Zoomed to the window.");
+      return;
+    }
     if (gesture.dragging && props.editTool === "stretch") {
       // With Stretch active a drag on empty canvas sets the window instead of selecting.
       const end = camera.toSketch(event.clientX, event.clientY);
@@ -1369,6 +1410,56 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const profile = gesture.profileId === undefined ? undefined : profiles.find((candidate) => candidate.id === gesture.profileId);
     if (profile !== undefined) selectProfile(profile, gesture.additive);
     else pointer(event, true);
+  };
+
+  /** One click of the Measure tool: the first pick is remembered, the second gives the distance or the angle. Nothing is added to the sketch. */
+  const measureClick = (point: Vec2): void => {
+    const first = measureState.result === undefined ? measureState.picks[0] : undefined;
+    const target = pickMeasureTarget(props.sketch, point, hitSizes.pickPx * px, first?.kind === "line" ? "line" : "any");
+    if (target === undefined) { props.onMessage("Click on a line to measure its angle to the first line."); return; }
+    const next = addMeasurePick(measureState, target);
+    setMeasureState(next);
+    props.onMessage(next.result !== undefined ? `${describeMeasurement(next.result)}. Click again to measure something else; Esc finishes.` : `${target.kind === "line" ? "Line" : `Point (${target.label})`} picked. Pick a second point for a distance, or a second line for an angle.`);
+  };
+
+  /** Double-click on a spline adds a fit point where the curve is. */
+  const handleCanvasDoubleClick = (event: React.MouseEvent<SVGSVGElement>): void => {
+    if (!interactive || props.dimensionMode) return;
+    const at = camera.toSketch(event.clientX, event.clientY);
+    const target = selectionIds.length === 1 ? visibleEntities.find((entity) => entity.id === selectionIds[0]) : undefined;
+    if (target?.kind !== "spline") return;
+    const onCurve = nearestPointOnSpline(target, at);
+    if (onCurve === undefined || onCurve.distanceMm > hitSizes.pickPx * 1.5 * px) return;
+    // A double-click on an existing fit point is on its handle, not a request for a new point.
+    if (target.fitPoints.some((point) => Math.hypot(point[0] - at[0], point[1] - at[1]) < hitSizes.grabHitPx * px)) return;
+    const edited = insertSplineFitPoint(target, at);
+    if (!edited.ok) { props.onMessage(edited.message); return; }
+    if (props.onApplyEdit({ label: `Added spline point ${edited.index + 1}`, removeEntityIds: [], updateEntities: [edited.entity], addEntities: [], addConstraints: [] }) !== false) {
+      setActiveFit({ entityId: target.id, index: edited.index });
+      props.onMessage(`Added fit point ${edited.index + 1} (${edited.entity.fitPoints.length} of ${MAX_SPLINE_FIT_POINTS} possible). Drag it, or drag its tangent handle; Delete removes it.`);
+    }
+  };
+
+  /** Keys pressed while the canvas itself has the focus: walk through the curves and select them without a mouse. */
+  const handleCanvasKeyDown = (event: React.KeyboardEvent<SVGSVGElement>): void => {
+    if (event.target !== event.currentTarget) return;
+    const action = resolveCanvasKey({ key: event.key, ctrl: event.ctrlKey, meta: event.metaKey, alt: event.altKey, shift: event.shiftKey });
+    if (action === undefined || (action.kind === "select-focused" && focusedId === null)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (action.kind === "select-focused") {
+      if (focusedId !== null) { selectEntity(focusedId, action.additive); announceFocus(focusedId, true); }
+      return;
+    }
+    const next = focusAfter(visibleEntities, focusedId, action);
+    setFocusedId(next);
+    if (next !== null) announceFocus(next, selectionIds.includes(next));
+  };
+  const announceFocus = (id: string, selected: boolean): void => {
+    const index = visibleEntities.findIndex((entity) => entity.id === id);
+    const entity = visibleEntities[index];
+    if (entity === undefined) return;
+    setAnnouncement(describeEntityForAccessibility(entity, entityLabels.get(id) ?? entity.kind, index + 1, visibleEntities.length, selected));
   };
 
   const interactive = props.tool === "select" && props.viewportState.navigationMode !== "pan" && !camera.spaceHeld && !isClickEditTool(props.editTool);
