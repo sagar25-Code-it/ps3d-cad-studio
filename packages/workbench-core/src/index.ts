@@ -42,3 +42,5 @@ export * from "./project-text.js";
 export * from "./feature-refs.js";
 export * from "./face-sketch.js";
 export * from "./units.js";
+export * from "./arc-geometry.js";
+export * from "./spline-limits.js";

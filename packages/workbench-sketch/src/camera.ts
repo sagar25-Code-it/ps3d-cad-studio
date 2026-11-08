@@ -35,12 +35,18 @@ export const MAX_VIEW_WIDTH_MM = 200_000;
 export const DEFAULT_CAMERA: SketchCamera = { centerMm: [0, 0], widthMm: 120 };
 
 function clampWidth(widthMm: number): number {
+  // NaN compares false with everything, so it used to pass straight through the clamp and poison the camera.
+  if (Number.isNaN(widthMm)) return DEFAULT_CAMERA.widthMm;
   return Math.min(MAX_VIEW_WIDTH_MM, Math.max(MIN_VIEW_WIDTH_MM, widthMm));
 }
 
+const finite = (value: number): boolean => Number.isFinite(value);
+const finitePoint = (point: Vec2): boolean => finite(point[0]) && finite(point[1]);
+const finiteExtents = (extents: SketchExtents): boolean => finitePoint(extents.min) && finitePoint(extents.max);
+
 /** A camera that shows `extents` with a margin, never tighter than 10 mm across. */
 export function fitCamera(extents: SketchExtents | undefined, aspect: number, margin = 0.14): SketchCamera {
-  if (extents === undefined) return DEFAULT_CAMERA;
+  if (extents === undefined || !finiteExtents(extents)) return DEFAULT_CAMERA;
   const safeAspect = aspect > 0.05 ? aspect : 1.6;
   const width = Math.max(extents.max[0] - extents.min[0], 1e-6);
   const height = Math.max(extents.max[1] - extents.min[1], 1e-6);
@@ -66,7 +72,7 @@ const EMPTY_SKETCH_EXTENTS: SketchExtents = { min: [-50, -35], max: [50, 35] };
  * fitted sketch never sits underneath the palette or the navigation bars. An empty sketch frames the origin.
  */
 export function fitCameraToViewport(extents: SketchExtents | undefined, size: { readonly width: number; readonly height: number }, insets: ScreenInsets, marginPx = 36): SketchCamera {
-  const target = extents ?? EMPTY_SKETCH_EXTENTS;
+  const target = extents !== undefined && finiteExtents(extents) ? extents : EMPTY_SKETCH_EXTENTS;
   const freeWidth = Math.max(size.width - insets.left - insets.right, 80);
   const freeHeight = Math.max(size.height - insets.top - insets.bottom, 80);
   const spanWidth = Math.max(target.max[0] - target.min[0], 10);
@@ -97,6 +103,8 @@ export function mmPerPixel(camera: SketchCamera, viewportWidthPx: number): numbe
 
 /** Zooms about `anchorMm`, which stays under the same screen point. A factor above 1 zooms out. */
 export function zoomCamera(camera: SketchCamera, anchorMm: Vec2, factor: number): SketchCamera {
+  // A zoom that is not a number (or has no anchor) leaves the camera where it is rather than turning it into NaN.
+  if (!finite(factor) || factor <= 0 || !finitePoint(anchorMm)) return camera;
   const widthMm = clampWidth(camera.widthMm * factor);
   const ratio = widthMm / camera.widthMm;
   return {
@@ -107,6 +115,7 @@ export function zoomCamera(camera: SketchCamera, anchorMm: Vec2, factor: number)
 
 /** Moves the camera so the scene follows a pointer drag of (dxPx, dyPx) screen pixels. */
 export function panCamera(camera: SketchCamera, dxPx: number, dyPx: number, viewportWidthPx: number): SketchCamera {
+  if (!finite(dxPx) || !finite(dyPx) || !finite(viewportWidthPx)) return camera;
   const scale = mmPerPixel(camera, viewportWidthPx);
   return { centerMm: [camera.centerMm[0] - dxPx * scale, camera.centerMm[1] + dyPx * scale], widthMm: camera.widthMm };
 }

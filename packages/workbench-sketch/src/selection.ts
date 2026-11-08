@@ -1,4 +1,4 @@
-import type { SketchEntity, Vec2 } from "../../workbench-core/src/index.js";
+import { circleThroughThreePoints, type SketchEntity, type Vec2 } from "../../workbench-core/src/index.js";
 import { entityExtents, entityPoints, sampleArc, sampleSpline } from "./index.js";
 
 /** An axis-aligned selection rectangle in sketch millimetres. */
@@ -29,20 +29,22 @@ function entityPolyline(entity: SketchEntity): { readonly points: readonly Vec2[
   if (entity.kind === "line") return { points: [entity.start, entity.end], closed: false };
   if (entity.kind === "rectangle") return { points: entityPoints(entity), closed: true };
   if (entity.kind === "circle") {
-    const points = Array.from({ length: 64 }, (_, index): Vec2 => {
-      const angle = (index / 64) * Math.PI * 2;
+    const count = facetsFor(entity.radiusMm, Math.PI * 2);
+    const points = Array.from({ length: count }, (_, index): Vec2 => {
+      const angle = (index / count) * Math.PI * 2;
       return [entity.center[0] + entity.radiusMm * Math.cos(angle), entity.center[1] + entity.radiusMm * Math.sin(angle)];
     });
     return { points, closed: true };
   }
-  if (entity.kind === "arc") return { points: sampleArc(entity.start, entity.mid, entity.end), closed: false };
+  if (entity.kind === "arc") return { points: sampleArc(entity.start, entity.mid, entity.end, OUTLINE_TOLERANCE_MM), closed: false };
   if (entity.kind === "spline") return { points: sampleSpline(entity.fitPoints), closed: false };
   if (entity.kind === "ellipse") {
     const radians = (entity.rotationDeg * Math.PI) / 180;
     const cos = Math.cos(radians);
     const sin = Math.sin(radians);
-    const points = Array.from({ length: 64 }, (_, index): Vec2 => {
-      const theta = (index / 64) * Math.PI * 2;
+    const count = facetsFor(entity.majorRadiusMm, Math.PI * 2);
+    const points = Array.from({ length: count }, (_, index): Vec2 => {
+      const theta = (index / count) * Math.PI * 2;
       const localX = entity.majorRadiusMm * Math.cos(theta);
       const localY = entity.minorRadiusMm * Math.sin(theta);
       return [entity.center[0] + localX * cos - localY * sin, entity.center[1] + localX * sin + localY * cos];
@@ -79,7 +81,33 @@ function segmentTouchesRect(a: Vec2, b: Vec2, rect: SketchSelectionRect): boolea
   return true;
 }
 
+/** Facets fine enough that a sampled round curve stays within 5 microns of the true one, however large its radius. */
+const OUTLINE_TOLERANCE_MM = 0.005;
+
+function facetStepRad(radiusMm: number): number {
+  const stepRad = 2 * Math.acos(Math.max(0, 1 - OUTLINE_TOLERANCE_MM / Math.max(radiusMm, OUTLINE_TOLERANCE_MM * 2)));
+  return Math.min(Math.PI / 32, Math.max(stepRad, 1e-4));
+}
+
+function facetsFor(radiusMm: number, sweepRad: number): number {
+  return Math.min(4096, Math.max(16, Math.ceil(sweepRad / facetStepRad(radiusMm))));
+}
+
+function arcRadius(start: Vec2, mid: Vec2, end: Vec2): number {
+  return circleThroughThreePoints(start, mid, end)?.radiusMm ?? 1;
+}
+
+/** Does the circle's outline pass through the rectangle? Exact: the rectangle holds every distance from the centre between its nearest and farthest point. */
+function circleOutlineTouchesRect(center: Vec2, radiusMm: number, rect: SketchSelectionRect): boolean {
+  const nearX = Math.max(rect.min[0] - center[0], 0, center[0] - rect.max[0]);
+  const nearY = Math.max(rect.min[1] - center[1], 0, center[1] - rect.max[1]);
+  const farX = Math.max(Math.abs(center[0] - rect.min[0]), Math.abs(center[0] - rect.max[0]));
+  const farY = Math.max(Math.abs(center[1] - rect.min[1]), Math.abs(center[1] - rect.max[1]));
+  return Math.hypot(nearX, nearY) <= radiusMm && radiusMm <= Math.hypot(farX, farY);
+}
+
 export function entityTouchesRect(entity: SketchEntity, rect: SketchSelectionRect): boolean {
+  if (entity.kind === "circle") return circleOutlineTouchesRect(entity.center, entity.radiusMm, rect);
   const { points, closed } = entityPolyline(entity);
   if (points.length === 1) {
     const point = points[0]!;

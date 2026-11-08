@@ -1,4 +1,5 @@
 import type { SketchEntity, Vec2, WorkbenchSketch } from "../../workbench-core/src/index.js";
+import { ellipsePerpendicularFeet, ellipsePolyline, ellipseSegmentIntersections, ellipseTangentPointsFrom, nearestOnEllipse, type EllipseShape } from "./ellipse-geometry.js";
 import { entityPoints, sampleSpline } from "./index.js";
 
 /**
@@ -91,7 +92,8 @@ const EPSILON = 1e-9;
 
 type Segment = { readonly kind: "segment"; readonly a: Vec2; readonly b: Vec2 };
 type Round = { readonly kind: "round"; readonly center: Vec2; readonly radius: number; readonly startAngle: number; readonly sweep: number; readonly full: boolean };
-type Primitive = Segment | Round;
+type Oval = { readonly kind: "ellipse"; readonly shape: EllipseShape };
+type Primitive = Segment | Round | Oval;
 
 const TWO_PI = Math.PI * 2;
 
@@ -103,8 +105,16 @@ function dist(a: Vec2, b: Vec2): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1]);
 }
 
+/**
+ * Rounds to the nearest multiple of `step` without the binary-float tail that plain multiplication leaves (0.1 * 3 is
+ * 0.30000000000000004): the result is cleaned to the number of decimals the step itself has.
+ */
 function roundTo(value: number, step: number): number {
-  return Math.round(value / step) * step;
+  const rounded = Math.round(value / step) * step;
+  const text = String(step);
+  const exponent = /e-(d+)$/u.exec(text);
+  const decimals = exponent !== null ? Number(exponent[1]) : (text.split(".")[1]?.length ?? 0);
+  return decimals > 12 ? rounded : Number(rounded.toFixed(decimals));
 }
 
 function circumcircle(a: Vec2, b: Vec2, c: Vec2): { readonly center: Vec2; readonly radius: number } | undefined {
@@ -147,6 +157,7 @@ function primitivesOf(entity: SketchEntity): readonly Primitive[] {
     const samples = sampleSpline(entity.fitPoints);
     return samples.slice(1).map((sample, index): Primitive => ({ kind: "segment", a: samples[index]!, b: sample }));
   }
+  if (entity.kind === "ellipse") return [{ kind: "ellipse", shape: entity }];
   return [];
 }
 
@@ -159,6 +170,7 @@ function pointOnRound(round: Round, angle: number): Vec2 {
 }
 
 function nearestOnPrimitive(point: Vec2, primitive: Primitive): { readonly point: Vec2; readonly distance: number } | undefined {
+  if (primitive.kind === "ellipse") return nearestOnEllipse(point, primitive.shape);
   if (primitive.kind === "segment") {
     const dx = primitive.b[0] - primitive.a[0];
     const dy = primitive.b[1] - primitive.a[1];
@@ -231,7 +243,27 @@ function intersectRounds(first: Round, second: Round): readonly Vec2[] {
   return candidates.filter((point) => onSweep(first, Math.atan2(point[1] - first.center[1], point[0] - first.center[0])) && onSweep(second, Math.atan2(point[1] - second.center[1], point[0] - second.center[0])));
 }
 
+/** The ellipse outline as short segments, for crossings with curves that have no closed form against an ellipse. */
+function ovalSegments(oval: Oval): readonly Segment[] {
+  const ring = ellipsePolyline(oval.shape, 192);
+  return ring.map((point, index): Segment => ({ kind: "segment", a: point, b: ring[(index + 1) % ring.length]! }));
+}
+
+/** A crossing found on the polygonal outline, moved onto the true ellipse. */
+function ontoOval(point: Vec2, oval: Oval): Vec2 {
+  return nearestOnEllipse(point, oval.shape).point;
+}
+
 function intersect(first: Primitive, second: Primitive): readonly Vec2[] {
+  if (first.kind === "ellipse" || second.kind === "ellipse") {
+    const oval = first.kind === "ellipse" ? first : (second as Oval);
+    const other = first.kind === "ellipse" ? second : first;
+    if (other.kind === "segment") return ellipseSegmentIntersections(other.a, other.b, oval.shape);
+    if (other.kind === "round") return ovalSegments(oval).flatMap((segment) => intersectSegmentRound(segment, other)).map((point) => ontoOval(point, oval)).filter((point, index, all) => all.findIndex((candidate) => dist(candidate, point) < 1e-6) === index);
+    const segments = ovalSegments(oval);
+    const otherSegments = ovalSegments(other);
+    return segments.flatMap((segment) => otherSegments.flatMap((candidate) => intersectSegments(segment, candidate))).map((point) => ontoOval(point, oval)).filter((point, index, all) => all.findIndex((candidate) => dist(candidate, point) < 1e-6) === index);
+  }
   if (first.kind === "segment" && second.kind === "segment") return intersectSegments(first, second);
   if (first.kind === "segment" && second.kind === "round") return intersectSegmentRound(first, second);
   if (first.kind === "round" && second.kind === "segment") return intersectSegmentRound(second, first);
@@ -241,6 +273,7 @@ function intersect(first: Primitive, second: Primitive): readonly Vec2[] {
 
 /** The points on a primitive where a line from `anchor` meets it at a right angle. */
 function perpendicularFeet(anchor: Vec2, primitive: Primitive): readonly Vec2[] {
+  if (primitive.kind === "ellipse") return ellipsePerpendicularFeet(anchor, primitive.shape);
   if (primitive.kind === "segment") {
     const dx = primitive.b[0] - primitive.a[0];
     const dy = primitive.b[1] - primitive.a[1];
@@ -257,6 +290,7 @@ function perpendicularFeet(anchor: Vec2, primitive: Primitive): readonly Vec2[] 
 
 /** The points on a circle or arc where a tangent from `anchor` touches it. */
 function tangentPoints(anchor: Vec2, primitive: Primitive): readonly Vec2[] {
+  if (primitive.kind === "ellipse") return ellipseTangentPointsFrom(anchor, primitive.shape);
   if (primitive.kind !== "round") return [];
   const offset = dist(anchor, primitive.center);
   if (offset <= primitive.radius + 1e-9) return [];
@@ -323,6 +357,7 @@ function pointsOfInterest(entity: SketchEntity): readonly PointOfInterest[] {
 }
 
 function boxDistance(point: Vec2, primitive: Primitive): number {
+  if (primitive.kind === "ellipse") return nearestOnEllipse(point, primitive.shape).distance;
   if (primitive.kind === "segment") {
     const minX = Math.min(primitive.a[0], primitive.b[0]);
     const maxX = Math.max(primitive.a[0], primitive.b[0]);
@@ -332,6 +367,18 @@ function boxDistance(point: Vec2, primitive: Primitive): number {
   }
   // Distance to the outline, not to the disc: a pointer well inside a circle is not near it.
   return Math.abs(dist(point, primitive.center) - primitive.radius);
+}
+
+/**
+ * Two pieces of one curve only meet at the vertex between them, which is a sampling artefact and not a crossing: a spline is
+ * drawn as short segments and every neighbouring pair "intersects" at each sample, so the cursor used to jump from sample to
+ * sample labelled Intersection. Pieces that are not neighbours (a spline that loops across itself, two non-adjacent rectangle
+ * edges) can still genuinely cross.
+ */
+function sameCurveNeighbours(a: { readonly entity: SketchEntity; readonly index: number; readonly count: number }, b: { readonly index: number; readonly count: number }): boolean {
+  if (a.entity.kind === "circle" || a.entity.kind === "arc" || a.entity.kind === "ellipse" || a.entity.kind === "line") return true;
+  const gap = Math.abs(a.index - b.index);
+  return gap <= 1 || (a.entity.kind === "rectangle" && gap === a.count - 1);
 }
 
 /**
@@ -351,16 +398,17 @@ export function inferSketchPoint(pointer: Vec2, sketch: WorkbenchSketch, options
 
   const alignmentSources: Vec2[] = [[0, 0]];
   add({ kind: "origin", point: [0, 0], selector: "point" });
-  const nearby: { readonly entity: SketchEntity; readonly primitive: Primitive }[] = [];
+  const nearby: { readonly entity: SketchEntity; readonly primitive: Primitive; readonly index: number; readonly count: number }[] = [];
 
   for (const entity of entities) {
     for (const interest of pointsOfInterest(entity)) {
       add({ kind: interest.kind, point: interest.point, entityId: entity.id, selector: interest.selector });
       if (interest.kind === "endpoint" || interest.kind === "center") alignmentSources.push(interest.point);
     }
-    for (const primitive of primitivesOf(entity)) {
+    const primitives = primitivesOf(entity);
+    for (const [index, primitive] of primitives.entries()) {
       if (boxDistance(pointer, primitive) > tolerance * 1.5) continue;
-      nearby.push({ entity, primitive });
+      nearby.push({ entity, primitive, index, count: primitives.length });
       const nearest = nearestOnPrimitive(pointer, primitive);
       if (nearest !== undefined) add({ kind: "on-curve", point: nearest.point, entityId: entity.id }, tolerance * ON_CURVE_REACH);
       if (options.anchor !== undefined) {
@@ -373,12 +421,14 @@ export function inferSketchPoint(pointer: Vec2, sketch: WorkbenchSketch, options
     for (let second = first + 1; second < nearby.length; second += 1) {
       const a = nearby[first]!;
       const b = nearby[second]!;
-      if (a.entity.id === b.entity.id && a.primitive.kind === "round") continue;
+      if (a.entity.id === b.entity.id && sameCurveNeighbours(a, b)) continue;
       for (const hit of intersect(a.primitive, b.primitive)) add({ kind: "intersection", point: hit, entityId: a.entity.id, otherEntityId: b.entity.id });
     }
   }
 
-  const ranked = [...candidates].sort((left, right) => TIER[left.kind] - TIER[right.kind] || left.distanceMm - right.distanceMm);
+  // At the very same distance a point of existing geometry beats the bare origin: a shape that starts on the origin and is
+  // closed on its own first point must join that point (a Coincident relation), not just land on the origin.
+  const ranked = [...candidates].sort((left, right) => TIER[left.kind] - TIER[right.kind] || (Math.abs(left.distanceMm - right.distanceMm) > 1e-12 ? left.distanceMm - right.distanceMm : Number(left.entityId === undefined) - Number(right.entityId === undefined)));
   const best = ranked[0];
   if (best !== undefined) return { point: best.point, snapped: true, primary: best, guides: [] };
 

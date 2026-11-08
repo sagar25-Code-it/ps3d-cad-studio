@@ -111,6 +111,15 @@ export function buildControlPointSpline(controls: readonly Vec2[], closed: boole
 
 // ---------------------------------------------------------------- conics from tangent geometry
 
+/**
+ * Conics are stored as fit-point splines. With 32 points crowded where the curve bends (see sampleCurveToFitPoints) the
+ * spline stays within 0.01 mm of the exact conic over a 60 mm span for every rho from 0.02 to 0.98; 24 evenly spaced
+ * points were off by up to 0.9 mm at rho 0.98.
+ */
+export const CONIC_FIT_POINTS = 32;
+const CONIC_CURVATURE_BIAS = 2;
+const CONIC_DENSE_SAMPLES = 960;
+
 export const CONIC_RHO_MIN = 0.02;
 export const CONIC_RHO_MAX = 0.98;
 
@@ -133,7 +142,7 @@ export function buildConicByRho(start: Vec2, end: Vec2, apex: Vec2, rho: number,
   if (!Number.isFinite(rho) || rho < CONIC_RHO_MIN || rho > CONIC_RHO_MAX) return badShape(`Rho must be between ${CONIC_RHO_MIN} and ${CONIC_RHO_MAX}: below 0.5 is an ellipse, 0.5 a parabola, above 0.5 a hyperbola.`, "Type a rho between 0.02 and 0.98.");
   if (dist(start, end) < 0.1) return badShape("The conic's two ends must be at least 0.1 mm apart.");
   if (Math.abs(turn(start, apex, end)) < 0.05 * Math.max(1, dist(start, end))) return badShape("The tangent-intersection point is in line with the two ends: place it away from the chord so the curve has a bulge.");
-  const fit = sampleCurveToFitPoints((t) => conicArcPoint(start, apex, end, rho, t), 0, 1, 24);
+  const fit = sampleCurveToFitPoints((t) => conicArcPoint(start, apex, end, rho, t), 0, 1, CONIC_FIT_POINTS, CONIC_DENSE_SAMPLES, 0, CONIC_CURVATURE_BIAS);
   const spline = splineFromPoints(fit, ids.entity());
   return spline.ok ? { ok: true, value: { entities: [spline.value], constraints: [] } } : spline;
 }
@@ -160,7 +169,7 @@ export function buildHyperbola(center: Vec2, vertex: Vec2, branchPoint: Vec2, id
   const b = Math.abs(y) / Math.sqrt((x * x) / (a * a) - 1);
   const tEnd = Math.asinh(Math.abs(y) / b);
   const curve = (t: number): Vec2 => add(center, add(scale(axis, a * Math.cosh(t)), scale(normal, b * Math.sinh(t))));
-  const fit = sampleCurveToFitPoints(curve, -tEnd, tEnd, 24);
+  const fit = sampleCurveToFitPoints(curve, -tEnd, tEnd, CONIC_FIT_POINTS, CONIC_DENSE_SAMPLES, 0, CONIC_CURVATURE_BIAS);
   const spline = splineFromPoints(fit, ids.entity());
   return spline.ok ? { ok: true, value: { entities: [spline.value], constraints: [] } } : spline;
 }
@@ -274,7 +283,7 @@ export function fitConicThroughFivePoints(points: readonly Vec2[], id: string): 
     const t1 = Math.max(...ts);
     if (t1 - t0 < 1e-3) return badShape("The five points are too close together along the curve.");
     const curve = (t: number): Vec2 => back([ux + sign * a * Math.cosh(t) * transverse[0] + b * Math.sinh(t) * conjugate[0], uy + sign * a * Math.cosh(t) * transverse[1] + b * Math.sinh(t) * conjugate[1]]);
-    const spline = splineFromPoints(sampleCurveToFitPoints(curve, t0, t1, 24), id);
+    const spline = splineFromPoints(sampleCurveToFitPoints(curve, t0, t1, CONIC_FIT_POINTS, CONIC_DENSE_SAMPLES, 0, CONIC_CURVATURE_BIAS), id);
     return spline.ok ? { ok: true, value: { kind: "hyperbola", entity: spline.value } } : spline;
   }
   // Parabola: only one of the two principal curvatures is non-zero.
@@ -294,7 +303,7 @@ export function fitConicThroughFivePoints(points: readonly Vec2[], id: string): 
     const tv = -(lambda * sv * sv + dn * sv + F) / dm;
     return back([sv * n[0] + tv * m[0], sv * n[1] + tv * m[1]]);
   };
-  const spline = splineFromPoints(sampleCurveToFitPoints(curve, s0, s1, 24), id);
+  const spline = splineFromPoints(sampleCurveToFitPoints(curve, s0, s1, CONIC_FIT_POINTS, CONIC_DENSE_SAMPLES, 0, CONIC_CURVATURE_BIAS), id);
   return spline.ok ? { ok: true, value: { kind: "parabola", entity: spline.value } } : spline;
 }
 

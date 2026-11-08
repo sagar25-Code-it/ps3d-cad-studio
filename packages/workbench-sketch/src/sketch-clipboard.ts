@@ -1,5 +1,8 @@
 import {
+  SPLINE_MAX_FIT_POINTS,
+  SPLINE_MIN_FIT_POINTS,
   failure,
+  MODEL_ENVELOPE,
   WORKBENCH_LIMITS,
   type SketchConstraintKind,
   type SketchEntity,
@@ -114,7 +117,7 @@ const CONSTRAINT_KINDS: readonly SketchConstraintKind[] = [
 ];
 const POINT_REFS: readonly SketchPointRef[] = ["start", "end", "mid", "center", "self"];
 /** The project's own coordinate limit: nothing the sketch would refuse can travel through the clipboard. */
-const MAX_COORDINATE = WORKBENCH_LIMITS.maxCoordinateMm;
+const MAX_COORDINATE = MODEL_ENVELOPE.maxSketchCoordinateMm;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const finite = (value: unknown, limit: number = MAX_COORDINATE): value is number => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= limit;
@@ -130,16 +133,16 @@ function cleanEntity(value: unknown): SketchEntity | undefined {
   switch (value.kind) {
     case "line": return known(["start", "end"]) && isPoint(value.start) && isPoint(value.end) ? { ...base, kind: "line", start: value.start, end: value.end } : undefined;
     case "arc": return known(["start", "mid", "end"]) && isPoint(value.start) && isPoint(value.mid) && isPoint(value.end) ? { ...base, kind: "arc", start: value.start, mid: value.mid, end: value.end } : undefined;
-    case "circle": return known(["center", "radiusMm"]) && isPoint(value.center) && finite(value.radiusMm, 10_000) && value.radiusMm > 0 ? { ...base, kind: "circle", center: value.center, radiusMm: value.radiusMm } : undefined;
+    case "circle": return known(["center", "radiusMm"]) && isPoint(value.center) && finite(value.radiusMm, MODEL_ENVELOPE.maxSketchRadiusMm) && value.radiusMm > 0 ? { ...base, kind: "circle", center: value.center, radiusMm: value.radiusMm } : undefined;
     case "point": return known(["point"]) && isPoint(value.point) ? { ...base, kind: "point", point: value.point } : undefined;
     case "rectangle":
-      return known(["center", "widthMm", "heightMm", "rotationDeg"]) && isPoint(value.center) && finite(value.widthMm, 20_000) && finite(value.heightMm, 20_000) && value.widthMm > 0 && value.heightMm > 0 && finite(value.rotationDeg, 360)
+      return known(["center", "widthMm", "heightMm", "rotationDeg"]) && isPoint(value.center) && finite(value.widthMm, MODEL_ENVELOPE.maxSketchSizeMm) && finite(value.heightMm, MODEL_ENVELOPE.maxSketchSizeMm) && value.widthMm > 0 && value.heightMm > 0 && finite(value.rotationDeg, 360)
         ? { ...base, kind: "rectangle", center: value.center, widthMm: value.widthMm, heightMm: value.heightMm, rotationDeg: value.rotationDeg } : undefined;
     case "ellipse":
-      return known(["center", "majorRadiusMm", "minorRadiusMm", "rotationDeg"]) && isPoint(value.center) && finite(value.majorRadiusMm, 10_000) && finite(value.minorRadiusMm, 10_000) && value.majorRadiusMm > 0 && value.minorRadiusMm > 0 && finite(value.rotationDeg, 360)
+      return known(["center", "majorRadiusMm", "minorRadiusMm", "rotationDeg"]) && isPoint(value.center) && finite(value.majorRadiusMm, MODEL_ENVELOPE.maxSketchRadiusMm) && finite(value.minorRadiusMm, MODEL_ENVELOPE.maxSketchRadiusMm) && value.majorRadiusMm > 0 && value.minorRadiusMm > 0 && finite(value.rotationDeg, 360)
         ? { ...base, kind: "ellipse", center: value.center, majorRadiusMm: value.majorRadiusMm, minorRadiusMm: value.minorRadiusMm, rotationDeg: value.rotationDeg } : undefined;
     case "spline":
-      return known(["fitPoints"]) && Array.isArray(value.fitPoints) && value.fitPoints.length >= 3 && value.fitPoints.length <= 24 && value.fitPoints.every(isPoint) ? { ...base, kind: "spline", fitPoints: value.fitPoints as Vec2[] } : undefined;
+      return known(["fitPoints"]) && Array.isArray(value.fitPoints) && value.fitPoints.length >= SPLINE_MIN_FIT_POINTS && value.fitPoints.length <= SPLINE_MAX_FIT_POINTS && value.fitPoints.every(isPoint) ? { ...base, kind: "spline", fitPoints: value.fitPoints as Vec2[] } : undefined;
     default: return undefined;
   }
 }

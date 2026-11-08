@@ -1,3 +1,5 @@
+import { circleThroughThreePoints } from "./arc-geometry.js";
+import { SPLINE_MAX_FIT_POINTS, SPLINE_MIN_FIT_POINTS } from "./spline-limits.js";
 import { NEW_PRIMITIVE_SHAPES, validPrimitiveBody } from "./primitive-bodies.js";
 import { validConstructionBinder, validNewPlaneDefinition } from "./construction-refs.js";
 import {
@@ -1052,6 +1054,3 @@ function distance(left: readonly [number, number], right: readonly [number, numb
   return Math.hypot(right[0] - left[0], right[1] - left[1]);
 }
 
-function cross2(a: readonly [number, number], b: readonly [number, number], c: readonly [number, number]): number {
-  return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-}

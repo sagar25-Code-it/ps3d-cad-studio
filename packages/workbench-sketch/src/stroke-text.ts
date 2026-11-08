@@ -72,14 +72,44 @@ const GLYPHS: Readonly<Record<string, Glyph>> = {
   ")": { width: 1.6, strokes: "M0,6.5 A1.4,3 0,-0.5" },
   "!": { width: 1, strokes: "M0.5,6 L0.5,2 M0.2,0 L0.8,0 L0.8,0.6 L0.2,0.6 L0.2,0" },
   "?": { width: 4, strokes: "M0.2,5 A2,6.2 3.6,4.2 A2.4,3 2,2.4 L2,1.6 M1.7,0 L2.3,0 L2.3,0.6 L1.7,0.6 L1.7,0" },
-  "'": { width: 0.6, strokes: "M0.3,6 L0.3,4.4" }
+  "'": { width: 0.6, strokes: "M0.3,6 L0.3,4.4" },
+  // Engineering symbols. The degree sign is a small ring at cap height; the diameter sign is an O with a slash through it
+  // (U+00D8 and U+2300 draw the same), so a label such as "Ø12" or "90°" can be engraved.
+  "°": { width: 2, strokes: "M2,5 A1,6 0,5 A1,4 2,5" },
+  "Ø": { width: 4, strokes: `${ROUND_O} M0.3,-0.3 L3.7,6.3` },
+  "⌀": { width: 4, strokes: `${ROUND_O} M0.3,-0.3 L3.7,6.3` },
+  "±": { width: 4, strokes: "M0.4,3.8 L3.6,3.8 M2,2.2 L2,5.4 M0.4,0.6 L3.6,0.6" },
+  "×": { width: 4, strokes: "M0.4,1.4 L3.6,4.6 M0.4,4.6 L3.6,1.4" },
+  "#": { width: 4, strokes: "M1.1,0 L1.7,6 M2.5,0 L3.1,6 M0,2 L4,2 M0,4 L4,4" },
+  "%": { width: 4, strokes: "M0,0 L4,6 M1.6,5 A0.8,5.8 0,5 A0.8,4.2 1.6,5 M4,1 A3.2,1.8 2.4,1 A3.2,0.2 4,1" },
+  "@": { width: 4, strokes: "M3,3 A2,4 1,3 A2,2 3,3 L3,2.2 L4,2.2 L4,3.6 A2,6 0,3 A2,0 3.6,0.4" },
+  "*": { width: 4, strokes: "M2,1 L2,5 M0.3,2 L3.7,4 M0.3,4 L3.7,2" },
+  "<": { width: 4, strokes: "M3.4,5 L0.6,3 L3.4,1" },
+  ">": { width: 4, strokes: "M0.6,5 L3.4,3 L0.6,1" },
+  "[": { width: 1.6, strokes: "M1.6,6.5 L0,6.5 L0,-0.5 L1.6,-0.5" },
+  "]": { width: 1.6, strokes: "M0,6.5 L1.6,6.5 L1.6,-0.5 L0,-0.5" },
+  "{": { width: 1.8, strokes: "M1.8,6.5 L1.2,6.5 L1.2,3.6 L0,3 L1.2,2.4 L1.2,-0.5 L1.8,-0.5" },
+  "}": { width: 1.8, strokes: "M0,6.5 L0.6,6.5 L0.6,3.6 L1.8,3 L0.6,2.4 L0.6,-0.5 L0,-0.5" },
+  "&": { width: 4, strokes: "M4,0 L1,4 A0.6,5.6 1.6,6 A2.6,5.6 2.2,4.6 L0.6,2.2 A0.2,0.8 1.6,0 A3.2,0.3 3.8,2.6" },
+  "^": { width: 4, strokes: "M0.4,3.6 L2,6 L3.6,3.6" },
+  "~": { width: 4, strokes: "M0,3 A1,4 2,3 A3,2 4,3" },
+  "|": { width: 0.6, strokes: "M0.3,-0.5 L0.3,6.5" },
+  "\\": { width: 4, strokes: "M0,6 L4,0" },
+  "\"": { width: 1.8, strokes: "M0.3,6 L0.3,4.4 M1.5,6 L1.5,4.4" },
+  "`": { width: 1, strokes: "M0.2,6 L0.8,4.8" },
+  "$": { width: 4, strokes: "M3.9,4.9 A2,5.6 0.2,4.4 L3.8,1.6 A2,0.4 0.1,1.1 M2,-0.5 L2,6.5" },
+  ";": { width: 1, strokes: "M0.6,0.6 L0.2,-1 M0.2,3 L0.8,3 L0.8,3.6 L0.2,3.6 L0.2,3" }
 };
+
+/** The punctuation and symbols the font draws, for the message that lists what is supported. */
+const STROKE_FONT_SYMBOLS: string = Object.keys(GLYPHS).filter((character) => !/^[A-Z0-9]$/u.test(character)).join(" ");
 
 /** The characters the font can draw (lowercase letters map to the capitals). */
 export const STROKE_FONT_CHARACTERS: string = [...Object.keys(GLYPHS), " "].sort().join("");
 
 export const TEXT_MAX_CHARACTERS = 40;
-export const TEXT_MAX_ENTITIES = 360;
+/** A sketch edit takes at most 200 new entities, so longer text could never be placed; the limit is that number. */
+export const TEXT_MAX_ENTITIES = 200;
 
 type Step = { readonly kind: "line"; readonly to: Vec2 } | { readonly kind: "arc"; readonly through: Vec2; readonly to: Vec2 };
 
@@ -133,9 +163,12 @@ export function buildSketchText(origin: Vec2, text: string, options: SketchTextO
   if (trimmed === "") return badShape("Type some text first.", "Type the text in the Sketch palette, then click where it should start.");
   if ([...trimmed].length > TEXT_MAX_CHARACTERS) return badShape(`Sketch text takes at most ${TEXT_MAX_CHARACTERS} characters.`);
   const missing = unsupportedTextCharacters(trimmed);
-  if (missing.length > 0) return badShape(`The built-in font cannot draw ${missing.map((character) => `"${character}"`).join(", ")}. It has letters, digits and . , : - _ + = / ( ) ! ? '`, "Remove those characters.");
+  if (missing.length > 0) return badShape(`The built-in font cannot draw ${missing.map((character) => `"${character}"`).join(", ")}. It has letters, digits and ${STROKE_FONT_SYMBOLS}`, "Remove those characters.");
   const { heightMm } = options;
   if (!Number.isFinite(heightMm) || heightMm < 0.5 || heightMm > 1_000) return badShape("Text height must be between 0.5 mm and 1000 mm.");
+  if (options.rotationDeg !== undefined && !Number.isFinite(options.rotationDeg)) return badShape("Text rotation must be a number of degrees.", "Type the rotation as a number, for example 0 or 90.");
+  if (options.spacing !== undefined && !Number.isFinite(options.spacing)) return badShape("Text letter spacing must be a number.", "Type the spacing as a number, for example 1.");
+  if (!Number.isFinite(origin[0]) || !Number.isFinite(origin[1])) return badShape("The text start point is not a finite position.");
   const unit = heightMm / GLYPH_CAP_HEIGHT;
   const radians = ((options.rotationDeg ?? 0) * Math.PI) / 180;
   const cos = Math.cos(radians);

@@ -6,6 +6,7 @@ import type { SketchBlock } from "../../../../packages/workbench-sketch/src/sket
 import { DEFAULT_CURVE_TOOL_OPTIONS, type CurveToolOptions } from "../../../../packages/workbench-sketch/src/curve-tools.js";
 import { TEXT_MAX_CHARACTERS } from "../../../../packages/workbench-sketch/src/stroke-text.js";
 import type { SketchTool } from "../../../../packages/workbench-sketch/src/index.js";
+import { SPLINE_PARAMETERIZATION_LABELS, type SplineParameterization } from "../../../../packages/workbench-sketch/src/spline-fit.js";
 
 /**
  * The numbers the extra curve tools read from the Sketch palette, kept as the text the user typed so a half-typed value
@@ -19,6 +20,8 @@ export interface CurveOptionFields {
   readonly textHeight: string;
   readonly textRotation: string;
   readonly profileMode: ProfileSegmentMode;
+  /** Fit-point spline: how the curve is spaced between uneven clicks. */
+  readonly splineMode: SplineParameterization;
   readonly keepPolygon: boolean;
   /** Insert block: which saved block, the angle and scale to insert it at, and the name to save the selection under. */
   readonly blockChoice: string;
@@ -35,6 +38,7 @@ export const DEFAULT_CURVE_OPTION_FIELDS: CurveOptionFields = {
   textHeight: String(DEFAULT_CURVE_TOOL_OPTIONS.textHeightMm),
   textRotation: String(DEFAULT_CURVE_TOOL_OPTIONS.textRotationDeg),
   profileMode: "line",
+  splineMode: "uniform",
   keepPolygon: DEFAULT_CURVE_TOOL_OPTIONS.keepControlPolygon,
   blockChoice: "",
   blockRotation: "0",
@@ -104,9 +108,17 @@ export function SketchCurveOptionsPanel({ tool, fields, onChange, blockNames, se
       </>
     );
     case "rectangle-rounded": return numberField("Corner radius (mm)", "cornerRadius", 0.5, 0.01);
+    case "circle-tangent-2": return numberField("Circle radius (mm)", "cornerRadius", 0.5, 0.01);
     case "conic": return numberField("Rho (0.5 = parabola)", "rho", 0.05, CONIC_RHO_MIN, CONIC_RHO_MAX);
     case "blend": return numberField("Blend tension", "tension", 0.1, BLEND_TENSION_MIN, BLEND_TENSION_MAX);
     case "spline-control": return <label className="palette-number"><span>Keep control polygon</span><input type="checkbox" checked={fields.keepPolygon} aria-label="Keep the control polygon as construction lines" onChange={(event) => set("keepPolygon", event.target.checked)} /></label>;
+    case "spline": return (
+      <label className="palette-number"><span>Spline spacing</span>
+        <select aria-label="Fit-point spline parameterisation" value={fields.splineMode} onChange={(event) => set("splineMode", event.target.value === "centripetal" ? "centripetal" : event.target.value === "chord-length" ? "chord-length" : "uniform")}>
+          {(Object.keys(SPLINE_PARAMETERIZATION_LABELS) as SplineParameterization[]).map((mode) => <option key={mode} value={mode}>{SPLINE_PARAMETERIZATION_LABELS[mode]}</option>)}
+        </select>
+      </label>
+    );
     case "profile": return (
       <label className="palette-number"><span>Next segment</span>
         <select aria-label="Profile segment type" value={fields.profileMode} onChange={(event) => set("profileMode", event.target.value === "tangent-arc" ? "tangent-arc" : "line")}>

@@ -98,7 +98,11 @@ export function pointFromDynamicInput(tool: SketchTool, placed: readonly Vec2[],
       }
       const length = value("length");
       if (length < 0.01) return undefined;
-      const angle = typed.angle !== undefined ? (typed.angle * Math.PI) / 180 : Math.atan2(cursor[1] - first[1], cursor[0] - first[0]);
+      if (typed.angle !== undefined) {
+        const direction = directionOfAngle(typed.angle);
+        return [first[0] + length * direction[0], first[1] + length * direction[1]];
+      }
+      const angle = Math.atan2(cursor[1] - first[1], cursor[0] - first[0]);
       return [first[0] + length * Math.cos(angle), first[1] + length * Math.sin(angle)];
     }
     case "rectangle": {
@@ -122,6 +126,20 @@ export function pointFromDynamicInput(tool: SketchTool, placed: readonly Vec2[],
     }
     default: return undefined;
   }
+}
+
+/**
+ * The unit direction of a typed angle in degrees. A right-angle multiple gives exact components: cos(90 degrees) in floating
+ * point is 6e-17, which made a typed 90 degree line a hair off plumb and so impossible to hold Vertical.
+ */
+export function directionOfAngle(angleDeg: number): Vec2 {
+  const turns = angleDeg / 90;
+  if (Number.isInteger(turns)) {
+    const quarter = ((turns % 4) + 4) % 4;
+    return quarter === 0 ? [1, 0] : quarter === 1 ? [0, 1] : quarter === 2 ? [-1, 0] : [0, -1];
+  }
+  const radians = (angleDeg * Math.PI) / 180;
+  return [Math.cos(radians), Math.sin(radians)];
 }
 
 /** Parses what the user typed into a field: a finite number, with a comma accepted as the decimal separator. */

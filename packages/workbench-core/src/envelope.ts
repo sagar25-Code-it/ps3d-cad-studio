@@ -1,3 +1,5 @@
+import { circleThroughThreePoints } from "./arc-geometry.js";
+import { SPLINE_MAX_FIT_POINTS, SPLINE_MIN_FIT_POINTS } from "./spline-limits.js";
 import type { WorkbenchDiagnostic } from "./types.js";
 
 /**
@@ -19,8 +21,8 @@ export const MODEL_ENVELOPE = {
   maxFeatureDistanceMm: 100_000,
   maxPlaneOffsetMm: 100_000,
   maxBodyCoordinateMm: 1_000_000,
-  maxSplineFitPoints: 24,
-  minSplineFitPoints: 3
+  maxSplineFitPoints: SPLINE_MAX_FIT_POINTS,
+  minSplineFitPoints: SPLINE_MIN_FIT_POINTS
 } as const;
 
 export interface EnvelopeProblem {
@@ -119,8 +121,8 @@ export function sketchEntityProblem(value: unknown): EnvelopeProblem | undefined
       const problem = point("start", value.start) ?? point("mid", value.mid) ?? point("end", value.end);
       if (problem !== undefined) return problem;
       const [a, b, c] = [value.start, value.mid, value.end] as readonly (readonly [number, number])[];
-      const cross = (b![0] - a![0]) * (c![1] - a![1]) - (b![1] - a![1]) * (c![0] - a![0]);
-      if (Math.abs(cross) < 1e-4) return bad("(arc) has its start, middle and end points on one straight line, so no circle passes through them. Move the middle point off the line.", "DEGENERATE_GEOMETRY");
+      // Judged relative to the arc's own size (see arc-geometry.ts), so a small well-formed arc is kept and a near-straight one is refused.
+      if (circleThroughThreePoints(a!, b!, c!) === undefined) return bad("(arc) has its start, middle and end points on one straight line, so no circle passes through them. Move the middle point off the line.", "DEGENERATE_GEOMETRY");
       return undefined;
     }
     case "point":

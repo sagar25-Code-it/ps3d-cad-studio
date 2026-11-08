@@ -271,10 +271,10 @@ export const sketchCurveToolTests: readonly TestCase[] = [
     run: () => {
       const shape = must(buildParabola([-10, 10], [10, 10], [0, -10], ids));
       const spline = splineOf(shape.entities[0]);
-      equal(spline.fitPoints.length, 24, "24 fit points");
+      equal(spline.fitPoints.length, 32, "32 fit points (crowded where the conic bends, see T13)");
       for (const point of spline.fitPoints) near(point[1], (point[0] * point[0]) / 10, 1e-9, "fit point on the parabola");
       near(spline.fitPoints[0]![0], -10, 1e-12, "starts at the first point");
-      near(spline.fitPoints[23]![0], 10, 1e-12, "ends at the second point");
+      near(spline.fitPoints[31]![0], 10, 1e-12, "ends at the second point");
       let worst = 0;
       for (const point of sampleSpline(spline.fitPoints, 12)) worst = Math.max(worst, Math.abs(point[1] - (point[0] * point[0]) / 10));
       assert(worst < 0.01, `the drawn curve stays within 0.01 mm of the parabola (worst ${worst.toFixed(4)})`);
@@ -516,8 +516,8 @@ export const sketchCurveToolTests: readonly TestCase[] = [
         assert(box.max[0] - box.min[0] > 0 || box.max[1] - box.min[1] > 0, `"${character}" has extent`);
       }
       assert(STROKE_FONT_CHARACTERS.includes("Z") && STROKE_FONT_CHARACTERS.includes("9"), "letters and digits are present");
-      equal(unsupportedTextCharacters("Hi~").join(""), "~", "unsupported characters are listed");
-      assert(!buildSketchText([0, 0], "a~b", { heightMm: 10 }, ids).ok, "text with an unsupported character is refused");
+      equal(unsupportedTextCharacters("Hi§").join(""), "§", "unsupported characters are listed");
+      assert(!buildSketchText([0, 0], "a§b", { heightMm: 10 }, ids).ok, "text with an unsupported character is refused");
       assert(!buildSketchText([0, 0], "   ", { heightMm: 10 }, ids).ok, "blank text is refused");
       assert(!buildSketchText([0, 0], "A", { heightMm: 0.1 }, ids).ok, "text under 0.5 mm is refused");
       assert(!buildSketchText([0, 0], "A".repeat(41), { heightMm: 10 }, ids).ok, "more than 40 characters is refused");
@@ -577,6 +577,9 @@ export const sketchCurveToolTests: readonly TestCase[] = [
         hyperbola: [[0, 0], [6, 0], [15, 12]],
         conic: [[0, 0], [40, 0], [20, 20]],
         "conic-five": [[-2, 4], [-1, 1], [0, 0], [1, 1], [2, 4]],
+        "ellipse-arc": [[0, 40], [20, 40], [0, 50], [10, 40], [-10, 40]],
+        "circle-tangent-3": [[-10, 0], [40, 12], [60, 5]],
+        "circle-tangent-2": [[-10, 0], [60, 5]],
         blend: [[0, 0], [30, 12]],
         text: [[0, 0]],
         block: [[60, 40]]
@@ -585,7 +588,8 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       const sampleBlock = must(makeSketchBlock("sample", must(buildRoundedRectangle([0, 0], [10, 6], 1.5, ids)).entities, []));
       const withCurves: SketchEntity[] = [
         { id: "entity:blend-a", kind: "line", start: [-20, 0], end: [0, 0], construction: false },
-        { id: "entity:blend-b", kind: "line", start: [30, 12], end: [50, 12], construction: false }
+        { id: "entity:blend-b", kind: "line", start: [30, 12], end: [50, 12], construction: false },
+        { id: "entity:tangent-c", kind: "line", start: [60, -10], end: [60, 30], construction: false }
       ];
       let project: WorkbenchProject = { ...base, sketch: { ...base.sketch, entities: withCurves } };
       for (const tool of Object.keys(samples) as FixedCurveToolId[]) {
@@ -595,7 +599,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
         equal(curveToolRequiredPoints(tool), points.length, `${tool} registry count`);
         assert(isShapeTool(tool as SketchTool), `${tool} is placed as a shape`);
         equal(sketchToolLabel(tool), CURVE_TOOL_LABELS[tool], `${tool} label`);
-        const shape = must(buildCurveTool(tool, points, { ...DEFAULT_CURVE_TOOL_OPTIONS, entities: withCurves, pickReachMm: 2, block: sampleBlock, blockRotationDeg: 90, blockScale: 2 }, ids));
+        const shape = must(buildCurveTool(tool, points, { ...DEFAULT_CURVE_TOOL_OPTIONS, entities: withCurves, pickReachMm: 2, block: sampleBlock, blockRotationDeg: 90, blockScale: 2, cornerRadiusMm: tool === "circle-tangent-2" ? 6 : DEFAULT_CURVE_TOOL_OPTIONS.cornerRadiusMm }, ids));
         assert(shape.entities.length >= 1, `${tool} builds entities`);
         project = addThrough(project, shape, `Added ${tool}`);
         assert(!buildCurveTool(tool, points.slice(0, -1), DEFAULT_CURVE_TOOL_OPTIONS, ids).ok, `${tool} refuses a wrong click count`);
@@ -605,7 +609,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
         assert(!isShapeTool(tool), `${tool} is not placed in one go`);
         assert((requiredSketchPoints(tool) ?? 0) >= 2, `${tool} has a minimum`);
       }
-      equal(Object.keys(CURVE_TOOL_LABELS).length, 15, "fifteen curve tools (fourteen shapes and the block insert)");
+      equal(Object.keys(CURVE_TOOL_LABELS).length, 18, "eighteen curve tools (seventeen shapes and the block insert)");
       assert(!buildCurveTool("block", [[0, 0]], DEFAULT_CURVE_TOOL_OPTIONS, ids).ok, "inserting a block that was never saved is refused");
       assert(project.sketch.entities.length > 30, `${project.sketch.entities.length} entities from one of each tool are valid together`);
     }
