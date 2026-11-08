@@ -1,5 +1,5 @@
 import type { DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchEntity, SketchPlaneFrame, WorkbenchOperation, WorkbenchProject } from "../packages/workbench-core/src/index.js";
-import { applyWorkbenchOperation, createWorkbenchProject, designOf, validateWorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { applyWorkbenchOperation, CAD_COMMANDS, createWorkbenchProject, designOf, validateWorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { solidMetrics } from "../packages/workbench-core/src/solid-metrics.js";
 import { detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
 import { fitPolyline, type FitPrimitive, type Pt } from "../packages/workbench-geometry/src/curve-fit.js";
@@ -7,6 +7,7 @@ import { meshHole, nearestPickableEdge, pickableEdges } from "../packages/workbe
 import { frameThroughPoints, placePoint } from "../packages/workbench-geometry/src/sketch-placement.js";
 import { chooseFace, planProjection, projectBodyEdges, sketchFrameOf, sketchToWorld, worldToSketch, type ProjectionMode, type SketchFrameSource } from "../packages/workbench-geometry/src/sketch-project.js";
 import { replayAllBodies, rebuildSolidFeature } from "../apps/studio-web/src/design-regeneration.js";
+import { edgesToPick, isSketchProjectCommand, needsPick, pickedEdgeRun, planSketchProject, sourceBodyOf, type SketchProjectCommand } from "../apps/studio-web/src/sketch-project-command.js";
 import { assert, near, type TestCase } from "./test-kit.js";
 
 let serial = 0;
@@ -324,6 +325,31 @@ export const sketchProjectTests: readonly TestCase[] = [
     }
   },
   {
+    name: "A slot (two lines and two arcs) is recognised as such by Project, Silhouette and Intersect, on a datum and on a tilted plane, and extrudes back to the same volume",
+    run: async () => {
+      const arc = (id: string, start: Pt, mid: Pt, end: Pt): SketchEntity => ({ id: `entity:${id}`, kind: "arc", start: [start[0], start[1]], mid: [mid[0], mid[1]], end: [end[0], end[1]], construction: false });
+      const slotEntities = [lineOf("a", [0, 0], [20, 0]), arc("b", [20, 0], [25, 5], [20, 10]), lineOf("c", [20, 10], [0, 10]), arc("d", [0, 10], [-5, 5], [0, 0])];
+      const slot = await makeBody("slot", XY, slotEntities, 6);
+      const area = 20 * 10 + Math.PI * 25;
+      near(volumeOf(slot.body), area * 6, area * 6 * 0.01, "the slot solid");
+      for (const mode of ["project", "silhouette"] as const) {
+        const brought = bring(slot.project, slot.body, XY, mode);
+        assert(kindsOf(brought.entities) === "arc,arc,line,line", `${mode}: two lines and two arcs: ${kindsOf(brought.entities)}`);
+        const arcs = brought.entities.filter((entity) => entity.kind === "arc") as Extract<SketchEntity, { kind: "arc" }>[];
+        for (const a of arcs) near(Math.hypot(a.start[0] - a.end[0], a.start[1] - a.end[1]), 10, 1e-3, `${mode}: each end arc spans the 10 mm slot width`);
+        const profiles = detectSketchProfiles(brought.project.sketch);
+        assert(profiles.length === 1, `${mode}: the slot closes into one profile`);
+        near(profiles[0]!.areaMm2, area, area * 0.01, `${mode}: the profile has the slot's area`);
+        const copy = await extrudeWorking(brought.project, `slot-copy-${mode}`, 6);
+        near(volumeOf(copy.body), volumeOf(slot.body), volumeOf(slot.body) * 0.01, `${mode}: it extrudes back to the slot's volume`);
+      }
+      const cut = bring(slot.project, slot.body, { plane: "datum:xy", planeOffsetMm: 3 }, "intersect");
+      assert(kindsOf(cut.entities) === "arc,arc,line,line", `a level cut of the slot is the same slot: ${kindsOf(cut.entities)}`);
+      const tilted = bring(slot.project, slot.body, { plane: "datum:xy", planeTilt: { axis: "y", angleDeg: 25 } }, "silhouette");
+      assert(detectSketchProfiles(tilted.project.sketch).length === 1, `the slot's shadow on a tilted plane is one closed profile: ${kindsOf(tilted.entities)}`);
+    }
+  },
+  {
     name: "Intersect cuts a body with the sketch plane: a loop for a box, a circle for a cylinder, a tilted rectangle of the right size, and nothing when the plane misses",
     run: async () => {
       const { project, body } = await box();
@@ -333,6 +359,11 @@ export const sketchProjectTests: readonly TestCase[] = [
       near(profile.areaMm2, 1200, 1e-6, "40 x 30");
       const slice = await extrudeWorking(level.project, "slice", 2);
       near(volumeOf(slice.body), 2400, 1e-6, "extruding the cut gives the section area times depth");
+      // A plane lying along a face of the body gives that face's outline once, not twice or not at all.
+      for (const offset of [0, 10]) {
+        const onFace = bring(project, body, { plane: "datum:xy", planeOffsetMm: offset }, "intersect");
+        assert(kindsOf(onFace.entities) === "line,line,line,line", `a plane along the face at z = ${offset} gives its four edges: ${kindsOf(onFace.entities)}`);
+      }
       const angle = (30 * Math.PI) / 180;
       const tilted = bring(project, body, { plane: "datum:xy", planeOffsetMm: 1, planeTilt: { axis: "x", angleDeg: 30 } }, "intersect");
       assert(kindsOf(tilted.entities) === "line,line,line,line", `a slanted cut of a box is a rectangle: ${kindsOf(tilted.entities)}`);
@@ -483,6 +514,57 @@ export const sketchProjectTests: readonly TestCase[] = [
       assert(failure(project, body, XY, "project", { room: 2 }).includes("room for 2 more"), "a sketch with no room is told so before anything is added");
       assert(failure(project, { ...body, indices: [] }, XY, "project").includes("no solid geometry"), "a body with no triangles is refused");
       assert(failure(project, body, XY, "convert", {}).length > 0, "convert needs a pick");
+    }
+  }
+  ,
+  {
+    name: "The Project group's commands choose the body, take a pick where one is needed, and bring the curves in through a real sketch edit",
+    run: async () => {
+      const { project, body } = await box();
+      const second = await makeBody("pin", { plane: "datum:xy", planeOffsetMm: 40 }, [circle("pin", 60, 15, 4)], 12, project);
+      assert(!sourceBodyOf(createWorkbenchProject("project:test-empty"), null).ok, "no body, no projection");
+      assert(sourceBodyOf(project, null).ok && sourceBodyOf(project, "general-body:box").ok, "a lone body, or the selected one, is the source");
+      assert(!sourceBodyOf(second.project, null).ok, "with two bodies and no selection the user is asked to choose");
+      const chosen = sourceBodyOf(second.project, "general-body:pin");
+      assert(chosen.ok && chosen.body.id === "general-body:pin", "the selected body wins");
+      assert(CAD_COMMANDS.some((command) => command.id === "command:sketch-project" && command.level === "preview"), "the catalog's Project geometry command is live");
+      assert(isSketchProjectCommand("silhouette-body") && !isSketchProjectCommand("fix-curve"), "the ribbon's project commands are told apart from the other sketch commands");
+      assert(needsPick("project-edge") && needsPick("convert-face") && !needsPick("intersect-body"), "an edge and a face need a click");
+      const started = startSketch(second.project, XY);
+      let n = 0;
+      const newId = (): string => `entity:proj-${(n += 1)}`;
+      const apply = (current: WorkbenchProject, command: SketchProjectCommand, target: GeneralSolidBody, extra: Partial<Parameters<typeof planSketchProject>[3]> = {}): { readonly project: WorkbenchProject; readonly summary: string; readonly kinds: string } => {
+        const planned = planSketchProject(current, target, command, { construction: false, newId, ...extra });
+        if (!planned.ok) throw new Error(`${command}: ${planned.message}`);
+        const next = run(current, planned.operation);
+        return { project: next, summary: planned.summary, kinds: kindsOf(next.sketch.entities.slice(current.sketch.entities.length)) };
+      };
+      const projected = apply(started, "project-body", body);
+      assert(projected.kinds === "line,line,line,line" && validateWorkbenchProject(projected.project).ok, `project-body adds the box outline and the project still validates: ${projected.kinds}`);
+      assert(apply(started, "silhouette-body", body).kinds === "line,line,line,line", "silhouette-body");
+      const cut = apply(startSketch(second.project, { plane: "datum:xy", planeOffsetMm: 6 }), "intersect-body", body);
+      assert(cut.kinds === "line,line,line,line", "intersect-body with the plane inside the box");
+      const pillCut = apply(startSketch(second.project, { plane: "datum:xy", planeOffsetMm: 46 }), "intersect-body", second.body);
+      assert(pillCut.kinds === "circle", `and across the pin: ${pillCut.kinds}`);
+      // Project edge: the click is near the top rim of the pin, which picks the whole rim.
+      const run2 = pickedEdgeRun(second.body, [64, 15, 52]);
+      assert(typeof run2 !== "string" && run2.pieces >= 36, `a click near the pin's rim picks the whole rim: ${typeof run2 === "string" ? run2 : run2.pieces}`);
+      if (typeof run2 !== "string") {
+        const edge = apply(started, "project-edge", second.body, { pick: { pointMm: [64, 15, 52], edges: run2.segments } });
+        assert(edge.kinds === "circle" && edge.summary.includes("snapshot"), `project-edge adds the rim as one circle: ${edge.kinds}`);
+        const reference = apply(started, "project-edge", second.body, { construction: true, pick: { pointMm: [64, 15, 52], edges: run2.segments } });
+        assert(reference.project.sketch.entities.every((entity) => entity.construction), "as reference geometry when asked");
+      }
+      assert(typeof edgesToPick(body) !== "string" && (edgesToPick(body) as readonly unknown[]).length === 12, "a box offers its twelve edges to pick");
+      // Convert face: the pin's top face, picked by a point on it.
+      const face = apply(started, "convert-face", second.body, { pick: { pointMm: [60, 15, 52], faceIndex: null } });
+      assert(face.kinds === "circle", `convert-face on the pin's top: ${face.kinds}`);
+      assert(!planSketchProject(started, body, "convert-face", { construction: false, newId }).ok, "convert-face without a pick is refused");
+      assert(!planSketchProject(started, body, "project-edge", { construction: false, newId }).ok, "project-edge without a pick is refused");
+      // A sketch that is nearly full refuses before changing anything.
+      const full = { ...started, sketch: { ...started.sketch, entities: Array.from({ length: 498 }, (_, i): SketchEntity => lineOf(`fill-${i}`, [i, 0], [i, 5])) } } as WorkbenchProject;
+      const refused = planSketchProject(full, body, "project-body", { construction: false, newId });
+      assert(!refused.ok && refused.message.includes("room for 2 more"), "a nearly full sketch says how much room it has");
     }
   }
 ];
