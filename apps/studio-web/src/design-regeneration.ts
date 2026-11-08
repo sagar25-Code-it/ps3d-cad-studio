@@ -78,7 +78,7 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     return { ok: false, message: `${feature.name}: a ${feature.kind} is built from one region, but ${groups.length} separate regions are selected. Select a single region, or use an extrude or revolve for several.` };
   }
   if (groups.length > 1 && feature.kind === "revolve" && feature.thinWallMm !== undefined) return { ok: false, message: `${feature.name}: a thin revolve follows one outline. Select a single region.` };
-  const warnings = feature.edge !== undefined && groups.some((group) => group.holes.length > 0) ? [...region.value.warnings, "The chamfer or fillet is applied to the outline; the holes keep their sharp edges."] : region.value.warnings;
+  const warnings = [...region.value.warnings, ...(feature.edge !== undefined && groups.some((group) => group.holes.length > 0) ? ["The chamfer or fillet is applied to the outline; the holes keep their sharp edges."] : [])];
   const plane = planeKeyOf(sketch.plane);
   if (feature.kind === "sheet-lofted-bend") {
     const lofted = loftedBendBody(feature, profiles, region.value.outer, plane, color);

@@ -3,7 +3,7 @@ import { applyWorkbenchOperation, createWorkbenchProject, designOf, parseWorkben
 import { solidMetrics } from "../packages/workbench-core/src/solid-metrics.js";
 import { evaluateConstructionPlane } from "../packages/workbench-geometry/src/construction-geometry.js";
 import { tessellateExtrude } from "../packages/workbench-geometry/src/tessellate.js";
-import { rebuildSolidFeature, replayAllBodies } from "../apps/studio-web/src/design-regeneration.js";
+import { rebuildSolidFeature, replayAllBodies, isRebuildFailure } from "../apps/studio-web/src/design-regeneration.js";
 import { assert, near, type TestCase } from "./test-kit.js";
 
 /*
@@ -54,7 +54,7 @@ async function addModifierAndReplay(project: WorkbenchProject, step: DesignSolid
   const results = await replayAllBodies(added);
   const applied = run(added, { kind: "regenerate-design", results });
   assert(validateWorkbenchProject(applied).ok, `${step.kind} leaves a valid project after replay`);
-  return { project: applied, messages: results.flatMap((result) => result.message === undefined ? [] : [result.message]) };
+  return { project: applied, messages: results.flatMap((result) => !isRebuildFailure(result) ? [] : [result.message!]) };
 }
 
 const bodyOf = (project: WorkbenchProject, id: string): GeneralSolidBody => project.part.generalBodies!.find((body) => body.id === id)!;

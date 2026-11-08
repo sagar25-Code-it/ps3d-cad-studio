@@ -1,4 +1,4 @@
-import { failure, type SketchEntity, type Vec2, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
+import { failure, type SketchEntity, type SketchPointRef, type Vec2, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
 import { buildArrangement, type ArrangementEdge } from "./arrangement.js";
 import { arcCircle } from "./curve-sampling.js";
 import { editPlan, type SketchEditContext, type SketchEditResult } from "./edit-tools.js";
@@ -49,6 +49,68 @@ function subsample(points: readonly Vec2[], limit: number): Vec2[] {
   return result;
 }
 
+/** The two ends of a line or arc, which is all a joint with a broken curve can still name. */
+function endsOf(entity: SketchEntity): { readonly start: Vec2; readonly end: Vec2 } | undefined {
+  return entity.kind === "line" || entity.kind === "arc" ? { start: entity.start, end: entity.end } : undefined;
+}
+
+const JOINT_TOLERANCE_MM = 0.05;
+const near = (a: Vec2, b: Vec2): boolean => Math.hypot(a[0] - b[0], a[1] - b[1]) <= JOINT_TOLERANCE_MM;
+
+/**
+ * A curve that is broken is replaced by its pieces, and the joints it had (Coincident at its ends) went with it, so a closed outline fell
+ * apart on the next drag. Each joint is made again on the piece that now holds that end, and consecutive pieces of one curve are joined to
+ * each other so the curve still moves as one.
+ */
+function rejoin(
+  context: SketchEditContext,
+  replaced: ReadonlyMap<string, { readonly entity: SketchEntity; readonly pieces: readonly SketchEntity[] }>
+): WorkbenchSketchConstraint[] {
+  const joints: WorkbenchSketchConstraint[] = [];
+  const newJoint = (a: string, pointA: SketchPointRef, b: string, pointB: SketchPointRef): void => {
+    joints.push({ id: context.newId("constraint"), kind: "coincident", entityIds: [a, b], points: [pointA, pointB] });
+  };
+  const carry = (id: string, point: SketchPointRef | undefined): { readonly id: string; readonly point: SketchPointRef } | undefined => {
+    const swap = replaced.get(id);
+    if (swap === undefined) return point === undefined ? undefined : { id, point };
+    const ends = endsOf(swap.entity);
+    if (ends === undefined || (point !== "start" && point !== "end")) return undefined;
+    const wanted = point === "start" ? ends.start : ends.end;
+    for (const piece of swap.pieces) {
+      const pieceEnds = endsOf(piece);
+      if (pieceEnds === undefined) continue;
+      if (near(pieceEnds.start, wanted)) return { id: piece.id, point: "start" };
+      if (near(pieceEnds.end, wanted)) return { id: piece.id, point: "end" };
+    }
+    return undefined;
+  };
+  return (() => {
+    const current = (context.sketch.constraints);
+    for (const constraint of current) {
+      if (constraint.kind !== "coincident" || constraint.suppressed === true || constraint.entityIds.length !== 2 || constraint.points === undefined) continue;
+      if (!constraint.entityIds.some((id) => replaced.has(id))) continue;
+      const first = carry(constraint.entityIds[0]!, constraint.points[0]);
+      const second = carry(constraint.entityIds[1]!, constraint.points[1]);
+      if (first === undefined || second === undefined || first.id === second.id) continue;
+      newJoint(first.id, first.point, second.id, second.point);
+    }
+    for (const swap of replaced.values()) {
+      for (let index = 0; index + 1 < swap.pieces.length; index += 1) {
+        const left = swap.pieces[index]!;
+        const right = swap.pieces[index + 1]!;
+        const a = endsOf(left);
+        const b = endsOf(right);
+        if (a === undefined || b === undefined) continue;
+        if (near(a.end, b.start)) newJoint(left.id, "end", right.id, "start");
+        else if (near(a.end, b.end)) newJoint(left.id, "end", right.id, "end");
+        else if (near(a.start, b.start)) newJoint(left.id, "start", right.id, "start");
+        else if (near(a.start, b.end)) newJoint(left.id, "start", right.id, "end");
+      }
+    }
+    return joints;
+  })();
+}
+
 export function breakAtIntersections(context: SketchEditContext, ids?: readonly string[]): SketchEditResult {
   const sketch = context.sketch;
   const curves = profileCurves(sketch);
@@ -61,6 +123,7 @@ export function breakAtIntersections(context: SketchEditContext, ids?: readonly 
   const addEntities: SketchEntity[] = [];
   const addConstraints: WorkbenchSketchConstraint[] = [];
   const notes: string[] = [];
+  const replaced = new Map<string, { readonly entity: SketchEntity; readonly pieces: readonly SketchEntity[] }>();
   let pieces = 0;
   let curvesBroken = 0;
   for (const entity of targets) {
@@ -101,6 +164,7 @@ export function breakAtIntersections(context: SketchEditContext, ids?: readonly 
     if (created.length < 2) continue;
     removeEntityIds.push(entity.id);
     addEntities.push(...created);
+    replaced.set(entity.id, { entity, pieces: created });
     pieces += created.length;
     curvesBroken += 1;
     // Relations that stay true on every piece of a line.
@@ -115,6 +179,7 @@ export function breakAtIntersections(context: SketchEditContext, ids?: readonly 
   if (curvesBroken === 0) {
     return failure("INVALID_OPERATION", `No curve crosses, touches or overlaps another, so there is nothing to break${notes.length === 0 ? "" : ` (${notes.join("; ")})`}.`, [...(wanted ?? [])], "Break splits curves where they meet. Draw curves that cross first.");
   }
+  addConstraints.push(...rejoin(context, replaced));
   const crossings = arrangement.crossings.length;
   return editPlan(`Broke ${curvesBroken} curve${curvesBroken === 1 ? "" : "s"} into ${pieces} pieces at ${crossings} intersection${crossings === 1 ? "" : "s"}${notes.length === 0 ? "" : ` (${notes.join("; ")})`}`, { removeEntityIds, addEntities, addConstraints });
 }

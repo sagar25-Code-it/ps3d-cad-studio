@@ -5,7 +5,7 @@ import { detectSketchProfiles, resolveProfileRegion } from "../packages/workbenc
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { circ, line, rect, sketchFeatureOf, sketchOf, solidFeature, volumeOf } from "./region-wave2-kit.js";
 import type { DesignFeature, DesignSolidFeature, SketchEntity, WorkbenchProject } from "../packages/workbench-core/src/index.js";
-import { createWorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { applyWorkbenchOperation, createWorkbenchProject, validSolidFeaturePayload, MAX_PROFILE_REFS } from "../packages/workbench-core/src/index.js";
 import type { SketchProfile } from "../packages/workbench-sketch/src/index.js";
 
 /** Rebuilds a feature of the given kind on the region the picker names (its stable reference, as the sketch stores it). */
@@ -194,6 +194,29 @@ export const regionWave2Tests: readonly TestCase[] = [
       assert(clean.every((entry) => entry.message === undefined), "a plain plate with a bore has no message");
       const refused = await replayed([rect("r", [0, 0], 20, 20), circ("h", [7, 0], 3)], (profiles) => [profiles[0]!.ref!]);
       assert(refused.some((entry) => isRebuildFailure(entry) && /hole h touches the outline/u.test(entry.message!)), "a failure that has a region reason carries it");
+    }
+  },
+  {
+    name: "region N-06: a feature stores a whole grid of region references (the cap was 64), through add-design-solid as well",
+    run: async () => {
+      const circles: SketchEntity[] = [];
+      for (let index = 0; index < 70; index += 1) circles.push(circ(`c${index}`, [(index % 20) * 10, Math.floor(index / 20) * 10], 2));
+      const sketch = sketchOf(circles);
+      const profiles = detectSketchProfiles(sketch);
+      assert(profiles.length === 70, "the grid has 70 regions");
+      const feature = solidFeature("extrude", { profileIds: profiles.map((profile) => profile.ref!), valueMm: 5, sketchFeatureId: "feature:sketch-1", bodyId: "general-body:grid" });
+      assert(validSolidFeaturePayload(feature) && validSolidFeaturePayload({ ...feature, profileIds: Array.from({ length: 200 }, (_, i) => `profile:c${i}_a12.566_x0_y0_h0_e`) }), "70 and 200 references are a valid payload");
+      assert(validSolidFeaturePayload({ ...feature, profileIds: Array.from({ length: MAX_PROFILE_REFS }, (_, i) => `profile:c${i}`) }) && !validSolidFeaturePayload({ ...feature, profileIds: Array.from({ length: MAX_PROFILE_REFS + 1 }, (_, i) => `profile:c${i}`) }), "and the cap is the named limit");
+      let project: WorkbenchProject = { ...createWorkbenchProject("project:test-grid"), sketch };
+      const committed = applyWorkbenchOperation(project, { kind: "commit-design-sketch", featureId: "feature:sketch-1", name: "Sketch 1", operationId: "operation:grid-1", expectedRevision: project.revision } as never);
+      assert(committed.ok, `the grid sketch commits: ${committed.ok ? "" : committed.diagnostics[0]?.message}`);
+      project = committed.value.project;
+      const sketchFeature = project.design!.features[0]!;
+      assert(sketchFeature.kind === "sketch", "the sketch is in the timeline");
+      const built = await rebuildSolidFeature(feature, sketchFeature);
+      assert(built.ok, `the 70 regions extrude together: ${built.ok ? "" : built.message}`);
+      const added = applyWorkbenchOperation(project, { kind: "add-design-solid", feature, body: built.body, operationId: "operation:grid-2", expectedRevision: project.revision } as never);
+      assert(added.ok, `add-design-solid accepts 70 references: ${added.ok ? "" : added.diagnostics[0]?.message}`);
     }
   }
 ];

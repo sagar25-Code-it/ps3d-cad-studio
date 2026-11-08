@@ -3,7 +3,8 @@ import { pointInRing } from "./arrangement.js";
 import type { SketchProfile, SketchProfileBoundary, SketchProfileSegment } from "./index.js";
 import { profileOutlineMm } from "./profile-outline.js";
 import { shapesOf } from "./profile-detect.js";
-import { fnv1a, holeKeyOf, parseProfileRef, profileBaseOf } from "./profile-regions.js";
+import { RingIndex } from "./ring-index.js";
+import { fnv1a, holeKeyOf, parseProfileRef, profileBaseOf, type ParsedProfileRef } from "./profile-regions.js";
 
 /**
  * Turns a profile selection into the solid-ready region: one or more groups, each an outer outline with the holes cut through it.
@@ -73,6 +74,17 @@ function makeRing(points: readonly Vec2[]): Ring {
   return { points, box: [minX, minY, maxX, maxY], area: Math.abs(twice) / 2 };
 }
 
+const indexCache = new WeakMap<Ring, RingIndex>();
+
+/** Where a point sits against a ring: within a margin of its edge, and inside it. Rings with many edges are indexed; small ones are scanned. */
+function locate(ring: Ring): { readonly near: (point: Vec2, margin: number) => boolean; readonly inside: (point: Vec2) => boolean } {
+  if (ring.points.length < 96) return { near: (point, margin) => distanceToRing(point, ring.points) <= margin, inside: (point) => pointInRing(point, ring.points) };
+  let index = indexCache.get(ring);
+  if (index === undefined) { index = new RingIndex(ring.points); indexCache.set(ring, index); }
+  const found = index;
+  return { near: (point, margin) => found.within(point, margin), inside: (point) => found.contains(point) };
+}
+
 function grossArea(profile: SketchProfile): number {
   return ringOf(profile).area;
 }
@@ -116,10 +128,11 @@ function relate(a: Ring, b: Ring): Related {
     let inside = 0;
     let on = 0;
     let outside = 0;
+    const where = locate(against);
     for (const point of points) {
       if (point[0] < against.box[0] - margin || point[0] > against.box[2] + margin || point[1] < against.box[1] - margin || point[1] > against.box[3] + margin) { outside += 1; continue; }
-      if (distanceToRing(point, against.points) <= margin) on += 1;
-      else if (pointInRing(point, against.points)) inside += 1;
+      if (where.near(point, margin)) on += 1;
+      else if (where.inside(point)) inside += 1;
       else outside += 1;
     }
     return { inside, on, outside };
@@ -137,6 +150,7 @@ function relate(a: Ring, b: Ring): Related {
   for (let i = 0; i < a.points.length; i += 1) {
     const a0 = a.points[i]!;
     const a1 = a.points[(i + 1) % a.points.length]!;
+    if (Math.max(a0[0], a1[0]) < b.box[0] || Math.min(a0[0], a1[0]) > b.box[2] || Math.max(a0[1], a1[1]) < b.box[1] || Math.min(a0[1], a1[1]) > b.box[3]) continue;
     for (let j = 0; j < b.points.length; j += 1) {
       if (segmentsCross(a0, a1, b.points[j]!, b.points[(j + 1) % b.points.length]!)) return { relation: "cross", touching };
     }
@@ -157,6 +171,10 @@ export interface MatchedProfile {
   readonly profile: SketchProfile;
   /** The id still names a profile ("id"), only its loop name does ("name": the curves were moved or resized), or the region was found by its geometry. */
   readonly how: "id" | "name" | "geometry";
+  /** For a region found by its geometry: the outline area it has now over the one the reference carried. */
+  readonly areaRatio?: number;
+  /** For a region found by its geometry: how far its centroid moved, in millimetres. */
+  readonly shiftMm?: number;
 }
 
 /** The area and centroid of a profile's outline, read from its id (the same numbers a stored reference carries). */
@@ -175,15 +193,25 @@ function outlineSignature(profile: SketchProfile): { readonly areaMm2: number; r
  * Returns undefined when nothing fits well enough, so a lost region is reported instead of guessed.
  */
 export function matchProfileRef(ref: string, profiles: readonly SketchProfile[], useGeometry = true): MatchedProfile | undefined {
+  return matchDetailed(ref, profiles, useGeometry).match;
+}
+
+/** How many regions fit a reference about equally well when none could be chosen (0 when none fits at all). */
+export function ambiguousProfileMatches(ref: string, profiles: readonly SketchProfile[]): number {
+  return matchDetailed(ref, profiles, true).ambiguous;
+}
+
+function matchDetailed(ref: string, profiles: readonly SketchProfile[], useGeometry: boolean): { readonly match?: MatchedProfile; readonly ambiguous: number } {
+  const found = (match: MatchedProfile | undefined, ambiguous = 0): { readonly match?: MatchedProfile; readonly ambiguous: number } => (match === undefined ? { ambiguous } : { match, ambiguous });
   const parsed = parseProfileRef(ref);
   const byId = profiles.find((profile) => profile.id === parsed.id);
-  if (byId !== undefined) return { profile: byId, how: "id" };
+  if (byId !== undefined) return found({ profile: byId, how: "id" });
   const wantedArea = parsed.areaMm2;
   const wantedCentroid = parsed.centroid;
   const sameName = profiles.filter((profile) => profileBaseOf(profile.id) === parsed.base);
-  if (sameName.length === 1) return { profile: sameName[0]!, how: "name" };
-  if (!useGeometry && sameName.length === 0) return undefined;
-  if (wantedArea === undefined || wantedCentroid === undefined || wantedArea <= 0) return sameName.length > 1 ? { profile: sameName.sort((left, right) => right.areaMm2 - left.areaMm2)[0]!, how: "name" } : undefined;
+  if (sameName.length === 1) return found({ profile: sameName[0]!, how: "name" });
+  if (!useGeometry && sameName.length === 0) return found(undefined);
+  if (wantedArea === undefined || wantedCentroid === undefined || wantedArea <= 0) return found(sameName.length > 1 ? { profile: sameName.sort((left, right) => right.areaMm2 - left.areaMm2)[0]!, how: "name" } : undefined);
   const size = Math.sqrt(wantedArea);
   const scored = (sameName.length > 1 ? sameName : profiles)
     .map((profile) => {
@@ -195,10 +223,11 @@ export function matchProfileRef(ref: string, profiles: readonly SketchProfile[],
     .filter((item) => item.ratio >= 0.4 && item.ratio <= 2.5 && item.offset <= 0.35 * size)
     .sort((left, right) => left.score - right.score);
   const best = scored[0];
-  if (best === undefined) return undefined;
+  if (best === undefined) return found(undefined, splitPieces(wantedArea, wantedCentroid, size, sameName.length > 1 ? sameName : profiles));
   const second = scored[1];
-  if (second !== undefined && second.score < best.score * 1.5 && best.score > 0.05) return undefined;
-  return { profile: best.profile, how: "geometry" };
+  // Two regions fit about equally well (a line through the middle split it): refuse rather than guess which half was meant.
+  if (second !== undefined && second.score < best.score * 1.5 && best.score > 0.05) return found(undefined, scored.filter((item) => item.score < best.score * 1.5).length);
+  return found({ profile: best.profile, how: "geometry", areaRatio: best.ratio, shiftMm: best.offset });
 }
 
 
@@ -223,6 +252,7 @@ export function resolveProfileRegion(
   const exact: ExactPick[] = [];
   const outlines: SketchProfile[] = [];
   const pins = new Map<SketchProfile, readonly string[] | "all">();
+  const matchNotes: string[] = [];
   for (const id of unique) {
     const parsed = parseProfileRef(id);
     // The profile the id names: the region of that name, else (for a plain id) the drawn shape of that name -- a rectangle a circle crosses
@@ -230,7 +260,11 @@ export function resolveProfileRegion(
     const found = matchProfileRef(id, profiles, false)
       ?? (parsed.exact || shapes === undefined ? undefined : matchProfileRef(id, shapes, false))
       ?? matchProfileRef(id, profiles);
-    if (found === undefined) return missing(id);
+    if (found === undefined) return missing(id, profiles);
+    if (found.how === "geometry") {
+      const note = geometryMatchNote(parsed, found);
+      if (note !== undefined) matchNotes.push(note);
+    }
     if (parsed.exact) {
       const holes = found.profile.holes ?? [];
       let keep: "all" | Set<string>;
@@ -249,12 +283,45 @@ export function resolveProfileRegion(
   if (exact.length > 0) {
     // Plain ids mixed into a reference selection are regions with all their holes.
     for (const profile of outlines) exact.push({ profile, keep: "all" });
-    return unionRegion(profiles, exact, options.includeIslands);
+    return withNotes(unionRegion(profiles, exact, options.includeIslands), matchNotes);
   }
-  return outlineRegion(profiles, shapes ?? profiles, outlines, options.includeIslands, pins);
+  return withNotes(outlineRegion(profiles, shapes ?? profiles, outlines, options.includeIslands, pins), matchNotes);
 }
 
-function missing(id: string): WorkbenchResult<never> {
+/** The regions that together fill the footprint of a region that is gone (a line cut it in two): how many, or 0 when they do not add up to it. */
+function splitPieces(wantedArea: number, wantedCentroid: Vec2, size: number, profiles: readonly SketchProfile[]): number {
+  let count = 0;
+  let total = 0;
+  for (const profile of profiles) {
+    const signature = outlineSignature(profile);
+    const ratio = signature.areaMm2 / wantedArea;
+    if (ratio < 0.02 || ratio > 0.98) continue;
+    if (Math.hypot(signature.centroid[0] - wantedCentroid[0], signature.centroid[1] - wantedCentroid[1]) > 0.75 * size) continue;
+    count += 1;
+    total += signature.areaMm2;
+  }
+  return count >= 2 && total >= 0.8 * wantedArea && total <= 1.2 * wantedArea ? count : 0;
+}
+
+function withNotes(result: WorkbenchResult<ProfileRegion>, notes: readonly string[]): WorkbenchResult<ProfileRegion> {
+  if (!result.ok || notes.length === 0) return result;
+  return { ok: true, value: { ...result.value, warnings: [...notes, ...result.value.warnings] } };
+}
+
+const round2 = (value: number): string => String(Math.round(value * 100) / 100);
+
+/** A region found again only by its shape is worth a line when it no longer looks like the region that was picked (new geometry cut into it). */
+function geometryMatchNote(parsed: ParsedProfileRef, found: MatchedProfile): string | undefined {
+  const ratio = found.areaRatio ?? 1;
+  const shift = found.shiftMm ?? 0;
+  const size = Math.sqrt(parsed.areaMm2 ?? 1);
+  if (Math.abs(ratio - 1) <= 0.05 && shift <= 0.05 * size) return undefined;
+  return `The region ${shortId(parsed.base)} of about ${round2(parsed.areaMm2 ?? 0)} mm² was found again by its shape, but the sketch changed it: the region used now covers ${round2((parsed.areaMm2 ?? 0) * ratio)} mm² (${Math.round(ratio * 100)}% of the original). Check that it is the one you meant, or select the region again.`;
+}
+
+function missing(id: string, profiles: readonly SketchProfile[] = []): WorkbenchResult<never> {
+  const pieces = ambiguousProfileMatches(id, profiles);
+  if (pieces > 1) return failure("INVALID_OPERATION", `The selected profile ${shortId(id)} was split by new geometry into ${pieces} regions of about the same size, so it cannot tell which one you meant.`, [id], "Select the region you want again.");
   return failure("INVALID_OPERATION", `The selected profile ${shortId(id)} no longer exists in the sketch.`, [id], "Select the profile again, or restore the curves that bounded it.");
 }
 
@@ -399,21 +466,34 @@ function finish(groups: readonly { outer: SketchProfile; holes: readonly SketchP
 // ---------------------------------------------------------------------------------------------
 
 class PointRegistry {
-  private readonly cells = new Map<string, number>();
+  private readonly cells = new Map<number, number[]>();
   readonly points: Vec2[] = [];
   private readonly cell = 1e-5;
+  private static readonly REACH = 2e-6;
+  private key(cx: number, cy: number): number {
+    return (Math.imul(cx | 0, 73856093) ^ Math.imul(cy | 0, 19349663)) | 0;
+  }
+  /** The number of a point, shared by every point within 2e-6 of it. Only the cells the point is close enough to the edge of are searched. */
   id(point: Vec2): number {
-    const cx = Math.floor(point[0] / this.cell);
-    const cy = Math.floor(point[1] / this.cell);
-    for (let dx = -1; dx <= 1; dx += 1) {
-      for (let dy = -1; dy <= 1; dy += 1) {
-        const found = this.cells.get(`${cx + dx},${cy + dy}`);
-        if (found !== undefined && Math.hypot(this.points[found]![0] - point[0], this.points[found]![1] - point[1]) <= 2e-6) return found;
+    const gx = point[0] / this.cell;
+    const gy = point[1] / this.cell;
+    const cx = Math.floor(gx);
+    const cy = Math.floor(gy);
+    const margin = PointRegistry.REACH / this.cell;
+    const fx = gx - cx;
+    const fy = gy - cy;
+    for (let dx = fx < margin ? -1 : 0; dx <= (fx > 1 - margin ? 1 : 0); dx += 1) {
+      for (let dy = fy < margin ? -1 : 0; dy <= (fy > 1 - margin ? 1 : 0); dy += 1) {
+        const bucket = this.cells.get(this.key(cx + dx, cy + dy));
+        if (bucket === undefined) continue;
+        for (const found of bucket) if (Math.hypot(this.points[found]![0] - point[0], this.points[found]![1] - point[1]) <= PointRegistry.REACH) return found;
       }
     }
     const id = this.points.length;
     this.points.push(point);
-    this.cells.set(`${cx},${cy}`, id);
+    const home = this.key(cx, cy);
+    const bucket = this.cells.get(home);
+    if (bucket === undefined) this.cells.set(home, [id]); else bucket.push(id);
     return id;
   }
 }
@@ -466,16 +546,17 @@ function unionRegion(universe: readonly SketchProfile[], picks: readonly ExactPi
   const registry = new PointRegistry();
   const edges: DirectedEdge[] = [];
   const outgoing = new Map<number, DirectedEdge[]>();
-  const incoming = new Map<string, DirectedEdge[]>();
+  const incoming = new Map<number, DirectedEdge[]>();
+  const edgeKey = (from: number, to: number): number => from * 67108864 + to;
   const add = (from: number, to: number, info: EdgeInfo): void => {
     if (from === to) return;
     const edge: DirectedEdge = { from, to, info, cancelled: false };
-    const opposite = incoming.get(`${to}>${from}`)?.find((candidate) => !candidate.cancelled);
+    const opposite = incoming.get(edgeKey(to, from))?.find((candidate) => !candidate.cancelled);
     if (opposite !== undefined) { opposite.cancelled = true; return; }
     edges.push(edge);
     const list = outgoing.get(from);
     if (list === undefined) outgoing.set(from, [edge]); else list.push(edge);
-    const key = `${from}>${to}`;
+    const key = edgeKey(from, to);
     const inList = incoming.get(key);
     if (inList === undefined) incoming.set(key, [edge]); else inList.push(edge);
   };
@@ -596,11 +677,12 @@ function unionRegion(universe: readonly SketchProfile[], picks: readonly ExactPi
 function holeStandsIn(hole: Ring, outer: Ring): boolean {
   if (hole.box[0] < outer.box[0] - TOLERANCE_MM || hole.box[2] > outer.box[2] + TOLERANCE_MM || hole.box[1] < outer.box[1] - TOLERANCE_MM || hole.box[3] > outer.box[3] + TOLERANCE_MM) return false;
   const stride = Math.max(1, Math.floor(hole.points.length / 12));
+  const where = locate(outer);
   let counted = 0;
   for (let index = 0; index < hole.points.length; index += stride) {
     const point = hole.points[index]!;
-    if (distanceToRing(point, outer.points) <= 1e-6) continue;
-    if (!pointInRing(point, outer.points)) return false;
+    if (where.near(point, 1e-6)) continue;
+    if (!where.inside(point)) return false;
     counted += 1;
   }
   return counted > 0;
@@ -676,8 +758,9 @@ export function lostProfileRefs(profiles: readonly SketchProfile[], ids: readonl
   for (const id of new Set(ids)) {
     const parsed = parseProfileRef(id);
     if (matchProfileRef(id, profiles, false) !== undefined || (shapes !== undefined && matchProfileRef(id, shapes, false) !== undefined) || matchProfileRef(id, profiles) !== undefined) continue;
-    const round = (value: number): string => String(Math.round(value * 100) / 100);
-    lost.push(parsed.areaMm2 !== undefined && parsed.centroid !== undefined ? `a region of about ${round(parsed.areaMm2)} mm² near (${round(parsed.centroid[0])}, ${round(parsed.centroid[1])})` : shortId(parsed.base));
+    const round = round2;
+    const pieces = ambiguousProfileMatches(id, profiles);
+    lost.push(parsed.areaMm2 !== undefined && parsed.centroid !== undefined ? `a region of about ${round(parsed.areaMm2)} mm² near (${round(parsed.centroid[0])}, ${round(parsed.centroid[1])})${pieces > 1 ? `, split by new geometry into ${pieces} regions of about the same size` : ""}` : shortId(parsed.base));
   }
   return lost;
 }

@@ -8,7 +8,7 @@ import {
   invertAffine, patternTransforms, reflectionAffine, rotationAffine, summarizePattern, transformIndices, transformMesh, transformPoint
 } from "../packages/workbench-geometry/src/index.js";
 import { tessellateExtrude } from "../packages/workbench-geometry/src/tessellate.js";
-import { replayAllBodies, replayBody } from "../apps/studio-web/src/design-regeneration.js";
+import { replayAllBodies, replayBody, isRebuildFailure } from "../apps/studio-web/src/design-regeneration.js";
 import { addPattern, editPattern, patternGroups, patternableFeatures, previewPattern, requestOfGroup, type PatternRequest } from "../apps/studio-web/src/pattern-commit.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { isClosedAndOriented } from "./relief-pick-hole-drag.test.js";
@@ -533,7 +533,7 @@ export const patternTests: readonly TestCase[] = [
       near(metricsOf(copyOfCopy).centroidMm[0], 80, 1e-6, "the copy of the copy stays in the copy's column (x)");
       near(metricsOf(copyOfCopy).centroidMm[1], 80, 1e-6, "and steps 80 mm up (y)");
       const replayed = await replayAllBodies(second);
-      assert(replayed.every((result) => result.message === undefined), "the whole chain replays without a problem");
+      assert(replayed.every((result) => !isRebuildFailure(result)), "the whole chain replays without a problem");
       const base = baseFeatureOf(designOf(second), patternSteps(second)[1]!.bodyId);
       assert(base?.kind === "pattern", "a copy's base step is its pattern step");
     }

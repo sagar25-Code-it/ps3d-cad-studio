@@ -1,4 +1,5 @@
 import type { Vec3 } from "../../workbench-core/src/index.js";
+import { alignLoopStart } from "./loft-align.js";
 
 /**
  * Browser-safe analytic tessellator for general sketch-profile solids.
@@ -443,6 +444,7 @@ export function tessellateLoftTwoProfiles(bottom: readonly Point2[], top: readon
     topClean = resampleClosedPolygon(topClean, targetCount);
     if (bottomClean.length !== topClean.length) return { positionsMm: [], indices: [] };
   }
+  topClean = [...alignLoopStart(bottomClean, topClean)];
   const height = Math.abs(heightMm);
   // A rail forces at least `rings` ring samples so the bend is visible even in the position mode.
   const sampleCount = (continuity === "position" && railSamples === undefined) ? 2 : Math.max(2, rings);
