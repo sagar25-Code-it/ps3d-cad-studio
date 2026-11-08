@@ -1,7 +1,7 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
-import { attachEdgeFlange, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
+import { attachEdgeFlange, booleanMeshes, flangeReliefs, holeCutter, snapToAxis, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 
 /**
@@ -39,7 +39,7 @@ function shifted(body: GeneralSolidBody, normal: readonly [number, number, numbe
 
 /** Builds the solid a feature describes from the sketch snapshot it is based on. For a join or cut this is the tool solid. */
 export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature, color = "#b9c2c8"): Promise<SolidRebuild> {
-  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange") {
+  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole") {
     return { ok: false, message: "A direct-edit / indent step is applied during timeline replay, not through the sketch-driven builder." };
   }
   const sketch = sketchFeature.sketch;
@@ -164,11 +164,26 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
     // Edge flange: bend a flange up from a named top-face edge of the sheet this body started as.
     if (step.kind === "sheet-edge-flange") {
       if (current === undefined || baseBody === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sheet this flange bends from could not be built." }); continue; }
-      const attached = attachEdgeFlange(current, baseBody, NORMALS[baseBody.feature?.plane ?? "xy"], { edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0 });
+      const plateNormal = NORMALS[baseBody.feature?.plane ?? "xy"];
+      const plateFrame = sheetFrameOf(baseBody, plateNormal);
+      const liveFlanges = steps.filter((other) => other.kind === "sheet-edge-flange" && isFeatureActive(history, other.id)).map((other) => ({ edgeIndex: other.flangeEdgeIndex ?? 0, reliefMm: other.flangeReliefMm ?? 0 }));
+      const relief = plateFrame === undefined ? { startMm: 0, endMm: 0 } : flangeReliefs(plateFrame, step.flangeEdgeIndex ?? 0, liveFlanges);
+      const attached = attachEdgeFlange(current, baseBody, plateNormal, { edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0, reliefStartMm: relief.startMm, reliefEndMm: relief.endMm });
       if (!attached.ok) { outcomes.set(step.id, { featureId: step.id, message: attached.message }); continue; }
       const { brep: _faceNames, ...withoutFaces } = current;
       void _faceNames;
       current = { ...withoutFaces, positionsMm: [...attached.positionsMm], indices: [...attached.indices] };
+      outcomes.set(step.id, { featureId: step.id });
+      continue;
+    }
+    // Hole: drill at a recorded point on a face, straight into the material.
+    if (step.kind === "hole") {
+      if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this hole is drilled in could not be built." }); continue; }
+      const drilled = drillHole(step, current);
+      if (!drilled.ok) { outcomes.set(step.id, { featureId: step.id, message: drilled.message }); continue; }
+      const { brep: _faceNames, ...withoutFaces } = current;
+      void _faceNames;
+      current = { ...withoutFaces, positionsMm: [...drilled.positionsMm], indices: [...drilled.indices] };
       outcomes.set(step.id, { featureId: step.id });
       continue;
     }
@@ -407,10 +422,44 @@ export async function flatPatternForBody(project: WorkbenchProject, bodyId: stri
   if (frame === undefined) return { ok: false, message: "This body has no flat top face with a thickness to unfold." };
   const flanges = steps
     .filter((step) => step.kind === "sheet-edge-flange" && isFeatureActive(history, step.id))
-    .map((step) => ({ edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0 }));
+    .map((step) => ({ edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0, reliefMm: step.flangeReliefMm ?? 0 }));
   const pattern = flatPatternOfPlate(frame, plane, flanges);
   if ("error" in pattern) return { ok: false, message: pattern.error };
   const width = pattern.boundsMm.maxX - pattern.boundsMm.minX;
   const height = pattern.boundsMm.maxY - pattern.boundsMm.minY;
   return { ok: true, layout: pattern, summary: `${width.toFixed(2)} x ${height.toFixed(2)} mm blank, ${pattern.bendCount} bend${pattern.bendCount === 1 ? "" : "s"}, ${frame.thicknessMm.toFixed(2)} mm thick`, notes: pattern.notes };
+}
+
+export type HoleDrilling =
+  | { readonly ok: true; readonly positionsMm: readonly number[]; readonly indices: readonly number[] }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * Cuts a hole step out of a body. The hole starts at `holePositionMm` on the face looking along `holeNormal` and goes the
+ * other way; a depth of 0 (or none) drills through everything the axis meets.
+ */
+export function drillHole(step: DesignSolidFeature, body: { readonly positionsMm: readonly number[]; readonly indices: readonly number[] }): HoleDrilling {
+  if (step.holePositionMm === undefined || step.holeNormal === undefined || step.holeDiameterMm === undefined || step.holeStyle === undefined) return { ok: false, message: "This hole has no position, direction or diameter recorded." };
+  const normal = snapToAxis(step.holeNormal);
+  const origin = step.holePositionMm;
+  let depth = step.holeDepthMm ?? 0;
+  if (!(depth > 0)) {
+    // Through all: far enough to leave the far side of the body along the hole's axis, plus a margin.
+    let reach = 0;
+    for (let i = 0; i + 2 < body.positionsMm.length; i += 3) {
+      reach = Math.max(reach, -((body.positionsMm[i]! - origin[0]) * normal[0] + (body.positionsMm[i + 1]! - origin[1]) * normal[1] + (body.positionsMm[i + 2]! - origin[2]) * normal[2]));
+    }
+    depth = reach + 1;
+  }
+  const cutter = holeCutter({
+    style: step.holeStyle, originMm: origin, normal, diameterMm: step.holeDiameterMm, depthMm: depth,
+    ...(step.holeCounterDiameterMm === undefined ? {} : { counterDiameterMm: step.holeCounterDiameterMm }),
+    ...(step.holeCounterDepthMm === undefined ? {} : { counterDepthMm: step.holeCounterDepthMm }),
+    ...(step.holeSinkDiameterMm === undefined ? {} : { sinkDiameterMm: step.holeSinkDiameterMm }),
+    ...(step.holeSinkAngleDeg === undefined ? {} : { sinkAngleDeg: step.holeSinkAngleDeg })
+  });
+  if (!cutter.ok) return { ok: false, message: cutter.message };
+  const cut = booleanMeshes({ positionsMm: body.positionsMm, indices: body.indices }, { positionsMm: cutter.positionsMm, indices: cutter.indices }, "cut");
+  if (!cut.ok) return { ok: false, message: `The hole could not be cut: ${cut.message}` };
+  return { ok: true, positionsMm: cut.value.positionsMm, indices: cut.value.indices };
 }

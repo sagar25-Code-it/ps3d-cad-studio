@@ -120,7 +120,21 @@ export function parameterFieldsOf(feature: DesignSolidFeature): readonly Paramet
         read: (f) => String(f.flangeEdgeIndex ?? 0), write: (f, v) => ({ ...f, flangeEdgeIndex: v as number }) },
       number("radius", "Inner bend radius", "mm", (f) => f.sheetBendRadiusMm, (f, v) => ({ ...f, sheetBendRadiusMm: v }), { min: 0, max: 1000 }),
       number("length", "Flange length", "mm", (f) => f.flangeLengthMm, (f, v) => ({ ...f, flangeLengthMm: v, valueMm: v }), { ...positive, max: 10_000 }),
-      number("angle", "Bend angle", "°", (f) => f.flangeAngleDeg, (f, v) => ({ ...f, flangeAngleDeg: v }), { ...positive, max: 180 })
+      number("angle", "Bend angle", "°", (f) => f.flangeAngleDeg, (f, v) => ({ ...f, flangeAngleDeg: v }), { ...positive, max: 180 }),
+      number("relief", "Corner relief", "mm", (f) => f.flangeReliefMm ?? 0, (f, v) => ({ ...f, flangeReliefMm: v }), { min: 0, max: 1000, hint: "gap left where this flange meets a neighbouring flange; 0 for none" })
+    ];
+    case "hole": return [
+      vector("position", "Position on the face", (f) => f.holePositionMm, (f, v) => ({ ...f, holePositionMm: v })),
+      number("diameter", "Hole diameter", "mm", (f) => f.holeDiameterMm, (f, v) => ({ ...f, holeDiameterMm: v }), { ...positive, max: 10_000 }),
+      number("depth", "Depth", "mm", (f) => f.holeDepthMm ?? 0, (f, v) => ({ ...f, holeDepthMm: v }), { min: 0, max: 100_000, hint: "0 drills through everything" }),
+      ...(feature.holeStyle === "counterbore" ? [
+        number("counterDiameter", "Pocket diameter", "mm", (f) => f.holeCounterDiameterMm, (f, v) => ({ ...f, holeCounterDiameterMm: v }), { ...positive, max: 10_000 }),
+        number("counterDepth", "Pocket depth", "mm", (f) => f.holeCounterDepthMm, (f, v) => ({ ...f, holeCounterDepthMm: v }), { ...positive, max: 100_000 })
+      ] : []),
+      ...(feature.holeStyle === "countersink" ? [
+        number("sinkDiameter", "Countersink diameter", "mm", (f) => f.holeSinkDiameterMm, (f, v) => ({ ...f, holeSinkDiameterMm: v }), { ...positive, max: 10_000 }),
+        number("sinkAngle", "Countersink angle", "°", (f) => f.holeSinkAngleDeg, (f, v) => ({ ...f, holeSinkAngleDeg: v }), { min: 10, max: 170 })
+      ] : [])
     ];
     case "move-body": return [
       vector("delta", "Move by", (f) => f.moveDeltaMm, (f, v) => ({ ...f, moveDeltaMm: v, valueMm: Math.max(0.01, Math.hypot(v[0], v[1], v[2])) }))
@@ -188,6 +202,7 @@ export function refreshedName(feature: DesignSolidFeature): string {
   switch (feature.kind) {
     case "sheet-edge-flange":
       return name.replace(/^Edge flange \d+/u, `Edge flange ${feature.flangeEdgeIndex ?? 0}`).replace(/\(\d+(?:\.\d+)?°, \d+(?:\.\d+)? mm\)$/u, `(${(feature.flangeAngleDeg ?? 0).toFixed(0)}°, ${(feature.flangeLengthMm ?? 0).toFixed(0)} mm)`);
+    case "hole": return name.replace(/Ø\s?\d+(?:\.\d+)?/u, `Ø${(feature.holeDiameterMm ?? 0).toFixed(2)}`);
     case "move-body": return name.replace(/\([^()]*mm\)$/u, `(${vectorText(feature.moveDeltaMm)} mm)`);
     case "move-face": return name.replace(/\([^()]*mm\)$/u, `(${vectorText(feature.moveFaceDeltaMm)} mm)`);
     case "scale-body": return name.replace(/×[\d.]+$/u, `×${(feature.scaleFactor ?? 1).toFixed(3)}`);

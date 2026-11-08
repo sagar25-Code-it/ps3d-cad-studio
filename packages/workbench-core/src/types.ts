@@ -1007,7 +1007,7 @@ export interface DesignSketchFeature extends DesignFeatureBase {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
@@ -1152,6 +1152,26 @@ export interface DesignSolidFeature extends DesignFeatureBase {
    * sheet as its first step made it (`sheetFrameOf`), so it stays stable when other flanges are added later.
    */
   readonly flangeEdgeIndex?: number;
+  /**
+   * Sheet-edge-flange only: the gap in millimetres to leave at a corner shared with another edge flange. Each of the two flanges
+   * stops half of it short of the corner; a flange end that meets no other flange is not shortened. 0 or absent means no relief.
+   */
+  readonly flangeReliefMm?: number;
+  /** Hole only: the shape. A tapped hole is recorded as a plain hole at its tap-drill diameter. */
+  readonly holeStyle?: "simple" | "counterbore" | "countersink";
+  /** Hole only: the point on the face where the hole starts, in millimetres. */
+  readonly holePositionMm?: readonly [number, number, number];
+  /** Hole only: the face's outward direction; the hole is drilled the opposite way. */
+  readonly holeNormal?: readonly [number, number, number];
+  readonly holeDiameterMm?: number;
+  /** Hole only: depth of the full-diameter hole from the face; 0 means through all. */
+  readonly holeDepthMm?: number;
+  /** Counterbore hole only: the pocket's diameter and depth. */
+  readonly holeCounterDiameterMm?: number;
+  readonly holeCounterDepthMm?: number;
+  /** Countersink hole only: the diameter at the face and the included cone angle. */
+  readonly holeSinkDiameterMm?: number;
+  readonly holeSinkAngleDeg?: number;
   /** Sheet-flange only: length of the flange in millimetres (how far the flange extends from the edge). */
   readonly flangeLengthMm?: number;
   /** Sheet-flange only: bend angle in degrees (90 is a right-angle flange). */

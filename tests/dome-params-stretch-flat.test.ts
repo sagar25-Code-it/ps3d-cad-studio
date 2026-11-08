@@ -138,7 +138,7 @@ export const domeParamsStretchFlatTests: readonly TestCase[] = [
         applyParameterValues(helix, { ...parameterValuesOf(helix), turns: "" }),
         applyParameterValues(move, { delta: "1, 2" }),
         applyParameterValues(move, { delta: "0, 0, 0" }),
-        applyParameterValues(SAMPLES.find((sample) => sample.kind === "sheet-edge-flange")!, { edge: "1.5", radius: "2", length: "12", angle: "90" }),
+        applyParameterValues(SAMPLES.find((sample) => sample.kind === "sheet-edge-flange")!, { edge: "1.5", radius: "2", length: "12", angle: "90", relief: "0" }),
         applyParameterValues(SAMPLES.find((sample) => sample.kind === "sheet-flange")!, { ...parameterValuesOf(SAMPLES.find((sample) => sample.kind === "sheet-flange")!), angle: "200" }),
         applyParameterValues(SAMPLES.find((sample) => sample.kind === "dome")!, { height: "0" })
       ];
@@ -180,9 +180,9 @@ export const domeParamsStretchFlatTests: readonly TestCase[] = [
     run: () => {
       const sketch = { id: "feature:sketch-1" } as DesignSketchFeature;
       const flange = step(sketch, "sheet-edge-flange", "ef", { name: "Edge flange 0 (90°, 15 mm)", operation: "direct-edit", flangeEdgeIndex: 0, sheetBendRadiusMm: 2, flangeLengthMm: 15, flangeAngleDeg: 90 });
-      const edited = applyParameterValues(flange, { edge: "3", radius: "2", length: "25", angle: "120" });
+      const edited = applyParameterValues(flange, { edge: "3", radius: "2", length: "25", angle: "120", relief: "0" });
       assert(edited.ok && edited.feature.name === "Edge flange 3 (120°, 25 mm)", `flange name: ${edited.ok ? edited.feature.name : edited.message}`);
-      const renamed = applyParameterValues({ ...flange, name: "Left lip" }, { edge: "1", radius: "2", length: "20", angle: "90" });
+      const renamed = applyParameterValues({ ...flange, name: "Left lip" }, { edge: "1", radius: "2", length: "20", angle: "90", relief: "0" });
       assert(renamed.ok && renamed.feature.name === "Left lip", "a user's name is kept");
       const move = step(sketch, "move-body", "mv", { name: "Move Sheet base 2 (10.0, 0.0, 0.0 mm)", operation: "direct-edit", moveDeltaMm: [10, 0, 0] });
       assert(refreshedName({ ...move, moveDeltaMm: [1, 2, 3] }) === "Move Sheet base 2 (1.0, 2.0, 3.0 mm)", "move name");

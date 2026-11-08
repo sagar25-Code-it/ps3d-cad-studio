@@ -1,5 +1,5 @@
 import { DEFAULT_K_FACTOR, sheetBendAllowanceMm, sheetBendDeductionMm, type FlatPattern } from "./sheet-metal.js";
-import type { SheetFrame } from "./sheet-edge-flange.js";
+import { flangeReliefs, type SheetFrame } from "./sheet-edge-flange.js";
 
 type Point2 = readonly [number, number];
 type Vec3 = readonly [number, number, number];
@@ -37,6 +37,8 @@ export interface PlateFlange {
   readonly innerRadiusMm: number;
   readonly flangeLengthMm: number;
   readonly angleDeg: number;
+  /** Gap left between this flange and a neighbouring flange at a shared corner; each of the two gives up half. */
+  readonly reliefMm?: number;
 }
 
 const KEY_SCALE = 1e4;
@@ -55,8 +57,8 @@ function loopArea(points: readonly Point2[]): number {
 /**
  * Unfolds a plate with flanges into its flat blank. The plate's top-face boundary is chained into closed loops (the largest is the
  * blank, the rest are holes); each flange replaces its edge with a rectangle as wide as the edge and as long as the bend allowance
- * plus the flange, and a bend line marks the middle of each bend. Corner reliefs are not generated, so flanges on neighbouring
- * edges are reported in `notes`.
+ * plus the flange, and a bend line marks the middle of each bend. Where two flanges meet at a corner and carry a relief, each
+ * stops half the relief short of the corner; without one, `notes` says the corner needs a relief.
  */
 export function flatPatternOfPlate(frame: SheetFrame, plane: SheetPlane, flanges: readonly PlateFlange[], kFactor = DEFAULT_K_FACTOR): SheetFlatPattern | { readonly error: string } {
   const edges = frame.edges.map((edge) => ({ a: planeCoordinates(edge.startMm, plane), b: planeCoordinates(edge.endMm, plane), o: planeCoordinates(edge.outward, plane) }));
@@ -89,6 +91,8 @@ export function flatPatternOfPlate(frame: SheetFrame, plane: SheetPlane, flanges
   const bendLines: (readonly [Point2, Point2])[] = [];
   let totalAllowance = 0;
   let totalDeduction = 0;
+  const reliefFlanges = [...flangeByEdge.values()].map((flange) => ({ edgeIndex: flange.edgeIndex, reliefMm: flange.reliefMm ?? 0 }));
+  let reliefApplied = false;
   const outlines = loops.map((loop) => {
     const points: Point2[] = [];
     for (const index of loop) {
@@ -100,16 +104,24 @@ export function flatPatternOfPlate(frame: SheetFrame, plane: SheetPlane, flanges
       const reach = allowance + flange.flangeLengthMm;
       totalAllowance += allowance;
       totalDeduction += sheetBendDeductionMm(flange.angleDeg, flange.innerRadiusMm, frame.thicknessMm, kFactor);
-      points.push([edge.a[0] + edge.o[0] * reach, edge.a[1] + edge.o[1] * reach], [edge.b[0] + edge.o[0] * reach, edge.b[1] + edge.o[1] * reach]);
+      const reliefs = flangeReliefs(frame, index, reliefFlanges);
+      const length = Math.hypot(edge.b[0] - edge.a[0], edge.b[1] - edge.a[1]);
+      const dir: Point2 = length < 1e-9 ? [0, 0] : [(edge.b[0] - edge.a[0]) / length, (edge.b[1] - edge.a[1]) / length];
+      const from: Point2 = [edge.a[0] + dir[0] * reliefs.startMm, edge.a[1] + dir[1] * reliefs.startMm];
+      const to: Point2 = [edge.b[0] - dir[0] * reliefs.endMm, edge.b[1] - dir[1] * reliefs.endMm];
+      if (reliefs.startMm > 0 || reliefs.endMm > 0) reliefApplied = true;
+      if (reliefs.startMm > 0) points.push(from);
+      points.push([from[0] + edge.o[0] * reach, from[1] + edge.o[1] * reach], [to[0] + edge.o[0] * reach, to[1] + edge.o[1] * reach]);
+      if (reliefs.endMm > 0) points.push(to);
       const mid = allowance / 2;
-      bendLines.push([[edge.a[0] + edge.o[0] * mid, edge.a[1] + edge.o[1] * mid], [edge.b[0] + edge.o[0] * mid, edge.b[1] + edge.o[1] * mid]]);
+      bendLines.push([[from[0] + edge.o[0] * mid, from[1] + edge.o[1] * mid], [to[0] + edge.o[0] * mid, to[1] + edge.o[1] * mid]]);
     }
     return points;
   });
   const flangedEdges = [...flangeByEdge.keys()];
   const notes: string[] = [];
   const touching = flangedEdges.some((first) => flangedEdges.some((second) => first < second && (keyOf(edges[first]!.a) === keyOf(edges[second]!.b) || keyOf(edges[first]!.b) === keyOf(edges[second]!.a))));
-  if (touching) notes.push("Flanges on neighbouring edges meet at a corner and the pattern has no corner relief; add one before cutting.");
+  if (touching && !reliefApplied) notes.push("Flanges on neighbouring edges meet at a corner with no corner relief; give the flanges a corner relief before cutting.");
   const all = outlines.flat();
   return {
     outlinesMm: outlines,

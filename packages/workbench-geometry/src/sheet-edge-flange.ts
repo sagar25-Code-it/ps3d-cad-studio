@@ -96,11 +96,81 @@ export function sheetFrameOf(mesh: SheetMesh, normalIn: Vec3): SheetFrame | unde
   return { normal, topMm: top, bottomMm: bottom, thicknessMm: thickness, edges };
 }
 
+/** The straight edge of the frame closest to a point (for example where the user clicked), with how far away it is. */
+export function nearestFrameEdge(frame: SheetFrame, pointMm: Vec3): { readonly index: number; readonly distanceMm: number } | undefined {
+  let best: { index: number; distanceMm: number } | undefined;
+  for (const edge of frame.edges) {
+    const along: Vec3 = [edge.endMm[0] - edge.startMm[0], edge.endMm[1] - edge.startMm[1], edge.endMm[2] - edge.startMm[2]];
+    const lengthSquared = dot3(along, along);
+    const toPoint: Vec3 = [pointMm[0] - edge.startMm[0], pointMm[1] - edge.startMm[1], pointMm[2] - edge.startMm[2]];
+    const t = lengthSquared < 1e-12 ? 0 : Math.max(0, Math.min(1, dot3(toPoint, along) / lengthSquared));
+    const distance = Math.hypot(toPoint[0] - along[0] * t, toPoint[1] - along[1] * t, toPoint[2] - along[2] * t);
+    if (best === undefined || distance < best.distanceMm - 1e-9) best = { index: edge.index, distanceMm: distance };
+  }
+  return best;
+}
+
 export interface EdgeFlangeSpec {
   readonly edgeIndex: number;
   readonly innerRadiusMm: number;
   readonly flangeLengthMm: number;
   readonly angleDeg: number;
+  /** How far the flange stops short of the edge's start and end, leaving a corner relief gap where a neighbouring flange meets it. */
+  readonly reliefStartMm?: number;
+  readonly reliefEndMm?: number;
+}
+
+/**
+ * Which ends of a flanged edge meet another flanged edge at a corner. `flangedEdges` are the edge indices carrying flanges
+ * (the edge itself may be listed; it is ignored).
+ */
+export function sharedFlangeEnds(frame: SheetFrame, edgeIndex: number, flangedEdges: readonly number[]): { readonly start: boolean; readonly end: boolean } {
+  const edge = frame.edges[edgeIndex];
+  if (edge === undefined) return { start: false, end: false };
+  const startKey = pointKey(edge.startMm[0], edge.startMm[1], edge.startMm[2]);
+  const endKey = pointKey(edge.endMm[0], edge.endMm[1], edge.endMm[2]);
+  let start = false;
+  let end = false;
+  for (const other of flangedEdges) {
+    if (other === edgeIndex) continue;
+    const neighbour = frame.edges[other];
+    if (neighbour === undefined) continue;
+    const keys = [pointKey(neighbour.startMm[0], neighbour.startMm[1], neighbour.startMm[2]), pointKey(neighbour.endMm[0], neighbour.endMm[1], neighbour.endMm[2])];
+    if (keys.includes(startKey)) start = true;
+    if (keys.includes(endKey)) end = true;
+  }
+  return { start, end };
+}
+
+/** A flange as far as corner relief goes: its edge and the gap it asks for at a corner it shares with another flange. */
+export interface ReliefFlange {
+  readonly edgeIndex: number;
+  readonly reliefMm: number;
+}
+
+/**
+ * The relief to leave at each end of a flange. A corner needs one gap between its two flanges: the larger of the two flanges'
+ * relief values, shared half and half, and only at an end where another flange meets this one. So asking for a relief on either
+ * flange of a corner is enough, and a later flange cannot leave an earlier one without its gap.
+ */
+export function flangeReliefs(frame: SheetFrame, edgeIndex: number, flanges: readonly ReliefFlange[]): { readonly startMm: number; readonly endMm: number } {
+  const edge = frame.edges[edgeIndex];
+  const own = flanges.find((flange) => flange.edgeIndex === edgeIndex);
+  if (edge === undefined || own === undefined) return { startMm: 0, endMm: 0 };
+  const startKey = pointKey(edge.startMm[0], edge.startMm[1], edge.startMm[2]);
+  const endKey = pointKey(edge.endMm[0], edge.endMm[1], edge.endMm[2]);
+  let start = 0;
+  let end = 0;
+  for (const other of flanges) {
+    if (other.edgeIndex === edgeIndex) continue;
+    const neighbour = frame.edges[other.edgeIndex];
+    if (neighbour === undefined) continue;
+    const keys = [pointKey(neighbour.startMm[0], neighbour.startMm[1], neighbour.startMm[2]), pointKey(neighbour.endMm[0], neighbour.endMm[1], neighbour.endMm[2])];
+    const gap = Math.max(own.reliefMm, other.reliefMm);
+    if (keys.includes(startKey)) start = Math.max(start, gap / 2);
+    if (keys.includes(endKey)) end = Math.max(end, gap / 2);
+  }
+  return { startMm: start, endMm: end };
 }
 
 export type EdgeFlangeResult =
@@ -120,8 +190,13 @@ export function attachEdgeFlange(body: SheetMesh, base: SheetMesh, normal: Vec3,
   if (edge === undefined) return { ok: false, message: `There is no edge ${spec.edgeIndex}; this plate has ${frame.edges.length} (0 to ${frame.edges.length - 1}).` };
   if (!(spec.flangeLengthMm > 0) || !(spec.innerRadiusMm >= 0) || !(spec.angleDeg > 0 && spec.angleDeg <= 180)) return { ok: false, message: "A flange needs a positive length, a non-negative bend radius and an angle from 0° to 180°." };
   const thickness = frame.thicknessMm;
-  const section = bentStripSection({ legMm: 0, flangeLengthMm: spec.flangeLengthMm, angleDeg: spec.angleDeg, innerRadiusMm: spec.innerRadiusMm, thicknessMm: thickness, widthMm: edge.lengthMm });
-  const strip = tessellateExtrude(section, edge.lengthMm, "xy");
+  const reliefStart = spec.reliefStartMm ?? 0;
+  const reliefEnd = spec.reliefEndMm ?? 0;
+  if (!(reliefStart >= 0) || !(reliefEnd >= 0)) return { ok: false, message: "A corner relief cannot be negative." };
+  const span = edge.lengthMm - reliefStart - reliefEnd;
+  if (!(span > 1e-3)) return { ok: false, message: `The corner relief (${(reliefStart + reliefEnd).toFixed(2)} mm) leaves no flange on edge ${spec.edgeIndex}, which is ${edge.lengthMm.toFixed(2)} mm long.` };
+  const section = bentStripSection({ legMm: 0, flangeLengthMm: spec.flangeLengthMm, angleDeg: spec.angleDeg, innerRadiusMm: spec.innerRadiusMm, thicknessMm: thickness, widthMm: span });
+  const strip = tessellateExtrude(section, span, "xy");
   if (strip.positionsMm.length < 9) return { ok: false, message: "The flange could not be built." };
   const direction = unit3([edge.endMm[0] - edge.startMm[0], edge.endMm[1] - edge.startMm[1], edge.endMm[2] - edge.startMm[2]]);
   // The strip's frame is (u, v, s) = (outward, normal, along the edge); a left-handed mapping needs its winding flipped.
@@ -132,7 +207,7 @@ export function attachEdgeFlange(body: SheetMesh, base: SheetMesh, normal: Vec3,
     const u = strip.positionsMm[i * 3]!;
     const v = strip.positionsMm[i * 3 + 1]!;
     const s = strip.positionsMm[i * 3 + 2]!;
-    for (let axis = 0; axis < 3; axis += 1) world.push(edge.startMm[axis]! + edge.outward[axis]! * u + frame.normal[axis]! * (v - thickness) + direction[axis]! * s);
+    for (let axis = 0; axis < 3; axis += 1) world.push(edge.startMm[axis]! + edge.outward[axis]! * u + frame.normal[axis]! * (v - thickness) + direction[axis]! * (s + reliefStart));
   }
   const stripTriangles: number[] = [];
   for (let corner = 0; corner + 2 < strip.indices.length; corner += 3) {
@@ -162,8 +237,64 @@ export function attachEdgeFlange(body: SheetMesh, base: SheetMesh, normal: Vec3,
     keptBody.push(...triangle);
   }
   if (removed < 2) return { ok: false, message: `Edge ${spec.edgeIndex} has no flat side wall left to bend from; it may already carry a flange.` };
-  const merged = [...body.positionsMm, ...world];
-  const combined = [...keptBody, ...stripTriangles.map((index) => index + bodyVertices)];
+  const extraPositions: number[] = [];
+  const extraTriangles: number[] = [];
+  const addVertex = (point: Vec3): number => { extraPositions.push(point[0], point[1], point[2]); return bodyVertices + world.length / 3 + extraPositions.length / 3 - 1; };
+  const along = (point: Vec3, distance: number): Vec3 => [point[0] + direction[0] * distance, point[1] + direction[1] * distance, point[2] + direction[2] * distance];
+  if (reliefStart > 0 || reliefEnd > 0) {
+    // The flange stops short of the edge's ends, so the plate's side wall stays at the relief and the plate's top and bottom
+    // faces get matching vertices on that edge (their triangles on this edge are split there).
+    const splitsTop: Vec3[] = [];
+    const splitsBottom: Vec3[] = [];
+    if (reliefStart > 0) { splitsTop.push(along(edge.startMm, reliefStart)); splitsBottom.push(along(bottomStart, reliefStart)); }
+    if (reliefEnd > 0) { splitsTop.push(along(edge.endMm, -reliefEnd)); splitsBottom.push(along(bottomEnd, -reliefEnd)); }
+    const topKeys = [corners[0]!, corners[1]!];
+    const bottomKeys = [corners[2]!, corners[3]!];
+    const splitIndex = new Map<string, number>();
+    const splitVertex = (point: Vec3): number => {
+      const key = pointKey(point[0], point[1], point[2]);
+      let found = splitIndex.get(key);
+      if (found === undefined) { found = addVertex(point); splitIndex.set(key, found); }
+      return found;
+    };
+    const splitEdgeOf = (triangle: readonly number[], pair: readonly string[], splits: readonly Vec3[]): number[] | undefined => {
+      const keys = triangle.map((index) => pointKey(body.positionsMm[index * 3]!, body.positionsMm[index * 3 + 1]!, body.positionsMm[index * 3 + 2]!));
+      for (let side = 0; side < 3; side += 1) {
+        const k0 = keys[side]!;
+        const k1 = keys[(side + 1) % 3]!;
+        if (!((k0 === pair[0] && k1 === pair[1]) || (k0 === pair[1] && k1 === pair[0]))) continue;
+        const v0 = triangle[side]!;
+        const v1 = triangle[(side + 1) % 3]!;
+        const third = triangle[(side + 2) % 3]!;
+        const middle = splits.map((point) => splitVertex(point));
+        const chain = k0 === pair[0] ? [v0, ...middle, v1] : [v0, ...middle.slice().reverse(), v1];
+        const out: number[] = [];
+        for (let i = 0; i + 1 < chain.length; i += 1) out.push(chain[i]!, chain[i + 1]!, third);
+        return out;
+      }
+      return undefined;
+    };
+    const rebuilt: number[] = [];
+    for (let corner = 0; corner + 2 < keptBody.length; corner += 3) {
+      const triangle = [keptBody[corner]!, keptBody[corner + 1]!, keptBody[corner + 2]!];
+      const replaced = splitEdgeOf(triangle, topKeys, splitsTop) ?? splitEdgeOf(triangle, bottomKeys, splitsBottom);
+      rebuilt.push(...(replaced ?? triangle));
+    }
+    keptBody.length = 0;
+    keptBody.push(...rebuilt);
+    const wallPiece = (from: Vec3, to: Vec3): void => {
+      const t0 = addVertex(from);
+      const t1 = addVertex(to);
+      const b0 = addVertex(down(from));
+      const b1 = addVertex(down(to));
+      if (dot3(cross3(frame.normal, direction), edge.outward) > 0) extraTriangles.push(t0, t1, b1, t0, b1, b0);
+      else extraTriangles.push(t0, b1, t1, t0, b0, b1);
+    };
+    if (reliefStart > 0) wallPiece(edge.startMm, along(edge.startMm, reliefStart));
+    if (reliefEnd > 0) wallPiece(along(edge.endMm, -reliefEnd), edge.endMm);
+  }
+  const merged = [...body.positionsMm, ...world, ...extraPositions];
+  const combined = [...keptBody, ...stripTriangles.map((index) => index + bodyVertices), ...extraTriangles];
   // Weld coincident vertices so the flange shares the plate's edge vertices.
   const remap = new Map<string, number>();
   const positions: number[] = [];

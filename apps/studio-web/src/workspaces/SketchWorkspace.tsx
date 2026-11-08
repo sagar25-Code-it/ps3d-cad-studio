@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SOLVABLE_POINT_REFS, constraintFit, planeWorldCoordinate, type ConstraintFit, type SketchDatumPlane, type SketchEntity, type SketchConstraintKind, type SketchPointRef, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
 import {
   analyzeWorkbenchSketch,
@@ -27,7 +27,7 @@ import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, buildPolygon, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
 import { entitiesInSelectionBox, selectionBoxMode, selectionRect, type SketchSelectionBoxMode } from "../../../../packages/workbench-sketch/src/selection.js";
-import { SketchCheckPanel, SketchEditPanel, SketchRelationList, type SketchEditToolId } from "./SketchEditPanel.js";
+import { SketchCheckPanel, SketchEditPanel, SketchRelationList, type SketchEditToolId, type StretchWindowRect } from "./SketchEditPanel.js";
 import { SketchGrid } from "./sketch/SketchGrid.js";
 import { useSketchCamera } from "./sketch/useSketchCamera.js";
 import { useSketchHotkeys } from "./sketch/useSketchHotkeys.js";
@@ -256,6 +256,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [selectionIds, setSelectionIds] = useState<readonly string[]>(props.selectedId === null ? [] : [props.selectedId]);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [selectionBox, setSelectionBox] = useState<{ readonly start: Vec2; readonly end: Vec2 } | undefined>(undefined);
+  /** The Stretch tool's window: drawn by dragging on empty canvas, or typed in the tool's panel; both show the same rectangle. */
+  const [stretchWindow, setStretchWindowState] = useState<StretchWindowRect | undefined>(undefined);
+  const setStretchWindow = useCallback((next: StretchWindowRect | undefined): void => {
+    setStretchWindowState((current) => (current !== undefined && next !== undefined && current.x1 === next.x1 && current.y1 === next.y1 && current.x2 === next.x2 && current.y2 === next.y2) || (current === undefined && next === undefined) ? current : next);
+  }, []);
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem">("extrude");
@@ -1033,6 +1038,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setSelectionBox(undefined);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (event.type === "pointercancel") return;
+    if (gesture.dragging && props.editTool === "stretch") {
+      // With Stretch active a drag on empty canvas sets the window instead of selecting.
+      const end = camera.toSketch(event.clientX, event.clientY);
+      const round = (value: number): number => Number(value.toFixed(3));
+      setStretchWindow({ x1: round(Math.min(gesture.startMm[0], end[0])), y1: round(Math.min(gesture.startMm[1], end[1])), x2: round(Math.max(gesture.startMm[0], end[0])), y2: round(Math.max(gesture.startMm[1], end[1])) });
+      props.onMessage("Stretch window set. Select the entities, enter the distance, then Apply.");
+      return;
+    }
     if (gesture.dragging) { finishSelectionBox(gesture, camera.toSketch(event.clientX, event.clientY)); return; }
     // A press that never moved is a click: on a shaded profile it selects the profile, anywhere else it clears the selection.
     const profile = gesture.profileId === undefined ? undefined : profiles.find((candidate) => candidate.id === gesture.profileId);
@@ -1124,11 +1137,20 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           {directDimension !== undefined && <DirectDimensionPreview dimension={directDimension} px={px} />}
         </>}
         {selectionBox !== undefined && <rect
-          className={`selection-box ${selectionBoxMode(selectionBox.start, selectionBox.end)}`}
+          className={`selection-box ${props.editTool === "stretch" ? "stretch-draw" : selectionBoxMode(selectionBox.start, selectionBox.end)}`}
           x={Math.min(selectionBox.start[0], selectionBox.end[0])}
           y={-Math.max(selectionBox.start[1], selectionBox.end[1])}
           width={Math.abs(selectionBox.end[0] - selectionBox.start[0])}
           height={Math.abs(selectionBox.end[1] - selectionBox.start[1])}
+          pointerEvents="none"
+        />}
+        {props.editTool === "stretch" && stretchWindow !== undefined && <rect
+          className="stretch-window"
+          data-stretch-window=""
+          x={Math.min(stretchWindow.x1, stretchWindow.x2)}
+          y={-Math.max(stretchWindow.y1, stretchWindow.y2)}
+          width={Math.abs(stretchWindow.x2 - stretchWindow.x1)}
+          height={Math.abs(stretchWindow.y2 - stretchWindow.y1)}
           pointerEvents="none"
         />}
       </svg>
@@ -1458,7 +1480,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       </section>
       {analysis.conflicts.length > 0 && <div className="inline-warning">{analysis.conflicts[0]}</div>}
 
-      {props.editTool !== null && <SketchEditPanel tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
+      {props.editTool !== null && <SketchEditPanel tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
       {props.checkOpen && <SketchCheckPanel sketch={props.sketch} onClose={props.onCloseCheck} />}
       {props.showMovable && <div className="inline-warning movable-note">{movableIds.size === 0 ? "Show Movable: every entity is fully constrained." : `Show Movable: ${movableIds.size} entit${movableIds.size === 1 ? "y has" : "ies have"} estimated degrees of freedom (amber).`}</div>}
       <section className="inspector-section point-relations"><header><strong>Point relations</strong><span>{pickRelation === null ? "pick points" : pickRelation}</span></header>

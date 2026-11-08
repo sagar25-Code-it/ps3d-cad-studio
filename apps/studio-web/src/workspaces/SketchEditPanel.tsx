@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { SketchEntity, WorkbenchSketch, WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
 import {
   chamferCorners,
@@ -42,7 +42,7 @@ const INSTRUCTIONS: Readonly<Record<SketchEditToolId, string>> = {
   move: "Select the entities, enter the X and Y distance, then Apply. Tick Copy to leave the originals and add moved copies.",
   rotate: "Select the entities, set the angle (counter-clockwise) and the centre, then Apply. Tick Copy to keep the originals.",
   scale: "Select the entities, set the factor and the centre, then Apply. Circles, rectangles and ellipses scale their size too. Tick Copy to keep the originals.",
-  stretch: "Select the entities, set a window over the points or sides to move, enter the distance, then Apply. Only what lies inside the window moves, so the rest of each entity stays and it stretches. \"Use selection bounds\" fills the window from the selection.",
+  stretch: "Select the entities, then drag a window on empty canvas (or type its corners) over the points or sides to move, enter the distance, then Apply. Only what lies inside the window moves, so the rest of each entity stays and it stretches. \"Use selection bounds\" fills the window from the selection.",
   corner: "Select two lines, then Apply. Both are extended or trimmed to meet at their intersection.",
   fillet: "Select two lines (or one rectangle), set the radius, then Apply. The lines are shortened to the tangent points and an arc joins them.",
   chamfer: "Select two lines (or one rectangle), set the distance, then Apply. The lines are shortened and a straight cut joins them.",
@@ -50,7 +50,19 @@ const INSTRUCTIONS: Readonly<Record<SketchEditToolId, string>> = {
   extend: "Click a line near the end you want to lengthen. It runs on to the first curve it reaches."
 };
 
+/** The Stretch window in sketch millimetres: opposite corners, x1 <= x2 and y1 <= y2 when drawn. */
+export interface StretchWindowRect {
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+}
+
 interface SketchEditPanelProps {
+  /** The window drawn on the canvas, which the panel shows in its fields. */
+  readonly stretchWindow?: StretchWindowRect | undefined;
+  /** Called with the window the fields describe, so the canvas can draw what was typed. */
+  readonly onStretchWindow?: (window: StretchWindowRect | undefined) => void;
   readonly tool: SketchEditToolId;
   readonly sketch: WorkbenchSketch;
   readonly selectionIds: readonly string[];
@@ -86,6 +98,18 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   const [windowY2, setWindowY2] = useState("10");
   const [chamferMode, setChamferMode] = useState<"equal" | "asymmetric" | "distance-angle">("equal");
   const interactive = props.tool !== "trim" && props.tool !== "extend";
+  const { stretchWindow, onStretchWindow } = props;
+
+  // A window drawn on the canvas fills the fields; a typed window is drawn on the canvas.
+  useEffect(() => {
+    if (stretchWindow === undefined) return;
+    setWindowX1(String(stretchWindow.x1)); setWindowY1(String(stretchWindow.y1)); setWindowX2(String(stretchWindow.x2)); setWindowY2(String(stretchWindow.y2));
+  }, [stretchWindow]);
+  useEffect(() => {
+    if (props.tool !== "stretch" || onStretchWindow === undefined) return;
+    const values = [windowX1, windowY1, windowX2, windowY2].map((text) => (text.trim() === "" ? Number.NaN : Number(text)));
+    if (values.every(Number.isFinite)) onStretchWindow({ x1: values[0]!, y1: values[1]!, x2: values[2]!, y2: values[3]! });
+  }, [props.tool, windowX1, windowY1, windowX2, windowY2, onStretchWindow]);
 
   const apply = (): void => {
     const context = { sketch: props.sketch, newId: (prefix: "entity" | "constraint"): string => `${prefix}:user-${crypto.randomUUID()}` };

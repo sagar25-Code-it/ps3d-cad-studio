@@ -29,6 +29,7 @@ import {
   type AssemblyTemplateId,
   type CadCommandRecord,
   baseFeatureOf,
+  isFeatureActive,
   designOf,
   type ComponentInstance,
   type DesignFeature,
@@ -51,7 +52,7 @@ import {
   type Vec3,
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
-import { flatLayoutDxf, flatLayoutSvg, sheetFrameOf } from "../../../packages/workbench-geometry/src/index.js";
+import { flangeReliefs, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
 import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
@@ -82,6 +83,7 @@ import {
   type NavigationMode,
   type SelectionFilter,
   type ViewOrientation,
+  type ViewportGuideSegment,
   type ViewportMeasurePoint,
   type ViewportBackgroundTone,
   type ViewportViewState,
@@ -317,6 +319,8 @@ export function App(): React.JSX.Element {
   const historyActionRef = useRef<{ undo: () => void; redo: () => void }>({ undo: () => undefined, redo: () => undefined });
   const fitViewportRef = useRef<() => void>(() => undefined);
   const viewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
+  /** Set while a command waits for the user to click something in the viewport; called with the click, or null when cancelled. */
+  const pickRef = useRef<((point: ViewportMeasurePoint | null) => void) | null>(null);
   const renderCanvasRef = useRef<HTMLCanvasElement>(null);
   const renderViewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
   const projectInputRef = useRef<HTMLInputElement>(null);
@@ -639,6 +643,7 @@ export function App(): React.JSX.Element {
 
   const isThreeDimensional = !renderStudioOpen && (project.activeWorkspace === "part" || project.activeWorkspace === "assembly" || project.activeWorkspace === "surface" || project.activeWorkspace === "vehicle");
   const acceptMeasurePoint = useCallback((point: ViewportMeasurePoint): void => {
+    if (pickRef.current !== null) { pickRef.current(point); return; }
     setMeasurePoints((current) => current.length >= 2 ? [point] : [...current, point]);
   }, []);
   const openContextMenu = useCallback((clientX: number, clientY: number, selectionId: string | null, selectionKind?: WorkbenchSelectionKind): void => {
@@ -676,6 +681,16 @@ export function App(): React.JSX.Element {
     if (project.activeWorkspace === "vehicle") viewport.setScene(vehiclePreview.scene);
   }, [activeImport, assemblyScene, model, partScene, project.activeWorkspace, surfacePreview.scene, vehiclePreview.scene]);
   useEffect(() => viewportRef.current?.setSelectedId(selectedId), [selectedId]);
+  // Escape ends a viewport pick that is waiting for a click.
+  useEffect(() => {
+    const listener = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || pickRef.current === null) return;
+      pickRef.current(null);
+      setStatusText("Pick cancelled.");
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
   // A face highlight belongs to its body; drop it whenever the body selection changes.
   useEffect(() => { setSelectedFace((current) => (current === null || current.bodyId === selectedId ? current : null)); }, [selectedId]);
   useEffect(() => { viewportRef.current?.setHighlightedFace(selectedFace?.bodyId ?? null, selectedFace?.faceIndex ?? null); }, [selectedFace]);
@@ -888,7 +903,51 @@ export function App(): React.JSX.Element {
     modifier === "hole" ? "Hole" : modifier === "fillet" ? "Fillet" : modifier === "chamfer" ? "Chamfer" : "Shell"
   );
 
-  const handleHoleWizard = (): void => {
+  /**
+   * Hole Wizard: click the face where the hole should start, choose its type and fastener, and the hole is recorded as a timeline
+   * step at that point, drilled straight into the face. A body that is not in the timeline gets the older whole-body version.
+   */
+  const handleHoleWizard = async (): Promise<void> => {
+    const current = projectRef.current;
+    const bodies = current.part.generalBodies ?? [];
+    const body = bodies.find((candidate) => candidate.id === selectedId);
+    if (body === undefined) { setStatus("ready"); setStatusText("Hole Wizard needs a general solid body selected first."); return; }
+    const history = designOf(current);
+    const base = baseFeatureOf(history, body.id);
+    if (base === undefined) { holeWizardOnMesh(); return; }
+    const picked = await requestViewportPick(`Hole Wizard: click the face of ${body.name} where the hole should start`);
+    if (picked === null) return;
+    if (picked.semanticId !== body.id) { setStatus("ready"); setStatusText(`Hole Wizard: click on ${body.name}.`); return; }
+    if (picked.normalMm === undefined) { setStatus("ready"); setStatusText("Hole Wizard: the clicked surface has no direction to drill along."); return; }
+    const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
+    const typeRaw = (ask("Hole type (simple, counterbore, countersink, tapped):", "counterbore") ?? "").trim().toLowerCase();
+    if (typeRaw === "" ) return;
+    if (!["simple", "counterbore", "countersink", "tapped"].includes(typeRaw)) { setStatus("ready"); setStatusText("Hole Wizard: enter simple, counterbore, countersink or tapped."); return; }
+    const fastenerRaw = (ask("Fastener size (M3, M4, M5, M6, M8, M10):", "M6") ?? "").trim().toUpperCase();
+    const spec = METRIC_FASTENERS[fastenerRaw];
+    if (spec === undefined) { setStatus("ready"); setStatusText("Hole Wizard: enter M3, M4, M5, M6, M8 or M10."); return; }
+    const depthRaw = ask("Hole depth from the face in mm (0 drills through everything):", "0");
+    if (depthRaw === null) return;
+    const depth = Number.parseFloat(depthRaw);
+    if (!Number.isFinite(depth) || depth < 0) { setStatus("ready"); setStatusText("Hole Wizard: depth must be 0 (through) or a positive number."); return; }
+    const round = (value: number): number => Number(value.toFixed(3));
+    const normal = snapToAxis(picked.normalMm);
+    const diameter = typeRaw === "tapped" ? spec.nominalDiameterMm * 0.85 : spec.clearanceDiameterMm;
+    const style = typeRaw === "counterbore" ? "counterbore" : typeRaw === "countersink" ? "countersink" : "simple";
+    const label = typeRaw === "tapped" ? `${fastenerRaw} tapped hole Ø${diameter.toFixed(2)}` : `${fastenerRaw} ${typeRaw} hole Ø${diameter.toFixed(2)}`;
+    const feature: DesignSolidFeature = {
+      id: `feature:hole-${crypto.randomUUID()}`, name: label, kind: "hole", suppressed: false,
+      sketchFeatureId: base.sketchFeatureId, profileIds: [], valueMm: Math.max(0.01, diameter),
+      bodyId: body.id, operation: "direct-edit",
+      holeStyle: style, holePositionMm: [round(picked.pointMm[0]), round(picked.pointMm[1]), round(picked.pointMm[2])], holeNormal: normal,
+      holeDiameterMm: diameter, holeDepthMm: depth,
+      ...(style === "counterbore" ? { holeCounterDiameterMm: spec.counterboreDiameterMm, holeCounterDepthMm: spec.counterboreDepthMm } : {}),
+      ...(style === "countersink" ? { holeSinkDiameterMm: spec.countersinkDiameterMm, holeSinkAngleDeg: 90 } : {})
+    };
+    void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) { setSelectedId(body.id); setStatusText(`Added ${label} to ${body.name}, drilled along (${normal.map((value) => -Number(value.toFixed(3)) || 0).join(", ")}) from (${feature.holePositionMm?.map((value) => value.toFixed(1)).join(", ")}) mm.`); } });
+  };
+
+  const holeWizardOnMesh = (): void => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
     const body = bodies.find((candidate) => candidate.id === selectedId);
@@ -1117,6 +1176,26 @@ export function App(): React.JSX.Element {
     setStatusText(`Created ${point.name} (point ${ordinal}).`);
   };
 
+  /**
+   * Waits for the user to click the model: the viewport switches to its pick mode, optional guide lines show what can be picked,
+   * and the promise resolves with the clicked point (and face) or null when the user presses Escape or starts another pick.
+   */
+  const requestViewportPick = (instruction: string, guides: readonly ViewportGuideSegment[] = [], activeGuide: number | null = null): Promise<ViewportMeasurePoint | null> => new Promise((resolve) => {
+    pickRef.current?.(null);
+    const viewport = viewportRef.current;
+    if (viewport === undefined) { resolve(null); return; }
+    viewport.setGuideSegments(guides, activeGuide);
+    viewport.setNavigationMode("measure");
+    setStatus("ready");
+    setStatusText(`${instruction} (Esc cancels)`);
+    pickRef.current = (point) => {
+      pickRef.current = null;
+      viewport.setGuideSegments([]);
+      viewport.setNavigationMode("select");
+      resolve(point);
+    };
+  });
+
   const handleEdgeFlange = async (): Promise<void> => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
@@ -1130,28 +1209,33 @@ export function App(): React.JSX.Element {
     if (!rebuilt.ok) { setStatus("error"); setStatusText(`Edge flange: ${rebuilt.message}`); return; }
     const frame = sheetFrameOf(rebuilt.body, PLANE_NORMALS[rebuilt.body.feature?.plane ?? "xy"]);
     if (frame === undefined || frame.edges.length === 0) { setStatus("ready"); setStatusText("Edge flange: this body has no flat top face with straight edges to bend from."); return; }
-    const direction = (vector: readonly [number, number, number]): string => {
-      const axis = [Math.abs(vector[0]), Math.abs(vector[1]), Math.abs(vector[2])];
-      const index = axis.indexOf(Math.max(...axis));
-      return `${vector[index]! < 0 ? "-" : "+"}${"XYZ"[index]}`;
-    };
     const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
-    const listing = frame.edges.map((edge) => `${edge.index}: ${edge.lengthMm.toFixed(1)} mm, faces ${direction(edge.outward)}`).join("\n");
-    const edgeRaw = ask(`Edge to bend a flange from (plate ${frame.thicknessMm.toFixed(2)} mm thick):\n${listing}`, "0");
-    if (edgeRaw === null) return;
-    const edgeIndex = Number.parseInt(edgeRaw, 10);
-    if (!Number.isInteger(edgeIndex) || frame.edges[edgeIndex] === undefined) { setStatus("ready"); setStatusText(`Edge flange: pick an edge number from 0 to ${frame.edges.length - 1}.`); return; }
+    const guides: ViewportGuideSegment[] = frame.edges.map((edge) => [edge.startMm, edge.endMm]);
+    const picked = await requestViewportPick(`Edge flange: click near the plate edge to bend the flange from (${frame.edges.length} edges, ${frame.thicknessMm.toFixed(2)} mm sheet)`, guides);
+    if (picked === null) return;
+    const nearest = nearestFrameEdge(frame, picked.pointMm);
+    if (nearest === undefined) { setStatus("ready"); setStatusText("Edge flange: this plate has no straight edge to pick."); return; }
+    const edgeIndex = nearest.index;
+    viewportRef.current?.setGuideSegments(guides, edgeIndex);
+    window.setTimeout(() => viewportRef.current?.setGuideSegments([]), 1500);
+    setStatusText(`Edge flange: using edge ${edgeIndex} (${frame.edges[edgeIndex]!.lengthMm.toFixed(1)} mm long, ${nearest.distanceMm.toFixed(1)} mm from your click).`);
     const radius = Number.parseFloat(ask("Inner bend radius (mm):", String(frame.thicknessMm)) ?? "");
     const length = Number.parseFloat(ask("Flange length after the bend (mm):", "20") ?? "");
     const angle = Number.parseFloat(ask("Bend angle (degrees, 1 to 180):", "90") ?? "");
     if (![radius, length, angle].every(Number.isFinite) || radius < 0 || length <= 0 || angle <= 0 || angle > 180) { setStatus("ready"); setStatusText("Edge flange: enter a bend radius of 0 or more, a flange length above 0 and an angle up to 180°."); return; }
+    const liveFlangeEdges = history.features.filter((candidate) => candidate.kind === "sheet-edge-flange" && candidate.bodyId === body.id && isFeatureActive(history, candidate.id)).map((candidate) => (candidate as DesignSolidFeature).flangeEdgeIndex ?? 0);
+    const meetsNeighbour = sharedFlangeEnds(frame, edgeIndex, liveFlangeEdges);
+    const needsRelief = meetsNeighbour.start || meetsNeighbour.end;
+    const relief = needsRelief ? Number.parseFloat(ask(`Edge ${edgeIndex} meets another flange at a corner. Corner relief (mm gap between the two flanges, 0 for none):`, frame.thicknessMm.toFixed(2)) ?? "") : 0;
+    if (!Number.isFinite(relief) || relief < 0) { setStatus("ready"); setStatusText("Edge flange: enter a corner relief of 0 or more."); return; }
     const feature: DesignSolidFeature = {
       id: `feature:sheet-edge-flange-${crypto.randomUUID()}`,
       name: `Edge flange ${edgeIndex} (${angle.toFixed(0)}°, ${length.toFixed(0)} mm)`,
       kind: "sheet-edge-flange", suppressed: false,
       sketchFeatureId: base.sketchFeatureId, profileIds: [],
       valueMm: Math.max(0.01, length), bodyId: body.id, operation: "direct-edit",
-      flangeEdgeIndex: edgeIndex, sheetBendRadiusMm: radius, flangeLengthMm: length, flangeAngleDeg: angle
+      flangeEdgeIndex: edgeIndex, sheetBendRadiusMm: radius, flangeLengthMm: length, flangeAngleDeg: angle,
+      ...(relief > 0 ? { flangeReliefMm: relief } : {})
     };
     void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
   };
@@ -1191,7 +1275,7 @@ export function App(): React.JSX.Element {
     void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
   };
 
-  const handleDirectEdit = (mode: "move-body" | "scale-body" | "move-face" | "offset-face" | "emboss"): void => {
+  const handleDirectEdit = async (mode: "move-body" | "scale-body" | "move-face" | "offset-face" | "emboss"): Promise<void> => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
     const body = bodies.find((candidate) => candidate.id === selectedId) ?? bodies[0];
@@ -1204,10 +1288,13 @@ export function App(): React.JSX.Element {
     if (mode === "move-face" || mode === "offset-face" || mode === "emboss") {
       const roles = body.brep?.faces.map((face) => face.role) ?? [];
       if (roles.length === 0) { setStatus("ready"); setStatusText(`${niceName}: this body has no named faces to target. Rebuild it through the extrude kernel first.`); return; }
-      const roleRaw = ask(`Face role (one of: ${roles.join(", ")}):`, roles[0]!);
-      if (roleRaw === null) return;
-      const role = roleRaw.trim();
-      if (!roles.includes(role)) { setStatus("ready"); setStatusText(`${niceName}: that face role is not on this body.`); return; }
+      const picked = await requestViewportPick(`${niceName}: click the face of ${body.name} to change`);
+      if (picked === null) return;
+      const pickedFace = picked.semanticId === body.id && picked.faceIndex !== null && picked.faceIndex !== undefined ? body.brep?.faces[picked.faceIndex] : undefined;
+      if (pickedFace === undefined || picked.faceIndex === null || picked.faceIndex === undefined) { setStatus("ready"); setStatusText(`${niceName}: click one of the named faces of ${body.name}.`); return; }
+      const role = pickedFace.role;
+      setSelectedFace({ bodyId: body.id, faceIndex: picked.faceIndex });
+      setStatusText(`${niceName}: using face ${role}.`);
       if (mode === "move-face") {
         const raw = ask("Face translation (dx, dy, dz in mm):", "0, 0, 5");
         if (raw === null) return;

@@ -979,6 +979,8 @@
 .selection-box { vector-effect: non-scaling-stroke; stroke-width: 1px; }
 .selection-box.window { fill: #4aa8f01f; stroke: #4aa8f0; }
 .selection-box.crossing { fill: #5fd08a1f; stroke: #5fd08a; stroke-dasharray: 5 3; }
+.selection-box.stretch-draw { fill: #ffb3471f; stroke: #ffb347; stroke-dasharray: 6 3; }
+.stretch-window { vector-effect: non-scaling-stroke; fill: #ffb34724; stroke: #ffb347; stroke-width: 1.5px; stroke-dasharray: 6 3; }
 .sketch-stage .sketch-palette { right: 0.85rem; max-height: calc(100% - 11rem); overflow-y: auto; }
 .make-solid-plane { color: #5d6a73; font-size: 0.62rem; }
 .palette-shortcuts { margin-top: 0.4rem; padding-top: 0.35rem; border-top: 1px solid #d0d4d8; font-size: 0.64rem; }

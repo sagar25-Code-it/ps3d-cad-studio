@@ -44,6 +44,8 @@ import { sheetMetalTests } from "./sheet-metal.test.js";
 import { inspectTransformEdgeFlangeTests } from "./inspect-transform-edge-flange.test.js";
 import { solidOperationsIntegrationTests } from "./solid-operations-integration.test.js";
 import { domeParamsStretchFlatTests } from "./dome-params-stretch-flat.test.js";
+import { reliefPickHoleDragTests } from "./relief-pick-hole-drag.test.js";
+import { holeTests } from "./hole.test.js";
 import { constructionPlaneTests } from "./construction-planes.test.js";
 import { assemblyMeshTests } from "./assembly-mesh.test.js";
 import { assemblyMateTests } from "./assembly-mates.test.js";
@@ -108,6 +110,8 @@ const tests: readonly TestCase[] = [
   ...bigPushTests,
   ...sheetMetalTests,
   ...inspectTransformEdgeFlangeTests,
+  ...reliefPickHoleDragTests,
+  ...holeTests,
   ...solidOperationsIntegrationTests,
   ...domeParamsStretchFlatTests,
   ...constructionPlaneTests,

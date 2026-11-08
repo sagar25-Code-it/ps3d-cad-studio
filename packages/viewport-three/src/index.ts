@@ -74,7 +74,14 @@ export interface ViewportViewState {
 export interface ViewportMeasurePoint {
   readonly pointMm: readonly [number, number, number];
   readonly semanticId: string | null;
+  /** The face of the clicked body (an index into its `brep.faces`) when the body has named faces, else null. */
+  readonly faceIndex?: number | null;
+  /** The clicked surface's outward normal in world space (unit length), when the renderer knows it. */
+  readonly normalMm?: readonly [number, number, number];
 }
+
+/** A line to draw over the model while the user is picking an edge: its end points in millimetres. */
+export type ViewportGuideSegment = readonly [readonly [number, number, number], readonly [number, number, number]];
 
 export interface ViewportContextMenuRequest {
   readonly clientX: number;
@@ -164,6 +171,7 @@ export class ThreeViewportAdapter {
   readonly #orthographicCamera = new THREE.OrthographicCamera(-0.1, 0.1, 0.1, -0.1, 0.001, 100);
   readonly #bodyGroup = new THREE.Group();
   readonly #measurementGroup = new THREE.Group();
+  readonly #guideGroup = new THREE.Group();
   readonly #grid = new THREE.GridHelper(0.24, 24, "#9aa3aa", "#545d64");
   readonly #axes = new THREE.AxesHelper(0.035);
   readonly #hemisphereLight = new THREE.HemisphereLight("#f5f7f8", "#1f2428", 1.35);
@@ -222,6 +230,7 @@ export class ThreeViewportAdapter {
     this.#scene.add(this.#axes);
     this.#scene.add(this.#bodyGroup);
     this.#scene.add(this.#measurementGroup);
+    this.#scene.add(this.#guideGroup);
     this.#scene.add(this.#hemisphereLight);
     this.#keyLight.position.set(0.12, -0.08, 0.2);
     this.#keyLight.castShadow = true;
@@ -830,7 +839,10 @@ export class ThreeViewportAdapter {
     const hit = this.#raycaster.intersectObjects(this.#pickable, false).find((entry) => this.#selectionAllows(entry.object));
     if (hit === undefined) return;
     const semanticId = typeof hit.object.userData["semanticId"] === "string" ? hit.object.userData["semanticId"] as string : null;
-    this.#options.onMeasurePoint?.({ pointMm: [hit.point.x * 1000, hit.point.y * 1000, hit.point.z * 1000], semanticId });
+    const faceTriangles = hit.object.userData["faceTriangles"];
+    const faceIndex = Array.isArray(faceTriangles) && hit.faceIndex !== undefined && hit.faceIndex !== null ? (faceTriangles[hit.faceIndex] as number | undefined) ?? null : null;
+    const worldNormal = hit.face === undefined || hit.face === null ? undefined : hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+    this.#options.onMeasurePoint?.({ pointMm: [hit.point.x * 1000, hit.point.y * 1000, hit.point.z * 1000], semanticId, faceIndex, ...(worldNormal === undefined ? {} : { normalMm: [worldNormal.x, worldNormal.y, worldNormal.z] as const }) });
   }
 
   #selectionAllows(object: THREE.Object3D): boolean {
@@ -929,6 +941,36 @@ export class ThreeViewportAdapter {
     highlight.rotation.copy(source.rotation);
     this.#bodyGroup.add(highlight);
     this.#faceHighlight = highlight;
+  }
+
+  /**
+   * Draws guide lines over the model (edges the user may pick, with the one under consideration highlighted). Passing an empty
+   * list removes them.
+   */
+  setGuideSegments(segmentsMm: readonly ViewportGuideSegment[], activeIndex: number | null = null): void {
+    for (const object of [...this.#guideGroup.children]) {
+      this.#guideGroup.remove(object);
+      if ("geometry" in object && object.geometry instanceof THREE.BufferGeometry) object.geometry.dispose();
+      if ("material" in object) (object.material as THREE.Material).dispose();
+    }
+    // A line is one pixel wide whatever the zoom, so each guide is a thin rod that always draws on top of the model.
+    const rodRadius = THREE.MathUtils.clamp(this.#radius * 0.004, 0.0003, 0.003);
+    const up = new THREE.Vector3(0, 1, 0);
+    segmentsMm.forEach(([from, to], index) => {
+      const start = new THREE.Vector3(from[0] / 1000, from[1] / 1000, from[2] / 1000);
+      const end = new THREE.Vector3(to[0] / 1000, to[1] / 1000, to[2] / 1000);
+      const direction = new THREE.Vector3().subVectors(end, start);
+      const length = direction.length();
+      if (length < 1e-9) return;
+      const active = index === activeIndex;
+      const geometry = new THREE.CylinderGeometry(active ? rodRadius * 1.6 : rodRadius, active ? rodRadius * 1.6 : rodRadius, length, 8, 1, false);
+      const rod = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: active ? "#ffb347" : "#3fd0ff", depthTest: false, transparent: true, opacity: active ? 1 : 0.85 }));
+      rod.quaternion.setFromUnitVectors(up, direction.normalize());
+      rod.position.copy(start).add(end).multiplyScalar(0.5);
+      rod.renderOrder = 18;
+      rod.userData["ps3dExchangeHelper"] = true;
+      this.#guideGroup.add(rod);
+    });
   }
 
   #clearMeasurements(): void {
