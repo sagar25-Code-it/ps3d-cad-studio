@@ -70,6 +70,7 @@ import { cameraLandmarkTests } from "./camera-landmarks.test.js";
 import { topologyNamingTests } from "./topology-naming.test.js";
 import { extentTerminationTests } from "./extent-terminations.test.js";
 import { revolveTerminationTests } from "./revolve-terminations.test.js";
+import { reachUiTests } from "./reach-ui.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -144,7 +145,8 @@ const tests: readonly TestCase[] = [
   ...publicReleaseTests,
   ...topologyNamingTests,
   ...extentTerminationTests,
-  ...revolveTerminationTests
+  ...revolveTerminationTests,
+  ...reachUiTests
 ];
 let failures = 0;
 

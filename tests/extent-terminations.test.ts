@@ -1,5 +1,5 @@
 import type { DesignExtentTarget, DesignSolidFeature, WorkbenchProject } from "../packages/workbench-core/src/index.js";
-import { applyWorkbenchOperation, designOf, validateWorkbenchProject, validSolidFeaturePayload } from "../packages/workbench-core/src/index.js";
+import { applyWorkbenchOperation, describeFeature, designOf, validateWorkbenchProject, validSolidFeaturePayload } from "../packages/workbench-core/src/index.js";
 import { facePlaneOf } from "../packages/workbench-geometry/src/index.js";
 import { rebuildDependents, replayAllBodies } from "../apps/studio-web/src/design-regeneration.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
@@ -29,6 +29,8 @@ export const extentTerminationTests: readonly TestCase[] = [
       assert(isClosedManifold(plate), "plate and peg are one closed manifold solid");
       assert(designOf(project).features.every((feature) => feature.health === undefined), "no step is flagged");
       assert(validateWorkbenchProject(JSON.parse(JSON.stringify(project)) as unknown).ok, "the project validates after a save and reload");
+      const label = describeFeature(designOf(project), designOf(project).features.find((feature) => feature.id === "feature:join-face")!);
+      assert(label.startsWith("Join to face (") && label.includes("when picked"), `the timeline says it reaches a face: ${label}`);
     }
   },
   {

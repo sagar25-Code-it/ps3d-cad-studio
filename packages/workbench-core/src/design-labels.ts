@@ -22,7 +22,7 @@ const EXTENT_TEXT: Readonly<Record<string, string>> = {
 
 function sweptAmount(feature: DesignSolidFeature, unit: string): string {
   const reached = feature.extent === undefined ? undefined : EXTENT_TEXT[feature.extent];
-  if (reached !== undefined) return `${reached} (${trimNumber(feature.valueMm)}${unit} now)`;
+  if (reached !== undefined) return `${reached} (${trimNumber(feature.valueMm)}${unit} when picked)`;
   if (feature.direction === "two-side") return `${trimNumber(feature.valueMm)}${unit} + ${trimNumber(feature.secondValueMm ?? 0)}${unit} two sides`;
   const side = feature.direction === undefined || feature.direction === "one-side" ? "" : ` ${DIRECTION[feature.direction]}`;
   return `${trimNumber(feature.valueMm)}${unit}${side}`;
