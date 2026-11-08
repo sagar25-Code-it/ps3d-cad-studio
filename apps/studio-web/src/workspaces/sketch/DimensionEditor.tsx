@@ -1,0 +1,53 @@
+import { useEffect, useRef } from "react";
+
+/**
+ * The inline value editor for a driving dimension: it opens at the dimension (Fusion's D tool: click a curve, type, Enter), starts
+ * from the exact stored value, applies on Enter and closes on Esc. A checkbox makes the dimension a reference one (measured, it never
+ * moves the geometry) or a driving one again.
+ */
+export interface DimensionEditorProps {
+  readonly label: string;
+  readonly text: string;
+  readonly unitLabel: string;
+  readonly position: readonly [number, number];
+  /** Whether the dimension is a reference dimension; undefined hides the toggle (angles, arc lengths and perimeters are always driving here). */
+  readonly reference?: boolean | undefined;
+  readonly hint?: string;
+  readonly onChange: (text: string) => void;
+  readonly onReferenceChange?: (reference: boolean) => void;
+  readonly onCommit: () => void;
+  readonly onCancel: () => void;
+}
+
+export function DimensionEditor(props: DimensionEditorProps): React.JSX.Element {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
+  return <div
+    className="dimension-editor"
+    style={{ left: props.position[0], top: props.position[1] }}
+    role="group"
+    aria-label={`Edit ${props.label.toLowerCase()}`}
+    // Moving focus to the checkbox must not close the editor; leaving the editor entirely does.
+    onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) props.onCancel(); }}
+  >
+    <label><span>{props.label}</span>
+      <input
+        ref={inputRef}
+        inputMode="decimal"
+        aria-label={`${props.label} in ${props.unitLabel}`}
+        value={props.text}
+        onChange={(event) => props.onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") { event.preventDefault(); props.onCommit(); }
+          else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel(); }
+        }}
+      />
+      <small>{props.unitLabel}</small>
+    </label>
+    {props.reference !== undefined && <label className="dimension-reference-toggle">
+      <input type="checkbox" checked={props.reference} onChange={(event) => props.onReferenceChange?.(event.target.checked)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel(); } }} />
+      <span>Reference (measured, does not drive)</span>
+    </label>}
+    <em>{props.hint ?? "Enter applies a driving value · Esc closes"}</em>
+  </div>;
+}
