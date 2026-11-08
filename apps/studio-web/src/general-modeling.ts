@@ -209,7 +209,7 @@ export type CreateGeneralSolidResult =
   | { readonly ok: false; readonly message: string };
 
 /** Joins solids that do not touch into one body: their meshes side by side, their faces named per region. */
-export function mergeRegionBodies(bodies: readonly GeneralSolidBody[], base: { readonly id: string; readonly name: string; readonly color: string }): GeneralSolidBody {
+function mergeRegionBodies(bodies: readonly GeneralSolidBody[], base: { readonly id: string; readonly name: string; readonly color: string }): GeneralSolidBody {
   const positionsMm: number[] = [];
   const indices: number[] = [];
   const faces: { role: string; key: string; areaMm2: number }[] = [];
