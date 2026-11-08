@@ -1649,16 +1649,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           key={handle.id}
           className={`relation-point${pickedPoint?.id === handle.id ? " selected" : ""}`}
           data-relation-point={handle.id}
-          x={handle.point[0] - 6 * px}
-          y={-handle.point[1] - 6 * px}
-          width={12 * px}
-          height={12 * px}
+          x={handle.point[0] - hitSizes.relationPointPx * px}
+          y={-handle.point[1] - hitSizes.relationPointPx * px}
+          width={2 * hitSizes.relationPointPx * px}
+          height={2 * hitSizes.relationPointPx * px}
           role="button"
           aria-label={`${handle.label} (relation point)`}
           onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); pickRelationPoint(handle); }}
         />)}
         {props.dimensionMode && <>
-          {dimensionHandleEntities.flatMap(dimensionHandles).map((point) => <circle key={point.id} className={`dimension-point ${dimensionPoints.some((candidate) => candidate.id === point.id) ? "selected" : ""}`} data-dimension-point={point.id} cx={point.point[0]} cy={-point.point[1]} r={6 * px} role="button" aria-label={`${point.label} dimension point`} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); selectDimensionPoint(point); }} />)}
+          {dimensionHandleEntities.flatMap(dimensionHandles).map((point) => <circle key={point.id} className={`dimension-point ${dimensionPoints.some((candidate) => candidate.id === point.id) ? "selected" : ""}`} data-dimension-point={point.id} cx={point.point[0]} cy={-point.point[1]} r={hitSizes.dimensionPointPx * px} role="button" aria-label={`${point.label} dimension point`} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); selectDimensionPoint(point); }} />)}
           {directDimension !== undefined && <DirectDimensionPreview dimension={directDimension} px={px} />}
         </>}
         {selectionBox !== undefined && <rect
