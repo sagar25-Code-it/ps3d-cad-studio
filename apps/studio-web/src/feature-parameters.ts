@@ -17,6 +17,8 @@ export interface ParameterField {
   readonly max?: number;
   readonly exclusiveMin?: boolean;
   readonly hint?: string;
+  /** A field a caller may leave out: its value is then left as it is (the thread fields of a hole). */
+  readonly optional?: boolean;
   readonly read: (feature: DesignSolidFeature) => string;
   readonly write: (feature: DesignSolidFeature, value: number | readonly number[] | string) => DesignSolidFeature;
 }
@@ -40,6 +42,8 @@ const vector = (id: string, label: string, read: (feature: DesignSolidFeature) =
   write: (feature, value) => write(feature, value as readonly [number, number, number])
 });
 
+const optionalField = (field: ParameterField): ParameterField => ({ ...field, optional: true });
+
 type HoleThreadValue = NonNullable<DesignSolidFeature["holeThread"]>;
 const withThread = (feature: DesignSolidFeature, change: Partial<HoleThreadValue>): DesignSolidFeature => feature.holeThread === undefined ? feature : { ...feature, holeThread: { ...feature.holeThread, ...change } };
 
@@ -47,21 +51,22 @@ const withThread = (feature: DesignSolidFeature, change: Partial<HoleThreadValue
 function holeThreadFields(feature: DesignSolidFeature): readonly ParameterField[] {
   const pitch = feature.holeThread?.pitchMm ?? 1;
   return [
-    { id: "thread", label: "Thread", unit: "", input: "select", options: [{ value: "none", label: "No thread (plain hole)" }, { value: "cosmetic", label: "Cosmetic thread" }, { value: "modelled", label: "Modelled thread" }],
+    { id: "thread", label: "Thread", unit: "", optional: true, input: "select", options: [{ value: "none", label: "No thread (plain hole)" }, { value: "cosmetic", label: "Cosmetic thread" }, { value: "modelled", label: "Modelled thread" }],
       read: (f) => f.holeThread?.mode ?? "none",
       write: (f, v) => {
+        if (v !== "none" && v !== "cosmetic" && v !== "modelled") return f;
         if (v === "none") { const { holeThread: _drop, ...rest } = f; void _drop; return rest; }
         const mode = v === "modelled" ? "modelled" as const : "cosmetic" as const;
         return f.holeThread === undefined ? { ...f, holeThread: { mode, pitchMm: pitch, majorDiameterMm: Number(((f.holeDiameterMm ?? 5) + 1.0825 * pitch).toFixed(3)), handedness: "right" } } : withThread(f, { mode });
       } },
-    number("threadPitch", "Thread pitch", "mm", (f) => f.holeThread?.pitchMm ?? pitch, (f, v) => withThread(f, { pitchMm: v }), { ...positive, max: 50 }),
-    number("threadMajor", "Thread major diameter", "mm", (f) => f.holeThread?.majorDiameterMm ?? Number(((f.holeDiameterMm ?? 5) + 1.0825 * pitch).toFixed(3)), (f, v) => withThread(f, { majorDiameterMm: v }), { ...positive, max: 10_000, hint: "the hole's own diameter is the tap-drill (minor) diameter" }),
-    number("threadLength", "Thread length", "mm", (f) => f.holeThread?.lengthMm ?? 0, (f, v) => {
+    optionalField(number("threadPitch", "Thread pitch", "mm", (f) => f.holeThread?.pitchMm ?? pitch, (f, v) => withThread(f, { pitchMm: v }), { ...positive, max: 50 })),
+    optionalField(number("threadMajor", "Thread major diameter", "mm", (f) => f.holeThread?.majorDiameterMm ?? Number(((f.holeDiameterMm ?? 5) + 1.0825 * pitch).toFixed(3)), (f, v) => withThread(f, { majorDiameterMm: v }), { ...positive, max: 10_000, hint: "the hole's own diameter is the tap-drill (minor) diameter" })),
+    optionalField(number("threadLength", "Thread length", "mm", (f) => f.holeThread?.lengthMm ?? 0, (f, v) => {
       if (f.holeThread === undefined) return f;
       const { lengthMm: _drop, ...rest } = f.holeThread; void _drop;
       return { ...f, holeThread: v > 0 ? { ...rest, lengthMm: v } : rest };
-    }, { min: 0, max: 100_000, hint: "0 threads the hole's full depth" }),
-    handedness("threadHand", (f) => f.holeThread?.handedness, (f, v) => withThread(f, { handedness: v }))
+    }, { min: 0, max: 100_000, hint: "0 threads the hole's full depth" })),
+    optionalField(handedness("threadHand", (f) => f.holeThread?.handedness, (f, v) => withThread(f, { handedness: v })))
   ];
 }
 
@@ -202,6 +207,7 @@ export function applyParameterValues(feature: DesignSolidFeature, values: Readon
   if (fields === undefined) return { ok: false, message: "This step has no editable numbers." };
   let next = feature;
   for (const field of fields) {
+    if (field.optional === true && values[field.id] === undefined) continue;
     const raw = (values[field.id] ?? "").trim().replace(/,(?=\d)(?!.*,)/u, ".");
     if (field.input === "select") { next = field.write(next, raw); continue; }
     if (field.input === "vector") {
