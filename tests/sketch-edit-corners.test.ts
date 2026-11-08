@@ -1,3 +1,4 @@
+import { applyWorkbenchOperation } from "../packages/workbench-core/src/index.js";
 import { chamferCorners, chamferCornersAngle, chamferCornersAsymmetric, cornerLines, filletCorners } from "../packages/workbench-sketch/src/edit-tools.js";
 import { cornerByClick } from "../packages/workbench-sketch/src/corner-tools.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
@@ -27,6 +28,19 @@ export const sketchEditCornerTests: readonly TestCase[] = [
       equal(relationsOf(rounded, "coincident").length, 2, "the arc ends are joined to the lines");
       assert(!relationsOf(rounded, "coincident").some((c) => c.entityIds.includes("entity:a") && c.entityIds.includes("entity:b")), "the old corner joint is gone");
       equal(relationsOf(rounded, "horizontal").length + relationsOf(rounded, "vertical").length, 2, "the lines keep their horizontal and vertical relations");
+    }
+  },
+  {
+    name: "Sketch edit E01 relaxing relations first no longer leaves stale ones: after the fillet, restoring everything is consistent",
+    run: () => {
+      const project = drawnCorner();
+      const relaxed = applyWorkbenchOperation(project, { kind: "set-sketch-constraints-suppressed", operationId: "operation:et-relax", expectedRevision: project.revision, constraintIds: project.sketch.constraints.map((constraint) => constraint.id), suppressed: true });
+      assert(relaxed.ok, "relaxing applies");
+      const rounded = applyOk(relaxed.value.project, filletCorners(ctx(relaxed.value.project), ids("a", "b"), 10));
+      equal(rounded.sketch.constraints.some((constraint) => constraint.id === "constraint:joint"), false, "the relaxed corner joint, now untrue, is gone");
+      const restored = applyWorkbenchOperation(rounded, { kind: "set-sketch-constraints-suppressed", operationId: "operation:et-restore", expectedRevision: rounded.revision, constraintIds: rounded.sketch.constraints.filter((constraint) => constraint.suppressed === true).map((constraint) => constraint.id), suppressed: false });
+      assert(restored.ok, "restoring what is left applies");
+      deepProblems(restored.value.project);
     }
   },
   {

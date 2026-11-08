@@ -317,7 +317,11 @@ export const sketchEditToolTests: readonly TestCase[] = [
       assert(relaxed.ok, "relaxing applies");
       const retry = commit(relaxed.value.project, filletCorners(context(relaxed.value.project), ids("a", "b"), 2));
       assert(retry.ok, "with the relation relaxed the fillet goes through");
-      equal(constraintsOnEntities(retry.value.project.sketch, ["entity:b"], "relations", true).length, 1, "and the relation stays recorded as relaxed");
+      equal(constraintsOnEntities(retry.value.project.sketch, ["entity:b"], "relations", true).length, 0, "and the relaxed equal(b, c), which the shortened b makes untrue, is removed instead of being left stale");
+      const spare = projectWith([line("a", [0, 0], [10, 0]), line("b", [10, 0], [10, 10]), line("c", [20, 0], [20, 10]), line("d", [20, 10], [30, 10])], [{ id: "constraint:equal-cd", kind: "equal", entityIds: ["entity:c", "entity:d"], suppressed: true }]);
+      const untouched = commit(spare, filletCorners(context(spare), ids("a", "b"), 2));
+      assert(untouched.ok, "a fillet elsewhere applies");
+      equal(constraintsOnEntities(untouched.value.project.sketch, ["entity:c"], "relations", true).length, 1, "and a relaxed relation the edit does not touch stays recorded as relaxed");
     }
   },
   {

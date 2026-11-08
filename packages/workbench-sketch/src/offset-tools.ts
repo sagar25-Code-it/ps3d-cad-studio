@@ -637,7 +637,9 @@ export function offsetEntities(context: SketchEditContext, ids: readonly string[
   }
 
   if (lines.length > 0) {
-    const built = buildChains(lines, joinTolerance(sketch));
+    let built = buildChains(lines, joinTolerance(sketch));
+    // Pulling in tangent neighbours must never be what makes a selection branch: fall back to exactly what was selected.
+    if ("error" in built && chainIds.length > ids.length) built = buildChains(ids.map((id) => sketch.entities.find((entity) => entity.id === id)).filter(isRound), joinTolerance(sketch));
     if ("error" in built) return reject(built.error, built.ids, "Select one chain or loop at a time, or choose the chain option 'none' and pick the curves yourself.");
     for (const chain of built.chains) {
       const ids = chain.pieces.map((piece) => piece.entity.id);

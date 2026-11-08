@@ -336,6 +336,12 @@ export function settleRelations(sketch: WorkbenchSketch, plan: SketchEditPlan, o
     if (already.has(constraint.id) || (options.keep?.has(constraint.id) ?? false)) continue;
     if (constraint.entityIds.some((id) => removed.has(id))) continue;
     if (!constraint.entityIds.some((id) => touched.has(id))) continue;
+    if (constraint.suppressed === true) {
+      // A relaxed relation that the edit makes untrue would be left stale: restoring it later could not hold without undoing the edit.
+      const live = { ...constraint, suppressed: false };
+      if (constraintHolds(sketch, live) && !constraintHolds(applied.sketch, live)) broken.add(constraint.id);
+      continue;
+    }
     if (!constraintHolds(applied.sketch, constraint)) broken.add(constraint.id);
   }
   let result: SketchEditPlan = broken.size === 0 ? plan : { ...plan, removeConstraintIds: [...already, ...broken] };

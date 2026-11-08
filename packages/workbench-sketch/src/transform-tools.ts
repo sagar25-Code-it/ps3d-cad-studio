@@ -2,6 +2,7 @@ import { failure, type SketchEntity, type Vec2, type WorkbenchSketch, type Workb
 import { isDimensionConstraint, measureDimensionConstraint } from "../../workbench-core/src/sketch-measure.js";
 import { entityExtents, entityPoints } from "./index.js";
 import { mapEntity, type SketchEditContext, type SketchEditResult } from "./edit-tools.js";
+import { arcTravel } from "./corner-tools.js";
 import { alignParallelDirections, constraintHolds, finishPlan, finiteVec, nameOf, pairRelation } from "./edit-relations.js";
 import { internalRelations } from "./sketch-clone.js";
 
@@ -381,9 +382,23 @@ export interface StretchWindow {
   readonly y2: number;
 }
 
+/** The exact extent of an arc: its end points plus any quarter-turn extreme the sweep passes through. */
+function arcExtents(entity: Extract<SketchEntity, { kind: "arc" }>): { readonly min: Vec2; readonly max: Vec2 } {
+  const travel = arcTravel(entity);
+  const points: Vec2[] = [entity.start, entity.end];
+  if (travel !== undefined) {
+    for (let quarter = 0; quarter < 4; quarter += 1) {
+      const angle = (quarter * Math.PI) / 2;
+      const offset = (((travel.dir * (angle - travel.startAngle)) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      if (offset <= travel.sweep) points.push([travel.center[0] + travel.radius * Math.cos(angle), travel.center[1] + travel.radius * Math.sin(angle)]);
+    }
+  }
+  return { min: [Math.min(...points.map((point) => point[0])), Math.min(...points.map((point) => point[1]))], max: [Math.max(...points.map((point) => point[0])), Math.max(...points.map((point) => point[1]))] };
+}
+
 /** The true bounding box of the selected entities (arc and ellipse extremes included), for seeding a stretch window. */
 export function selectionBounds(sketch: WorkbenchSketch, ids: readonly string[]): StretchWindow | undefined {
-  const boxes = ids.map((id) => find(sketch, id)).filter((entity): entity is SketchEntity => entity !== undefined).map(entityExtents);
+  const boxes = ids.map((id) => find(sketch, id)).filter((entity): entity is SketchEntity => entity !== undefined).map((entity) => (entity.kind === "arc" ? arcExtents(entity) : entityExtents(entity)));
   if (boxes.length === 0) return undefined;
   return {
     x1: Math.min(...boxes.map((box) => box.min[0])),

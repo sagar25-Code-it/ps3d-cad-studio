@@ -187,12 +187,12 @@ export const sketchEditTransformTests: readonly TestCase[] = [
   {
     name: "Sketch edit E16 selection bounds hold the true extent of arcs and ellipses",
     run: () => {
-      const quarter = projectWith([arc("a", [10, 0], [-7.0710678, 7.0710678], [0, -10])]);
+      const quarter = projectWith([arc("a", [10, 0], [-7.0710678118654755, 7.0710678118654755], [0, -10])]);
       const bounds = selectionBounds(quarter.sketch, ids("a"))!;
-      near(bounds.x1, -10, 0.05, "the arc reaches x = -10");
-      near(bounds.x2, 10, 0.05, "and x = 10");
-      near(bounds.y1, -10, 0.05, "and y = -10");
-      near(bounds.y2, 10, 0.05, "and y = +10");
+      near(bounds.x1, -10, 1e-9, "the arc reaches x = -10 exactly");
+      near(bounds.x2, 10, 1e-9, "and x = 10");
+      near(bounds.y1, -10, 1e-9, "and y = -10");
+      near(bounds.y2, 10, 1e-9, "and y = +10");
       const flat = projectWith([ellipse("e", [0, 0], 30, 10)]);
       const ellipseBounds = selectionBounds(flat.sketch, ids("e"))!;
       near(ellipseBounds.y2, 10, 1e-9, "an ellipse 30 x 10 is 10 high, not 30");
