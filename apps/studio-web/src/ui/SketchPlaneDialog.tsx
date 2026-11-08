@@ -17,7 +17,7 @@ interface SketchPlaneOption {
 const SKETCH_PLANES: readonly SketchPlaneOption[] = [
   { plane: "xy", label: "Top (XY)", view: "Top view", icon: "axes", hint: "Floor plane · Z up" },
   { plane: "xz", label: "Front (XZ)", view: "Front view", icon: "axes", hint: "Looking along −Y" },
-  { plane: "yz", label: "Right (YZ)", view: "Right view", icon: "axes", hint: "Looking along +X" }
+  { plane: "yz", label: "Right (YZ)", view: "Right view", icon: "axes", hint: "Looking along +X · sketch X runs along world -Z, Y is up" }
 ];
 
 /** A planar face of a solid the sketch can sit on, already reduced to its plane and offset. */

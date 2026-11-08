@@ -811,7 +811,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       setDimensionEdit(next);
       // A dimension bound to an expression shows the expression, so it can be edited as text; a circle shows its diameter.
       const bound = existing?.expression === undefined ? undefined : entity.kind === "circle" ? unhalvedExpression(existing.expression) : existing.expression;
-      setDimensionText(bound ?? String(Number(shown.toFixed(3))));
+      const inInches = (props.displayUnit ?? "mm") === "in" && dimension !== "angle";
+      setDimensionText(bound ?? (inInches ? String(Number((shown / 25.4).toFixed(4))) : String(Number(shown.toFixed(3)))));
     }, 0);
   };
 
@@ -827,7 +828,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const commitDimensionEdit = (): void => {
     const edit = dimensionEdit;
     if (edit === undefined) return;
-    const typed = parseDynamicNumber(dimensionText);
+    // A length is read with its unit (12 mm, 1/2 in, 3/4"); a bare number takes the display unit. An angle stays a plain number of degrees.
+    const lengthRead = edit.dimension === "angle" ? undefined : readSketchLength(dimensionText, props.displayUnit ?? "mm");
+    const typed = edit.dimension === "angle" ? parseDynamicNumber(dimensionText) : lengthRead?.ok === true ? lengthRead.valueMm : undefined;
     const entity = props.sketch.entities.find((candidate) => candidate.id === edit.entityId);
     // Text that is not a number is an expression (plate_w / 2): the dimension is bound to it. The project checks it and says what is wrong.
     if (typed === undefined && dimensionText.trim() !== "" && dimensionText.trim() !== "-") {
@@ -838,6 +841,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       setDimensionEdit(undefined);
       return;
     }
+    if (typed !== undefined && edit.dimension !== "angle" && typed > 0 && typed < 0.01) { props.onMessage("The smallest size a sketch can hold is 0.01 mm. Type a larger value."); return; }
+    if (typed !== undefined && edit.dimension !== "angle" && typed > 200_000) { props.onMessage("The largest sketch size is 200,000 mm (200 m). Type a smaller value."); return; }
     if (typed === undefined || (edit.dimension === "angle" ? typed < 0 || typed >= 360 : typed <= 0)) { props.onMessage(edit.dimension === "angle" ? "Type an angle from 0 up to 360 degrees." : "Type a size greater than zero."); return; }
     // A circle is dimensioned by its diameter on the canvas; the model stores the radius.
     props.onSetDimension(edit.entityId, edit.dimension, entity?.kind === "circle" && edit.dimension === "radius" ? typed / 2 : typed, edit.secondEntityId === undefined ? undefined : { secondEntityId: edit.secondEntityId });
@@ -1790,7 +1795,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
 /** A driving dimension drawn like a drawing dimension: extension lines, a dimension line with arrowheads, and editable text. */
 function DimensionMarks({ entity, dimension, valueMm, relaxed, px, onEdit }: { readonly entity: SketchEntity; readonly dimension: DrivingDimension; readonly valueMm: number; readonly relaxed: boolean; readonly px: number; readonly onEdit?: () => void }): React.JSX.Element {
-  const layout = dimensionLayout(entity, dimension, valueMm, px);
+  const markUnit = useSketchUnit();
+  const layout = dimensionLayout(entity, dimension, markUnit === "in" && dimension !== "angle" ? valueMm / 25.4 : valueMm, px);
   if (layout === undefined) return <></>;
   const flip = (point: Vec2): string => `${point[0]},${-point[1]}`;
   const textWidth = (layout.label.length * 7.4 + 12) * px;
