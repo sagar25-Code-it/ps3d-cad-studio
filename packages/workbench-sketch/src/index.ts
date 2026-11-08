@@ -160,6 +160,45 @@ export function analyzeWorkbenchSketch(sketch: WorkbenchSketch): SketchAnalysis 
       applied += 1;
       continue;
     }
+    // A driven (reference) dimension is measured from the geometry; it takes no freedom and can conflict with nothing.
+    if (constraint.driven === true) continue;
+    if (constraint.kind === "angle" || constraint.kind === "arc-length" || constraint.kind === "perimeter") {
+      const entities = constraint.entityIds.map((id) => sketch.entities.find((candidate) => candidate.id === id));
+      if (!constraintFit(constraint.kind, entities.map((entity) => entity?.kind), constraint.points).ok) conflicts.push(`${constraint.id} does not apply to these curves.`);
+      const value = constraint.kind === "angle" ? constraint.valueDeg : constraint.valueMm;
+      if (value === undefined) conflicts.push(`${constraint.id} requires a numeric value.`);
+      else {
+        const key = `${constraint.kind}:${constraint.entityIds.join("|")}`;
+        const prior = scalarValues.get(key);
+        if (prior !== undefined && Math.abs(prior - value) > 1e-9) conflicts.push(`${constraint.id} conflicts with another ${constraint.kind} value.`);
+        scalarValues.set(key, value);
+      }
+      reduce(freedom, constraint.entityIds, 1);
+      applied += 1;
+      continue;
+    }
+    if (constraint.kind === "smooth") {
+      const entities = constraint.entityIds.map((id) => sketch.entities.find((candidate) => candidate.id === id));
+      if (!constraintFit("smooth", entities.map((entity) => entity?.kind), constraint.points).ok) conflicts.push(`${constraint.id} needs a spline end meeting a line, arc or spline end.`);
+      // Joining the ends (2), matching the tangent (1) and matching the curvature (1) all act on the spline.
+      const splineId = constraint.entityIds.find((id) => sketch.entities.find((candidate) => candidate.id === id)?.kind === "spline") ?? constraint.entityIds[0]!;
+      reduce(freedom, [splineId], 4);
+      applied += 1;
+      continue;
+    }
+    if (constraint.kind === "pierce") {
+      if (constraint.entityIds.length !== 1 || sketch.entities.find((candidate) => candidate.id === constraint.entityIds[0])?.kind !== "point") conflicts.push(`${constraint.id} requires a sketch point.`);
+      reduce(freedom, constraint.entityIds, 2);
+      applied += 1;
+      continue;
+    }
+    if (constraint.kind === "refraction") {
+      const entities = constraint.entityIds.map((id) => sketch.entities.find((candidate) => candidate.id === id));
+      if (!constraintFit("refraction", entities.map((entity) => entity?.kind)).ok) conflicts.push(`${constraint.id} requires three lines.`);
+      reduce(freedom, [constraint.entityIds[1]!], 1);
+      applied += 1;
+      continue;
+    }
     if (constraint.kind === "radius" || constraint.kind === "distance") {
       if (constraint.valueMm === undefined) conflicts.push(`${constraint.id} requires a numeric value.`);
       const key = `${constraint.kind}:${constraint.dimension ?? "generic"}:${constraint.entityIds.join("|")}`;

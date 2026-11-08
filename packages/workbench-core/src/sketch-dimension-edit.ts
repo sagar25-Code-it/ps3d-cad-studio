@@ -1,5 +1,5 @@
 import { constraintFit } from "./constraint-fit.js";
-import { measureDimensionConstraint } from "./sketch-measure.js";
+import { arcShape, measureDimensionConstraint } from "./sketch-measure.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
 import type { SketchDimensionName, SketchEntity, WorkbenchOperation, WorkbenchProject, WorkbenchResult, WorkbenchSketchConstraint } from "./types.js";
 import { failure, WORKBENCH_LIMITS } from "./validation.js";
@@ -42,6 +42,14 @@ function resizeDirect(entity: SketchEntity, dimension: SketchDimensionName, valu
     return { ...entity, end: [entity.start[0] + (dx / current) * valueMm, entity.start[1] + (dy / current) * valueMm] as const };
   }
   if (entity.kind === "circle" && dimension === "radius") return { ...entity, radiusMm: valueMm };
+  if (entity.kind === "circle" && dimension === "perimeter") return { ...entity, radiusMm: valueMm / (2 * Math.PI) };
+  if (entity.kind === "arc" && dimension === "radius") {
+    const shape = arcShape(entity.start, entity.mid, entity.end);
+    if (shape === undefined) return undefined;
+    const scale = valueMm / shape.radiusMm;
+    const about = (point: readonly [number, number]): readonly [number, number] => [shape.center[0] + (point[0] - shape.center[0]) * scale, shape.center[1] + (point[1] - shape.center[1]) * scale];
+    return { ...entity, start: about(entity.start), mid: about(entity.mid), end: about(entity.end) };
+  }
   if (entity.kind === "rectangle" && dimension === "width") return { ...entity, widthMm: valueMm };
   if (entity.kind === "rectangle" && dimension === "height") return { ...entity, heightMm: valueMm };
   return undefined;
