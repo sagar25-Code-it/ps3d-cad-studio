@@ -107,3 +107,81 @@ function stableFaultHash(value: string): string {
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
+
+/**
+ * Which workspaces a notice from `noticeWorkspace` is worth interrupting. Vehicle and electrical findings are about those studies
+ * only: they must not pop up while someone sketches a mechanical part. Part, Sketch, Assembly, Surface and Drawing share the
+ * solid model, so a problem in one is shown in its neighbours. Automate sees everything. A notice with no workspace (an operation
+ * failure, a browser runtime fault) is relevant everywhere.
+ */
+const RELATED_WORKSPACES: Readonly<Record<WorkspaceId, readonly WorkspaceId[]>> = {
+  sketch: ["sketch", "part"],
+  part: ["part", "sketch", "assembly"],
+  assembly: ["assembly", "part"],
+  surface: ["surface", "part"],
+  drawing: ["drawing", "part"],
+  electrical: ["electrical", "assembly"],
+  vehicle: ["vehicle"],
+  automate: ["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"]
+};
+
+export function isNoticeRelevantToWorkspace(notice: Pick<FaultBrainNotice, "workspace">, active: WorkspaceId): boolean {
+  return notice.workspace === undefined || RELATED_WORKSPACES[active].includes(notice.workspace);
+}
+
+export interface PartitionedNotices {
+  readonly relevant: readonly FaultBrainNotice[];
+  readonly elsewhere: readonly FaultBrainNotice[];
+}
+
+export function partitionNoticesByWorkspace(notices: readonly FaultBrainNotice[], active: WorkspaceId): PartitionedNotices {
+  const relevant: FaultBrainNotice[] = [];
+  const elsewhere: FaultBrainNotice[] = [];
+  for (const notice of notices) (isNoticeRelevantToWorkspace(notice, active) ? relevant : elsewhere).push(notice);
+  return { relevant, elsewhere };
+}
+
+/**
+ * The key a dismissal is stored under. It is the notice id plus its severity, so acknowledging a warning keeps it quiet however
+ * its count or wording changes, while the same finding turning into an error is a new event and is shown again.
+ */
+export function faultDismissalKey(notice: Pick<FaultBrainNotice, "id" | "severity">): string {
+  return `${notice.id}|${notice.severity}`;
+}
+
+const DISMISSED_STORAGE_KEY = "ps3d.faultBrain.dismissed.v1";
+const DISMISSED_LIMIT = 200;
+
+interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+/** Reads the acknowledged keys; a missing, blocked or damaged store is an empty set. */
+export function loadDismissedFaults(storage: StorageLike | undefined): ReadonlySet<string> {
+  try {
+    const raw = storage?.getItem(DISMISSED_STORAGE_KEY);
+    if (raw === null || raw === undefined) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === "string").slice(-DISMISSED_LIMIT) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function saveDismissedFaults(storage: StorageLike | undefined, keys: ReadonlySet<string>): void {
+  try {
+    storage?.setItem(DISMISSED_STORAGE_KEY, JSON.stringify([...keys].slice(-DISMISSED_LIMIT)));
+  } catch {
+    // A full or blocked store only means the acknowledgement lasts until the page closes.
+  }
+}
+
+/**
+ * The one notice that may interrupt now: the first relevant one that is neither acknowledged nor already announced. `announced` holds
+ * dismissal keys and only grows within a session, so a notice that goes away and comes back (a re-render, a revision change) is not
+ * announced a second time, and an acknowledged one never is.
+ */
+export function nextAnnouncement(relevant: readonly FaultBrainNotice[], dismissed: ReadonlySet<string>, announced: ReadonlySet<string>): FaultBrainNotice | undefined {
+  return relevant.find((notice) => !dismissed.has(faultDismissalKey(notice)) && !announced.has(faultDismissalKey(notice)));
+}

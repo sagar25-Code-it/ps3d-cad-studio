@@ -1,3 +1,4 @@
+import { sketchEntityNames } from "../../../../packages/workbench-core/src/sketch-names.js";
 import { useEffect, useMemo, useState } from "react";
 import type { SketchEntity, WorkbenchSketch, WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
 import {
@@ -215,7 +216,7 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
       </>}
     </div>}
     {props.tool === "dynamic-mirror" && <>
-      <p className="profile-help">{props.dynamicMirrorAxis == null ? "Not mirroring." : `Mirroring about ${props.dynamicMirrorAxis.replace(/^entity:/u, "")}. New curves are drawn with their mirror image.`}</p>
+      <p className="profile-help">{props.dynamicMirrorAxis == null ? "Not mirroring." : `Mirroring about ${sketchEntityNames(props.sketch.entities).get(props.dynamicMirrorAxis) ?? "the axis"}. New curves are drawn with their mirror image.`}</p>
       <button className="palette-action primary" onClick={() => {
         const axis = resolveMirrorAxis(props.sketch, props.selectionIds);
         if (axis === undefined) { props.onMessage("Select the mirror line first, then press Start."); return; }

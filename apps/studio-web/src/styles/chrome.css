@@ -1,0 +1,146 @@
+/*
+ * App chrome: sketch plane chip and primary New Sketch button, the docked/foldable sketch palette, the plane dialog diagram,
+ * the "newer version" banner, the build label in the status bar and the About dialog. Loaded after the theme sheets and before
+ * the responsive policy so the responsive rules can still collapse it.
+ */
+
+/* ---- Primary ribbon button (New Sketch) ---- */
+.studio-app .ribbon-button.primary {
+  border-color: #c62836;
+  background: linear-gradient(180deg, #d93a48, #b51e2b);
+  box-shadow: inset 0 1px 0 #ffffff55, 0 1px 3px #9f1c2744;
+}
+.studio-app .ribbon-button.primary > span,
+.studio-app .ribbon-button.primary > strong,
+.studio-app .ribbon-button.primary > small { color: #ffffff; }
+.studio-app .ribbon-button.primary:hover:not(:disabled) { border-color: #9f1c27; background: linear-gradient(180deg, #e04656, #c02432); }
+
+/* ---- Sketch plane chip: ribbon variant and canvas variant ---- */
+.studio-app .sketch-plane-chip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 168px;
+  max-width: 260px;
+  height: 70px;
+  padding: 2px 8px;
+  border: 1px solid #9ec3da;
+  border-radius: 6px;
+  color: #155ead;
+  background: linear-gradient(180deg, #f4faff, #e3f1fa);
+  box-shadow: inset 0 1px 0 #ffffff, 0 1px 2px #30363b12;
+  text-align: left;
+  cursor: pointer;
+}
+.studio-app .sketch-plane-chip:hover { border-color: #1877b3; background: #ffffff; }
+.studio-app .sketch-plane-chip .command-icon { width: 19px; height: 19px; }
+.studio-app .sketch-plane-chip-text { display: grid; min-width: 0; gap: 1px; }
+.studio-app .sketch-plane-chip-text small { color: #4d6f86; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.studio-app .sketch-plane-chip-text strong { overflow: hidden; color: #1b3a52; font-size: 12px; line-height: 14px; text-overflow: ellipsis; }
+.studio-app .sketch-plane-chip em { color: #155ead; font-size: 11px; font-style: normal; font-weight: 700; text-decoration: underline; }
+.studio-app .sketch-plane-chip.canvas {
+  position: absolute;
+  z-index: 7;
+  top: 4.3rem;
+  left: 0.72rem;
+  height: auto;
+  min-width: 0;
+  padding: 4px 10px;
+  box-shadow: 0 4px 12px #15191d33;
+}
+
+/* ---- Sketch palette: docked beside the canvas, floating, or folded ---- */
+.studio-app .sketch-stage { --sketch-palette-width: 204px; }
+.studio-app .sketch-palette .palette-header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.25rem; }
+.studio-app .sketch-stage .sketch-palette .palette-header-actions button { padding: 0.25rem 0.45rem; font-size: 0.74rem; }
+.studio-app .sketch-stage .sketch-palette.docked {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  max-height: none;
+  width: var(--sketch-palette-width);
+  overflow-y: auto;
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  box-shadow: -4px 0 14px #15191d1f;
+}
+.studio-app .sketch-stage.palette-docked .sketch-canvas { width: calc(100% - var(--sketch-palette-width)); }
+.studio-app .sketch-stage.palette-docked .canvas-hud,
+.studio-app .sketch-stage.palette-docked .viewport-controller { right: calc(var(--sketch-palette-width) + 0.72rem); }
+.studio-app .sketch-stage .sketch-palette.collapsed {
+  top: 0.72rem;
+  right: 0.72rem;
+  bottom: auto;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+  border-width: 1px;
+  border-radius: 8px;
+}
+.studio-app .sketch-palette.collapsed > :not(header) { display: none; }
+.studio-app .sketch-palette.collapsed header { padding-bottom: 0; border-bottom: 0; }
+
+/* ---- Plane dialog ---- */
+.sketch-plane-diagram { display: block; width: min(100%, 250px); height: auto; margin: 0 auto 0.4rem; }
+.sketch-plane-diagram polygon { fill: #1877b320; stroke: #1877b3; stroke-width: 1.4; cursor: pointer; }
+.sketch-plane-diagram g:hover polygon { fill: #1877b340; }
+.sketch-plane-diagram g.chosen polygon { fill: #c6283655; stroke: #c62836; stroke-width: 2.2; }
+.sketch-plane-diagram text { fill: #34505f; font-size: 11px; pointer-events: none; }
+.sketch-plane-diagram g.chosen text { fill: #9f1c27; font-weight: 700; }
+.sketch-plane-diagram .origin { fill: #34505f; }
+.sketch-plane-current { margin: 0 0 0.5rem; padding: 0.4rem 0.6rem; border: 1px solid #b9d6e7; border-radius: 5px; color: #1b3a52; background: #eaf5fb; font-size: 0.82rem; }
+.sketch-plane-points > summary { cursor: pointer; }
+
+/* ---- Newer-version banner ---- */
+.update-banner {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.9rem;
+  border-bottom: 1px solid #1877b3;
+  color: #0f2f45;
+  background: #dff0fb;
+  font-size: 0.86rem;
+}
+.update-banner button { padding: 0.25rem 0.7rem; border: 1px solid #1877b3; border-radius: 4px; color: #0f2f45; background: #ffffff; cursor: pointer; }
+.update-banner .update-banner-reload { color: #ffffff; background: #1877b3; font-weight: 700; }
+.update-banner .update-banner-dismiss { margin-left: auto; padding: 0.1rem 0.5rem; border-color: transparent; background: transparent; font-size: 1.1rem; line-height: 1; }
+.update-banner-warning { color: #8a1c26; font-weight: 600; }
+
+/* ---- Status bar build label ---- */
+.status-facts .status-build {
+  padding: 0 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-transform: none;
+  cursor: pointer;
+}
+.status-facts .status-build:hover { border-color: #aeb5bb; background: #ffffff; }
+
+/* ---- About dialog ---- */
+.about-build { display: grid; gap: 0.3rem; margin: 0 0 0.6rem; }
+.about-build > div { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: 0.5rem; }
+.about-build dt { color: #5b6a74; font-size: 0.82rem; }
+.about-build dd { margin: 0; overflow-wrap: anywhere; font-size: 0.86rem; }
+.about-commit { font-family: var(--mono); }
+.about-verdict { margin-bottom: 0.6rem; padding: 0.4rem 0.6rem; border: 1px solid #9ccbb0; border-radius: 5px; color: #1d4a33; background: #e9f6ee; font-size: 0.84rem; }
+.about-verdict.stale { border-color: #1877b3; color: #0f2f45; background: #dff0fb; }
+.about-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem; }
+
+/* ---- Smart Brain scope note ---- */
+.fault-brain-scope { margin: 0.3rem 0; font-size: 0.8rem; }
+.fault-brain-scope button { margin-left: 0.4rem; }
+
+@media (max-width: 720px) {
+  .studio-app .sketch-stage .sketch-palette.docked { position: absolute; width: min(var(--sketch-palette-width), 70vw); }
+  .studio-app .sketch-stage.palette-docked .sketch-canvas { width: 100%; }
+  .studio-app .sketch-plane-chip.canvas { top: 3.6rem; }
+}

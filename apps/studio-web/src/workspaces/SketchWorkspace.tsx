@@ -42,8 +42,12 @@ import { SketchGrid } from "./sketch/SketchGrid.js";
 import { ConstraintExtras, ExtraDimensionMarks, type ConstraintExtrasBridge, type SetDimensionRequest } from "./sketch/ConstraintExtras.js";
 import { angleDimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { angleBetweenLinesDeg, entityLengthMm } from "../../../../packages/workbench-core/src/sketch-measure.js";
+import { sketchEntityNames } from "../../../../packages/workbench-core/src/sketch-names.js";
 import { useSketchCamera } from "./sketch/useSketchCamera.js";
 import { useSketchHotkeys } from "./sketch/useSketchHotkeys.js";
+import { useSketchPref } from "./sketch/useSketchPref.js";
+import { describeSketchPlane } from "../sketch-plane-ui.js";
+import { DEFAULT_PALETTE_LAYOUT } from "./sketch/sketch-prefs.js";
 import {
   type NavigationMode,
   type SelectionFilter,
@@ -257,7 +261,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [cursor, setCursor] = useState<Vec2>([0, 0]);
   const [inference, setInference] = useState<InferenceResult | undefined>(undefined);
   // Relations drawn with a shape (Coincident at snapped ends, Horizontal on a level guide...) and the snap each placed point had.
-  const [autoConstrain, setAutoConstrain] = useState(true);
+  const [autoConstrain, setAutoConstrain] = useSketchPref("autoConstrain", true);
   const [pendingInference, setPendingInference] = useState<readonly PlacedPointInference[]>([]);
   // Picking the points of a Coincident or Midpoint relation on the canvas.
   const [pickRelation, setPickRelation] = useState<"coincident" | "midpoint" | null>(null);
@@ -265,9 +269,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // The in-place value editor for a driving dimension (opened from Sketch Dimension, or by clicking a dimension's text).
   const [dimensionEdit, setDimensionEdit] = useState<{ readonly entityId: string; readonly dimension: DrivingDimension; readonly anchor: Vec2; readonly label: string; readonly secondEntityId?: string } | undefined>(undefined);
   const [dimensionText, setDimensionText] = useState("");
-  const [polygonSides, setPolygonSides] = useState(String(POLYGON_DEFAULT_SIDES));
+  const [polygonSides, setPolygonSides] = useSketchPref("polygonSides", String(POLYGON_DEFAULT_SIDES));
   // The extra curve tools (rounded rectangle, conics, blend, profile, text ...): their palette numbers, and the Profile chain being drawn.
-  const [curveFields, setCurveFields] = useState(DEFAULT_CURVE_OPTION_FIELDS);
+  const [curveFields, setCurveFields] = useSketchPref("curveFields", DEFAULT_CURVE_OPTION_FIELDS);
   const profileChain = useRef<ProfileChain | undefined>(undefined);
   // Reusable sketch blocks live in the browser (not in the project file); a blocked or missing localStorage just keeps them in memory.
   const [blockLibrary] = useState(() => createBlockLibrary((() => { try { return window.localStorage; } catch { return undefined; } })()));
@@ -292,48 +296,48 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setStretchWindowState((current) => (current !== undefined && next !== undefined && current.x1 === next.x1 && current.y1 === next.y1 && current.x2 === next.x2 && current.y2 === next.y2) || (current === undefined && next === undefined) ? current : next);
   }, []);
   /** Jog values typed in the Jog panel, read when a line is clicked. */
-  const [jogParams, setJogParams] = useState<JogParams>(DEFAULT_JOG_PARAMS);
+  const [jogParams, setJogParams] = useSketchPref<JogParams>("jogParams", DEFAULT_JOG_PARAMS);
   /** Dynamic Mirror: the line new curves are mirrored about, or null when off. It outlives the edit panel so drawing tools can use it. */
-  const [dynamicMirrorAxis, setDynamicMirrorAxis] = useState<string | null>(null);
+  const [dynamicMirrorAxis, setDynamicMirrorAxis] = useSketchPref<string | null>("dynamicMirrorAxis", null, { durable: false });
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
-  const [snapEnabled, setSnapEnabled] = useState(true);
-  const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem">("extrude");
-  const [solidValue, setSolidValue] = useState("10");
-  const [sweepDx, setSweepDx] = useState("0");
-  const [sweepDy, setSweepDy] = useState("0");
-  const [sweepDz, setSweepDz] = useState("1");
-  const [sweepMode, setSweepMode] = useState<"direction" | "path">("direction");
-  const [sweepPathEntityId, setSweepPathEntityId] = useState<string>("");
-  const [loftTopScale, setLoftTopScale] = useState("0.7");
-  const [loftMode, setLoftMode] = useState<"scaled" | "two-profile">("scaled");
-  const [loftContinuity, setLoftContinuity] = useState<"position" | "tangent" | "curvature">("position");
-  const [loftRailEntityId, setLoftRailEntityId] = useState<string>("");
-  const [loftTangencyWeight, setLoftTangencyWeight] = useState("1");
-  const [sweepTwist, setSweepTwist] = useState("0");
-  const [sweepFrameTransport, setSweepFrameTransport] = useState(false);
-  const [helixRadius, setHelixRadius] = useState("20");
-  const [helixPitch, setHelixPitch] = useState("5");
-  const [helixTurns, setHelixTurns] = useState("4");
-  const [helixHandedness, setHelixHandedness] = useState<"right" | "left">("right");
-  const [threadPitch, setThreadPitch] = useState("2");
-  const [threadTurns, setThreadTurns] = useState("8");
-  const [threadDepth, setThreadDepth] = useState("10");
-  const [threadHandedness, setThreadHandedness] = useState<"right" | "left">("right");
-  const [ribThickness, setRibThickness] = useState("2");
-  const [domeHeight, setDomeHeight] = useState("8");
-  const [sheetThickness, setSheetThickness] = useState("2");
-  const [sheetBendRadius, setSheetBendRadius] = useState("2");
-  const [flangeLength, setFlangeLength] = useState("20");
-  const [flangeAngle, setFlangeAngle] = useState("90");
-  const [hemStyle, setHemStyle] = useState<"closed" | "open">("closed");
-  const [modifierEdgeSize, setModifierEdgeSize] = useState("1");
-  const [shellThickness, setShellThickness] = useState("2");
-  const [shellOpenFace, setShellOpenFace] = useState<"top" | "bottom" | "none">("top");
-  const [draftAngle, setDraftAngle] = useState("5");
-  const [draftNeutralFace, setDraftNeutralFace] = useState<"top" | "bottom">("bottom");
-  const [reach, setReach] = useState<ReachSettings>(DEFAULT_REACH);
-  const [solidResult, setSolidResult] = useState<"new-body" | "join" | "cut">("new-body");
-  const [solidTarget, setSolidTarget] = useState("");
+  const [snapEnabled, setSnapEnabled] = useSketchPref("snapEnabled", true);
+  const [solidOp, setSolidOp] = useSketchPref<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem">("solidOp", "extrude");
+  const [solidValue, setSolidValue] = useSketchPref("solidValue", "10");
+  const [sweepDx, setSweepDx] = useSketchPref("sweepDx", "0");
+  const [sweepDy, setSweepDy] = useSketchPref("sweepDy", "0");
+  const [sweepDz, setSweepDz] = useSketchPref("sweepDz", "1");
+  const [sweepMode, setSweepMode] = useSketchPref<"direction" | "path">("sweepMode", "direction");
+  const [sweepPathEntityId, setSweepPathEntityId] = useSketchPref<string>("sweepPathEntityId", "", { durable: false });
+  const [loftTopScale, setLoftTopScale] = useSketchPref("loftTopScale", "0.7");
+  const [loftMode, setLoftMode] = useSketchPref<"scaled" | "two-profile">("loftMode", "scaled");
+  const [loftContinuity, setLoftContinuity] = useSketchPref<"position" | "tangent" | "curvature">("loftContinuity", "position");
+  const [loftRailEntityId, setLoftRailEntityId] = useSketchPref<string>("loftRailEntityId", "", { durable: false });
+  const [loftTangencyWeight, setLoftTangencyWeight] = useSketchPref("loftTangencyWeight", "1");
+  const [sweepTwist, setSweepTwist] = useSketchPref("sweepTwist", "0");
+  const [sweepFrameTransport, setSweepFrameTransport] = useSketchPref("sweepFrameTransport", false);
+  const [helixRadius, setHelixRadius] = useSketchPref("helixRadius", "20");
+  const [helixPitch, setHelixPitch] = useSketchPref("helixPitch", "5");
+  const [helixTurns, setHelixTurns] = useSketchPref("helixTurns", "4");
+  const [helixHandedness, setHelixHandedness] = useSketchPref<"right" | "left">("helixHandedness", "right");
+  const [threadPitch, setThreadPitch] = useSketchPref("threadPitch", "2");
+  const [threadTurns, setThreadTurns] = useSketchPref("threadTurns", "8");
+  const [threadDepth, setThreadDepth] = useSketchPref("threadDepth", "10");
+  const [threadHandedness, setThreadHandedness] = useSketchPref<"right" | "left">("threadHandedness", "right");
+  const [ribThickness, setRibThickness] = useSketchPref("ribThickness", "2");
+  const [domeHeight, setDomeHeight] = useSketchPref("domeHeight", "8");
+  const [sheetThickness, setSheetThickness] = useSketchPref("sheetThickness", "2");
+  const [sheetBendRadius, setSheetBendRadius] = useSketchPref("sheetBendRadius", "2");
+  const [flangeLength, setFlangeLength] = useSketchPref("flangeLength", "20");
+  const [flangeAngle, setFlangeAngle] = useSketchPref("flangeAngle", "90");
+  const [hemStyle, setHemStyle] = useSketchPref<"closed" | "open">("hemStyle", "closed");
+  const [modifierEdgeSize, setModifierEdgeSize] = useSketchPref("modifierEdgeSize", "1");
+  const [shellThickness, setShellThickness] = useSketchPref("shellThickness", "2");
+  const [shellOpenFace, setShellOpenFace] = useSketchPref<"top" | "bottom" | "none">("shellOpenFace", "top");
+  const [draftAngle, setDraftAngle] = useSketchPref("draftAngle", "5");
+  const [draftNeutralFace, setDraftNeutralFace] = useSketchPref<"top" | "bottom">("draftNeutralFace", "bottom");
+  const [reach, setReach] = useSketchPref<ReachSettings>("reach", DEFAULT_REACH);
+  const [solidResult, setSolidResult] = useSketchPref<"new-body" | "join" | "cut">("solidResult", "new-body");
+  const [solidTarget, setSolidTarget] = useSketchPref("solidTarget", "", { durable: false });
   // A join or cut acts on the picked solid, else the selected one, else the newest.
   const effectiveTarget = props.solidBodies.some((body) => body.id === solidTarget) ? solidTarget
     : props.solidBodies.some((body) => body.id === props.selectedId) ? props.selectedId ?? ""
@@ -343,13 +347,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const cutThroughAll = modifying && solidResult === "cut" && solidOp === "extrude" && reach.extent === "through-all";
   // A "to" extent measures its own distance or angle from the target, so the typed value is not used.
   const reachesTarget = (solidOp === "extrude" || solidOp === "revolve") && isReachTarget(reach.extent) && !cutThroughAll;
-  const [edgeKind, setEdgeKind] = useState<"none" | "chamfer" | "fillet">("none");
-  const [edgeSize, setEdgeSize] = useState("2");
-  const [showProfiles, setShowProfiles] = useState(true);
-  const [showDimensions, setShowDimensions] = useState(true);
-  const [showConstraints, setShowConstraints] = useState(true);
-  const [showComb, setShowComb] = useState(false);
-  const [combScale, setCombScale] = useState(1);
+  const [edgeKind, setEdgeKind] = useSketchPref<"none" | "chamfer" | "fillet">("edgeKind", "none");
+  const [edgeSize, setEdgeSize] = useSketchPref("edgeSize", "2");
+  const [showProfiles, setShowProfiles] = useSketchPref("showProfiles", true);
+  const [showDimensions, setShowDimensions] = useSketchPref("showDimensions", true);
+  const [showConstraints, setShowConstraints] = useSketchPref("showConstraints", true);
+  const [showComb, setShowComb] = useSketchPref("showComb", false);
+  const [combScale, setCombScale] = useSketchPref("combScale", 1);
+  // The palette is docked beside the canvas by default (it no longer covers drawing area); it can float or fold up, and the choice is remembered.
+  const [paletteLayout, setPaletteLayout] = useSketchPref("paletteLayout", DEFAULT_PALETTE_LAYOUT);
+  const planeDescription = describeSketchPlane(props.sketch);
   const [selectedProfileIds, setSelectedProfileIds] = useState<readonly string[]>([]);
   const boxGesture = useRef<BoxGesture | undefined>(undefined);
   // Direct manipulation: the gesture, and the live (uncommitted) result shown while it runs.
@@ -365,6 +372,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (props.optionsRevealRequest === handledOptionsRevealRef.current) return undefined;
     handledOptionsRevealRef.current = props.optionsRevealRequest;
     if (props.optionsRevealRequest === 0) return undefined;
+    setPaletteLayout((current) => (current.collapsed ? { ...current, collapsed: false } : current));
     const palette = paletteRef.current;
     if (palette === null) return undefined;
     palette.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -396,6 +404,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const camera = useSketchCamera(fitExtents, `${props.projectId}:${props.sketch.plane}`, props.fitSerial);
   const px = camera.mmPerPx;
   const grid = gridSteps(props.sketch.gridMm, px);
+  // Friendly names for tooltips, chips and messages (derived from sketch order; see workbench-core/sketch-names.ts).
+  const entityNames = useMemo(() => sketchEntityNames(workingSketch.entities), [workingSketch.entities]);
   const selectedEntity = workingSketch.entities.find((entity) => entity.id === selectionIds.at(-1));
   const selectedEntities = selectionIds.map((id) => workingSketch.entities.find((entity) => entity.id === id)).filter((entity): entity is SketchEntity => entity !== undefined);
   const selectedConstraints = props.sketch.constraints.filter((constraint) => constraint.entityIds.some((id) => selectionIds.includes(id)));
@@ -472,6 +482,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   useEffect(() => {
     if (dynamicMirrorAxis !== null && dynamicMirrorEntity === undefined) { setDynamicMirrorAxis(null); props.onMessage("Dynamic mirror stopped: its mirror line is gone."); }
   }, [dynamicMirrorAxis, dynamicMirrorEntity]);
+  // Remembered picks that name geometry (sweep path, loft rail) are dropped quietly when the sketch they pointed into is gone.
+  useEffect(() => {
+    const present = (id: string): boolean => id === "" || props.sketch.entities.some((entity) => entity.id === id);
+    if (!present(sweepPathEntityId)) setSweepPathEntityId("");
+    if (!present(loftRailEntityId)) setLoftRailEntityId("");
+  }, [props.sketch.entities, sweepPathEntityId, loftRailEntityId]);
   const mirrorGhosts = useMemo(
     () => (dynamicMirrorEntity === undefined ? [] : mirrorImages(dynamicMirrorEntity, [...(previewEntity === undefined ? [] : [previewEntity]), ...(previewShape?.entities ?? [])])),
     [dynamicMirrorEntity, previewEntity, previewShape]
@@ -480,7 +496,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const applyDrawn = (plan: SketchEditPlan): boolean | void => {
     if (dynamicMirrorAxis === null) return props.onApplyEdit(plan);
     const outcome = withDynamicMirror({ sketch: props.sketch, newId: (prefix) => `${prefix}:user-${crypto.randomUUID()}` }, dynamicMirrorAxis, plan);
-    if (outcome.mirrored > 0) props.onMessage(`Mirrored ${outcome.mirrored} curve${outcome.mirrored === 1 ? "" : "s"} about ${dynamicMirrorAxis.replace(/^entity:/u, "")}${outcome.withoutRelations ? " (as exact copies; the solver would not take the symmetry relations)" : ""}.`);
+    if (outcome.mirrored > 0) props.onMessage(`Mirrored ${outcome.mirrored} curve${outcome.mirrored === 1 ? "" : "s"} about ${sketchEntityNames(props.sketch.entities).get(dynamicMirrorAxis) ?? "the axis"}${outcome.withoutRelations ? " (as exact copies; the solver would not take the symmetry relations)" : ""}.`);
     return props.onApplyEdit(outcome.plan);
   };
   const addDrawn = (entity: SketchEntity): void => {
@@ -1293,7 +1309,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const curvatureCombs = showComb ? sketchCurvatureCombs(visibleEntities, 60 * px * combScale) : [];
 
   return <>
-    <section className="workspace-canvas sketch-stage" aria-label={`Interactive ${planeInfo.name} sketch`}>
+    <section className={`workspace-canvas sketch-stage${paletteLayout.dock === "docked" && !paletteLayout.collapsed ? " palette-docked" : ""}`} aria-label={`Interactive ${planeInfo.name} sketch`}>
+      <button className="sketch-plane-chip canvas" onClick={props.onChangePlane} title="Change the plane this sketch is on" aria-label={`${planeDescription.chip}. Change plane`}><span className="sketch-plane-chip-text"><small>Sketch plane</small><strong>{[planeDescription.name, ...planeDescription.details].join(" · ")}</strong></span><em>Change</em></button>
       <svg
         ref={camera.svgRef}
         className={canvasClasses}
@@ -1330,7 +1347,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           verticalLabel={planeInfo.verticalLabel}
         />
         {showProfiles && profiles.map((profile) => <SketchProfileShape key={profile.id} profile={profile} selected={selectedProfileIds.includes(profile.id)} {...(interactive ? { onSelect: (additive: boolean) => selectProfile(profile, additive) } : {})} />)}
-        {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={selectionIds.includes(entity.id)} hovered={hoverId === entity.id} movable={props.showMovable && movableIds.has(entity.id)} constrained={analysis.entityFreedom[entity.id] === 0} {...(interactive ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive), onHover: (inside: boolean) => setHoverId(inside ? entity.id : null), onGrab: (event: React.PointerEvent, handle: DragHandle) => beginDrag(event, entity.id, handle), handles: grabHandlesOf(entity) } : {})} />)}
+        {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} name={entityNames.get(entity.id)} px={px} selected={selectionIds.includes(entity.id)} hovered={hoverId === entity.id} movable={props.showMovable && movableIds.has(entity.id)} constrained={analysis.entityFreedom[entity.id] === 0} {...(interactive ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive), onHover: (inside: boolean) => setHoverId(inside ? entity.id : null), onGrab: (event: React.PointerEvent, handle: DragHandle) => beginDrag(event, entity.id, handle), handles: grabHandlesOf(entity) } : {})} />)}
         {curvatureCombs.map(({ entityId, comb }) => <g key={`comb:${entityId}`} className="curvature-comb" data-comb-entity={entityId} pointerEvents="none" fill="none" stroke="#d9480f" strokeWidth={px}>
           {comb.teeth.map((tooth, index) => <line key={index} x1={tooth.base[0]} y1={-tooth.base[1]} x2={tooth.tip[0]} y2={-tooth.tip[1]} strokeOpacity={0.7} />)}
           <polyline points={comb.envelope.map((point) => `${point[0]},${-point[1]}`).join(" ")} strokeWidth={1.4 * px} />
@@ -1422,8 +1439,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
       <ViewportChrome workspace="sketch" state={props.viewportState} measurePoints={[]} onNavigationMode={props.onNavigationMode} onSelectionFilter={props.onSelectionFilter} onOrientation={props.onOrientation} onViewAngles={props.onViewAngles} onProjection={props.onProjection} onGrid={props.onGrid} onAxes={props.onAxes} onShadingMode={() => undefined} onBodyColor={() => undefined} onBackgroundTone={() => undefined} onFit={camera.fit} onHome={camera.fit} onClearMeasure={() => undefined} />
 
-      <div className="sketch-palette" ref={paletteRef} aria-label="Sketch palette">
-        <header><div><span>SKETCH</span><strong>Palette</strong></div><button onClick={props.onChangePlane} title="Move this sketch to another datum plane"><CommandIcon name="view" />Plane</button></header>
+      <div className={`sketch-palette ${paletteLayout.dock}${paletteLayout.collapsed ? " collapsed" : ""}`} ref={paletteRef} aria-label="Sketch palette">
+        <header><div><span>SKETCH</span><strong>Palette</strong></div><div className="palette-header-actions">
+          <button onClick={props.onChangePlane} title="Move this sketch to another plane"><CommandIcon name="view" />Plane</button>
+          <button onClick={() => setPaletteLayout((current) => ({ ...current, dock: current.dock === "docked" ? "floating" : "docked" }))} title={paletteLayout.dock === "docked" ? "Float the palette over the canvas" : "Dock the palette beside the canvas"} aria-label={paletteLayout.dock === "docked" ? "Float the palette" : "Dock the palette"}>{paletteLayout.dock === "docked" ? "Float" : "Dock"}</button>
+          <button onClick={() => setPaletteLayout((current) => ({ ...current, collapsed: !current.collapsed }))} aria-expanded={!paletteLayout.collapsed} title={paletteLayout.collapsed ? "Expand the palette" : "Fold the palette up"} aria-label={paletteLayout.collapsed ? "Expand the palette" : "Fold the palette up"}>{paletteLayout.collapsed ? "+" : "−"}</button>
+        </div></header>
         <PaletteToggle label="Sketch grid" active={props.viewportState.gridVisible} onToggle={props.onGrid} />
         <PaletteToggle label="Snap" active={snapEnabled} onToggle={setSnapEnabled} />
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
@@ -1702,7 +1723,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       {analysis.conflicts.length > 0 && <div className="inline-warning">{analysis.conflicts[0]}</div>}
 
       {dynamicMirrorEntity !== undefined && props.editTool !== "dynamic-mirror" && <div className="inline-warning movable-note" role="status" aria-label="Dynamic mirror active">
-        Dynamic mirror is on: what you draw is mirrored about {dynamicMirrorEntity.id.replace(/^entity:/u, "")}. <button className="palette-action" onClick={() => { setDynamicMirrorAxis(null); props.onMessage("Dynamic mirror stopped."); }}><CommandIcon name="cancel" />Stop</button>
+        Dynamic mirror is on: what you draw is mirrored about {entityNames.get(dynamicMirrorEntity.id) ?? "the axis"}. <button className="palette-action" onClick={() => { setDynamicMirrorAxis(null); props.onMessage("Dynamic mirror stopped."); }}><CommandIcon name="cancel" />Stop</button>
       </div>}
       {props.editTool !== null && <SketchEditPanel tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} jog={jogParams} onJog={setJogParams} dynamicMirrorAxis={dynamicMirrorAxis} onDynamicMirror={(axisId) => { setDynamicMirrorAxis(axisId); props.onMessage(axisId === null ? "Dynamic mirror stopped." : `Dynamic mirror on: pick a drawing tool; everything you draw is mirrored about ${axisId.replace(/^entity:/u, "")}.`); }} />}
       {props.checkOpen && <SketchRepairPanel sketch={props.sketch} onApplyEdit={props.onApplyEdit} onSetSuppressed={props.onSetSuppressed} onSelect={(ids) => { setSelectionIds(ids); props.onSelect(ids.at(-1) ?? null); }} onMessage={props.onMessage} onClose={props.onCloseCheck} />}
@@ -1718,7 +1739,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       <section className="inspector-section"><header><strong>Selection controller</strong><span>{selectionIds.length} selected</span></header>
         {selectedEntity === undefined ? <p className="empty-copy">Select an entity, or drag a box: left to right takes what the box fully encloses, right to left takes anything it touches. Shift adds to the selection.</p> : <>
           <dl className="compact-facts"><div><dt>Primary</dt><dd>{selectedEntity.kind}</dd></div><div><dt>Freedom</dt><dd>{analysis.entityFreedom[selectedEntity.id] ?? 0}</dd></div><div><dt>Stable ID</dt><dd>{shortId(selectedEntity.id)}</dd></div><div><dt>Constraints</dt><dd>{selectedConstraints.length}</dd></div></dl>
-          <div className="selection-chips">{selectedEntities.map((entity, index) => <span key={entity.id}><b>{index + 1}</b>{entity.kind}</span>)}</div>
+          <div className="selection-chips">{selectedEntities.map((entity, index) => <span key={entity.id}><b>{index + 1}</b>{entityNames.get(entity.id) ?? entity.kind}</span>)}</div>
           <div className="constraint-buttons">
             <button disabled={!horizontalFit.ok} title={hint(horizontalFit, "Make the line horizontal.")} onClick={() => constrain("horizontal")}><CommandIcon name="horizontal" />Horizontal</button>
             <button disabled={!verticalFit.ok} title={hint(verticalFit, "Make the line vertical.")} onClick={() => constrain("vertical")}><CommandIcon name="vertical" />Vertical</button>
@@ -1961,7 +1982,7 @@ function DirectDimensionPreview({ dimension, px }: { readonly dimension: DirectS
   </g>;
 }
 
-function SketchEntityShape({ entity, px, selected, hovered, onSelect, onHover, onGrab, handles, preview = false, movable = false, constrained = false }: { readonly entity: SketchEntity; readonly px: number; readonly selected: boolean; readonly hovered: boolean; readonly onSelect?: (additive: boolean) => void; readonly onHover?: (inside: boolean) => void; readonly onGrab?: (event: React.PointerEvent, handle: DragHandle) => void; readonly handles?: readonly SketchGrabHandle[]; readonly preview?: boolean; readonly movable?: boolean; readonly constrained?: boolean }): React.JSX.Element {
+function SketchEntityShape({ entity, name, px, selected, hovered, onSelect, onHover, onGrab, handles, preview = false, movable = false, constrained = false }: { readonly entity: SketchEntity; /** "Line 3": shown as the tooltip. */ readonly name?: string | undefined; readonly px: number; readonly selected: boolean; readonly hovered: boolean; readonly onSelect?: (additive: boolean) => void; readonly onHover?: (inside: boolean) => void; readonly onGrab?: (event: React.PointerEvent, handle: DragHandle) => void; readonly handles?: readonly SketchGrabHandle[]; readonly preview?: boolean; readonly movable?: boolean; readonly constrained?: boolean }): React.JSX.Element {
   // Fully constrained curves are drawn in a neutral tone and under-constrained ones in the working colour, so what can still move is visible at a glance.
   const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""} ${hovered && !selected ? "hover" : ""} ${preview ? "tool-preview" : ""} ${movable && !selected ? "movable" : ""} ${constrained && !preview && entity.kind !== "point" ? "constrained" : ""}`;
   const geometry = (cls: string, hit: boolean): React.JSX.Element => {
@@ -1981,6 +2002,7 @@ function SketchEntityShape({ entity, px, selected, hovered, onSelect, onHover, o
     onPointerEnter={() => onHover?.(true)}
     onPointerLeave={() => onHover?.(false)}
   >
+    {name !== undefined && <title>{name}</title>}
     {geometry("sketch-hit", true)}
     {geometry(className, false)}
     {(selected || hovered) && handles?.map((handle) => <circle

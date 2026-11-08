@@ -3,9 +3,10 @@ import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/inde
 import { dependentsOf, describeFeature, designOf, featureOfBody, featureStatus, featureStatusText, vehicleHardPoints, type DesignFeature, type WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { DesignHealthReport } from "../../../../packages/workbench-health/src/index.js";
 import { analyzeWorkbenchSketch, detectSketchProfiles } from "../../../../packages/workbench-sketch/src/index.js";
-import type { WorkbenchSketch } from "../../../../packages/workbench-core/src/index.js";
+import { friendlySketchText, sketchConstraintNames, sketchEntityNames, type WorkbenchSketch } from "../../../../packages/workbench-core/src/index.js";
 import { evaluateConstructionPlane, resolveBinder } from "../../../../packages/workbench-geometry/src/index.js";
 import { describeBinderKind } from "../construction-ui.js";
+import { RELATIONS_EMPTY_HELP } from "../sketch-help-text.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, inferCommandIcon } from "./CommandIcon.js";
 
@@ -23,6 +24,8 @@ type TreeKind = "project" | "health" | "datum" | "sketch" | "feature" | "body" |
 export function ProjectTree({ project, selectedId, revealSelectionRequest, designHealth, onSelect, onContextMenu }: ProjectTreeProps): React.JSX.Element {
   const treeRef = useRef<HTMLElement>(null);
   const handledRevealRequest = useRef(0);
+  // Curves are listed as "Line 3", "Circle 1" (derived, see sketch-names.ts), never by their generated ids.
+  const entityNames = sketchEntityNames(project.sketch.entities);
   useEffect(() => {
     if (selectedId === null) return;
     const selectedItem = treeRef.current?.querySelector<HTMLElement>('.tree-item[aria-pressed="true"]');
@@ -91,7 +94,7 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
       {project.activeWorkspace === "sketch"
         ? <SketchNavigator project={project} sketchProfiles={sketchProfiles} selectedId={selectedId} onSelect={onSelect} />
         : <>
-          {project.sketch.entities.map((entity) => <TreeItem key={entity.id} kind="sketch" id={entity.id} label={entityLabel(entity.kind)} meta={`${shortId(entity.id)} · ${entity.visible === false ? "hidden" : "shown"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
+          {project.sketch.entities.map((entity) => <TreeItem key={entity.id} kind="sketch" id={entity.id} label={entityNames.get(entity.id) ?? entityLabel(entity.kind)} meta={`${entityLabel(entity.kind)} · ${entity.visible === false ? "hidden" : "shown"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
           {sketchProfiles.map((profile, index) => <TreeItem key={profile.id} kind="sketch" id={profile.id} label={`Profile P${index + 1}`} meta={`${profile.boundary.kind.replaceAll("-", " ")} · ${formatArea(profile.areaMm2)} mm²`} selectedId={selectedId} onSelect={onSelect} indent />)}
         </>}
     </TreeSection>}
@@ -227,6 +230,8 @@ function SketchNavigator({ project, sketchProfiles, selectedId, onSelect }: {
   const analysis = analyzeWorkbenchSketch(project.sketch);
   const curves = project.sketch.entities;
   const relations = project.sketch.constraints;
+  const entityNames = sketchEntityNames(curves);
+  const relationNames = sketchConstraintNames(relations);
   const hiddenCount = curves.filter((entity) => entity.visible === false).length;
   const planeKey = project.sketch.plane.replace("datum:", "").toUpperCase();
   const tabs = [
@@ -242,12 +247,12 @@ function SketchNavigator({ project, sketchProfiles, selectedId, onSelect }: {
     <div role="tabpanel" aria-label={`Sketch navigator · ${tab}`} className="sketch-navigator-panel">
       {tab === "curves" && <>
         {curves.length === 0 && <p className="tree-empty">No curves yet — pick a sketch tool from the ribbon.</p>}
-        {curves.map((entity) => <TreeItem key={entity.id} kind="sketch" id={entity.id} label={entityLabel(entity.kind)} meta={`${shortId(entity.id)} · ${entity.visible === false ? "hidden" : "shown"}${entity.construction ? " · construction" : ""}`} selectedId={selectedId} onSelect={onSelect} indent />)}
+        {curves.map((entity) => <TreeItem key={entity.id} kind="sketch" id={entity.id} label={entityNames.get(entity.id) ?? entityLabel(entity.kind)} meta={`${entityLabel(entity.kind)} · ${entity.visible === false ? "hidden" : "shown"}${entity.construction ? " · construction" : ""}`} selectedId={selectedId} onSelect={onSelect} indent />)}
         {sketchProfiles.map((profile, index) => <TreeItem key={profile.id} kind="sketch" id={profile.id} label={`Profile P${index + 1}`} meta={`${profile.boundary.kind.replaceAll("-", " ")} · ${formatArea(profile.areaMm2)} mm²`} selectedId={selectedId} onSelect={onSelect} indent />)}
       </>}
       {tab === "relations" && <>
-        {relations.length === 0 && <p className="tree-empty">No relations yet. The Constrain group in the ribbon or Sketch Dimension (D) adds them.</p>}
-        {relations.map((constraint) => <TreeItem key={constraint.id} kind="sketch" id={constraint.id} label={constraint.kind.replaceAll("-", " ")} meta={`${shortId(constraint.id)} · ${constraint.entityIds.length} entit${constraint.entityIds.length === 1 ? "y" : "ies"}${constraint.valueMm !== undefined ? ` · ${constraint.valueMm} mm` : ""}${constraint.suppressed === true ? " · suppressed" : ""}`} selectedId={selectedId} onSelect={onSelect} indent />)}
+        {relations.length === 0 && <p className="tree-empty">{RELATIONS_EMPTY_HELP}</p>}
+        {relations.map((constraint) => <TreeItem key={constraint.id} kind="sketch" id={constraint.id} label={relationNames.get(constraint.id) ?? constraint.kind.replaceAll("-", " ")} meta={`${constraint.entityIds.map((id) => entityNames.get(id) ?? "a curve").join(" + ")}${constraint.valueMm !== undefined ? ` · ${constraint.valueMm} mm` : ""}${constraint.suppressed === true ? " · suppressed" : ""}`} selectedId={selectedId} onSelect={onSelect} indent />)}
       </>}
       {tab === "refs" && <>
         <TreeItem kind="datum" id={project.sketch.plane} label={`${planeKey} plane`} meta={`active sketch plane · ${project.sketch.gridMm} mm grid`} selectedId={selectedId} onSelect={onSelect} indent />
@@ -257,7 +262,7 @@ function SketchNavigator({ project, sketchProfiles, selectedId, onSelect }: {
       {tab === "issues" && <>
         <TreeItem kind="health" id="sketch-navigator:classification" label={analysis.classification === "fully-constrained" ? "Fully constrained" : analysis.classification === "conflict" ? "Conflicting constraints" : `Under-constrained · ${analysis.degreesOfFreedom} DOF`} meta={`${analysis.appliedConstraints} constraint${analysis.appliedConstraints === 1 ? "" : "s"} applied`} selectedId={selectedId} onSelect={onSelect} indent />
         {analysis.conflicts.length === 0 && analysis.classification !== "conflict" && <p className="tree-empty">No solver conflicts reported.</p>}
-        {analysis.conflicts.map((issue, index) => <TreeItem key={`issue:${index}`} kind="health" id={`sketch-navigator:issue:${index}`} label={`Conflict ${index + 1}`} meta={issue} selectedId={selectedId} onSelect={onSelect} indent />)}
+        {analysis.conflicts.map((issue, index) => <TreeItem key={`issue:${index}`} kind="health" id={`sketch-navigator:issue:${index}`} label={`Conflict ${index + 1}`} meta={friendlySketchText(issue, [project.sketch])} selectedId={selectedId} onSelect={onSelect} indent />)}
       </>}
     </div>
   </>;

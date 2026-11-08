@@ -57,6 +57,8 @@ export interface ExistingSketchPlane {
   /** The timeline name, "Sketch 2". */
   readonly name: string;
   readonly plane: SketchDatumPlane;
+  /** The same plane in the short form the plane dialog and the sketch-plane helpers use. */
+  readonly sketchPlane: "xy" | "xz" | "yz";
   readonly offsetMm: number;
   readonly tilt?: SketchPlaneTilt;
   readonly frame?: SketchPlaneFrame;
@@ -91,6 +93,7 @@ export function existingSketchPlanes(features: readonly TimelineLike[], current?
       featureId: feature.id,
       name: feature.name,
       plane: feature.sketch.plane,
+      sketchPlane: feature.sketch.plane === "datum:xz" ? "xz" : feature.sketch.plane === "datum:yz" ? "yz" : "xy",
       offsetMm: feature.sketch.planeOffsetMm ?? 0,
       ...(feature.sketch.planeTilt === undefined ? {} : { tilt: feature.sketch.planeTilt }),
       ...(feature.sketch.planeFrame === undefined ? {} : { frame: feature.sketch.planeFrame }),

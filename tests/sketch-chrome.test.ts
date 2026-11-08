@@ -14,6 +14,7 @@ import { SKETCH_HOTKEY_HELP, SKETCH_LETTER_FAMILIES, resolveSketchHotkey, sketch
 import type { SketchTool } from "../packages/workbench-sketch/src/index.js";
 import { DATUM_PLANE_NAMES, INITIAL_PLANE_OFFER, decidePlaneOffer, describeSketchPlane, existingSketchPlanes, planeOfferAfterFinish } from "../apps/studio-web/src/sketch-plane-ui.js";
 import { assert, equal, type TestCase } from "./test-kit.js";
+import { sketchChromeAppTests } from "./sketch-chrome-app.test.js";
 
 /**
  * Regression tests for the Sketch app chrome: ribbon hotkey chips that work, shortcut help that matches the keys, friendly curve names
@@ -59,6 +60,7 @@ function line(id: string, start: readonly [number, number], end: readonly [numbe
 }
 
 export const sketchChromeTests: TestCase[] = [
+  ...sketchChromeAppTests,
   {
     name: "Sketch hotkeys E14: pressing R, C or A again steps through the 2-point, centre and 3-point variants, and E selects the ellipse",
     run: () => {

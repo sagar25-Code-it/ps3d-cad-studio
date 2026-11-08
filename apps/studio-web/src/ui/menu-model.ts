@@ -46,9 +46,13 @@ export interface WorkbenchMenuState {
   readonly selectionDeletable: boolean;
   /** Solid bodies the Part analyses can look at (general solids and analytic bodies); defaults to the general solid count. */
   readonly analysisBodyCount?: number;
+  /** "Build 3f9a1c5 · 9 Nov 2026", shown on the Help > About item. */
+  readonly buildLabel?: string;
 }
 
 export interface WorkbenchMenuActions {
+  /** Opens Help > About (which build is running). Optional so older callers keep working; the item is listed only when it is given. */
+  readonly onAbout?: () => void;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
   readonly onCommandPalette: () => void;
@@ -101,7 +105,7 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
   ] };
 
   const create: WorkbenchMenu = { id: "create", label: "Create", icon: "insert", items: [
-    { id: "create.sketch", label: "New sketch…", icon: "sketch", hint: "On a datum plane, an offset, or a face of a solid", action: actions.onNewSketch },
+    { id: "create.sketch", label: "New sketch…", icon: "sketch", hint: "Choose the plane first: a datum plane, an offset, an existing sketch plane or a face of a solid", action: actions.onNewSketch },
     { id: "create.solid", label: "Solid from sketch…", icon: "extrude", hint: "Extrude or revolve a closed profile; join or cut a solid", action: actions.onCreateSolidFromSketch },
     { id: "create.block", label: "Block", icon: "box", divider: true, hint: "Independent preview body", action: () => actions.onCreatePrimitive("block") },
     { id: "create.cylinder", label: "Cylinder", icon: "cylinder", hint: "Independent preview body", action: () => actions.onCreatePrimitive("cylinder") },
@@ -194,7 +198,8 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
     { id: "help.learning", label: "Learning Center and PDF manual", icon: "help", action: actions.onLearning },
     { id: "help.shortcuts", label: "Keyboard shortcuts", icon: "command", shortcut: "?", action: actions.onShortcuts },
     { id: "help.commands", label: "All commands and capabilities", icon: "command", shortcut: "S", action: actions.onCommandPalette },
-    { id: "help.health", label: "Design readiness and dependencies", icon: "inspect", action: actions.onDesignHealth }
+    { id: "help.health", label: "Design readiness and dependencies", icon: "inspect", action: actions.onDesignHealth },
+    ...(actions.onAbout === undefined ? [] : [{ id: "help.about", label: "About PS3D CAD Studio", icon: "help", hint: state.buildLabel ?? "Which build is running", divider: true, action: actions.onAbout }])
   ] };
 
   return [edit, create, modify, view, inspect, tools, help];

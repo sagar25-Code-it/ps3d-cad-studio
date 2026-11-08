@@ -1,6 +1,8 @@
 import type { DisplayUnit } from "../../../../packages/model-schema/src/index.js";
 import type { AssemblyTemplateId, DrawingDatumScheme, DrawingDisplayStyle, DrawingDraftingStandard, DrawingSettings, ElectricalComponentKind, ElectricalStandard, ElectricalTemplateId, PartPreviewBodyShape, SurfaceIntent, VehicleLayerId, VehicleSimulationState, VehicleTemplateId, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { SketchTool } from "../../../../packages/workbench-sketch/src/index.js";
+import { SKETCH_LETTER_FAMILIES, sketchToolHotkeyChip } from "../../../../packages/workbench-sketch/src/hotkeys.js";
+import { describeSketchPlane } from "../sketch-plane-ui.js";
 import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/index.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, iconTone } from "./CommandIcon.js";
@@ -33,6 +35,8 @@ interface WorkbenchRibbonProps {
   readonly onToggleSketchEntityVisibility: (entityId: string) => void;
   readonly onFinishSketch: () => void;
   readonly onNewSketch: () => void;
+  /** Opens the plane dialog in "change the plane of this sketch" mode (the plane chip). */
+  readonly onChangeSketchPlane: () => void;
   readonly onChangeParameters: () => void;
   readonly onRemoteMcp: () => void;
   readonly onCancelSketchPoints: () => void;
@@ -97,20 +101,29 @@ interface WorkbenchRibbonProps {
   readonly onCloseMasterCart: () => void;
 }
 
-const SKETCH_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; readonly label: string; readonly key: string }[] = [
-  { id: "select", icon: "select", label: "Select", key: "V" },
-  { id: "line", icon: "line", label: "Line", key: "L" },
-  { id: "rectangle", icon: "rectangle", label: "2-point rectangle", key: "R" },
-  { id: "rectangle-center", icon: "rectangle", label: "Center rectangle", key: "R2" },
-  { id: "rectangle-three-point", icon: "rectangle", label: "3-point rectangle", key: "R3" },
-  { id: "circle", icon: "circle", label: "Center circle", key: "C" },
-  { id: "circle-two-point", icon: "circle", label: "2-point circle", key: "C2" },
-  { id: "circle-three-point", icon: "circle", label: "3-point circle", key: "C3" },
-  { id: "ellipse", icon: "ellipse", label: "Center ellipse", key: "E" },
-  { id: "arc", icon: "arc", label: "3-point arc", key: "A" },
-  { id: "arc-center", icon: "arc", label: "Centerpoint arc", key: "A2" },
-  { id: "arc-tangent", icon: "arc", label: "Tangent arc", key: "A3" }
+/** The tools with a key. The chip text comes from the hotkey model (packages/workbench-sketch/src/hotkeys.ts), so it only ever shows a key sequence that works. */
+const SKETCH_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; readonly label: string }[] = [
+  { id: "select", icon: "select", label: "Select" },
+  { id: "line", icon: "line", label: "Line" },
+  { id: "rectangle", icon: "rectangle", label: "2-point rectangle" },
+  { id: "rectangle-center", icon: "rectangle", label: "Center rectangle" },
+  { id: "rectangle-three-point", icon: "rectangle", label: "3-point rectangle" },
+  { id: "circle", icon: "circle", label: "Center circle" },
+  { id: "circle-two-point", icon: "circle", label: "2-point circle" },
+  { id: "circle-three-point", icon: "circle", label: "3-point circle" },
+  { id: "ellipse", icon: "ellipse", label: "Center ellipse" },
+  { id: "arc", icon: "arc", label: "3-point arc" },
+  { id: "arc-center", icon: "arc", label: "Centerpoint arc" },
+  { id: "arc-tangent", icon: "arc", label: "Tangent arc" }
 ];
+
+/** What the chip tooltip says about how to reach a tool from the keyboard. */
+function hotkeyHint(tool: SketchTool): string {
+  const chip = sketchToolHotkeyChip(tool) ?? "";
+  const family = Object.entries(SKETCH_LETTER_FAMILIES).find(([, tools]) => tools.includes(tool as never));
+  const index = family === undefined ? 0 : family[1].indexOf(tool as never);
+  return index > 0 && family !== undefined ? `${chip} (press ${family[0].toUpperCase()} ${index + 1} times)` : chip;
+}
 
 /** The extra sketch curve tools, grouped under "More curves" (their geometry lives in packages/workbench-sketch/src/curve-tools.ts). */
 const CURVE_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; readonly label: string; readonly hint: string }[] = [
@@ -165,8 +178,12 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
     </>}
     {!props.masterCartOpen && props.project.activeWorkspace === "sketch" && <>
+      <RibbonGroup label="Sketch plane">
+        <RibbonButton icon="sketch" label="New Sketch" hint="choose plane" primary onClick={props.onNewSketch} />
+        <SketchPlaneChip sketch={props.project.sketch} onClick={props.onChangeSketchPlane} />
+      </RibbonGroup>
       <RibbonGroup label="Create geometry">
-        {SKETCH_TOOLS.map((tool) => <RibbonButton key={tool.id} icon={tool.icon} label={tool.label} hint={tool.key} active={props.sketchTool === tool.id} onClick={() => props.onSketchTool(tool.id)} />)}
+        {SKETCH_TOOLS.map((tool) => <RibbonButton key={tool.id} icon={tool.icon} label={tool.label} hint={hotkeyHint(tool.id)} active={props.sketchTool === tool.id} onClick={() => props.onSketchTool(tool.id)} />)}
         <RibbonButton icon="polygon" label="Polygon" hint="centre + corner" active={props.sketchTool === "polygon"} onClick={() => props.onSketchTool("polygon")} />
         <RibbonButton icon="slot" label="Slot" hint="centres + width" active={props.sketchTool === "slot"} onClick={() => props.onSketchTool("slot")} />
         <RibbonButton icon="slot" label="Straight slot" hint="ends + width" active={props.sketchTool === "slot-straight"} onClick={() => props.onSketchTool("slot-straight")} />
@@ -178,9 +195,8 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
       <RibbonGroup label="Sketch session">
         <RibbonButton icon="save" label="Finish Sketch" hint="to timeline" onClick={props.onFinishSketch} />
-        <RibbonButton icon="sketch" label="New Sketch" hint="choose plane" onClick={props.onNewSketch} />
         <RibbonButton icon="cancel" label="Cancel points" hint="clear" onClick={props.onCancelSketchPoints} />
-        <RibbonButton icon="plane" label={`${props.project.sketch.plane.replace("datum:", "").toUpperCase()} plane`} hint={`${props.project.sketch.gridMm} mm`} active info />
+        <RibbonButton icon="plane" label="Grid" hint={`${props.project.sketch.gridMm} mm`} active info />
       </RibbonGroup>
       <RibbonGroup label="Dimension & modify">
         <RibbonButton icon="dimension" label="Dimension" hint="points / curve" active={props.sketchDimensionMode} onClick={props.onSketchDimension} />
@@ -513,11 +529,17 @@ function RibbonGroup({ label, children }: { readonly label: string; readonly chi
   return <div className="ribbon-group" role="group" aria-label={label}><div>{children}</div><small>{label}</small></div>;
 }
 
-function RibbonButton(props: { readonly icon: string; readonly label: string; readonly hint: string; readonly active?: boolean; readonly disabled?: boolean; readonly info?: boolean; readonly onClick?: () => void }): React.JSX.Element {
+/** The persistent "Sketch plane: Top (XY)" chip. It is a button: clicking it opens the plane dialog to move this sketch to another plane. */
+function SketchPlaneChip(props: { readonly sketch: WorkbenchProject["sketch"]; readonly onClick: () => void }): React.JSX.Element {
+  const plane = describeSketchPlane(props.sketch);
+  return <button className="sketch-plane-chip" onClick={props.onClick} title="Change the plane this sketch is on" aria-label={`${plane.chip}. Change plane`}><span aria-hidden="true"><CommandIcon name="plane" /></span><span className="sketch-plane-chip-text"><small>Sketch plane</small><strong>{[plane.name, ...plane.details].join(" · ")}</strong></span><em>Change</em></button>;
+}
+
+function RibbonButton(props: { readonly icon: string; readonly label: string; readonly hint: string; readonly active?: boolean; readonly disabled?: boolean; readonly info?: boolean; readonly primary?: boolean; readonly onClick?: () => void }): React.JSX.Element {
   if (props.info === true) {
     return <div className={`ribbon-button tone-${iconTone(props.icon)} ${props.active === true ? "active" : ""}`} role="presentation" title={`${props.label} · ${props.hint}`}><span aria-hidden="true"><CommandIcon name={props.icon} /></span><strong>{props.label}</strong><small>{props.hint}</small></div>;
   }
-  return <button className={`ribbon-button tone-${iconTone(props.icon)} ${props.active === true ? "active" : ""}`} aria-pressed={props.active} disabled={props.disabled} onClick={props.onClick} title={`${props.label} · ${props.hint}`}><span aria-hidden="true"><CommandIcon name={props.icon} /></span><strong>{props.label}</strong><small>{props.hint}</small></button>;
+  return <button className={`ribbon-button tone-${iconTone(props.icon)} ${props.active === true ? "active" : ""}${props.primary === true ? " primary" : ""}`} aria-pressed={props.active} disabled={props.disabled} onClick={props.onClick} title={`${props.label} · ${props.hint}`}><span aria-hidden="true"><CommandIcon name={props.icon} /></span><strong>{props.label}</strong><small>{props.hint}</small></button>;
 }
 
 function workspaceLabel(workspace: WorkbenchProject["activeWorkspace"]): string {
