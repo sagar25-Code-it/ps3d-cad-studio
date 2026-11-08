@@ -8,3 +8,4 @@ export * from "./mesh-modify.js";
 export * from "./construction-geometry.js";
 export * from "./sheet-metal.js";
 export * from "./sheet-edge-flange.js";
+export * from "./flat-pattern.js";

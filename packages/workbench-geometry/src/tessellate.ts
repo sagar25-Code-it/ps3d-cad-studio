@@ -260,6 +260,45 @@ export function tessellateSweepPath(polygonMm: readonly Point2[], pathSamples: r
 }
 
 /**
+ * A rounded dome over a closed profile: ring `r` is the profile scaled about its centroid by cos(φ) and raised by
+ * height·sin(φ), with φ running from 0 to 90°, and the last ring is closed by a fan to the apex. A circular profile gives a
+ * true half-ellipsoid (a hemisphere when the height equals the radius). A negative `heightMm` builds the dome below the plane.
+ */
+export function tessellateDome(polygonMm: readonly Point2[], heightMm: number, plane: TessellatePlane, rings = 14): TessellatedMesh {
+  let polygon = sanitizePolygon(polygonMm);
+  if (polygon.length < 3 || !Number.isFinite(heightMm) || heightMm === 0 || rings < 3) return { positionsMm: [], indices: [] };
+  if (signedArea(polygon) < 0) polygon = [...polygon].reverse();
+  const height = Math.abs(heightMm);
+  const sign = heightMm < 0 ? -1 : 1;
+  const centroid = polygonCentroid(polygon);
+  const count = polygon.length;
+  const positions: number[] = [];
+  for (let r = 0; r < rings; r += 1) {
+    const phi = (r / rings) * (Math.PI / 2);
+    const scale = Math.cos(phi);
+    const z = height * Math.sin(phi) * sign;
+    for (const [x, y] of polygon) positions.push(centroid[0] + (x - centroid[0]) * scale, centroid[1] + (y - centroid[1]) * scale, z);
+  }
+  const apex = rings * count;
+  positions.push(centroid[0], centroid[1], height * sign);
+  const indices: number[] = [];
+  const capTriangles = triangulatePolygon(polygon);
+  for (let i = 0; i < capTriangles.length; i += 3) indices.push(capTriangles[i]!, capTriangles[i + 2]!, capTriangles[i + 1]!);
+  for (let r = 0; r < rings - 1; r += 1) {
+    const base = r * count;
+    const nextBase = (r + 1) * count;
+    for (let i = 0; i < count; i += 1) {
+      const next = (i + 1) % count;
+      indices.push(base + i, base + next, nextBase + next, base + i, nextBase + next, nextBase + i);
+    }
+  }
+  const lastBase = (rings - 1) * count;
+  for (let i = 0; i < count; i += 1) indices.push(lastBase + i, lastBase + (i + 1) % count, apex);
+  if (sign < 0) for (let i = 0; i < indices.length; i += 3) { const swap = indices[i + 1]!; indices[i + 1] = indices[i + 2]!; indices[i + 2] = swap; }
+  return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };
+}
+
+/**
  * Resample an OPEN polyline (an ordered list of points, no implicit closing segment back to the first) into exactly
  * `targetCount` points at equal arc-length intervals. The first and last resampled points match the input endpoints.
  * Used by loft rails so one rail sample lines up with each ring height.

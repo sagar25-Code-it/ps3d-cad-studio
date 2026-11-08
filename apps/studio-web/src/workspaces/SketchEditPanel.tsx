@@ -10,13 +10,15 @@ import {
   mirrorEntities,
   offsetEntities,
   patternEntities,
+  selectionBounds,
+  stretchEntities,
   transformEntities,
   type SketchEditPlan,
   type SketchEditResult
 } from "../../../../packages/workbench-sketch/src/edit-tools.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 
-export type SketchEditToolId = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "corner" | "fillet" | "chamfer" | "trim" | "extend";
+export type SketchEditToolId = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "stretch" | "corner" | "fillet" | "chamfer" | "trim" | "extend";
 
 export const SKETCH_EDIT_TOOL_LABELS: Readonly<Record<SketchEditToolId, string>> = {
   offset: "Offset",
@@ -25,6 +27,7 @@ export const SKETCH_EDIT_TOOL_LABELS: Readonly<Record<SketchEditToolId, string>>
   move: "Move / Copy",
   rotate: "Rotate",
   scale: "Scale",
+  stretch: "Stretch",
   corner: "Corner",
   fillet: "Fillet",
   chamfer: "Chamfer",
@@ -39,6 +42,7 @@ const INSTRUCTIONS: Readonly<Record<SketchEditToolId, string>> = {
   move: "Select the entities, enter the X and Y distance, then Apply. Tick Copy to leave the originals and add moved copies.",
   rotate: "Select the entities, set the angle (counter-clockwise) and the centre, then Apply. Tick Copy to keep the originals.",
   scale: "Select the entities, set the factor and the centre, then Apply. Circles, rectangles and ellipses scale their size too. Tick Copy to keep the originals.",
+  stretch: "Select the entities, set a window over the points or sides to move, enter the distance, then Apply. Only what lies inside the window moves, so the rest of each entity stays and it stretches. \"Use selection bounds\" fills the window from the selection.",
   corner: "Select two lines, then Apply. Both are extended or trimmed to meet at their intersection.",
   fillet: "Select two lines (or one rectangle), set the radius, then Apply. The lines are shortened to the tangent points and an arc joins them.",
   chamfer: "Select two lines (or one rectangle), set the distance, then Apply. The lines are shortened and a straight cut joins them.",
@@ -76,6 +80,10 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   const [rotateAngle, setRotateAngle] = useState("45");
   const [scaleFactor, setScaleFactor] = useState("2");
   const [copyMode, setCopyMode] = useState(false);
+  const [windowX1, setWindowX1] = useState("0");
+  const [windowY1, setWindowY1] = useState("0");
+  const [windowX2, setWindowX2] = useState("10");
+  const [windowY2, setWindowY2] = useState("10");
   const [chamferMode, setChamferMode] = useState<"equal" | "asymmetric" | "distance-angle">("equal");
   const interactive = props.tool !== "trim" && props.tool !== "extend";
 
@@ -96,6 +104,7 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
       case "move": result = transformEntities(context, ids, { kind: "move", dxMm: Number(moveX), dyMm: Number(moveY) }, copyMode); break;
       case "rotate": result = transformEntities(context, ids, { kind: "rotate", angleDeg: Number(rotateAngle), center: [Number(centerX), Number(centerY)] }, copyMode); break;
       case "scale": result = transformEntities(context, ids, { kind: "scale", factor: Number(scaleFactor), center: [Number(centerX), Number(centerY)] }, copyMode); break;
+      case "stretch": result = stretchEntities(context, ids, { x1: Number(windowX1), y1: Number(windowY1), x2: Number(windowX2), y2: Number(windowY2) }, Number(moveX), Number(moveY)); break;
       case "pattern":
         result = patternEntities(context, ids, layout === "rectangular"
           ? { kind: "rectangular", countX: Number(countX), countY: Number(countY), dxMm: Number(stepX), dyMm: Number(stepY) }
@@ -116,6 +125,16 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
     <p className="profile-help">{INSTRUCTIONS[props.tool]}</p>
     {props.tool === "offset" && field("Distance", offset, setOffset, "mm")}
     {props.tool === "move" && <>{field("Distance X", moveX, setMoveX, "mm")}{field("Distance Y", moveY, setMoveY, "mm")}</>}
+    {props.tool === "stretch" && <>
+      {field("Window X1", windowX1, setWindowX1, "mm")}{field("Window Y1", windowY1, setWindowY1, "mm")}
+      {field("Window X2", windowX2, setWindowX2, "mm")}{field("Window Y2", windowY2, setWindowY2, "mm")}
+      <button className="palette-action" onClick={() => {
+        const bounds = selectionBounds(props.sketch, props.selectionIds);
+        if (bounds === undefined) { props.onMessage("Select the entities first, then use their bounds as the window."); return; }
+        setWindowX1(String(Number(bounds.x1.toFixed(3)))); setWindowY1(String(Number(bounds.y1.toFixed(3)))); setWindowX2(String(Number(bounds.x2.toFixed(3)))); setWindowY2(String(Number(bounds.y2.toFixed(3))));
+      }}><CommandIcon name="fit" />Use selection bounds</button>
+      {field("Distance X", moveX, setMoveX, "mm")}{field("Distance Y", moveY, setMoveY, "mm")}
+    </>}
     {props.tool === "rotate" && <>{field("Angle", rotateAngle, setRotateAngle, "°")}{field("Centre X", centerX, setCenterX, "mm")}{field("Centre Y", centerY, setCenterY, "mm")}</>}
     {props.tool === "scale" && <>{field("Factor", scaleFactor, setScaleFactor, "×")}{field("Centre X", centerX, setCenterX, "mm")}{field("Centre Y", centerY, setCenterY, "mm")}</>}
     {(props.tool === "move" || props.tool === "rotate" || props.tool === "scale") && <label className="check-row"><input type="checkbox" aria-label="Copy instead of moving the originals" checked={copyMode} onChange={(event) => setCopyMode(event.target.checked)} /><span>Copy (keep the originals)</span></label>}

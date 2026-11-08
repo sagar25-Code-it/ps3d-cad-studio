@@ -51,7 +51,7 @@ import {
   type Vec3,
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
-import { sheetFrameOf } from "../../../packages/workbench-geometry/src/index.js";
+import { flatLayoutDxf, flatLayoutSvg, sheetFrameOf } from "../../../packages/workbench-geometry/src/index.js";
 import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
@@ -71,7 +71,7 @@ import {
 } from "../../../packages/exchange-3d/src/index.js";
 import { detectSketchProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
-import { NORMALS as PLANE_NORMALS, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
+import { NORMALS as PLANE_NORMALS, flatPatternForBody, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
 import { CombineDialog, type CombineChoice } from "./ui/CombineDialog.js";
@@ -1156,17 +1156,52 @@ export function App(): React.JSX.Element {
     void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
   };
 
-  const handleDirectEdit = (mode: "move-body" | "scale-body" | "move-face" | "offset-face"): void => {
+  const handleFlatPattern = async (format: "svg" | "dxf"): Promise<void> => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
     const body = bodies.find((candidate) => candidate.id === selectedId) ?? bodies[0];
-    const niceName = mode === "move-body" ? "Move body" : mode === "scale-body" ? "Scale body" : mode === "move-face" ? "Move face" : "Offset face";
+    if (body === undefined) { setStatus("ready"); setStatusText("Flat pattern: select a sheet-metal body first."); return; }
+    setStatus("working");
+    const outcome = await flatPatternForBody(current, body.id);
+    if (!outcome.ok) { setStatus("ready"); setStatusText(`Flat pattern: ${outcome.message}`); return; }
+    const text = format === "svg" ? flatLayoutSvg(outcome.layout) : flatLayoutDxf(outcome.layout);
+    downloadBlob(new Blob([text], { type: format === "svg" ? "image/svg+xml" : "application/dxf" }), exportFileName(current.name, `${body.name}-flat-pattern`, format));
+    setStatus("ready");
+    setStatusText(`Exported the flat pattern of ${body.name} as ${format.toUpperCase()}: ${outcome.summary}.${outcome.notes.length === 0 ? "" : ` Note: ${outcome.notes.join(" ")}`}`);
+  };
+
+  const handleIndent = (): void => {
+    const current = projectRef.current;
+    const bodies = current.part.generalBodies ?? [];
+    const body = bodies.find((candidate) => candidate.id === selectedId) ?? bodies[0];
+    if (body === undefined) { setStatus("ready"); setStatusText("Indent: select the solid to indent first."); return; }
+    const tools = bodies.filter((candidate) => candidate.id !== body.id);
+    if (tools.length === 0) { setStatus("ready"); setStatusText("Indent: make a second solid to use as the tool, positioned where it should press into the first."); return; }
+    const history = designOf(current);
+    const base = baseFeatureOf(history, body.id);
+    if (base === undefined) { setStatus("ready"); setStatusText("Indent: this body is not in the timeline, so an indent cannot be recorded."); return; }
+    const raw = typeof window === "undefined" ? tools[0]!.name : window.prompt(`Tool solid to press into ${body.name} (available: ${tools.map((tool) => tool.name).join(", ")}):`, tools[0]!.name);
+    if (raw === null) return;
+    const tool = tools.find((candidate) => candidate.name === raw.trim() || candidate.id === raw.trim());
+    if (tool === undefined) { setStatus("ready"); setStatusText("Indent: no solid matched that name."); return; }
+    const feature: DesignSolidFeature = {
+      id: `feature:indent-${crypto.randomUUID()}`, name: `Indent ${body.name} with ${tool.name}`, kind: "indent", suppressed: false,
+      sketchFeatureId: base.sketchFeatureId, profileIds: [], valueMm: 1, bodyId: body.id, indentToolBodyId: tool.id
+    };
+    void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
+  };
+
+  const handleDirectEdit = (mode: "move-body" | "scale-body" | "move-face" | "offset-face" | "emboss"): void => {
+    const current = projectRef.current;
+    const bodies = current.part.generalBodies ?? [];
+    const body = bodies.find((candidate) => candidate.id === selectedId) ?? bodies[0];
+    const niceName = mode === "move-body" ? "Move body" : mode === "scale-body" ? "Scale body" : mode === "move-face" ? "Move face" : mode === "emboss" ? "Emboss" : "Offset face";
     if (body === undefined) { setStatus("ready"); setStatusText(`${niceName}: create or select a solid body first.`); return; }
     const history = designOf(current);
     const base = baseFeatureOf(history, body.id);
     if (base === undefined) { setStatus("ready"); setStatusText(`${niceName}: this body is not in the timeline, so a direct edit cannot be recorded.`); return; }
     const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
-    if (mode === "move-face" || mode === "offset-face") {
+    if (mode === "move-face" || mode === "offset-face" || mode === "emboss") {
       const roles = body.brep?.faces.map((face) => face.role) ?? [];
       if (roles.length === 0) { setStatus("ready"); setStatusText(`${niceName}: this body has no named faces to target. Rebuild it through the extrude kernel first.`); return; }
       const roleRaw = ask(`Face role (one of: ${roles.join(", ")}):`, roles[0]!);
@@ -1190,6 +1225,19 @@ export function App(): React.JSX.Element {
           targetFaceRole: role, moveFaceDeltaMm: delta
         };
         void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
+        return;
+      }
+      if (mode === "emboss") {
+        const heightRaw = ask("Emboss height (mm; negative presses the face in):", "1");
+        if (heightRaw === null) return;
+        const height = Number.parseFloat(heightRaw);
+        if (!Number.isFinite(height) || height === 0) { setStatus("ready"); setStatusText("Emboss: enter a non-zero height in millimetres."); return; }
+        const embossed: DesignSolidFeature = {
+          id: `feature:emboss-${crypto.randomUUID()}`, name: `Emboss ${role} ${height.toFixed(2)} mm`, kind: "emboss", suppressed: false,
+          sketchFeatureId: base.sketchFeatureId, profileIds: [], valueMm: Math.max(0.01, Math.abs(height)),
+          bodyId: body.id, operation: "direct-edit", targetFaceRole: role, embossHeightMm: height
+        };
+        void commitWithReplay({ kind: "add-design-solid", feature: embossed, body }, embossed.id).then((ok) => { if (ok) setSelectedId(body.id); });
         return;
       }
       // offset-face
@@ -3130,6 +3178,8 @@ export function App(): React.JSX.Element {
         setStatusText(next === null ? "Zebra stripes off." : `Zebra stripes on (${next.axis.toUpperCase()} axis, ×${next.frequency}). Orbit the model: stripes that run straight across a seam mean tangent (G1) continuity; stripes that kink there mean a tangent break.`);
       }}
       onEdgeFlange={() => void handleEdgeFlange()}
+      onIndent={handleIndent}
+      onFlatPattern={(format) => void handleFlatPattern(format)}
       onDirectEdit={handleDirectEdit}
       onHoleWizard={handleHoleWizard}
       onFit={fitViewport}

@@ -1,7 +1,7 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
-import { detectSketchProfiles, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
-import { attachEdgeFlange } from "../../../packages/workbench-geometry/src/index.js";
+import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
+import { attachEdgeFlange, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 
 /**
@@ -364,4 +364,53 @@ export function applyDirectEdit(feature: DesignSolidFeature & { readonly kind: "
     positionsMm[vertex * 3 + 2] = positionsMm[vertex * 3 + 2]! + shift[2];
   }
   return { ...body, positionsMm };
+}
+
+export type FlatPatternOutcome =
+  | { readonly ok: true; readonly layout: FlatLayout; readonly summary: string; readonly notes: readonly string[] }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * Unfolds the sheet-metal body `bodyId` of the timeline into its flat pattern. A sheet base or extruded plate with edge flanges unfolds
+ * to the blank with every live flange added (multi-bend); a standalone flange or hem unfolds to its single-bend strip.
+ */
+export async function flatPatternForBody(project: WorkbenchProject, bodyId: string): Promise<FlatPatternOutcome> {
+  const history = designOf(project);
+  const steps = stepsOfBody(history, bodyId);
+  const base = steps.find((step) => !modifiesBody(step));
+  if (base === undefined) return { ok: false, message: "This body is not in the timeline, so it has no sheet-metal steps to unfold." };
+  const sketchFeature = history.features.find((candidate): candidate is DesignSketchFeature => candidate.id === base.sketchFeatureId && candidate.kind === "sketch");
+  if (sketchFeature === undefined) return { ok: false, message: "The sketch this body was made from is no longer in the timeline." };
+  if (base.kind === "sheet-flange" || base.kind === "sheet-hem") {
+    const profiles = detectSketchProfiles(sketchFeature.sketch);
+    const region = resolveProfileRegion(profiles, base.profileIds, { includeIslands: false });
+    if (!region.ok) return { ok: false, message: region.diagnostics[0]?.message ?? "The sketch has no closed profile for this flange." };
+    const xs = profileOutlineMm(region.value.outer.boundary).map((point) => point[0]);
+    const hem = base.kind === "sheet-hem";
+    const spec: BentStripSpec = {
+      legMm: Math.max(...xs) - Math.min(...xs),
+      flangeLengthMm: base.flangeLengthMm ?? 0,
+      angleDeg: hem ? 180 : base.flangeAngleDeg ?? 0,
+      innerRadiusMm: hem && (base.hemStyle ?? "closed") === "closed" ? 0.05 : base.sheetBendRadiusMm ?? 0,
+      thicknessMm: base.sheetThicknessMm ?? 0,
+      widthMm: Math.abs(base.valueMm)
+    };
+    if (!(spec.legMm > 0 && spec.flangeLengthMm > 0 && spec.thicknessMm > 0 && spec.widthMm > 0)) return { ok: false, message: "The flange has a zero dimension, so it cannot be unfolded." };
+    const pattern = flatPatternOf(spec);
+    return { ok: true, layout: layoutOfFlatPattern(pattern), summary: `${pattern.flatLengthMm.toFixed(2)} x ${pattern.widthMm.toFixed(2)} mm blank, 1 bend, bend allowance ${pattern.bendAllowanceMm.toFixed(2)} mm`, notes: [] };
+  }
+  if (base.kind !== "sheet-base" && base.kind !== "extrude") return { ok: false, message: "Flat pattern needs a sheet-metal body: a Sheet base (or an extruded plate), optionally with edge flanges, or a Flange / Hem." };
+  const rebuilt = await rebuildSolidFeature(base, sketchFeature);
+  if (!rebuilt.ok) return { ok: false, message: rebuilt.message };
+  const plane = rebuilt.body.feature?.plane ?? planeKeyOf(sketchFeature.sketch.plane);
+  const frame = sheetFrameOf(rebuilt.body, NORMALS[plane]);
+  if (frame === undefined) return { ok: false, message: "This body has no flat top face with a thickness to unfold." };
+  const flanges = steps
+    .filter((step) => step.kind === "sheet-edge-flange" && isFeatureActive(history, step.id))
+    .map((step) => ({ edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0 }));
+  const pattern = flatPatternOfPlate(frame, plane, flanges);
+  if ("error" in pattern) return { ok: false, message: pattern.error };
+  const width = pattern.boundsMm.maxX - pattern.boundsMm.minX;
+  const height = pattern.boundsMm.maxY - pattern.boundsMm.minY;
+  return { ok: true, layout: pattern, summary: `${width.toFixed(2)} x ${height.toFixed(2)} mm blank, ${pattern.bendCount} bend${pattern.bendCount === 1 ? "" : "s"}, ${frame.thicknessMm.toFixed(2)} mm thick`, notes: pattern.notes };
 }

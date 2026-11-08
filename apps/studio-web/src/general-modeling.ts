@@ -1,5 +1,5 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { booleanMeshes, revolveAxisRelation, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateBentStrip, tessellateRevolve, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { booleanMeshes, revolveAxisRelation, tessellateDome, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateBentStrip, tessellateRevolve, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism, evaluateProfileRevolution, stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { profileOutlineMm, stableEntityToken, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
@@ -295,15 +295,8 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
   if (request.operation === "dome") {
     const height = request.domeHeightMm;
     if (height === undefined || !Number.isFinite(height) || height === 0) return { ok: false, message: "Dome needs a non-zero height." };
-    // Approximate the dome as a sequence of lofts from the profile to progressively smaller concentric scales (0.95, 0.8, 0.5, 0.15) at
-    // z = 25%, 50%, 75%, 100% of the dome height. Much cheaper than a true sphere, and the shape is a convincing dome from outside.
-    const absoluteHeight = Math.abs(height);
-    const sign = height < 0 ? -1 : 1;
-    const centroid = polygonMm.reduce((sum, p) => [sum[0] + p[0] / polygonMm.length, sum[1] + p[1] / polygonMm.length] as const, [0, 0] as const);
-    const scalesAtTop = 0.15;
-    const mesh = tessellateLoft(polygonMm, scalesAtTop, absoluteHeight * sign, request.plane);
+    const mesh = tessellateDome(polygonMm, height, request.plane);
     if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The dome could not be built." };
-    void centroid;
     return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
   if (request.operation === "helix") {

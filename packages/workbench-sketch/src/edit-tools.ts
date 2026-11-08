@@ -335,6 +335,93 @@ export function transformEntities(context: SketchEditContext, ids: readonly stri
 }
 
 // ---------------------------------------------------------------------------------------------
+// Stretch
+// ---------------------------------------------------------------------------------------------
+
+export interface StretchWindow {
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+}
+
+/** The smallest box that holds the selected entities (circles and ellipses by their extent), for seeding a stretch window. */
+export function selectionBounds(sketch: WorkbenchSketch, ids: readonly string[]): StretchWindow | undefined {
+  const points: Vec2[] = [];
+  for (const id of ids) {
+    const entity = find(sketch, id);
+    if (entity === undefined) continue;
+    if (entity.kind === "circle") points.push([entity.center[0] - entity.radiusMm, entity.center[1] - entity.radiusMm], [entity.center[0] + entity.radiusMm, entity.center[1] + entity.radiusMm]);
+    else if (entity.kind === "ellipse") points.push([entity.center[0] - entity.majorRadiusMm, entity.center[1] - entity.majorRadiusMm], [entity.center[0] + entity.majorRadiusMm, entity.center[1] + entity.majorRadiusMm]);
+    else if (entity.kind === "spline") points.push(...entity.fitPoints);
+    else points.push(...entityPoints(entity));
+  }
+  if (points.length === 0) return undefined;
+  return { x1: Math.min(...points.map((point) => point[0])), y1: Math.min(...points.map((point) => point[1])), x2: Math.max(...points.map((point) => point[0])), y2: Math.max(...points.map((point) => point[1])) };
+}
+
+/**
+ * Moves only the points of the selected entities that lie inside the window, by (dx, dy), so the rest of each entity stays put
+ * and it stretches. A line end, arc point or spline fit point inside the window moves; a circle, ellipse or point moves whole when
+ * its centre is inside; a rectangle moves whole when all four corners are inside, and otherwise each side that lies fully inside
+ * moves, which changes its width or height. A rectangle with only a corner inside is left alone.
+ */
+export function stretchEntities(context: SketchEditContext, ids: readonly string[], window: StretchWindow, dxMm: number, dyMm: number): SketchEditResult {
+  if (![window.x1, window.y1, window.x2, window.y2, dxMm, dyMm].every(Number.isFinite)) return reject("Enter numbers for the window and the distance.");
+  if (Math.hypot(dxMm, dyMm) < 0.001 || Math.abs(dxMm) > 100_000 || Math.abs(dyMm) > 100_000) return reject("Enter a stretch distance of at least 0.001 mm.");
+  const low: Vec2 = [Math.min(window.x1, window.x2), Math.min(window.y1, window.y2)];
+  const high: Vec2 = [Math.max(window.x1, window.x2), Math.max(window.y1, window.y2)];
+  if (high[0] - low[0] < 1e-6 || high[1] - low[1] < 1e-6) return reject("The window needs a width and a height.");
+  const inside = (point: Vec2): boolean => point[0] >= low[0] - 1e-9 && point[0] <= high[0] + 1e-9 && point[1] >= low[1] - 1e-9 && point[1] <= high[1] + 1e-9;
+  const shift = (point: Vec2): Vec2 => (inside(point) ? [point[0] + dxMm, point[1] + dyMm] : point);
+  const sources = ids.map((id) => find(context.sketch, id));
+  if (sources.length === 0 || sources.some((entity) => entity === undefined)) return reject("Select the entities to stretch, then set the window over the part to move.");
+  const updated: SketchEntity[] = [];
+  for (const entity of sources as SketchEntity[]) {
+    if (entity.kind === "line") {
+      if (inside(entity.start) || inside(entity.end)) updated.push({ ...entity, start: shift(entity.start), end: shift(entity.end) });
+    } else if (entity.kind === "arc") {
+      if (inside(entity.start) || inside(entity.mid) || inside(entity.end)) updated.push({ ...entity, start: shift(entity.start), mid: shift(entity.mid), end: shift(entity.end) });
+    } else if (entity.kind === "spline") {
+      if (entity.fitPoints.some(inside)) updated.push({ ...entity, fitPoints: entity.fitPoints.map(shift) });
+    } else if (entity.kind === "circle" || entity.kind === "ellipse") {
+      if (inside(entity.center)) updated.push({ ...entity, center: shift(entity.center) });
+    } else if (entity.kind === "point") {
+      if (inside(entity.point)) updated.push({ ...entity, point: shift(entity.point) });
+    } else {
+      const corners = entityPoints(entity);
+      const hit = corners.map(inside);
+      if (hit.every(Boolean)) { updated.push({ ...entity, center: [entity.center[0] + dxMm, entity.center[1] + dyMm] }); continue; }
+      // Corners run (-w,-h), (w,-h), (w,h), (-w,h): a side is a pair of neighbouring corners.
+      const left = hit[0]! && hit[3]!;
+      const right = hit[1]! && hit[2]!;
+      const bottom = hit[0]! && hit[1]!;
+      const top = hit[2]! && hit[3]!;
+      if (!left && !right && !bottom && !top) continue;
+      const radians = (entity.rotationDeg * Math.PI) / 180;
+      const cos = Math.cos(radians);
+      const sin = Math.sin(radians);
+      const localDx = dxMm * cos + dyMm * sin;
+      const localDy = -dxMm * sin + dyMm * cos;
+      const halfW = entity.widthMm / 2;
+      const halfH = entity.heightMm / 2;
+      const newLeft = -halfW + (left ? localDx : 0);
+      const newRight = halfW + (right ? localDx : 0);
+      const newBottom = -halfH + (bottom ? localDy : 0);
+      const newTop = halfH + (top ? localDy : 0);
+      const width = newRight - newLeft;
+      const height = newTop - newBottom;
+      if (width < 0.01 || height < 0.01) return reject(`The stretch would collapse ${shortId(entity.id)}; use a smaller distance.`, [entity.id]);
+      const centerX = (newLeft + newRight) / 2;
+      const centerY = (newBottom + newTop) / 2;
+      updated.push({ ...entity, widthMm: width, heightMm: height, center: [entity.center[0] + centerX * cos - centerY * sin, entity.center[1] + centerX * sin + centerY * cos] });
+    }
+  }
+  if (updated.length === 0) return reject("Nothing in the selection lies inside the window. Move the window over the points or sides you want to stretch.");
+  return plan(`Stretched ${updated.length} entit${updated.length === 1 ? "y" : "ies"} by (${format(dxMm)}, ${format(dyMm)}) mm`, { updateEntities: updated });
+}
+
+// ---------------------------------------------------------------------------------------------
 // Corner, fillet, chamfer
 // ---------------------------------------------------------------------------------------------
 

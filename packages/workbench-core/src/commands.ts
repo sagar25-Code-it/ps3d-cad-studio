@@ -3,7 +3,7 @@ import type { AssemblyTemplateId, CapabilityLevel, ComponentShape, ElectricalCom
 export type CadCommandCategory = "create" | "modify" | "construct" | "assemble" | "inspect" | "document" | "automate";
 export type CadSketchTool = "select" | "line" | "rectangle" | "rectangle-center" | "rectangle-three-point" | "circle" | "circle-two-point" | "circle-three-point" | "arc" | "point" | "spline" | "polygon" | "slot";
 /** Selection-driven or click-driven sketch edit tools (each applies one atomic `apply-sketch-edit`). */
-export type CadSketchEditTool = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "corner" | "fillet" | "chamfer" | "trim" | "extend";
+export type CadSketchEditTool = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "stretch" | "corner" | "fillet" | "chamfer" | "trim" | "extend";
 /** One-shot sketch commands that act on the current selection or toggle a display mode. */
 export type CadSketchCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check";
 
@@ -131,6 +131,7 @@ export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   command("command:sketch-move", "sketch", "modify", "Sketch Move / Copy", "Move the selected entities by an X and Y distance, or copy them there. A move is solved against the sketch relations and refused if it would break one.", "preview", { kind: "activate-sketch-edit", tool: "move" }, ["translate", "copy", "offset"]),
   command("command:sketch-rotate", "sketch", "modify", "Sketch Rotate", "Rotate the selected entities by an angle about a centre point, or rotate copies of them. Rectangles and ellipses turn with the rotation.", "preview", { kind: "activate-sketch-edit", tool: "rotate" }, ["turn", "angle", "copy"]),
   command("command:sketch-scale", "sketch", "modify", "Sketch Scale", "Scale the selected entities uniformly about a centre point by a factor, or scale copies of them. Circle, rectangle and ellipse sizes scale with the geometry.", "preview", { kind: "activate-sketch-edit", tool: "scale" }, ["resize", "enlarge", "shrink", "copy"]),
+  command("command:sketch-stretch", "sketch", "modify", "Sketch Stretch", "Move only the points of the selected entities that lie inside a window, so lines, arcs, splines and rectangle sides stretch while the rest stays put. A rectangle with only a corner inside is left alone.", "preview", { kind: "activate-sketch-edit", tool: "stretch" }, ["lengthen", "window", "extend"]),
   command("command:sketch-mirror", "sketch", "modify", "Sketch Mirror", "Mirror selected entities across a selected line; mirrored lines and circles get symmetric relations.", "preview", { kind: "activate-sketch-edit", tool: "mirror" }, ["symmetry", "copy", "axis"]),
   command("command:sketch-fix", "sketch", "construct", "Fix Curve", "Pin the selected curves in place with a fixed relation.", "preview", { kind: "sketch-command", command: "fix-curve" }, ["lock", "ground", "constraint"]),
   command("command:sketch-show-movable", "sketch", "inspect", "Show Movable Geometry", "Highlight sketch entities that still have estimated degrees of freedom.", "preview", { kind: "sketch-command", command: "show-movable" }, ["under constrained", "degrees of freedom", "solve"]),

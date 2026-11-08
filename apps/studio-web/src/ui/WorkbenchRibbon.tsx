@@ -51,9 +51,11 @@ interface WorkbenchRibbonProps {
   readonly onAddConstructionAxis: (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis") => void;
   readonly onAddConstructionPoint: (mode: "xyz" | "midpoint" | "axis-plane-intersection") => void;
   readonly onEdgeFlange: () => void;
+  readonly onFlatPattern: (format: "svg" | "dxf") => void;
   readonly zebra: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null;
   readonly onZebra: (next: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null) => void;
-  readonly onDirectEdit: (mode: "move-body" | "scale-body" | "move-face" | "offset-face") => void;
+  readonly onDirectEdit: (mode: "move-body" | "scale-body" | "move-face" | "offset-face" | "emboss") => void;
+  readonly onIndent: () => void;
   readonly onHoleWizard: () => void;
   readonly onInsertComponent: (shape: "box" | "cylinder") => void;
   readonly onDeleteComponent: (componentId: string) => void;
@@ -159,6 +161,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="pattern" label="Pattern" hint="grid / circular" active={props.sketchEditTool === "pattern"} onClick={() => props.onSketchEditTool("pattern")} />
         <RibbonButton icon="move" label="Move / Copy" hint="dx · dy" active={props.sketchEditTool === "move"} onClick={() => props.onSketchEditTool("move")} />
         <RibbonButton icon="revolve" label="Rotate" hint="angle · centre" active={props.sketchEditTool === "rotate"} onClick={() => props.onSketchEditTool("rotate")} />
+        <RibbonButton icon="line" label="Stretch" hint="window · dx · dy" active={props.sketchEditTool === "stretch"} onClick={() => props.onSketchEditTool("stretch")} />
         <RibbonButton icon="scale" label="Scale" hint="factor · centre" active={props.sketchEditTool === "scale"} onClick={() => props.onSketchEditTool("scale")} />
         <RibbonButton icon="mirror" label="Mirror" hint="about a line" active={props.sketchEditTool === "mirror"} onClick={() => props.onSketchEditTool("mirror")} />
       </RibbonGroup>
@@ -236,12 +239,16 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
       <RibbonGroup label="Sheet metal">
         <RibbonButton icon="bore" label="Edge Flange" hint="pick edge · bend" disabled={!generalBodySelected} onClick={props.onEdgeFlange} />
+        <RibbonButton icon="export" label="Flat Pattern SVG" hint="unfold · all bends" disabled={!generalBodySelected} onClick={() => props.onFlatPattern("svg")} />
+        <RibbonButton icon="export" label="Flat Pattern DXF" hint="unfold · laser / CNC" disabled={!generalBodySelected} onClick={() => props.onFlatPattern("dxf")} />
       </RibbonGroup>
       <RibbonGroup label="Direct editing">
         <RibbonButton icon="move" label="Move Body" hint="dx · dy · dz" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("move-body")} />
         <RibbonButton icon="scale" label="Scale Body" hint="×factor" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("scale-body")} />
         <RibbonButton icon="move" label="Move Face" hint="pick role" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("move-face")} />
         <RibbonButton icon="scale" label="Offset Face" hint="±mm · normal" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("offset-face")} />
+        <RibbonButton icon="move" label="Emboss" hint="face · ±mm" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("emboss")} />
+        <RibbonButton icon="subtract" label="Indent" hint="press a tool in" disabled={!generalBodySelected || (props.project.part.generalBodies?.length ?? 0) < 2} onClick={props.onIndent} />
       </RibbonGroup>
       <RibbonGroup label="Detail features">
         <RibbonButton icon="edge-blend" label="Edge Blend" hint="vertical chain" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("edge-blend", "Edge Blend")} />
