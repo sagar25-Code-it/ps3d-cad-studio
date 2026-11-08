@@ -1328,12 +1328,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     }
     if (gesture.dragging) { finishSelectionBox(gesture, camera.toSketch(event.clientX, event.clientY)); return; }
     // A press that never moved is a click: on a shaded profile it selects the profile, anywhere else it clears the selection.
-    const profile = gesture.profileId === undefined ? undefined : profiles.find((candidate) => candidate.id === gesture.profileId);
+    const profile = gesture.profileId === undefined || underlayPick.active ? undefined : profiles.find((candidate) => candidate.id === gesture.profileId);
     if (profile !== undefined) selectProfile(profile, gesture.additive);
     else pointer(event, true);
   };
 
-  const interactive = props.tool === "select" && props.viewportState.navigationMode !== "pan" && !camera.spaceHeld && !isClickEditTool(props.editTool);
+  const interactive = props.tool === "select" && props.viewportState.navigationMode !== "pan" && !camera.spaceHeld && !isClickEditTool(props.editTool) && !underlayPick.active;
   const box = camera.viewBox;
   const canvasClasses = [
     "sketch-canvas",
