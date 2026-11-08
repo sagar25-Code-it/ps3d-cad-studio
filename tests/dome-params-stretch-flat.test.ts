@@ -6,7 +6,7 @@ import { sheetBendAllowanceMm, flatPatternOf } from "../packages/workbench-geome
 import { sheetFrameOf } from "../packages/workbench-geometry/src/sheet-edge-flange.js";
 import { tessellateDome, tessellateExtrude } from "../packages/workbench-geometry/src/tessellate.js";
 import { selectionBounds, stretchEntities, type SketchEditContext } from "../packages/workbench-sketch/src/edit-tools.js";
-import { applyParameterValues, parameterFieldsOf, parameterValuesOf } from "../apps/studio-web/src/feature-parameters.js";
+import { applyParameterValues, parameterFieldsOf, parameterValuesOf, refreshedName } from "../apps/studio-web/src/feature-parameters.js";
 import { flatPatternForBody, rebuildSolidFeature, replayAllBodies } from "../apps/studio-web/src/design-regeneration.js";
 import { assert, near, type TestCase } from "./test-kit.js";
 
@@ -173,6 +173,25 @@ export const domeParamsStretchFlatTests: readonly TestCase[] = [
         const after = solidMetrics(rebuilt.body.positionsMm, rebuilt.body.indices);
         assert(entry.grows ? rebuilt.body.positionsMm.length > built.body.positionsMm.length : Math.abs(after.volumeMm3 - before.volumeMm3) > 1e-6 || after.boundsMm.min[2] !== before.boundsMm.min[2], `${entry.sample.kind} geometry changed`);
       }
+    }
+  },
+  {
+    name: "editing a step brings the numbers in its generated name up to date and leaves a name the user wrote alone",
+    run: () => {
+      const sketch = { id: "feature:sketch-1" } as DesignSketchFeature;
+      const flange = step(sketch, "sheet-edge-flange", "ef", { name: "Edge flange 0 (90°, 15 mm)", operation: "direct-edit", flangeEdgeIndex: 0, sheetBendRadiusMm: 2, flangeLengthMm: 15, flangeAngleDeg: 90 });
+      const edited = applyParameterValues(flange, { edge: "3", radius: "2", length: "25", angle: "120" });
+      assert(edited.ok && edited.feature.name === "Edge flange 3 (120°, 25 mm)", `flange name: ${edited.ok ? edited.feature.name : edited.message}`);
+      const renamed = applyParameterValues({ ...flange, name: "Left lip" }, { edge: "1", radius: "2", length: "20", angle: "90" });
+      assert(renamed.ok && renamed.feature.name === "Left lip", "a user's name is kept");
+      const move = step(sketch, "move-body", "mv", { name: "Move Sheet base 2 (10.0, 0.0, 0.0 mm)", operation: "direct-edit", moveDeltaMm: [10, 0, 0] });
+      assert(refreshedName({ ...move, moveDeltaMm: [1, 2, 3] }) === "Move Sheet base 2 (1.0, 2.0, 3.0 mm)", "move name");
+      const scale = step(sketch, "scale-body", "sc", { name: "Scale Sheet base 2 ×1.200", operation: "direct-edit", scaleFactor: 1.2 });
+      assert(refreshedName({ ...scale, scaleFactor: 2 }) === "Scale Sheet base 2 ×2.000", "scale name");
+      const offset = step(sketch, "offset-face", "of", { name: "Offset face face.top 2.00 mm", operation: "direct-edit", targetFaceRole: "face.top", offsetFaceMm: 2 });
+      assert(refreshedName({ ...offset, offsetFaceMm: -1.5 }) === "Offset face face.top -1.50 mm", "offset name");
+      const emboss = step(sketch, "emboss", "em", { name: "Emboss face.top 1.00 mm", operation: "direct-edit", targetFaceRole: "face.top", embossHeightMm: 1 });
+      assert(refreshedName({ ...emboss, embossHeightMm: 3 }) === "Emboss face.top 3.00 mm", "emboss name");
     }
   },
   {

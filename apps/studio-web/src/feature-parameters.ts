@@ -175,5 +175,24 @@ export function applyParameterValues(feature: DesignSolidFeature, values: Readon
     next = field.write(next, parsed);
   }
   if (!validSolidFeaturePayload(next)) return { ok: false, message: "Those values are outside what this step supports." };
-  return { ok: true, feature: next };
+  return { ok: true, feature: { ...next, name: refreshedName(next) } };
+}
+
+/**
+ * Steps made by the app carry their numbers in their name ("Edge flange 0 (90°, 15 mm)"). After an edit the name is brought up to
+ * date, but only the part the app wrote: a name the user has changed to something else is left alone.
+ */
+export function refreshedName(feature: DesignSolidFeature): string {
+  const name = feature.name;
+  const vectorText = (v: readonly number[] | undefined): string => (v ?? [0, 0, 0]).map((value) => value.toFixed(1)).join(", ");
+  switch (feature.kind) {
+    case "sheet-edge-flange":
+      return name.replace(/^Edge flange \d+/u, `Edge flange ${feature.flangeEdgeIndex ?? 0}`).replace(/\(\d+(?:\.\d+)?°, \d+(?:\.\d+)? mm\)$/u, `(${(feature.flangeAngleDeg ?? 0).toFixed(0)}°, ${(feature.flangeLengthMm ?? 0).toFixed(0)} mm)`);
+    case "move-body": return name.replace(/\([^()]*mm\)$/u, `(${vectorText(feature.moveDeltaMm)} mm)`);
+    case "move-face": return name.replace(/\([^()]*mm\)$/u, `(${vectorText(feature.moveFaceDeltaMm)} mm)`);
+    case "scale-body": return name.replace(/×[\d.]+$/u, `×${(feature.scaleFactor ?? 1).toFixed(3)}`);
+    case "offset-face": return name.replace(/-?\d+(?:\.\d+)? mm$/u, `${(feature.offsetFaceMm ?? 0).toFixed(2)} mm`);
+    case "emboss": return name.replace(/-?\d+(?:\.\d+)? mm$/u, `${(feature.embossHeightMm ?? 0).toFixed(2)} mm`);
+    default: return name;
+  }
 }
