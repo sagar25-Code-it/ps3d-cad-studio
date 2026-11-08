@@ -2,7 +2,7 @@ import { failure, type SketchEntity, type Vec2, type WorkbenchResult, type Workb
 import { sampleArc, sampleSpline } from "./index.js";
 import { editPlan, type SketchEditContext, type SketchEditResult } from "./edit-tools.js";
 import { curveEnd, isOpenCurve, jointBetween, withCurveEnd, type CurveEnd } from "./endpoint-join.js";
-import { planHolds } from "./sketch-clone.js";
+import { pinnedAmong, planHolds } from "./sketch-clone.js";
 
 /**
  * Make Path: chains the selected open curves (lines, arcs, splines) into one ordered path, walking end to end from a free end,
@@ -160,6 +160,7 @@ export function healPathGaps(context: SketchEditContext, path: SketchPath): Sket
     // The path enters the later curve at its start unless the segment is reversed.
     const enterEnd: CurveEnd = later.reversed ? "last" : "first";
     const current = (updates.get(later.entityId) ?? entity(later.entityId)) as Open;
+    if (pinnedAmong(sketch, [later.entityId]).length > 0) return failure("INVALID_OPERATION", `${later.entityId.replace(/^entity:/u, "")} is fixed and cannot be moved to close the gap.`, [later.entityId], "Relax its Fixed relation first.");
     const moved = withCurveEnd(current, enterEnd, target);
     if (moved === undefined) return failure("INVALID_OPERATION", `Closing the gap would collapse ${later.entityId.replace(/^entity:/u, "")}.`, [later.entityId], "Close that gap by hand.");
     updates.set(later.entityId, moved);
@@ -174,7 +175,7 @@ export function healPathGaps(context: SketchEditContext, path: SketchPath): Sket
 
 /**
  * Joins the path into a single new spline that passes through every joint of the chain, so it can be picked as a sweep path (the sweep
- * takes one curve). The spline is smooth, so a sharp corner in the chain becomes a tight bend; the original curves are kept.
+ * takes one curve). The spline is smooth, so a sharp corner in the chain becomes a tight bend; the original curves are kept. It is construction geometry, so it does not disturb the closed profiles the chain may be part of.
  */
 export function pathToSpline(context: SketchEditContext, path: SketchPath): SketchEditResult {
   if (path.segments.length < 1) return failure("INVALID_OPERATION", "The path is empty.", [], "Select curves first.");
@@ -209,6 +210,6 @@ export function pathToSpline(context: SketchEditContext, path: SketchPath): Sket
   }
   if (kept.length > 24) return failure("INVALID_OPERATION", `The path has ${kept.length} joints and a spline holds at most 24 fit points.`, path.segments.map((segment) => segment.entityId), "Chain fewer curves, or simplify the path.");
   if (kept.length < 3) return failure("INVALID_OPERATION", "The path is too short to become a spline.", path.segments.map((segment) => segment.entityId), "Select more curves.");
-  const spline: SketchEntity = { id: context.newId("entity"), kind: "spline", fitPoints: kept.map((entry) => entry.point), construction: false };
-  return editPlan(`Joined the path into one spline through ${kept.length} points`, { addEntities: [spline] });
+  const spline: SketchEntity = { id: context.newId("entity"), kind: "spline", fitPoints: kept.map((entry) => entry.point), construction: true };
+  return editPlan(`Joined the path into one construction spline through ${kept.length} points`, { addEntities: [spline] });
 }

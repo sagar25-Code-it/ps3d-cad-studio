@@ -126,6 +126,18 @@ export const sketchPathMirrorMoveTests: readonly TestCase[] = [
     }
   },
   {
+    name: "joining a closed path into a spline leaves its profile intact",
+    run: () => {
+      const region = squareRegion();
+      const project = projectWith(region.entities, region.constraints);
+      const path = makePath(project.sketch, region.entities.map((entity) => entity.id));
+      assert(path.ok && path.value.closed, "the square is a closed path");
+      if (!path.ok) return;
+      const next = commitOk(project, pathToSpline(context(project), path.value));
+      equal(detectSketchProfiles(next.sketch).length, 1, "the square is still one closed profile after the spline is added");
+    }
+  },
+  {
     name: "heal path gaps closes the gap through the operation, and the path is then gap-free",
     run: () => {
       const l1 = line("l1", [0, 0], [10, 0]);
@@ -173,6 +185,7 @@ export const sketchPathMirrorMoveTests: readonly TestCase[] = [
       if (!path.ok) return;
       const joined = planOf(pathToSpline(context(project), path.value));
       const splineId = joined.addEntities[0]!.id;
+      equal((joined.addEntities[0] as { construction: boolean }).construction, true, "the joined spline is construction geometry, so it cannot break the chain's own profiles");
       project = commitOk(project, joined);
       project = runOp(project, { kind: "commit-design-sketch", featureId: "feature:sketch-1", name: "Sketch 1" });
       const sketchFeature = designOf(project).features.find((feature) => feature.kind === "sketch");
@@ -188,6 +201,21 @@ export const sketchPathMirrorMoveTests: readonly TestCase[] = [
       for (let index = 0; index < built.body.positionsMm.length; index += 3) { maxX = Math.max(maxX, built.body.positionsMm[index]!); maxY = Math.max(maxY, built.body.positionsMm[index + 1]!); }
       assert(maxX > 25, `the solid runs along the path to x ~ 30 (got ${maxX.toFixed(2)})`);
       assert(maxY > 8, `and up the arc to y ~ 10 (got ${maxY.toFixed(2)})`);
+    }
+  },
+  {
+    name: "offset-move and path healing refuse to move a curve that is fixed",
+    run: () => {
+      const region = squareRegion();
+      const pinned = projectWith(region.entities, [...region.constraints, constraint("fx", "fixed", ["s0"])]);
+      const ids = region.entities.map((entity) => entity.id);
+      const offset = offsetMoveEntities(context(pinned), ids, { kind: "offset", distanceMm: 2 });
+      assert(!offset.ok && offset.diagnostics[0]!.message.includes("fixed"), "an offset-move would move a fixed side");
+      assert(!offsetMoveEntities(context(pinned), ids, { kind: "vector", dxMm: 5, dyMm: 0 }).ok, "and so would a vector move");
+      const gapped = projectWith([line("l1", [0, 0], [10, 0]), line("l2", [10.4, 0], [10.4, 8])], [constraint("f2", "fixed", ["l2"]), constraint("f1", "fixed", ["l1"])]);
+      const path = makePath(gapped.sketch, ["entity:l1", "entity:l2"]);
+      assert(path.ok && path.value.gaps.length === 1, "the gap is still found");
+      if (path.ok) assert(!healPathGaps(context(gapped), path.value).ok, "but it is not closed by moving a fixed curve");
     }
   },
   {

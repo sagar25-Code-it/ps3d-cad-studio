@@ -75,3 +75,8 @@ export function planHolds(sketch: WorkbenchSketch, plan: SketchEditPlan): { read
   if (solved.movedIds.length > 0) return { ok: false, reason: `Conflicts with a relation on ${solved.movedIds.map((id) => id.replace(/^entity:/u, "")).join(", ")}.` };
   return { ok: true };
 }
+
+/** Curves with an active Fixed relation: edits that would move them in place must be refused, not silently applied. */
+export function pinnedAmong(sketch: WorkbenchSketch, ids: readonly string[]): readonly string[] {
+  return ids.filter((id) => sketch.constraints.some((constraint) => constraint.kind === "fixed" && constraint.suppressed !== true && constraint.entityIds.includes(id)));
+}

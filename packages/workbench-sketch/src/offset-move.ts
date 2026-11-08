@@ -10,6 +10,7 @@ import {
   type SketchEditResult
 } from "./edit-tools.js";
 import { movedEnd } from "./split-jog.js";
+import { pinnedAmong } from "./sketch-clone.js";
 
 /**
  * Offset Move: moves the selected curves, a chain or a whole region, in place (the originals are changed, not copied) and keeps the
@@ -93,6 +94,8 @@ function vectorMove(context: SketchEditContext, selected: readonly SketchEntity[
       }
     }
   }
+  const pinned = pinnedAmong(context.sketch, [...updates.keys()]);
+  if (pinned.length > 0) return reject(`${pinned.map((id) => id.replace(/^entity:/u, "")).join(", ")} ${pinned.length === 1 ? "is" : "are"} fixed and would have to move.`, pinned, "Relax the Fixed relation first (Relax Relations).");
   return editPlan(`Moved ${selected.length} curve${selected.length === 1 ? "" : "s"} by (${fmt(dx)}, ${fmt(dy)}) mm; ${followed.length} attached curve${followed.length === 1 ? "" : "s"} followed`, { updateEntities: [...updates.values()] });
 }
 
@@ -181,6 +184,8 @@ function offsetMove(context: SketchEditContext, selected: readonly SketchEntity[
     }
   }
 
+  const pinnedOffset = pinnedAmong(sketch, [...updates.keys()]);
+  if (pinnedOffset.length > 0) return reject(`${pinnedOffset.map((id) => id.replace(/^entity:/u, "")).join(", ")} ${pinnedOffset.length === 1 ? "is" : "are"} fixed and would have to move.`, pinnedOffset, "Relax the Fixed relation first (Relax Relations).");
   const description = `${selected.length} curve${selected.length === 1 ? "" : "s"} by ${fmt(distanceMm)} mm`;
   return editPlan(`Offset-moved ${description}${stretched === 0 ? "" : `; ${stretched} attached line${stretched === 1 ? "" : "s"} stretched`}`, { updateEntities: [...updates.values()] });
 }

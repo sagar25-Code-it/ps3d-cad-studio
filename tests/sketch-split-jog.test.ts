@@ -257,6 +257,27 @@ export const sketchSplitJogTests: readonly TestCase[] = [
     }
   },
   {
+    name: "a fixed curve splits into fixed pieces with no joint relations; jog and delete-heal refuse to move fixed curves",
+    run: () => {
+      const project = projectWith([line("g", [0, 0], [20, 0])], [constraint("fix", "fixed", ["g"])]);
+      const next = commitOk(project, splitAt(context(project), "entity:g", [8, 0]));
+      equal(linesOf(next).length, 2, "two pieces");
+      equal(next.sketch.constraints.filter((c) => c.kind === "fixed").length, 2, "both are fixed");
+      assert(!next.sketch.constraints.some((c) => c.kind === "collinear" || c.kind === "coincident"), "no joint relation between two fixed lines");
+      const jog = jogLine(context(project), "entity:g", [10, 0], { offsetMm: 2, widthMm: 4 });
+      assert(!jog.ok && jog.diagnostics[0]!.message.includes("fixed"), "a fixed line is not jogged");
+      const rectangle: SketchEntity = { id: "entity:r", kind: "rectangle", center: [0, 0], widthMm: 20, heightMm: 10, rotationDeg: 0, construction: false };
+      const pinnedRect = projectWith([rectangle], [constraint("fr", "fixed", ["r"])]);
+      const rectNext = commitOk(pinnedRect, splitAt(context(pinnedRect), "entity:r", [3, -5.2]));
+      equal(linesOf(rectNext).length, 5, "a fixed rectangle becomes five fixed lines");
+      const arcProject = projectWith([arc("q", [0, 10], [Math.SQRT1_2 * 10, Math.SQRT1_2 * 10], [10, 0])], [constraint("fq", "fixed", ["q"])]);
+      equal(commitOk(arcProject, splitAt(context(arcProject), "entity:q", [8, 6])).sketch.entities.length, 2, "a fixed arc splits too");
+      const healed = projectWith([line("a", [0, 0], [10, 0]), line("t", [10, 0], [12, 2]), line("b", [12, 2], [12, 10])], [constraint("fa", "fixed", ["a"])]);
+      const refused = deleteCurveHeal(context(healed), "entity:t");
+      assert(!refused.ok && refused.diagnostics[0]!.message.includes("fixed"), "heal will not stretch a fixed neighbour");
+    }
+  },
+  {
     name: "split and jog round-trip through project validation and an undo-style replay of the operations",
     run: () => {
       let project = projectWith([line("a", [0, 0], [20, 0])]);

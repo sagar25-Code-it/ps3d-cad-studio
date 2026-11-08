@@ -7,6 +7,7 @@ import {
   type WorkbenchSketchConstraint
 } from "../../workbench-core/src/index.js";
 import { entityPoints, sampleSpline } from "./index.js";
+import { pinnedAmong } from "./sketch-clone.js";
 import {
   arcEntity,
   arcFrame,
@@ -161,10 +162,12 @@ function splitLine(context: SketchEditContext, line: Line, pick: Vec2, boundarie
   const second: Line = { ...line, id: context.newId("entity"), start: at };
   const first: Line = { ...line, end: at };
   const migrated = migrateLineSplit(context, line, second.id);
+  // Both halves of a fixed line stay fixed where they are, which already keeps them joined; the solver cannot take joint relations between two fixed lines.
+  const pinned = pinnedAmong(context.sketch, [line.id]).length > 0;
   return editPlan(`Split line at (${fmt(at[0])}, ${fmt(at[1])})${snapped ? " on a crossing" : ""}${migrated.note}`, {
     updateEntities: [first],
     addEntities: [second],
-    addConstraints: [coincident(context, line.id, "end", second.id, "start"), relation(context, "collinear", [line.id, second.id]), ...migrated.add],
+    addConstraints: [...(pinned ? [] : [coincident(context, line.id, "end", second.id, "start"), relation(context, "collinear", [line.id, second.id])]), ...migrated.add],
     removeConstraintIds: migrated.remove
   });
 }
@@ -205,7 +208,7 @@ function splitArc(context: SketchEditContext, arc: Arc, pick: Vec2, boundaries: 
   if (offset * radius < MIN_PIECE_MM || (sweep - offset) * radius < MIN_PIECE_MM) return reject("Pick a point between the ends of the arc; a split at an end would leave a zero-length piece.", [arc.id]);
   const firstPiece = arcByTravel(arc, arc.id, center, radius, travel.startAngle, travel.sign * offset);
   const secondPiece = arcByTravel(arc, context.newId("entity"), center, radius, travel.startAngle + travel.sign * offset, travel.sign * (sweep - offset));
-  const add: WorkbenchSketchConstraint[] = [relation(context, "concentric", [arc.id, secondPiece.id])];
+  const add: WorkbenchSketchConstraint[] = pinnedAmong(context.sketch, [arc.id]).length > 0 ? [] : [relation(context, "concentric", [arc.id, secondPiece.id])];
   const remove: string[] = [];
   let dropped = 0;
   for (const constraint of relationsOn(context.sketch, arc.id)) {
@@ -263,7 +266,7 @@ function splitCircle(context: SketchEditContext, circle: Circle, pick: Vec2, bou
   if (sweepA * radius < MIN_PIECE_MM || (TWO_PI - sweepA) * radius < MIN_PIECE_MM) return reject("The two split points coincide; pick a different point.", [circle.id]);
   const arcA = arcByTravel(circle, context.newId("entity"), center, radius, first, sweepA);
   const arcB = arcByTravel(circle, context.newId("entity"), center, radius, first + sweepA, TWO_PI - sweepA);
-  const add: WorkbenchSketchConstraint[] = [relation(context, "concentric", [arcA.id, arcB.id])];
+  const add: WorkbenchSketchConstraint[] = pinnedAmong(context.sketch, [circle.id]).length > 0 ? [] : [relation(context, "concentric", [arcA.id, arcB.id])];
   let dropped = 0;
   for (const constraint of relationsOn(context.sketch, circle.id)) {
     const index = constraint.entityIds.indexOf(circle.id);
@@ -307,9 +310,10 @@ function splitRectangle(context: SketchEditContext, rectangle: Rectangle, pick: 
     construction: rectangle.construction,
     ...(rectangle.visible === undefined ? {} : { visible: rectangle.visible })
   }));
-  const constraints: WorkbenchSketchConstraint[] = lines.map((line, index) => coincident(context, line.id, "end", lines[(index + 1) % lines.length]!.id, "start"));
+  const pinnedRectangle = pinnedAmong(context.sketch, [rectangle.id]).length > 0;
+  const constraints: WorkbenchSketchConstraint[] = pinnedRectangle ? [] : lines.map((line, index) => coincident(context, line.id, "end", lines[(index + 1) % lines.length]!.id, "start"));
   const rotation = ((rectangle.rotationDeg % 90) + 90) % 90;
-  if (Math.min(rotation, 90 - rotation) < 1e-6) {
+  if (!pinnedRectangle && Math.min(rotation, 90 - rotation) < 1e-6) {
     lines.forEach((line) => {
       const horizontal = Math.abs(line.end[1] - line.start[1]) < Math.abs(line.end[0] - line.start[0]);
       constraints.push(relation(context, horizontal ? "horizontal" : "vertical", [line.id]));
@@ -424,6 +428,7 @@ export function jogLine(context: SketchEditContext, lineId: string, pick: Vec2, 
   const along = (distanceMm: number): Vec2 => [line.start[0] + unit[0] * distanceMm, line.start[1] + unit[1] * distanceMm];
   const step = (point: Vec2): Vec2 => [point[0] + normal[0] * offsetMm, point[1] + normal[1] * offsetMm];
   const relations = relationsOn(context.sketch, line.id);
+  if (pinnedAmong(context.sketch, [line.id]).length > 0) return reject("This line is fixed, so it cannot be jogged.", [line.id], "Relax its Fixed relation first (Relax Relations), then jog it.");
   const endJoined = relations.some((constraint) => constraint.kind === "coincident" && constraint.entityIds.indexOf(line.id) >= 0 && constraint.points?.[constraint.entityIds.indexOf(line.id)] === "end");
   if (widthMm === 0 && endJoined) return reject("This line's far end is joined to another curve and would move by the jog offset.", [line.id], "Give the jog a width (a bump keeps both ends in place), or relax the relation on that end first.");
   const make = (start: Vec2, end: Vec2, keep?: Line): Line => ({ ...line, id: keep === undefined ? context.newId("entity") : keep.id, start, end });
@@ -592,6 +597,8 @@ export function deleteCurveHeal(context: SketchEditContext, targetId: string): S
   if (left === undefined || right === undefined) {
     return editPlan(`Deleted ${target.kind} (no curve on ${left === undefined && right === undefined ? "either side" : "one side"} to heal against)`, { removeEntityIds: [target.id] });
   }
+  const pinnedNeighbours = pinnedAmong(context.sketch, [left.entity.id, right.entity.id]);
+  if (pinnedNeighbours.length > 0) return reject(`${pinnedNeighbours.map((id) => id.replace(/^entity:/u, "")).join(" and ")} ${pinnedNeighbours.length === 1 ? "is" : "are"} fixed and would have to be stretched to heal the gap.`, [target.id, ...pinnedNeighbours], "Relax the Fixed relation first, or delete the curve without healing (Delete key).");
   if (left.entity.id === right.entity.id) {
     return reject("The curves on both sides of this one are the same curve, so there is nothing to join.", [target.id], "Delete it without healing (Delete key).");
   }
