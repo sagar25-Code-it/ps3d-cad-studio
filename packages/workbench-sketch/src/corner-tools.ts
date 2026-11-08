@@ -560,6 +560,9 @@ function roundChain(context: SketchEditContext, ids: readonly string[], spec: Co
   const joints = chainVertices(context.sketch, ids, joinTolerance(context.sketch)).filter((vertex) => vertex.ends.length === 2 && vertex.ends[0]!.id !== vertex.ends[1]!.id);
   const branches = chainVertices(context.sketch, ids, joinTolerance(context.sketch)).filter((vertex) => vertex.ends.length > 2).length;
   if (joints.length === 0) return reject("The selected curves do not meet end to end, so there is no corner to work on.", [...ids]);
+  if (spec.kind !== "corner" && context.sketch.entities.length + joints.length > 500) {
+    return failure("RESOURCE_LIMIT", `Would create ${joints.length} entities (one per corner), which makes ${context.sketch.entities.length + joints.length} in the sketch; the limit is 500.`, [], "Round fewer corners at once, or delete entities first.");
+  }
   let work: WorkbenchSketch = context.sketch;
   let firstMade: string | undefined;
   let done = 0;
@@ -575,7 +578,7 @@ function roundChain(context: SketchEditContext, ids: readonly string[], spec: Co
       if (/already tangent|side by side/u.test(step)) { skipped += 1; continue; }
       return reject(`Corner at (${fmt(joint.point[0])}, ${fmt(joint.point[1])}): ${step}`, [one!.id, two!.id], "Use a smaller value or lengthen the curves.");
     }
-    const finished = finishPlan(stepContext, step.plan);
+    const finished = finishPlan(stepContext, step.plan, { solve: false });
     if (!finished.ok) return finished;
     const next = sketchAfter(work, finished.value);
     if (typeof next === "string") return reject(next);
@@ -716,9 +719,25 @@ export function cornerByClick(context: SketchEditContext, point: Vec2, tolerance
   const stepContext: SketchEditContext = { sketch: working, newId: context.newId };
   const step = planCorner(stepContext, ids[0]!, ids[1]!, spec, { near: found.vertex });
   if (typeof step === "string") return reject(step, ids, "Use a smaller value or lengthen the curves.");
-  const staged = finishPlan(stepContext, step.plan);
+  const staged = finishPlan(stepContext, step.plan, { solve: false });
   if (!staged.ok) return staged;
   const after = sketchAfter(working, staged.value);
   if (typeof after === "string") return reject(after);
   return finishPlan(context, diffPlan(context.sketch, after, staged.value.label));
+}
+
+/**
+ * The quadrant of a corner a user means by a compass word, for panels that cannot take a click: the pick point sits one unit from the
+ * meeting point of the two selected lines toward that direction (northeast is up and to the right).
+ */
+export function cornerQuadrant(sketch: WorkbenchSketch, ids: readonly string[], side: "ne" | "nw" | "sw" | "se"): CornerPicks | undefined {
+  if (ids.length !== 2) return undefined;
+  const first = find(sketch, ids[0]!);
+  const second = find(sketch, ids[1]!);
+  if (!isCuttable(first) || !isCuttable(second)) return undefined;
+  const meeting = chooseMeeting(first, second, undefined);
+  if (meeting === undefined) return undefined;
+  const sx = side === "ne" || side === "se" ? 1 : -1;
+  const sy = side === "ne" || side === "nw" ? 1 : -1;
+  return { quadrant: [meeting[0] + sx * 1e-3, meeting[1] + sy * 1e-3] };
 }

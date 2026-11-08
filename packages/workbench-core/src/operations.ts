@@ -212,9 +212,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "apply-sketch-edit":
       if (!keys(input, [...common, "removeEntityIds", "updateEntities", "addEntities", "addConstraints", "label", ...(Object.hasOwn(input, "removeConstraintIds") ? ["removeConstraintIds"] : [])])
-        || (Object.hasOwn(input, "removeConstraintIds") && !boundedList(input.removeConstraintIds, 400, stableId))
-        || !boundedList(input.removeEntityIds, 200, stableId) || !boundedList(input.updateEntities, 200, isRecord)
-        || !boundedList(input.addEntities, 200, isRecord) || !boundedList(input.addConstraints, 400, isRecord)
+        || (Object.hasOwn(input, "removeConstraintIds") && !boundedList(input.removeConstraintIds, 1_000, stableId))
+        || !boundedList(input.removeEntityIds, 500, stableId) || !boundedList(input.updateEntities, 500, isRecord)
+        || !boundedList(input.addEntities, 500, isRecord) || !boundedList(input.addConstraints, 1_000, isRecord)
         || typeof input.label !== "string" || input.label.length < 1 || input.label.length > 80) return invalidOperation("The sketch edit payload is invalid.");
       break;
     case "set-sketch-constraints-suppressed":

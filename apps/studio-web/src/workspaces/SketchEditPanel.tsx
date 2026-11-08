@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SketchEntity, WorkbenchSketch, WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
 import {
+  MIRROR_AXIS_X,
+  MIRROR_AXIS_Y,
   chamferCorners,
   chamferCornersAngle,
   chamferCornersAsymmetric,
@@ -13,9 +15,12 @@ import {
   selectionBounds,
   stretchEntities,
   transformEntities,
+  type OffsetChainMode,
+  type OffsetCorner,
   type SketchEditPlan,
   type SketchEditResult
 } from "../../../../packages/workbench-sketch/src/edit-tools.js";
+import { cornerQuadrant } from "../../../../packages/workbench-sketch/src/corner-tools.js";
 import { resolveMirrorAxis } from "../../../../packages/workbench-sketch/src/dynamic-mirror.js";
 import { describePath, healPathGaps, makePath, pathToSpline } from "../../../../packages/workbench-sketch/src/make-path.js";
 import { offsetMoveEntities } from "../../../../packages/workbench-sketch/src/offset-move.js";
@@ -36,6 +41,14 @@ export interface JogParams {
 }
 
 export const DEFAULT_JOG_PARAMS: JogParams = { offset: "3", width: "6" };
+
+/** Fillet and chamfer values as typed, shared with the canvas so a click on a vertex uses them. */
+export interface CornerParams {
+  readonly radius: string;
+  readonly bevel: string;
+}
+
+export const DEFAULT_CORNER_PARAMS: CornerParams = { radius: "2", bevel: "2" };
 
 export const SKETCH_EDIT_TOOL_LABELS: Readonly<Record<SketchEditToolId, string>> = {
   offset: "Offset",
@@ -59,18 +72,18 @@ export const SKETCH_EDIT_TOOL_LABELS: Readonly<Record<SketchEditToolId, string>>
 };
 
 const INSTRUCTIONS: Readonly<Record<SketchEditToolId, string>> = {
-  offset: "Select the curves to offset (a connected chain of lines is mitred), set the distance, then Apply. Positive is outward for circles, arcs, rectangles and closed loops, and to the left of a line's direction.",
-  mirror: "Select the entities to mirror, then the mirror line last, then Apply. Mirrored lines and circles get symmetric relations.",
-  pattern: "Select the entities to repeat, choose a layout, then Apply. The original is the first instance.",
-  move: "Select the entities, enter the X and Y distance, then Apply. Tick Copy to leave the originals and add moved copies.",
-  rotate: "Select the entities, set the angle (counter-clockwise) and the centre, then Apply. Tick Copy to keep the originals.",
-  scale: "Select the entities, set the factor and the centre, then Apply. Circles, rectangles and ellipses scale their size too. Tick Copy to keep the originals.",
+  offset: "Select a curve (a smooth chain of lines and arcs is picked up whole), set the distance, then Apply. Positive is outward for circles, arcs, rectangles and closed loops; on an open chain it is the left of the chain read from its lower-left end. Flip or Both sides change the side, and the preview shows where it lands.",
+  mirror: "Select the entities to mirror, then the mirror line last (or choose the sketch X or Y axis), then Apply. Copies keep their relations and are linked to the originals by symmetry.",
+  pattern: "Select the entities to repeat, choose a layout, then Apply. The original is the first instance. A direction angle runs a linear pattern along any line; Total extent spaces the instances evenly between the first and last.",
+  move: "Select the entities, enter the X and Y distance, then Apply. Tick Copy to leave the originals and add moved copies (several in one go if you set the count).",
+  rotate: "Select the entities, set the angle (counter-clockwise) and the centre, then Apply. Tick Copy to keep the originals and set how many copies to make.",
+  scale: "Select the entities, set the factor and the centre, then Apply. A different Y factor scales unevenly. Dimensions of what you scale follow the new size. Tick Copy to keep the originals.",
   stretch: "Select the entities, then drag a window on empty canvas (or type its corners) over the points or sides to move, enter the distance, then Apply. Only what lies inside the window moves, so the rest of each entity stays and it stretches. \"Use selection bounds\" fills the window from the selection.",
-  corner: "Select two lines, then Apply. Both are extended or trimmed to meet at their intersection.",
-  fillet: "Select two lines (or one rectangle), set the radius, then Apply. The lines are shortened to the tangent points and an arc joins them.",
-  chamfer: "Select two lines (or one rectangle), set the distance, then Apply. The lines are shortened and a straight cut joins them.",
-  trim: "Click a curve where you want it cut: the part between its neighbouring crossings is removed. A circle becomes the arc that remains.",
-  extend: "Click a line near the end you want to lengthen. It runs on to the first curve it reaches.",
+  corner: "Select two curves, then Apply. Both are extended or trimmed to meet. For curves that cross, choose which side to keep.",
+  fillet: "Select two curves that meet (lines or arcs), a whole chain, or a rectangle, set the radius, then Apply. Or click a vertex with nothing selected. The corner relation is replaced by tangent relations and a radius dimension. For curves that cross, choose which corner to round.",
+  chamfer: "Select two curves, a whole chain, or a rectangle, set the distance, then Apply. Or click a vertex with nothing selected. The corner relation is replaced by joints on the new cut line.",
+  trim: "Click a curve where you want it cut: the part between its neighbouring crossings is removed, on lines, arcs, circles, rectangles, ellipses and splines. Drag across several curves to cut them all at once (Power Trim).",
+  extend: "Click a line, arc or spline near the end you want to lengthen. It runs on to the first curve it reaches.",
   split: "Click a curve where you want it cut in two. Near a crossing with another curve it snaps to the crossing. A circle becomes two arcs; a rectangle becomes five lines.",
   jog: "Set the step and its width, then click a line. The line steps out and back by the offset over the width (centred on your click); a width of 0 makes a single step and shifts the rest of the line.",
   "delete-curve": "Click a curve to delete it and heal the gap: the two curves that met it are extended or trimmed to meet each other.",
@@ -87,6 +100,14 @@ export interface StretchWindowRect {
   readonly y2: number;
 }
 
+/** A typed number: a comma is accepted as the decimal mark (12,5), and an empty or unreadable field is NaN, never 0. */
+export function parseDecimal(text: string): number {
+  const trimmed = text.trim();
+  if (trimmed === "") return Number.NaN;
+  const separated = /^[+-]?\d+,\d+$/u.test(trimmed) ? trimmed.replace(",", ".") : trimmed;
+  return Number(separated);
+}
+
 interface SketchEditPanelProps {
   /** The window drawn on the canvas, which the panel shows in its fields. */
   readonly stretchWindow?: StretchWindowRect | undefined;
@@ -101,31 +122,60 @@ interface SketchEditPanelProps {
   /** Jog: the values typed here are read by the canvas when a line is clicked. */
   readonly jog?: JogParams;
   readonly onJog?: (params: JogParams) => void;
+  /** Fillet and chamfer: the values typed here are read by the canvas when a vertex is clicked. */
+  readonly corner?: CornerParams;
+  readonly onCorner?: (params: CornerParams) => void;
   /** Dynamic Mirror: the axis line in use (null when off) and how to change it. */
   readonly dynamicMirrorAxis?: string | null;
   readonly onDynamicMirror?: (axisId: string | null) => void;
+  /** The entities the edit would produce for the values typed now, drawn as a ghost on the canvas (empty clears it). */
+  readonly onPreview?: (entities: readonly SketchEntity[]) => void;
+}
+
+type NewId = (prefix: "entity" | "constraint") => string;
+
+function describePlan(plan: SketchEditPlan): string {
+  const parts: string[] = [];
+  if (plan.addEntities.length > 0) parts.push(`adds ${plan.addEntities.length} curve${plan.addEntities.length === 1 ? "" : "s"}`);
+  if (plan.updateEntities.length > 0) parts.push(`changes ${plan.updateEntities.length}`);
+  if (plan.removeEntityIds.length > 0) parts.push(`removes ${plan.removeEntityIds.length}`);
+  if (plan.addConstraints.length > 0) parts.push(`adds ${plan.addConstraints.length} relation${plan.addConstraints.length === 1 ? "" : "s"}`);
+  const dropped = plan.removeConstraintIds?.length ?? 0;
+  if (dropped > 0) parts.push(`drops ${dropped} relation${dropped === 1 ? "" : "s"} it breaks`);
+  return parts.length === 0 ? "No change." : `Apply ${parts.join(", ")}.`;
 }
 
 /** Options and Apply for the selection-driven sketch edit tools. Trim and Extend act directly on canvas clicks. */
 export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element {
   const [offset, setOffset] = useState("5");
+  const [offsetFlip, setOffsetFlip] = useState(false);
+  const [offsetBoth, setOffsetBoth] = useState(false);
+  const [offsetCorner, setOffsetCorner] = useState<OffsetCorner>("mitre");
+  const [offsetChain, setOffsetChain] = useState<OffsetChainMode>("tangent");
   const [layout, setLayout] = useState<"rectangular" | "circular">("rectangular");
   const [countX, setCountX] = useState("3");
   const [countY, setCountY] = useState("1");
   const [stepX, setStepX] = useState("10");
   const [stepY, setStepY] = useState("10");
+  const [patternAngle, setPatternAngle] = useState("0");
+  const [patternExtent, setPatternExtent] = useState(false);
   const [count, setCount] = useState("6");
   const [angle, setAngle] = useState("360");
   const [centerX, setCenterX] = useState("0");
   const [centerY, setCenterY] = useState("0");
-  const [radius, setRadius] = useState("2");
-  const [bevel, setBevel] = useState("2");
+  const [radius, setRadius] = useState(props.corner?.radius ?? DEFAULT_CORNER_PARAMS.radius);
+  const [bevel, setBevel] = useState(props.corner?.bevel ?? DEFAULT_CORNER_PARAMS.bevel);
   const [bevelSecond, setBevelSecond] = useState("2");
   const [bevelAngle, setBevelAngle] = useState("45");
+  const [radiusDimension, setRadiusDimension] = useState(true);
+  const [cornerSide, setCornerSide] = useState<"auto" | "ne" | "nw" | "sw" | "se">("auto");
+  const [mirrorAxis, setMirrorAxis] = useState<"line" | "x" | "y">("line");
   const [moveX, setMoveX] = useState("10");
   const [moveY, setMoveY] = useState("0");
   const [rotateAngle, setRotateAngle] = useState("45");
   const [scaleFactor, setScaleFactor] = useState("2");
+  const [scaleFactorY, setScaleFactorY] = useState("");
+  const [copyCount, setCopyCount] = useState("1");
   const [copyMode, setCopyMode] = useState(false);
   const [windowX1, setWindowX1] = useState("0");
   const [windowY1, setWindowY1] = useState("0");
@@ -136,7 +186,7 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   const interactive = !isClickEditTool(props.tool) && props.tool !== "make-path" && props.tool !== "dynamic-mirror";
   const jog = props.jog ?? DEFAULT_JOG_PARAMS;
   const pathResult = useMemo(() => (props.tool === "make-path" && props.selectionIds.length > 0 ? makePath(props.sketch, props.selectionIds) : undefined), [props.tool, props.sketch, props.selectionIds]);
-  const { stretchWindow, onStretchWindow } = props;
+  const { stretchWindow, onStretchWindow, onCorner } = props;
 
   // A window drawn on the canvas fills the fields; a typed window is drawn on the canvas.
   useEffect(() => {
@@ -145,52 +195,111 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   }, [stretchWindow]);
   useEffect(() => {
     if (props.tool !== "stretch" || onStretchWindow === undefined) return;
-    const values = [windowX1, windowY1, windowX2, windowY2].map((text) => (text.trim() === "" ? Number.NaN : Number(text)));
+    const values = [windowX1, windowY1, windowX2, windowY2].map(parseDecimal);
     if (values.every(Number.isFinite)) onStretchWindow({ x1: values[0]!, y1: values[1]!, x2: values[2]!, y2: values[3]! });
   }, [props.tool, windowX1, windowY1, windowX2, windowY2, onStretchWindow]);
+  // The canvas reads the fillet and chamfer values when a vertex is clicked.
+  useEffect(() => { onCorner?.({ radius, bevel }); }, [radius, bevel, onCorner]);
+
+  /** Plans the edit for the values typed now; undefined when the tool takes no selection. */
+  const plan = (newId: NewId): SketchEditResult | undefined => {
+    const context = { sketch: props.sketch, newId };
+    const ids = props.selectionIds;
+    const picks = cornerSide === "auto" ? undefined : cornerQuadrant(props.sketch, ids, cornerSide);
+    const cornerOptions = { ...(picks === undefined ? {} : { picks }), dimension: radiusDimension };
+    switch (props.tool) {
+      case "offset": return offsetEntities(context, ids, parseDecimal(offset), { flip: offsetFlip, both: offsetBoth, corner: offsetCorner, chain: offsetChain });
+      case "mirror": return mirrorEntities(context, mirrorAxis === "line" ? ids : [...ids, mirrorAxis === "x" ? MIRROR_AXIS_X : MIRROR_AXIS_Y]);
+      case "corner": return cornerLines(context, ids, cornerOptions);
+      case "fillet": return filletCorners(context, ids, parseDecimal(radius), cornerOptions);
+      case "chamfer":
+        return chamferMode === "equal" ? chamferCorners(context, ids, parseDecimal(bevel), cornerOptions)
+          : chamferMode === "asymmetric" ? chamferCornersAsymmetric(context, ids, parseDecimal(bevel), parseDecimal(bevelSecond), cornerOptions)
+          : chamferCornersAngle(context, ids, parseDecimal(bevel), parseDecimal(bevelAngle), cornerOptions);
+      case "move": return transformEntities(context, ids, { kind: "move", dxMm: parseDecimal(moveX), dyMm: parseDecimal(moveY), copies: parseDecimal(copyCount) }, copyMode);
+      case "rotate": return transformEntities(context, ids, { kind: "rotate", angleDeg: parseDecimal(rotateAngle), center: [parseDecimal(centerX), parseDecimal(centerY)], copies: parseDecimal(copyCount) }, copyMode);
+      case "scale": {
+        const factorY = scaleFactorY.trim() === "" ? undefined : parseDecimal(scaleFactorY);
+        return transformEntities(context, ids, { kind: "scale", factor: parseDecimal(scaleFactor), center: [parseDecimal(centerX), parseDecimal(centerY)], ...(factorY === undefined ? {} : { factorY }) }, copyMode);
+      }
+      case "offset-move": return offsetMoveEntities(context, ids, moveMode === "offset" ? { kind: "offset", distanceMm: parseDecimal(offset) } : { kind: "vector", dxMm: parseDecimal(moveX), dyMm: parseDecimal(moveY) });
+      case "stretch": return stretchEntities(context, ids, { x1: parseDecimal(windowX1), y1: parseDecimal(windowY1), x2: parseDecimal(windowX2), y2: parseDecimal(windowY2) }, parseDecimal(moveX), parseDecimal(moveY));
+      case "pattern":
+        return patternEntities(context, ids, layout === "rectangular"
+          ? { kind: "rectangular", countX: parseDecimal(countX), countY: parseDecimal(countY), dxMm: parseDecimal(stepX), dyMm: parseDecimal(stepY), angleDeg: Number.isFinite(parseDecimal(patternAngle)) ? parseDecimal(patternAngle) : 0, extent: patternExtent }
+          : { kind: "circular", count: parseDecimal(count), angleDeg: parseDecimal(angle), center: [parseDecimal(centerX), parseDecimal(centerY)] });
+      default: return undefined;
+    }
+  };
+
+  // What the edit would do for the values typed now: a one-line summary (or the reason it cannot be done), and a ghost on the canvas.
+  const preview = useMemo(() => {
+    if (!interactive || props.selectionIds.length === 0) return undefined;
+    let serial = 0;
+    try { return plan((prefix) => `${prefix}:preview-${(serial += 1)}`); } catch { return undefined; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.tool, props.sketch, props.selectionIds, offset, offsetFlip, offsetBoth, offsetCorner, offsetChain, layout, countX, countY, stepX, stepY, patternAngle, patternExtent, count, angle, centerX, centerY, radius, bevel, bevelSecond, bevelAngle, radiusDimension, cornerSide, mirrorAxis, moveX, moveY, rotateAngle, scaleFactor, scaleFactorY, copyCount, copyMode, windowX1, windowY1, windowX2, windowY2, chamferMode, moveMode]);
+  const onPreview = props.onPreview;
+  useEffect(() => {
+    if (onPreview === undefined) return;
+    const ghost = preview?.ok === true ? [...preview.value.addEntities, ...preview.value.updateEntities].slice(0, 200) : [];
+    onPreview(ghost);
+  }, [preview, onPreview]);
+  useEffect(() => () => { onPreview?.([]); }, [onPreview]);
 
   const apply = (): void => {
-    const context = { sketch: props.sketch, newId: (prefix: "entity" | "constraint"): string => `${prefix}:user-${crypto.randomUUID()}` };
-    const ids = props.selectionIds;
-    let result: SketchEditResult;
-    switch (props.tool) {
-      case "offset": result = offsetEntities(context, ids, Number(offset)); break;
-      case "mirror": result = mirrorEntities(context, ids); break;
-      case "corner": result = cornerLines(context, ids); break;
-      case "fillet": result = filletCorners(context, ids, Number(radius)); break;
-      case "chamfer":
-        result = chamferMode === "equal" ? chamferCorners(context, ids, Number(bevel))
-          : chamferMode === "asymmetric" ? chamferCornersAsymmetric(context, ids, Number(bevel), Number(bevelSecond))
-          : chamferCornersAngle(context, ids, Number(bevel), Number(bevelAngle));
-        break;
-      case "move": result = transformEntities(context, ids, { kind: "move", dxMm: Number(moveX), dyMm: Number(moveY) }, copyMode); break;
-      case "rotate": result = transformEntities(context, ids, { kind: "rotate", angleDeg: Number(rotateAngle), center: [Number(centerX), Number(centerY)] }, copyMode); break;
-      case "scale": result = transformEntities(context, ids, { kind: "scale", factor: Number(scaleFactor), center: [Number(centerX), Number(centerY)] }, copyMode); break;
-      case "offset-move": result = offsetMoveEntities(context, ids, moveMode === "offset" ? { kind: "offset", distanceMm: Number(offset) } : { kind: "vector", dxMm: Number(moveX), dyMm: Number(moveY) }); break;
-      case "stretch": result = stretchEntities(context, ids, { x1: Number(windowX1), y1: Number(windowY1), x2: Number(windowX2), y2: Number(windowY2) }, Number(moveX), Number(moveY)); break;
-      case "pattern":
-        result = patternEntities(context, ids, layout === "rectangular"
-          ? { kind: "rectangular", countX: Number(countX), countY: Number(countY), dxMm: Number(stepX), dyMm: Number(stepY) }
-          : { kind: "circular", count: Number(count), angleDeg: Number(angle), center: [Number(centerX), Number(centerY)] });
-        break;
-      default: return;
-    }
+    const result = plan((prefix) => `${prefix}:user-${crypto.randomUUID()}`);
+    if (result === undefined) return;
     if (!result.ok) { props.onMessage(result.diagnostics[0]?.message ?? "The sketch edit was rejected."); return; }
-    props.onApply(result.value);
+    try {
+      props.onApply(result.value);
+    } catch (error) {
+      props.onMessage(`The edit could not be applied: ${error instanceof Error ? error.message : "unexpected error"}.`);
+    }
+  };
+
+  const keys = (event: React.KeyboardEvent): void => {
+    if (event.key === "Enter" && interactive) { event.preventDefault(); apply(); }
+    else if (event.key === "Escape") { event.preventDefault(); props.onClose(); }
   };
 
   const field = (label: string, value: string, onChange: (next: string) => void, unit?: string): React.JSX.Element => (
-    <label><span>{label}</span><div className="distance-entry"><input aria-label={label} inputMode="decimal" value={value} onChange={(event) => onChange(event.target.value)} />{unit !== undefined && <small>{unit}</small>}</div></label>
+    <label><span>{label}</span><div className="distance-entry"><input aria-label={label} inputMode="decimal" value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={keys} />{unit !== undefined && <small>{unit}</small>}</div></label>
+  );
+  const check = (label: string, value: boolean, onChange: (next: boolean) => void): React.JSX.Element => (
+    <label className="check-row"><input type="checkbox" aria-label={label} checked={value} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>
+  );
+  const centreButtons = (): React.JSX.Element => (
+    <div className="palette-row">
+      <button className="palette-action" title="Put the centre at the middle of the selection" onClick={() => {
+        const bounds = selectionBounds(props.sketch, props.selectionIds);
+        if (bounds === undefined) { props.onMessage("Select the entities first, then use their middle as the centre."); return; }
+        setCenterX(String(Number(((bounds.x1 + bounds.x2) / 2).toFixed(3)))); setCenterY(String(Number(((bounds.y1 + bounds.y2) / 2).toFixed(3))));
+      }}><CommandIcon name="fit" />Centre of selection</button>
+      <button className="palette-action" title="Put the centre at the sketch origin" onClick={() => { setCenterX("0"); setCenterY("0"); }}><CommandIcon name="coincident" />Origin</button>
+    </div>
+  );
+  const sideSelect = (): React.JSX.Element => (
+    <label><span>Keep (crossing curves)</span><select aria-label="Corner side to keep" value={cornerSide} onChange={(event) => setCornerSide(event.target.value as "auto" | "ne" | "nw" | "sw" | "se")}>
+      <option value="auto">Longer sides</option><option value="ne">Upper right</option><option value="nw">Upper left</option><option value="sw">Lower left</option><option value="se">Lower right</option>
+    </select></label>
   );
 
   return <section className="inspector-section sketch-edit-panel" aria-label={`${SKETCH_EDIT_TOOL_LABELS[props.tool]} options`}>
     <header><strong>{SKETCH_EDIT_TOOL_LABELS[props.tool]}</strong><span>{props.selectionIds.length} selected</span></header>
     <p className="profile-help">{INSTRUCTIONS[props.tool]}</p>
-    {props.tool === "offset" && field("Distance", offset, setOffset, "mm")}
+    {props.tool === "offset" && <>
+      {field("Distance", offset, setOffset, "mm")}
+      {check("Flip side", offsetFlip, setOffsetFlip)}
+      {check("Both sides", offsetBoth, setOffsetBoth)}
+      <label><span>Outside corners</span><select aria-label="Offset corner type" value={offsetCorner} onChange={(event) => setOffsetCorner(event.target.value as OffsetCorner)}><option value="mitre">Sharp (mitre)</option><option value="round">Round</option><option value="chamfer">Chamfer</option></select></label>
+      <label><span>Chain</span><select aria-label="Offset chain selection" value={offsetChain} onChange={(event) => setOffsetChain(event.target.value as OffsetChainMode)}><option value="tangent">Tangent chain</option><option value="connected">Everything connected</option><option value="none">Only what is selected</option></select></label>
+    </>}
     {props.tool === "offset-move" && <>
       <label><span>Move by</span><select aria-label="Offset move mode" value={moveMode} onChange={(event) => setMoveMode(event.target.value as "offset" | "vector")}><option value="offset">Offset along the normal</option><option value="vector">X and Y distance</option></select></label>
       {moveMode === "offset" ? field("Distance", offset, setOffset, "mm") : <>{field("Distance X", moveX, setMoveX, "mm")}{field("Distance Y", moveY, setMoveY, "mm")}</>}
     </>}
+    {props.tool === "mirror" && <label><span>Mirror about</span><select aria-label="Mirror axis" value={mirrorAxis} onChange={(event) => setMirrorAxis(event.target.value as "line" | "x" | "y")}><option value="line">The selected line (last)</option><option value="x">Sketch X axis</option><option value="y">Sketch Y axis</option></select></label>}
     {props.tool === "jog" && <>
       {field("Offset (step)", jog.offset, (next) => props.onJog?.({ ...jog, offset: next }), "mm")}
       {field("Width (0 = single step)", jog.width, (next) => props.onJog?.({ ...jog, width: next }), "mm")}
@@ -234,26 +343,32 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
       }}><CommandIcon name="fit" />Use selection bounds</button>
       {field("Distance X", moveX, setMoveX, "mm")}{field("Distance Y", moveY, setMoveY, "mm")}
     </>}
-    {props.tool === "rotate" && <>{field("Angle", rotateAngle, setRotateAngle, "°")}{field("Centre X", centerX, setCenterX, "mm")}{field("Centre Y", centerY, setCenterY, "mm")}</>}
-    {props.tool === "scale" && <>{field("Factor", scaleFactor, setScaleFactor, "×")}{field("Centre X", centerX, setCenterX, "mm")}{field("Centre Y", centerY, setCenterY, "mm")}</>}
-    {(props.tool === "move" || props.tool === "rotate" || props.tool === "scale") && <label className="check-row"><input type="checkbox" aria-label="Copy instead of moving the originals" checked={copyMode} onChange={(event) => setCopyMode(event.target.checked)} /><span>Copy (keep the originals)</span></label>}
-    {props.tool === "fillet" && field("Radius", radius, setRadius, "mm")}
+    {props.tool === "rotate" && <>{field("Angle", rotateAngle, setRotateAngle, "°")}{field("Centre X", centerX, setCenterX, "mm")}{field("Centre Y", centerY, setCenterY, "mm")}{centreButtons()}</>}
+    {props.tool === "scale" && <>{field("Factor", scaleFactor, setScaleFactor, "×")}{field("Factor Y (blank = same)", scaleFactorY, setScaleFactorY, "×")}{field("Centre X", centerX, setCenterX, "mm")}{field("Centre Y", centerY, setCenterY, "mm")}{centreButtons()}</>}
+    {(props.tool === "move" || props.tool === "rotate" || props.tool === "scale") && check("Copy (keep the originals)", copyMode, setCopyMode)}
+    {copyMode && (props.tool === "move" || props.tool === "rotate") && field("Number of copies", copyCount, setCopyCount)}
+    {props.tool === "fillet" && <>{field("Radius", radius, setRadius, "mm")}{check("Add a radius dimension", radiusDimension, setRadiusDimension)}{sideSelect()}</>}
+    {props.tool === "corner" && sideSelect()}
     {props.tool === "chamfer" && <>
       <label><span>Chamfer mode</span><select aria-label="Chamfer mode" value={chamferMode} onChange={(event) => setChamferMode(event.target.value as "equal" | "asymmetric" | "distance-angle")}><option value="equal">Equal distance</option><option value="asymmetric">Two distances</option><option value="distance-angle">Distance + angle</option></select></label>
       {field(chamferMode === "equal" ? "Distance" : chamferMode === "asymmetric" ? "First distance" : "Distance", bevel, setBevel, "mm")}
       {chamferMode === "asymmetric" && field("Second distance", bevelSecond, setBevelSecond, "mm")}
       {chamferMode === "distance-angle" && field("Angle from first line", bevelAngle, setBevelAngle, "°")}
+      {sideSelect()}
     </>}
     {props.tool === "pattern" && <>
       <label><span>Layout</span><select aria-label="Pattern layout" value={layout} onChange={(event) => setLayout(event.target.value as "rectangular" | "circular")}><option value="rectangular">Rectangular</option><option value="circular">Circular</option></select></label>
       {layout === "rectangular" ? <>
-        {field("Count X", countX, setCountX)}{field("Spacing X", stepX, setStepX, "mm")}
-        {field("Count Y", countY, setCountY)}{field("Spacing Y", stepY, setStepY, "mm")}
+        {field("Count X", countX, setCountX)}{field(patternExtent ? "Total extent X" : "Spacing X", stepX, setStepX, "mm")}
+        {field("Count Y", countY, setCountY)}{field(patternExtent ? "Total extent Y" : "Spacing Y", stepY, setStepY, "mm")}
+        {field("Direction angle", patternAngle, setPatternAngle, "°")}
+        {check("Total extent instead of spacing", patternExtent, setPatternExtent)}
       </> : <>
         {field("Count", count, setCount)}{field("Total angle", angle, setAngle, "°")}
-        {field("Centre X", centerX, setCenterX, "mm")}{field("Centre Y", centerY, setCenterY, "mm")}
+        {field("Centre X", centerX, setCenterX, "mm")}{field("Centre Y", centerY, setCenterY, "mm")}{centreButtons()}
       </>}
     </>}
+    {interactive && props.selectionIds.length > 0 && preview !== undefined && <p className={`profile-help edit-preview ${preview.ok ? "" : "edit-preview-error"}`} role="status" aria-live="polite">{preview.ok ? describePlan(preview.value) : preview.diagnostics[0]?.message}</p>}
     {interactive && <button className="palette-action primary" onClick={apply}><CommandIcon name="cube-check" />Apply {SKETCH_EDIT_TOOL_LABELS[props.tool].toLowerCase()}</button>}
     <button className="palette-action" onClick={props.onClose}><CommandIcon name="cancel" />Done</button>
   </section>;

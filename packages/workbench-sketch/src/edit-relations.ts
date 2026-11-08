@@ -197,8 +197,8 @@ function solverAccepts(sketch: WorkbenchSketch, constraint: WorkbenchSketchConst
 // ---------------------------------------------------------------------------------------------
 
 /** The per-edit list sizes the apply-sketch-edit operation accepts. */
-export const EDIT_ENTITY_LIMIT = 200;
-export const EDIT_CONSTRAINT_LIMIT = 400;
+export const EDIT_ENTITY_LIMIT = 500;
+export const EDIT_CONSTRAINT_LIMIT = 1_000;
 const LIMIT_MM = WORKBENCH_LIMITS.maxCoordinateMm;
 const MIN_MM = WORKBENCH_LIMITS.minGeometryMm;
 
@@ -267,6 +267,8 @@ export interface FinishOptions {
   readonly allowPinned?: readonly string[];
   /** Keep a relation that is no longer true instead of removing it (used by edits that re-value their own dimensions). */
   readonly keep?: ReadonlySet<string>;
+  /** False for the intermediate steps of a multi-step edit: only the final plan needs the live solver's verdict. */
+  readonly solve?: boolean;
 }
 
 /**
@@ -339,7 +341,7 @@ export function settleRelations(sketch: WorkbenchSketch, plan: SketchEditPlan, o
   let result: SketchEditPlan = broken.size === 0 ? plan : { ...plan, removeConstraintIds: [...already, ...broken] };
   // The relations are as true as they can be read directly; if the live solver still would have to move something, drop the
   // relations on the changed geometry that it cannot hold either, rather than failing the edit on them.
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < (options.solve === false ? 0 : 3); attempt += 1) {
     const next = applyPlanToSketch(sketch, result);
     if (typeof next === "string") return next;
     const focus = [...result.updateEntities.map((entity) => entity.id), ...result.addEntities.map((entity) => entity.id)];

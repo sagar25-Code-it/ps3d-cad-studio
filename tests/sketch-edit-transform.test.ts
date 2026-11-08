@@ -68,8 +68,8 @@ export const sketchEditTransformTests: readonly TestCase[] = [
       assert(!tooMany.ok, "40 circles x 100 would be 3960 copies");
       if (!tooMany.ok) assert(/limit is 500/u.test(tooMany.diagnostics[0]!.message) && /3960/u.test(tooMany.diagnostics[0]!.message), "and the message counts them and names the limit");
       const many = projectWith(Array.from({ length: 30 }, (_, index) => circle(`c${index}`, [index * 3, 0], 1)));
-      const withinSketchLimit = patternEntities(ctx(many), many.sketch.entities.map((entity) => entity.id), { kind: "rectangular", countX: 8, countY: 1, dxMm: 200, dyMm: 0 });
-      assert(!withinSketchLimit.ok && /at most 200/u.test(withinSketchLimit.diagnostics[0]!.message), "a single edit that would add more than 200 entities says so");
+      const fits = patternEntities(ctx(many), many.sketch.entities.map((entity) => entity.id), { kind: "rectangular", countX: 8, countY: 1, dxMm: 200, dyMm: 0 });
+      assert(fits.ok, "210 new entities (30 circles x 7 copies) are within one edit and the 500 entity limit");
     }
   },
   {

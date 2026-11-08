@@ -19,7 +19,8 @@ import {
 import { gridSteps, sketchToScreen } from "../../../../packages/workbench-sketch/src/camera.js";
 import { dynamicFieldsFor, measureFromCursor, parseDynamicNumber, pointFromDynamicInput, type DynamicFieldId, type DynamicValues } from "../../../../packages/workbench-sketch/src/dynamic-input.js";
 import { sketchCurvatureCombs } from "../../../../packages/workbench-sketch/src/curvature-comb.js";
-import { constraintsOnEntities, extendAt, nearestEntityId, trimAt, type SketchEditPlan } from "../../../../packages/workbench-sketch/src/edit-tools.js";
+import { constraintsOnEntities, extendAt, nearestEntityId, powerTrim, trimAt, type SketchEditPlan } from "../../../../packages/workbench-sketch/src/edit-tools.js";
+import { cornerByClick } from "../../../../packages/workbench-sketch/src/corner-tools.js";
 import { deleteCurveHeal, jogLine, splitAt } from "../../../../packages/workbench-sketch/src/split-jog.js";
 import { mirrorImages, withDynamicMirror } from "../../../../packages/workbench-sketch/src/dynamic-mirror.js";
 import { copySketchSelection, cutSketchSelection, nextPasteNumber, parseClipboard, pasteSketchClipboard, readSketchClipboard, serializeClipboard, storeSketchClipboard, type SketchClipboard } from "../../../../packages/workbench-sketch/src/sketch-clipboard.js";
@@ -34,7 +35,7 @@ import { extendProfileChain, startProfileChain, type ProfileChain } from "../../
 import { DEFAULT_CURVE_OPTION_FIELDS, SketchCurveOptionsPanel, curveOptionsFromFields } from "./SketchCurveOptions.js";
 import { createBlockLibrary, makeSketchBlock } from "../../../../packages/workbench-sketch/src/sketch-blocks.js";
 import { entitiesInSelectionBox, selectionBoxMode, selectionRect, type SketchSelectionBoxMode } from "../../../../packages/workbench-sketch/src/selection.js";
-import { DEFAULT_JOG_PARAMS, SKETCH_EDIT_TOOL_LABELS, SketchEditPanel, SketchRelationList, isClickEditTool, type JogParams, type SketchEditToolId, type StretchWindowRect } from "./SketchEditPanel.js";
+import { DEFAULT_CORNER_PARAMS, DEFAULT_JOG_PARAMS, SKETCH_EDIT_TOOL_LABELS, SketchEditPanel, SketchRelationList, isClickEditTool, parseDecimal, type CornerParams, type JogParams, type SketchEditToolId, type StretchWindowRect } from "./SketchEditPanel.js";
 import { SketchRepairPanel } from "./SketchRepairPanel.js";
 import { ReachOptions } from "./ReachOptions.js";
 import { DEFAULT_REACH, buildReach, isReachTarget, type ReachSettings } from "../reach-settings.js";
@@ -293,6 +294,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, []);
   /** Jog values typed in the Jog panel, read when a line is clicked. */
   const [jogParams, setJogParams] = useState<JogParams>(DEFAULT_JOG_PARAMS);
+  /** Fillet and chamfer values typed in their panel, read when a vertex is clicked. */
+  const [cornerParams, setCornerParams] = useState<CornerParams>(DEFAULT_CORNER_PARAMS);
+  /** The ghost of what the open edit tool would do for the values typed now. */
+  const [editPreview, setEditPreview] = useState<readonly SketchEntity[]>([]);
+  /** Power Trim: the path a press-and-drag has swept so far while the Trim tool is active. */
+  const trimSweep = useRef<{ readonly pointerId: number; readonly startClient: readonly [number, number]; readonly path: Vec2[] } | undefined>(undefined);
   /** Dynamic Mirror: the line new curves are mirrored about, or null when off. It outlives the edit panel so drawing tools can use it. */
   const [dynamicMirrorAxis, setDynamicMirrorAxis] = useState<string | null>(null);
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
@@ -595,7 +602,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         : props.editTool === "extend" ? extendAt(context, target, point)
         : props.editTool === "split" ? splitAt(context, target, point, { snapMm: PICK_PIXELS * px })
         : props.editTool === "delete-curve" ? deleteCurveHeal(context, target)
-        : jogLine(context, target, point, { offsetMm: Number(jogParams.offset), widthMm: Number(jogParams.width) });
+        : jogLine(context, target, point, { offsetMm: parseDecimal(jogParams.offset), widthMm: parseDecimal(jogParams.width) });
       if (!result.ok) { props.onMessage(result.diagnostics[0]?.message ?? "The sketch edit was rejected."); return; }
       props.onApplyEdit(result.value);
       setSelectionIds([]);
@@ -1228,6 +1235,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       };
       return;
     }
+    if (props.editTool === "trim" && props.tool === "select" && !props.dimensionMode) {
+      // Press, drag across curves and release cuts them all (Power Trim); a press that never moves is an ordinary click-trim on release.
+      event.currentTarget.setPointerCapture(event.pointerId);
+      trimSweep.current = { pointerId: event.pointerId, startClient: [event.clientX, event.clientY], path: [camera.toSketch(event.clientX, event.clientY)] };
+      return;
+    }
     pointer(event, true);
   };
 
@@ -1246,11 +1259,25 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       if (gesture.dragging) setSelectionBox({ start: gesture.startMm, end: camera.toSketch(event.clientX, event.clientY) });
       return;
     }
+    const sweep = trimSweep.current;
+    if (sweep !== undefined && sweep.pointerId === event.pointerId && sweep.path.length < 400) sweep.path.push(camera.toSketch(event.clientX, event.clientY));
     pointer(event, false);
   };
 
   const finishCanvasDrag = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (camera.endPan(event)) return;
+    const sweep = trimSweep.current;
+    if (sweep !== undefined && sweep.pointerId === event.pointerId) {
+      trimSweep.current = undefined;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      if (event.type === "pointercancel") return;
+      if (Math.hypot(event.clientX - sweep.startClient[0], event.clientY - sweep.startClient[1]) < 8) { pointer(event, true); return; }
+      const swept = powerTrim(editContext(), sweep.path);
+      if (!swept.ok) { props.onMessage(swept.diagnostics[0]?.message ?? "The sweep could not trim anything."); return; }
+      props.onApplyEdit(swept.value);
+      setSelectionIds([]);
+      return;
+    }
     const grab = dragGesture.current;
     if (grab !== undefined && grab.pointerId === event.pointerId) {
       dragGesture.current = undefined;
@@ -1277,7 +1304,15 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     // A press that never moved is a click: on a shaded profile it selects the profile, anywhere else it clears the selection.
     const profile = gesture.profileId === undefined ? undefined : profiles.find((candidate) => candidate.id === gesture.profileId);
     if (profile !== undefined) selectProfile(profile, gesture.additive);
-    else pointer(event, true);
+    else if ((props.editTool === "fillet" || props.editTool === "chamfer") && props.tool === "select" && selectionIds.length === 0) {
+      // With nothing selected, a click on a vertex where two curves meet rounds or cuts that corner at once.
+      const click = camera.toSketch(event.clientX, event.clientY);
+      const size = parseDecimal(props.editTool === "fillet" ? cornerParams.radius : cornerParams.bevel);
+      const done = cornerByClick(editContext(), click, PICK_PIXELS * px, props.editTool === "fillet" ? { kind: "fillet", radiusMm: size, dimension: true } : { kind: "chamfer", firstMm: size, secondMm: size });
+      if (done.ok) { props.onApplyEdit(done.value); setSelectionIds([]); }
+      else if (Number.isFinite(size) && !/Click on a vertex/u.test(done.diagnostics[0]?.message ?? "")) props.onMessage(done.diagnostics[0]?.message ?? "That corner could not be changed.");
+      else pointer(event, true);
+    } else pointer(event, true);
   };
 
   const interactive = props.tool === "select" && props.viewportState.navigationMode !== "pan" && !camera.spaceHeld && !isClickEditTool(props.editTool);
@@ -1337,6 +1372,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {previewEntity !== undefined && <SketchEntityShape entity={previewEntity} px={px} selected={false} hovered={false} preview />}
         {previewShape?.entities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
         {mirrorGhosts.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
+        {props.editTool !== null && editPreview.map((entity) => <SketchEntityShape key={`edit-preview-${entity.id}`} entity={entity} px={px} selected={false} hovered={false} preview />)}
         {showDimensions && drivingDimensions.map((view) => <DimensionMarks key={view.constraint.id} entity={view.entity} dimension={view.dimension} valueMm={view.constraint.valueMm ?? 0} relaxed={view.constraint.suppressed === true} px={px} {...(interactive ? { onEdit: () => openDimensionEditor(view.entity, view.dimension) } : {})} />)}
         {showDimensions && <ExtraDimensionMarks sketch={visibleSketch} px={px} {...(interactive ? { onEdit: openExtraDimensionEditor } : {})} />}
         {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r={4 * px} className="pending-point" />)}
@@ -1703,7 +1739,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       {dynamicMirrorEntity !== undefined && props.editTool !== "dynamic-mirror" && <div className="inline-warning movable-note" role="status" aria-label="Dynamic mirror active">
         Dynamic mirror is on: what you draw is mirrored about {dynamicMirrorEntity.id.replace(/^entity:/u, "")}. <button className="palette-action" onClick={() => { setDynamicMirrorAxis(null); props.onMessage("Dynamic mirror stopped."); }}><CommandIcon name="cancel" />Stop</button>
       </div>}
-      {props.editTool !== null && <SketchEditPanel tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} jog={jogParams} onJog={setJogParams} dynamicMirrorAxis={dynamicMirrorAxis} onDynamicMirror={(axisId) => { setDynamicMirrorAxis(axisId); props.onMessage(axisId === null ? "Dynamic mirror stopped." : `Dynamic mirror on: pick a drawing tool; everything you draw is mirrored about ${axisId.replace(/^entity:/u, "")}.`); }} />}
+      {props.editTool !== null && <SketchEditPanel tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} jog={jogParams} onJog={setJogParams} corner={cornerParams} onCorner={setCornerParams} onPreview={setEditPreview} dynamicMirrorAxis={dynamicMirrorAxis} onDynamicMirror={(axisId) => { setDynamicMirrorAxis(axisId); props.onMessage(axisId === null ? "Dynamic mirror stopped." : `Dynamic mirror on: pick a drawing tool; everything you draw is mirrored about ${axisId.replace(/^entity:/u, "")}.`); }} />}
       {props.checkOpen && <SketchRepairPanel sketch={props.sketch} onApplyEdit={props.onApplyEdit} onSetSuppressed={props.onSetSuppressed} onSelect={(ids) => { setSelectionIds(ids); props.onSelect(ids.at(-1) ?? null); }} onMessage={props.onMessage} onClose={props.onCloseCheck} />}
       {props.showMovable && <div className="inline-warning movable-note">{movableIds.size === 0 ? "Show Movable: every entity is fully constrained." : `Show Movable: ${movableIds.size} entit${movableIds.size === 1 ? "y has" : "ies have"} estimated degrees of freedom (amber).`}</div>}
       <section className="inspector-section point-relations"><header><strong>Point relations</strong><span>{pickRelation === null ? "pick points" : pickRelation}</span></header>

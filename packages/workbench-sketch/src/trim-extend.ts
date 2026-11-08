@@ -344,7 +344,7 @@ export function trimAt(context: SketchEditContext, targetId: string, pick: Vec2)
     const stepContext: SketchEditContext = { sketch: working, newId: context.newId };
     const trimmed = rawTrim(stepContext, edgeEntity, pick);
     if (!trimmed.ok) return trimmed;
-    const step = finishPlan(stepContext, trimmed.value);
+    const step = finishPlan(stepContext, trimmed.value, { solve: false });
     if (!step.ok) return step;
     const after = sketchAfter(working, step.value);
     if (typeof after === "string") return reject(after);
