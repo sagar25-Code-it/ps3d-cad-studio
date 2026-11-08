@@ -29,6 +29,7 @@ import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, buildPolyg
 import { CURVE_TOOL_PROMPTS, buildControlPointSpline, buildCurveTool, isFixedCurveTool } from "../../../../packages/workbench-sketch/src/curve-tools.js";
 import { extendProfileChain, startProfileChain, type ProfileChain } from "../../../../packages/workbench-sketch/src/blend-profile.js";
 import { DEFAULT_CURVE_OPTION_FIELDS, SketchCurveOptionsPanel, curveOptionsFromFields } from "./SketchCurveOptions.js";
+import { createBlockLibrary, makeSketchBlock } from "../../../../packages/workbench-sketch/src/sketch-blocks.js";
 import { entitiesInSelectionBox, selectionBoxMode, selectionRect, type SketchSelectionBoxMode } from "../../../../packages/workbench-sketch/src/selection.js";
 import { SketchCheckPanel, SketchEditPanel, SketchRelationList, type SketchEditToolId, type StretchWindowRect } from "./SketchEditPanel.js";
 import { SketchGrid } from "./sketch/SketchGrid.js";
@@ -248,6 +249,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // The extra curve tools (rounded rectangle, conics, blend, profile, text ...): their palette numbers, and the Profile chain being drawn.
   const [curveFields, setCurveFields] = useState(DEFAULT_CURVE_OPTION_FIELDS);
   const profileChain = useRef<ProfileChain | undefined>(undefined);
+  // Reusable sketch blocks live in the browser (not in the project file); a blocked or missing localStorage just keeps them in memory.
+  const [blockLibrary] = useState(() => createBlockLibrary((() => { try { return window.localStorage; } catch { return undefined; } })()));
+  const [blockNames, setBlockNames] = useState<readonly string[]>(() => blockLibrary.list().map((block) => block.name));
   // Typed input: fields the user has typed into are locked; the others keep following the pointer.
   const [fieldText, setFieldText] = useState<Partial<Record<DynamicFieldId, string>>>({});
   const [dynamicFocused, setDynamicFocused] = useState(false);
@@ -418,7 +422,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const buildShape = (tool: Exclude<SketchTool, "select">, points: readonly Vec2[]): ReturnType<typeof buildPolygon> => {
     const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
     if (isFixedCurveTool(tool)) {
-      const options = curveOptionsFromFields(curveFields, { entities: props.sketch.entities, centerlineReachMm: Math.max(1000, camera.camera.widthMm * 3 + Math.hypot(camera.camera.centerMm[0], camera.camera.centerMm[1])), pickReachMm: Math.max(props.sketch.snapToleranceMm, PICK_PIXELS * px) });
+      const options = curveOptionsFromFields(curveFields, { entities: props.sketch.entities, centerlineReachMm: Math.max(1000, camera.camera.widthMm * 3 + Math.hypot(camera.camera.centerMm[0], camera.camera.centerMm[1])), pickReachMm: Math.max(props.sketch.snapToleranceMm, PICK_PIXELS * px), block: blockLibrary.get(curveFields.blockChoice) });
       return buildCurveTool(tool, points, options, ids);
     }
     if (tool === "polygon") return buildPolygon(points[0]!, points[1]!, Math.round(Number(polygonSides)), ids);
@@ -641,6 +645,15 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (accepted === false) return;
     setPending([]);
     props.onMessage(`Added ${closed ? "closed " : ""}control-point spline from ${controls.length} control points${closed ? " as two splines that meet at two points, so it bounds a profile" : ""}.`);
+  };
+
+  const saveSelectionAsBlock = (name: string): void => {
+    const made = makeSketchBlock(name, selectedEntities, props.sketch.constraints);
+    if (!made.ok) { props.onMessage(made.diagnostics[0]?.message ?? "The block could not be saved."); return; }
+    blockLibrary.save(made.value);
+    setBlockNames(blockLibrary.list().map((block) => block.name));
+    setCurveFields((current) => ({ ...current, blockChoice: made.value.name }));
+    props.onMessage(`Saved block "${made.value.name}" with ${made.value.entities.length} curve${made.value.entities.length === 1 ? "" : "s"} and ${made.value.constraints.length} relation${made.value.constraints.length === 1 ? "" : "s"}. Click in the sketch to insert it.`);
   };
 
   /** One click of the Profile tool: the first click starts the chain, each later click adds a line or a tangent arc; ending on the start closes the loop. */
@@ -1277,7 +1290,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Snap" active={snapEnabled} onToggle={setSnapEnabled} />
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
         {props.tool === "polygon" && <label className="palette-number"><span>Polygon sides</span><input type="number" min={POLYGON_MIN_SIDES} max={POLYGON_MAX_SIDES} step={1} value={polygonSides} aria-label="Number of polygon sides" onChange={(event) => setPolygonSides(event.target.value)} /></label>}
-        <SketchCurveOptionsPanel tool={props.tool} fields={curveFields} onChange={setCurveFields} />
+        <SketchCurveOptionsPanel tool={props.tool} fields={curveFields} onChange={setCurveFields} blockNames={blockNames} selectedCount={selectedEntities.length} onSaveBlock={saveSelectionAsBlock} />
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
         <PaletteToggle label="Constraints" active={showConstraints} onToggle={setShowConstraints} />

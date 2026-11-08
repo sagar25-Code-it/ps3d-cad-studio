@@ -116,7 +116,8 @@ const CURVE_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; re
   { id: "conic-five", icon: "ellipse", label: "Conic (5 pts)", hint: "five points" },
   { id: "blend", icon: "spline", label: "Blend curve", hint: "two curve ends" },
   { id: "profile", icon: "line", label: "Profile", hint: "lines + arcs" },
-  { id: "text", icon: "text", label: "Text", hint: "stroke font" }
+  { id: "text", icon: "text", label: "Text", hint: "stroke font" },
+  { id: "block", icon: "copy", label: "Insert block", hint: "saved group" }
 ];
 
 const PART_FEATURES = [

@@ -2,6 +2,7 @@ import type { SketchEntity } from "../../../../packages/workbench-core/src/index
 import type { ProfileSegmentMode } from "../../../../packages/workbench-sketch/src/blend-profile.js";
 import { BLEND_TENSION_MAX, BLEND_TENSION_MIN } from "../../../../packages/workbench-sketch/src/blend-profile.js";
 import { CONIC_RHO_MAX, CONIC_RHO_MIN } from "../../../../packages/workbench-sketch/src/conic-curves.js";
+import type { SketchBlock } from "../../../../packages/workbench-sketch/src/sketch-blocks.js";
 import { DEFAULT_CURVE_TOOL_OPTIONS, type CurveToolOptions } from "../../../../packages/workbench-sketch/src/curve-tools.js";
 import { TEXT_MAX_CHARACTERS } from "../../../../packages/workbench-sketch/src/stroke-text.js";
 import type { SketchTool } from "../../../../packages/workbench-sketch/src/index.js";
@@ -19,6 +20,11 @@ export interface CurveOptionFields {
   readonly textRotation: string;
   readonly profileMode: ProfileSegmentMode;
   readonly keepPolygon: boolean;
+  /** Insert block: which saved block, the angle and scale to insert it at, and the name to save the selection under. */
+  readonly blockChoice: string;
+  readonly blockRotation: string;
+  readonly blockScale: string;
+  readonly blockName: string;
 }
 
 export const DEFAULT_CURVE_OPTION_FIELDS: CurveOptionFields = {
@@ -29,7 +35,11 @@ export const DEFAULT_CURVE_OPTION_FIELDS: CurveOptionFields = {
   textHeight: String(DEFAULT_CURVE_TOOL_OPTIONS.textHeightMm),
   textRotation: String(DEFAULT_CURVE_TOOL_OPTIONS.textRotationDeg),
   profileMode: "line",
-  keepPolygon: DEFAULT_CURVE_TOOL_OPTIONS.keepControlPolygon
+  keepPolygon: DEFAULT_CURVE_TOOL_OPTIONS.keepControlPolygon,
+  blockChoice: "",
+  blockRotation: "0",
+  blockScale: "1",
+  blockName: "Block 1"
 };
 
 /** What the canvas knows that the typed fields do not: the existing curves, the view's reach and how close a click must be to a curve end. */
@@ -37,6 +47,7 @@ export interface CurveContext {
   readonly entities: readonly SketchEntity[];
   readonly centerlineReachMm: number;
   readonly pickReachMm: number;
+  readonly block: SketchBlock | undefined;
 }
 
 export function curveOptionsFromFields(fields: CurveOptionFields, context: CurveContext): CurveToolOptions {
@@ -54,7 +65,10 @@ export function curveOptionsFromFields(fields: CurveOptionFields, context: Curve
     centerlineReachMm: context.centerlineReachMm,
     entities: context.entities,
     pickReachMm: context.pickReachMm,
-    keepControlPolygon: fields.keepPolygon
+    keepControlPolygon: fields.keepPolygon,
+    block: context.block,
+    blockRotationDeg: number(fields.blockRotation, Number.NaN),
+    blockScale: number(fields.blockScale, Number.NaN)
   };
 }
 
@@ -62,15 +76,33 @@ interface PanelProps {
   readonly tool: SketchTool;
   readonly fields: CurveOptionFields;
   readonly onChange: (next: CurveOptionFields) => void;
+  /** Insert block: the names of the saved blocks, how many curves are selected, and the action that saves the selection. */
+  readonly blockNames: readonly string[];
+  readonly selectedCount: number;
+  readonly onSaveBlock: (name: string) => void;
 }
 
 /** The palette controls of whichever extra curve tool is active; nothing for the other tools. */
-export function SketchCurveOptionsPanel({ tool, fields, onChange }: PanelProps): React.JSX.Element | null {
+export function SketchCurveOptionsPanel({ tool, fields, onChange, blockNames, selectedCount, onSaveBlock }: PanelProps): React.JSX.Element | null {
   const set = <K extends keyof CurveOptionFields>(key: K, value: CurveOptionFields[K]): void => onChange({ ...fields, [key]: value });
-  const numberField = (label: string, key: "cornerRadius" | "rho" | "tension" | "textHeight" | "textRotation", step: number, min?: number, max?: number): React.JSX.Element => (
+  const numberField = (label: string, key: "cornerRadius" | "rho" | "tension" | "textHeight" | "textRotation" | "blockRotation" | "blockScale", step: number, min?: number, max?: number): React.JSX.Element => (
     <label className="palette-number"><span>{label}</span><input type="number" {...(min === undefined ? {} : { min })} {...(max === undefined ? {} : { max })} step={step} value={fields[key]} aria-label={label} onChange={(event) => set(key, event.target.value)} /></label>
   );
   switch (tool) {
+    case "block": return (
+      <>
+        <label className="palette-number"><span>Block</span>
+          <select aria-label="Saved block" value={fields.blockChoice} onChange={(event) => set("blockChoice", event.target.value)}>
+            <option value="">{blockNames.length === 0 ? "No blocks saved" : "Choose a block"}</option>
+            {blockNames.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </label>
+        {numberField("Block angle (deg)", "blockRotation", 15, -360, 360)}
+        {numberField("Block scale", "blockScale", 0.1, 0.01, 100)}
+        <label className="palette-number"><span>Save as</span><input type="text" maxLength={40} value={fields.blockName} aria-label="Name for the new block" onChange={(event) => set("blockName", event.target.value)} /></label>
+        <button className="palette-action" disabled={selectedCount === 0} title="Save the selected curves as a reusable block" onClick={() => onSaveBlock(fields.blockName)}>Save {selectedCount} selected as block</button>
+      </>
+    );
     case "rectangle-rounded": return numberField("Corner radius (mm)", "cornerRadius", 0.5, 0.01);
     case "conic": return numberField("Rho (0.5 = parabola)", "rho", 0.05, CONIC_RHO_MIN, CONIC_RHO_MAX);
     case "blend": return numberField("Blend tension", "tension", 0.1, BLEND_TENSION_MIN, BLEND_TENSION_MAX);

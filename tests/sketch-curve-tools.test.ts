@@ -7,6 +7,7 @@ import { buildBlendCurve, curveEnds, extendProfileChain, startProfileChain, tang
 import { buildConicByRho, buildConicFromFivePoints, buildControlPointSpline, buildHyperbola, buildParabola, conicArcPoint, controlPointCurve, fitConicThroughFivePoints } from "../packages/workbench-sketch/src/conic-curves.js";
 import { buildCurveTool, CURVE_TOOL_LABELS, DEFAULT_CURVE_TOOL_OPTIONS, curveToolRequiredPoints, isCurveTool, isFixedCurveTool, type CurveToolId, type FixedCurveToolId } from "../packages/workbench-sketch/src/curve-tools.js";
 import type { ShapeIds, SketchShape } from "../packages/workbench-sketch/src/shapes.js";
+import { createBlockLibrary, insertSketchBlock, makeSketchBlock, type BlockStorage } from "../packages/workbench-sketch/src/sketch-blocks.js";
 import { buildSketchText, glyphWidthUnits, STROKE_FONT_CHARACTERS, unsupportedTextCharacters } from "../packages/workbench-sketch/src/stroke-text.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
@@ -570,9 +571,11 @@ export const sketchCurveToolTests: readonly TestCase[] = [
         conic: [[0, 0], [40, 0], [20, 20]],
         "conic-five": [[-2, 4], [-1, 1], [0, 0], [1, 1], [2, 4]],
         blend: [[0, 0], [30, 12]],
-        text: [[0, 0]]
+        text: [[0, 0]],
+        block: [[60, 40]]
       };
       const base = emptyProject();
+      const sampleBlock = must(makeSketchBlock("sample", must(buildRoundedRectangle([0, 0], [10, 6], 1.5, ids)).entities, []));
       const withCurves: SketchEntity[] = [
         { id: "entity:blend-a", kind: "line", start: [-20, 0], end: [0, 0], construction: false },
         { id: "entity:blend-b", kind: "line", start: [30, 12], end: [50, 12], construction: false }
@@ -585,7 +588,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
         equal(curveToolRequiredPoints(tool), points.length, `${tool} registry count`);
         assert(isShapeTool(tool as SketchTool), `${tool} is placed as a shape`);
         equal(sketchToolLabel(tool), CURVE_TOOL_LABELS[tool], `${tool} label`);
-        const shape = must(buildCurveTool(tool, points, { ...DEFAULT_CURVE_TOOL_OPTIONS, entities: withCurves, pickReachMm: 2 }, ids));
+        const shape = must(buildCurveTool(tool, points, { ...DEFAULT_CURVE_TOOL_OPTIONS, entities: withCurves, pickReachMm: 2, block: sampleBlock, blockRotationDeg: 90, blockScale: 2 }, ids));
         assert(shape.entities.length >= 1, `${tool} builds entities`);
         project = addThrough(project, shape, `Added ${tool}`);
         assert(!buildCurveTool(tool, points.slice(0, -1), DEFAULT_CURVE_TOOL_OPTIONS, ids).ok, `${tool} refuses a wrong click count`);
@@ -595,8 +598,108 @@ export const sketchCurveToolTests: readonly TestCase[] = [
         assert(!isShapeTool(tool), `${tool} is not placed in one go`);
         assert((requiredSketchPoints(tool) ?? 0) >= 2, `${tool} has a minimum`);
       }
-      equal(Object.keys(CURVE_TOOL_LABELS).length, 14, "fourteen curve tools");
+      equal(Object.keys(CURVE_TOOL_LABELS).length, 15, "fifteen curve tools (fourteen shapes and the block insert)");
+      assert(!buildCurveTool("block", [[0, 0]], DEFAULT_CURVE_TOOL_OPTIONS, ids).ok, "inserting a block that was never saved is refused");
       assert(project.sketch.entities.length > 30, `${project.sketch.entities.length} entities from one of each tool are valid together`);
+    }
+  },
+  // ------------------------------------------------------------------ reusable blocks
+  {
+    name: "sketch blocks: a rounded rectangle with its relations is saved once and inserted turned and scaled, with the exact area and an exact extrusion",
+    run: async () => {
+      const source = must(buildRoundedRectangle([0, 0], [40, 20], 4, ids));
+      const sourceProject = addThrough(emptyProject(), source);
+      const block = must(makeSketchBlock("Plate 40x20", sourceProject.sketch.entities, sourceProject.sketch.constraints));
+      equal(block.entities.length, 8, "all eight curves are in the block");
+      equal(block.constraints.length, source.constraints.length, "and every relation between them");
+      const box = boundsOf(block.entities);
+      near((box.min[0] + box.max[0]) / 2, 0, 1e-9, "the block is centred on its origin (x)");
+      near((box.min[1] + box.max[1]) / 2, 0, 1e-9, "the block is centred on its origin (y)");
+      const inserted = must(insertSketchBlock(block, [100, 50], { rotationDeg: 90, scale: 2 }, ids));
+      const placedBox = boundsOf(inserted.entities);
+      near(placedBox.max[0] - placedBox.min[0], 40, 1e-9, "turned 90 degrees the 40 mm width becomes the height, doubled: 40 wide (x)");
+      near(placedBox.max[1] - placedBox.min[1], 80, 1e-9, "and 80 tall (y)");
+      near((placedBox.min[0] + placedBox.max[0]) / 2, 100, 1e-9, "centred on the click (x)");
+      near((placedBox.min[1] + placedBox.max[1]) / 2, 50, 1e-9, "centred on the click (y)");
+      equal(inserted.constraints.filter((constraint) => constraint.kind === "horizontal").length, 2, "the plumb sides became level sides when turned a quarter turn");
+      assert(new Set(inserted.entities.map((entity) => entity.id)).size === 8 && inserted.entities.every((entity) => !block.entities.some((original) => original.id === entity.id)), "fresh IDs for every copy");
+      const project = addThrough(sourceProject, inserted, "Inserted block");
+      equal(project.sketch.entities.length, 16, "the original and the copy sit in one sketch");
+      const copyOnly = inserted.entities;
+      const area = 40 * 20 - (4 - Math.PI) * 16;
+      near(detectSketchProfiles(sketchOf(copyOnly))[0]!.areaMm2, area * 4, area * 4 * 0.003, "doubling the size quadruples the area");
+      const solid = await extrudedVolume(copyOnly, 3);
+      near(solid.volume, solid.area * 3, solid.area * 3 * 1e-9, "the copy extrudes");
+    }
+  },
+  {
+    name: "sketch blocks: a free angle drops level and plumb relations, dimensions scale, and Fixed is not carried over",
+    run: () => {
+      const line = (id: string, a: Vec2, b: Vec2): SketchEntity => ({ id, kind: "line", start: a, end: b, construction: false });
+      const entities: SketchEntity[] = [line("entity:b1", [0, 0], [10, 0]), line("entity:b2", [10, 0], [10, 6])];
+      const block = must(makeSketchBlock("L", entities, [
+        { id: "constraint:b-h", kind: "horizontal", entityIds: ["entity:b1"] },
+        { id: "constraint:b-v", kind: "vertical", entityIds: ["entity:b2"] },
+        { id: "constraint:b-d", kind: "distance", entityIds: ["entity:b1"], valueMm: 10, dimension: "length" },
+        { id: "constraint:b-f", kind: "fixed", entityIds: ["entity:b1"] },
+        { id: "constraint:b-out", kind: "equal", entityIds: ["entity:b1", "entity:outside"] }
+      ]));
+      equal(block.constraints.length, 4, "a relation to a curve outside the group is left out");
+      const turned = must(insertSketchBlock(block, [0, 0], { rotationDeg: 30, scale: 1.5 }, ids));
+      equal(turned.constraints.map((constraint) => constraint.kind).join(), "distance", "level, plumb and fixed are gone; the dimension stays");
+      near(turned.constraints[0]!.valueMm ?? 0, 15, 1e-12, "the length dimension scaled with the block");
+      const first = turned.entities[0]!;
+      assert(first.kind === "line", "still lines");
+      if (first.kind === "line") near(dist(first.start, first.end), 15, 1e-9, "and the geometry matches the scaled dimension");
+      const kept = must(insertSketchBlock(block, [0, 0], { rotationDeg: 0, scale: 1 }, ids));
+      equal(kept.constraints.map((constraint) => constraint.kind).sort().join(), "distance,horizontal,vertical", "unturned, level and plumb are kept");
+      addThrough(emptyProject(), kept, "Inserted block");
+      addThrough(emptyProject(), turned, "Inserted turned block");
+      assert(!insertSketchBlock(block, [0, 0], { rotationDeg: 0, scale: 0 }, ids).ok, "scale zero is refused");
+      assert(!insertSketchBlock(block, [0, 0], { rotationDeg: Number.NaN, scale: 1 }, ids).ok, "a non-numeric angle is refused");
+      assert(!makeSketchBlock("  ", entities, []).ok, "a block needs a name");
+      assert(!makeSketchBlock("empty", [], []).ok, "and some curves");
+    }
+  },
+  {
+    name: "sketch blocks: every entity kind round-trips through a block, and the library persists, replaces and survives bad storage",
+    run: () => {
+      const everything: SketchEntity[] = [
+        { id: "entity:k-line", kind: "line", start: [0, 0], end: [10, 0], construction: false },
+        { id: "entity:k-arc", kind: "arc", start: [10, 0], mid: [14, 4], end: [10, 8], construction: false },
+        { id: "entity:k-circle", kind: "circle", center: [-8, 4], radiusMm: 3, construction: false },
+        { id: "entity:k-ellipse", kind: "ellipse", center: [0, 12], majorRadiusMm: 6, minorRadiusMm: 3, rotationDeg: 20, construction: false },
+        { id: "entity:k-rect", kind: "rectangle", center: [0, -8], widthMm: 8, heightMm: 4, rotationDeg: 10, construction: false },
+        { id: "entity:k-point", kind: "point", point: [4, 4], construction: true },
+        { id: "entity:k-spline", kind: "spline", fitPoints: [[-10, -10], [-5, -14], [0, -12], [5, -16]], construction: false }
+      ];
+      const block = must(makeSketchBlock("Everything", everything, []));
+      const inserted = must(insertSketchBlock(block, [200, 0], { rotationDeg: 45, scale: 0.5 }, ids));
+      equal(inserted.entities.map((entity) => entity.kind).join(), everything.map((entity) => entity.kind).join(), "same kinds in the same order");
+      const circle = inserted.entities[2]!;
+      assert(circle.kind === "circle" && Math.abs(circle.radiusMm - 1.5) < 1e-12, "the circle radius halved");
+      const ellipse = inserted.entities[3]!;
+      assert(ellipse.kind === "ellipse" && Math.abs(ellipse.rotationDeg - 65) < 1e-9 && Math.abs(ellipse.majorRadiusMm - 3) < 1e-12, "the ellipse turned with the block and halved");
+      assert(inserted.entities[5]!.construction, "construction stays construction");
+      addThrough(emptyProject(), inserted, "Inserted block");
+      // The library keeps blocks across sessions through a storage, replaces by name, and shrugs off bad storage.
+      const cells = new Map<string, string>();
+      const storage: BlockStorage = { getItem: (key) => cells.get(key) ?? null, setItem: (key, value) => { cells.set(key, value); } };
+      const library = createBlockLibrary(storage);
+      library.save(block);
+      library.save({ ...block, name: "Another" });
+      library.save({ ...block, constraints: [] });
+      equal(library.list().map((entry) => entry.name).join(), "Another,Everything", "saved blocks are listed by name, a repeated name replaces");
+      const reopened = createBlockLibrary(storage);
+      equal(reopened.get("Everything")?.entities.length, 7, "a new library over the same storage sees them");
+      reopened.remove("Another");
+      equal(createBlockLibrary(storage).list().length, 1, "removal persists too");
+      cells.set("ps3d.sketch-blocks.v1", "not json {");
+      equal(createBlockLibrary(storage).list().length, 0, "junk in storage is ignored");
+      const throwing: BlockStorage = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+      const inMemory = createBlockLibrary(throwing);
+      inMemory.save(block);
+      equal(inMemory.get("Everything")?.name, "Everything", "a blocked storage still leaves a working in-memory library");
     }
   }
 ];

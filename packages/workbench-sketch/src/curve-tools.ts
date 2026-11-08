@@ -2,7 +2,8 @@ import type { SketchEntity, Vec2, WorkbenchResult } from "../../workbench-core/s
 import { buildBlendCurve } from "./blend-profile.js";
 import { buildCenterline, buildCenterpointArcSlot, buildMidpointLine, buildParallelogram, buildRoundedRectangle, buildThreePointArcSlot } from "./basic-curve-shapes.js";
 import { buildConicByRho, buildConicFromFivePoints, buildControlPointSpline, buildHyperbola, buildParabola } from "./conic-curves.js";
-import type { ShapeIds, SketchShape } from "./curve-math.js";
+import { badShape, type ShapeIds, type SketchShape } from "./curve-math.js";
+import { insertSketchBlock, type SketchBlock } from "./sketch-blocks.js";
 import { buildSketchText } from "./stroke-text.js";
 
 /**
@@ -22,7 +23,8 @@ export type FixedCurveToolId =
   | "conic"
   | "conic-five"
   | "blend"
-  | "text";
+  | "text"
+  | "block";
 
 /** Tools whose number of clicks is not fixed: the user keeps clicking and finishes with Enter (spline) or by closing (profile). */
 export type OpenCurveToolId = "spline-control" | "profile";
@@ -41,7 +43,8 @@ const FIXED_POINTS: Readonly<Record<FixedCurveToolId, number>> = {
   conic: 3,
   "conic-five": 5,
   blend: 2,
-  text: 1
+  text: 1,
+  block: 1
 };
 
 export const CURVE_TOOL_LABELS: Readonly<Record<CurveToolId, string>> = {
@@ -58,7 +61,8 @@ export const CURVE_TOOL_LABELS: Readonly<Record<CurveToolId, string>> = {
   "conic-five": "Conic (5 points)",
   blend: "Blend curve",
   profile: "Profile",
-  text: "Text"
+  text: "Text",
+  block: "Insert block"
 };
 
 /** What to click, in order, for each tool: shown in the status line as the clicks come in. */
@@ -76,7 +80,8 @@ export const CURVE_TOOL_PROMPTS: Readonly<Record<CurveToolId, readonly string[]>
   "conic-five": ["point 1", "point 2", "point 3", "point 4", "point 5"],
   blend: ["near the first curve end", "near the second curve end"],
   profile: ["start", "next point (click the start again to close)"],
-  text: ["where the text starts"]
+  text: ["where the text starts"],
+  block: ["where the middle of the block goes"]
 };
 
 export function isCurveTool(tool: string): tool is CurveToolId {
@@ -122,6 +127,10 @@ export interface CurveToolOptions {
   readonly pickReachMm: number;
   /** Control-point spline: keep the control polygon as construction lines. */
   readonly keepControlPolygon: boolean;
+  /** Insert block: the saved block to drop, and how it is turned and scaled on the way in. */
+  readonly block: SketchBlock | undefined;
+  readonly blockRotationDeg: number;
+  readonly blockScale: number;
 }
 
 export const DEFAULT_CURVE_TOOL_OPTIONS: CurveToolOptions = {
@@ -134,7 +143,10 @@ export const DEFAULT_CURVE_TOOL_OPTIONS: CurveToolOptions = {
   centerlineReachMm: 1000,
   entities: [],
   pickReachMm: 3,
-  keepControlPolygon: false
+  keepControlPolygon: false,
+  block: undefined,
+  blockRotationDeg: 0,
+  blockScale: 1
 };
 
 /** Builds the entities and relations a fixed-count curve tool places from its clicks. */
@@ -155,6 +167,7 @@ export function buildCurveTool(tool: FixedCurveToolId, points: readonly Vec2[], 
     case "conic": return buildConicByRho(p(0), p(1), p(2), options.rho, ids);
     case "conic-five": return buildConicFromFivePoints(points, ids);
     case "blend": return buildBlendCurve(options.entities, p(0), p(1), options.blendTension, options.pickReachMm, ids);
+    case "block": return options.block === undefined ? badShape("There is no block to insert: select curves, save them as a block, then choose it in the Sketch palette.", "Save a block first.") : insertSketchBlock(options.block, p(0), { rotationDeg: options.blockRotationDeg, scale: options.blockScale }, ids);
     case "text": return buildSketchText(p(0), options.text, { heightMm: options.textHeightMm, rotationDeg: options.textRotationDeg }, ids);
   }
 }
