@@ -2,6 +2,7 @@
 @import "./styles/shell.css";
 @import "./styles/panels.css";
 @import "./styles/workspaces.css";
+@import "./styles/constraint-extras.css";
 @import "./styles/theme-upgrade.css";
 @import "./styles/exchange.css";
 @import "./styles/vehicle.css";

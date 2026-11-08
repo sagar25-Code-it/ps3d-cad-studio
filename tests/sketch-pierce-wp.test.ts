@@ -166,7 +166,7 @@ export const sketchPierceWpTests: readonly TestCase[] = [
       near(hits[0]!.pointMm[0], 10, 1e-9, "at x = 10");
       near(hits[0]!.pointMm[1], 20, 1e-9, "and y = 20");
       const free = analyzeWorkbenchSketch(project.sketch).degreesOfFreedom;
-      const edit = createPierceEdit(project, hits[0]!, { entityId: "entity:pierce-1", constraintId: "constraint:pierce-1" });
+      const edit = createPierceEdit(hits[0]!, { entityId: "entity:pierce-1", constraintId: "constraint:pierce-1" });
       project = run(project, edit);
       const point = project.sketch.entities.find((entity) => entity.id === "entity:pierce-1");
       assert(point?.kind === "point", "the sketch gained a point");
@@ -189,7 +189,7 @@ export const sketchPierceWpTests: readonly TestCase[] = [
     run: () => {
       let project = onSketch("datum:xy", { offsetMm: 12 });
       project = withAxis(project, axisThrough("tower", [10, 20, -5], [10, 20, 30]));
-      project = run(project, createPierceEdit(project, listPierceHits(project)[0]!, { entityId: "entity:pierce-1", constraintId: "constraint:pierce-1" }));
+      project = run(project, createPierceEdit(listPierceHits(project)[0]!, { entityId: "entity:pierce-1", constraintId: "constraint:pierce-1" }));
       equal(pierceRefreshEdit(project), undefined, "a point already on its crossing needs no refresh");
 
       // Move the sketch plane to offset 20: the axis is vertical so the crossing keeps its sketch coordinates, but tilting it moves it.
@@ -224,7 +224,7 @@ export const sketchPierceWpTests: readonly TestCase[] = [
       equal(hits.length, 4, "the list offers all four");
       const chosen = hits.find((hit) => hit.pointMm[0] === 20 && hit.pointMm[1] === 30)!;
       assert(chosen.reference.kind === "body-edge", "a body-edge reference");
-      project = run(project, createPierceEdit(project, chosen, { entityId: "entity:corner", constraintId: "constraint:corner" }));
+      project = run(project, createPierceEdit(chosen, { entityId: "entity:corner", constraintId: "constraint:corner" }));
 
       // Make the block bigger: the same edge now crosses at the new corner, and the point is taken there.
       const grown = box("block", [0, 0, 0], [25, 40, 10]);

@@ -169,7 +169,7 @@ type SketchEditOperation = Extract<WorkbenchOperation, { readonly kind: "apply-s
 type SketchEditPayload = Omit<SketchEditOperation, "operationId" | "expectedRevision">;
 
 /** The edit that adds a sketch point at a crossing and records the Pierce constraint that holds it there. */
-export function createPierceEdit(project: WorkbenchProject, hit: PierceHit, ids: { readonly entityId: string; readonly constraintId: string }): SketchEditPayload {
+export function createPierceEdit(hit: PierceHit, ids: { readonly entityId: string; readonly constraintId: string }): SketchEditPayload {
   const point: SketchEntity = { id: ids.entityId, kind: "point", point: hit.pointMm, construction: false };
   return {
     kind: "apply-sketch-edit",
