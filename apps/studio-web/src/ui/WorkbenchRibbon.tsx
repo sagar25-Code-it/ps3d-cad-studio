@@ -55,6 +55,7 @@ interface WorkbenchRibbonProps {
   readonly zebra: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null;
   readonly onZebra: (next: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null) => void;
   readonly onDirectEdit: (mode: "move-body" | "scale-body" | "move-face" | "offset-face" | "emboss") => void;
+  readonly onBodyEdit: (mode: "shell" | "draft" | "offset-region" | "replace-face") => void;
   readonly onIndent: () => void;
   readonly onHoleWizard: () => void;
   readonly onInsertComponent: (shape: "box" | "cylinder") => void;
@@ -237,7 +238,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="chamfer" label="Chamfer" hint="click an edge" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer")} />
         <RibbonButton icon="fillet" label="Fillet All" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("fillet", "all")} />
         <RibbonButton icon="chamfer" label="Chamfer All" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer", "all")} />
-        <RibbonButton icon="shell" label="Shell" hint="open +Z" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("shell")} />
+        <RibbonButton icon="shell" label="Shell" hint="click open faces" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("shell")} />
       </RibbonGroup>
       <RibbonGroup label="Sheet metal">
         <RibbonButton icon="bore" label="Edge Flange" hint="pick edge · bend" disabled={!generalBodySelected} onClick={props.onEdgeFlange} />
@@ -250,6 +251,9 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="move" label="Move Face" hint="pick role" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("move-face")} />
         <RibbonButton icon="scale" label="Offset Face" hint="±mm · normal" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("offset-face")} />
         <RibbonButton icon="move" label="Emboss" hint="face · ±mm" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("emboss")} />
+        <RibbonButton icon="draft" label="Draft Faces" hint="neutral · pull · faces" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("draft")} />
+        <RibbonButton icon="offset-face" label="Offset Region" hint="faces · ±mm" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("offset-region")} />
+        <RibbonButton icon="replace-face" label="Replace Face" hint="face → plane" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("replace-face")} />
         <RibbonButton icon="subtract" label="Indent" hint="press a tool in" disabled={!generalBodySelected || (props.project.part.generalBodies?.length ?? 0) < 2} onClick={props.onIndent} />
       </RibbonGroup>
       <RibbonGroup label="Detail features">

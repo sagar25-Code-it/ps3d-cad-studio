@@ -6,6 +6,9 @@ import { replayAllBodies, rebuildSolidFeature } from "../apps/studio-web/src/des
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { isClosedAndOriented } from "./relief-pick-hole-drag.test.js";
 import { face } from "./body-edits.test.js";
+import { applyParameterValues, parameterFieldsOf } from "../apps/studio-web/src/feature-parameters.js";
+import { bodyEditFeature, createBodyEditHandlers, type BodyEditMode } from "../apps/studio-web/src/body-edit-handlers.js";
+import type { ViewportMeasurePoint } from "../packages/viewport-three/src/index.js";
 
 let serial = 0;
 type Op = WorkbenchOperation extends infer T ? T extends { readonly kind: infer K } ? Omit<T, "operationId" | "expectedRevision"> & { readonly kind: K } : never : never;
@@ -117,6 +120,31 @@ export const bodyEditTimelineTests: readonly TestCase[] = [
     }
   },
   {
+    name: "The inspector edits a body-edit step's numbers, keeps its faces, refreshes its name and the replay uses the new values",
+    run: async () => {
+      const { project, base } = await blockProject();
+      const made = bodyEditFeature("shell", { kind: "shell", thicknessMm: 2, side: "inside", openFaces: [top] }, base, BODY, 2);
+      assert(validSolidFeaturePayload(made) && made.name.startsWith("Shell · 2 mm wall inside"), "the handler builds a valid, named step");
+      const fields = parameterFieldsOf(made)!;
+      assert(fields.some((field) => field.id === "wall") && fields.some((field) => field.id === "side"), "the dialog lists wall and side");
+      const edited = applyParameterValues(made, { wall: "3", side: "inside" });
+      assert(edited.ok, "a valid edit is accepted");
+      if (!edited.ok) return;
+      assert(edited.feature.bodyEdit?.kind === "shell" && edited.feature.bodyEdit.thicknessMm === 3 && edited.feature.bodyEdit.openFaces.length === 1, "thickness changed and the open face was kept");
+      equal(edited.feature.valueMm, 3, "the timeline value follows");
+      assert(edited.feature.name.startsWith("Shell · 3 mm wall inside"), "the name was refreshed: " + edited.feature.name);
+      assert(!applyParameterValues(made, { wall: "-1", side: "inside" }).ok, "a negative wall is refused by the dialog");
+      const current = await addAndReplay(project, edited.feature);
+      near(volumeOfBody(current), 40 * 30 * 20 - 34 * 24 * 17, 1e-3, "the replay uses the edited 3 mm wall");
+      const draftStep = bodyEditFeature("draft", { kind: "draft", angleDeg: 4, pullDirection: [0, 0, 1], neutralPointMm: [0, 0, 0], faces: [face([20, 0, 10], [1, 0, 0])] }, base, BODY, 4);
+      const draftFields = parameterFieldsOf(draftStep)!;
+      const draftEdit = applyParameterValues(draftStep, { angle: "-2", pull: "0, 0, 1" });
+      assert(draftFields.length === 2 && draftEdit.ok && draftEdit.feature.bodyEdit?.kind === "draft" && draftEdit.feature.bodyEdit.angleDeg === -2, "a draft's angle may be edited to a negative value");
+      assert(!applyParameterValues(draftStep, { angle: "0", pull: "0, 0, 1" }).ok, "a zero draft angle is refused");
+      assert(!applyParameterValues(draftStep, { angle: "5", pull: "0, 0, 0" }).ok, "a zero pull direction is refused");
+    }
+  },
+  {
     name: "Body-edit payloads are validated: the pairing with direct-edit, the face lists, and the numbers",
     run: async () => {
       const { project } = await blockProject();
@@ -139,6 +167,98 @@ export const bodyEditTimelineTests: readonly TestCase[] = [
       // The operation itself is refused at the reducer, not just by the payload check.
       const bad = applyWorkbenchOperation(project, { kind: "add-design-solid", feature: { ...good, bodyEdit: { kind: "shell", thicknessMm: 0, side: "inside", openFaces: [] } }, body: bodyOf(project), operationId: "operation:test-bad-shell", expectedRevision: project.revision } as WorkbenchOperation);
       assert(!bad.ok, "add-design-solid refuses a shell with zero thickness");
+    }
+  }
+];
+
+/** Drives the real ribbon handler with scripted clicks and prompt answers; commits exactly as the app does (apply, replay, regenerate). */
+async function driveHandler(initial: WorkbenchProject, mode: BodyEditMode, clicks: readonly (ViewportMeasurePoint | null)[], answers: readonly (string | null)[]): Promise<{ readonly project: WorkbenchProject; readonly statuses: string[]; readonly guides: number }> {
+  let project = initial;
+  const queue = [...clicks];
+  const replies = [...answers];
+  const statuses: string[] = [];
+  let guideCalls = 0;
+  const handlers = createBodyEditHandlers({
+    project: () => project,
+    selectedBodyId: () => BODY,
+    pick: async (instruction) => { statuses.push(instruction); return queue.length === 0 ? null : queue.shift()!; },
+    commit: async (intent, mustApply) => {
+      const first = applyWorkbenchOperation(project, { ...intent, operationId: `operation:test-handler-${++serial}`, expectedRevision: project.revision } as WorkbenchOperation);
+      if (!first.ok) { statuses.push(first.diagnostics[0]?.message ?? "rejected"); return false; }
+      const results = await replayAllBodies(first.value.project);
+      const blocked = results.find((result) => result.featureId === mustApply && result.message !== undefined);
+      if (blocked?.message !== undefined) { statuses.push(`Not applied: ${blocked.message}`); return false; }
+      const second = applyWorkbenchOperation(first.value.project, { kind: "regenerate-design", results, operationId: `operation:test-handler-${++serial}`, expectedRevision: first.value.project.revision } as WorkbenchOperation);
+      if (!second.ok) return false;
+      project = second.value.project;
+      return true;
+    },
+    say: (_state, text) => { statuses.push(text); },
+    ask: () => (replies.length === 0 ? null : replies.shift()!),
+    select: () => undefined,
+    showGuides: (guides) => { if (guides.length > 0) guideCalls += 1; }
+  });
+  await handlers.run(mode);
+  return { project, statuses, guides: guideCalls };
+}
+const click = (point: readonly [number, number, number], normal: readonly [number, number, number]): ViewportMeasurePoint => ({ pointMm: point, semanticId: BODY, normalMm: normal });
+
+export const bodyEditHandlerTests: readonly TestCase[] = [
+  {
+    name: "The Shell ribbon flow: click the top face, answer the prompts, and the timeline holds a replayable shell; Esc or a bad answer records nothing",
+    run: async () => {
+      const { project } = await blockProject();
+      const done = await driveHandler(project, "shell", [click([5, 3, 20], [0, 0, 1])], ["2.5", "inside"]);
+      near(volumeOfBody(done.project), 40 * 30 * 20 - 35 * 25 * 17.5, 1e-3, "the clicked top face was opened and the 2.5 mm walls cut");
+      const step = designOf(done.project).features.find((feature): feature is DesignSolidFeature => feature.kind === "shell")!;
+      assert(step.bodyEdit?.kind === "shell" && step.bodyEdit.openFaces.length === 1 && step.bodyEdit.openFaces[0]!.normalMm[2] === 1, "the step records the picked face by point and direction");
+      assert(done.guides > 0, "the picked face was outlined in the viewport");
+      const sideOpen = await driveHandler(project, "shell", [click([20, 0, 10], [1, 0, 0]), click([-20, 0, 10], [-1, 0, 0])], ["2", "inside"]);
+      near(volumeOfBody(sideOpen.project), 40 * 30 * 20 - 40 * 26 * 16, 1e-3, "two clicked side faces gave a tube open at both ends");
+      const cancelled = await driveHandler(project, "shell", [], []);
+      equal(designOf(cancelled.project).features.length, designOf(project).features.length, "Esc before any click records nothing");
+      const badThickness = await driveHandler(project, "shell", [click([5, 3, 20], [0, 0, 1])], ["-3", "inside"]);
+      equal(designOf(badThickness.project).features.length, designOf(project).features.length, "a negative thickness records nothing");
+      assert(badThickness.statuses.some((text) => text.includes("positive")), "and says why");
+      const tooThick = await driveHandler(project, "shell", [click([5, 3, 20], [0, 0, 1])], ["20", "inside"]);
+      equal(designOf(tooThick.project).features.length, designOf(project).features.length, "a wall too thick for the block is not recorded");
+      assert(tooThick.statuses.some((text) => text.startsWith("Not applied")), "the failure reason is reported");
+      const wrongBody = await driveHandler(project, "shell", [{ pointMm: [5, 3, 20], semanticId: "general-body:other", normalMm: [0, 0, 1] }], ["2", "inside"]);
+      equal(designOf(wrongBody.project).features.length, designOf(project).features.length, "a click on another body is ignored");
+    }
+  },
+  {
+    name: "The Draft, Offset Region and Replace Face ribbon flows record steps that give the measured result",
+    run: async () => {
+      const { project } = await blockProject();
+      const k = Math.tan((5 * Math.PI) / 180);
+      const drafted = await driveHandler(project, "draft", [
+        click([0, 0, 0], [0, 0, -1]),
+        click([20, 0, 10], [1, 0, 0]), click([-20, 0, 10], [-1, 0, 0]), click([0, 15, 10], [0, 1, 0]), click([0, -15, 10], [0, -1, 0])
+      ], ["0, 0, 1", "5"]);
+      near(volumeOfBody(drafted.project), 40 * 30 * 20 - 70 * k * 400 + (4 / 3) * k * k * 8000, 1e-3, "neutral bottom face, pull +Z, four walls: the tapered volume");
+      const noWalls = await driveHandler(project, "draft", [click([0, 0, 0], [0, 0, -1])], ["0, 0, 1", "5"]);
+      equal(designOf(noWalls.project).features.length, designOf(project).features.length, "a draft with no faces picked records nothing");
+      const offset = await driveHandler(project, "offset-region", [click([0, 0, 20], [0, 0, 1])], ["4"]);
+      near(volumeOfBody(offset.project), 40 * 30 * 24, 1e-3, "the clicked top face moved 4 mm up");
+      const replaced = await driveHandler(project, "replace-face", [click([0, 0, 20], [0, 0, 1])], ["0 0 17 0 0 1"]);
+      near(volumeOfBody(replaced.project), 40 * 30 * 17, 1e-3, "the top face was put on the plane z = 17");
+      // A body with a slanted wall: replace the flat wall by the plane of the slanted one.
+      let wedge = run(createWorkbenchProject("project:test-wedge"), { kind: "new-design-sketch", plane: "datum:xy" });
+      const outline: readonly (readonly [number, number])[] = [[0, 0], [40, 0], [40, 20], [20, 20], [0, 10]];
+      outline.forEach((start, index) => { wedge = run(wedge, { kind: "add-sketch-entity", entity: { id: `entity:edge-${index}`, kind: "line", start, end: outline[(index + 1) % outline.length]!, construction: false } }); });
+      wedge = run(wedge, { kind: "commit-design-sketch", featureId: "feature:sketch-1", name: "Sketch 1" });
+      const wedgeBase: DesignSolidFeature = { id: "feature:extrude-1", name: "Extrude 1", kind: "extrude", suppressed: false, sketchFeatureId: "feature:sketch-1", profileIds: [], valueMm: 30, bodyId: BODY };
+      const wedgeBuilt = await rebuildSolidFeature(wedgeBase, sketchOf(wedge));
+      assert(wedgeBuilt.ok, "the wedge builds");
+      if (!wedgeBuilt.ok) return;
+      wedge = run(wedge, { kind: "add-design-solid", feature: wedgeBase, body: wedgeBuilt.body });
+      const slant = 1 / Math.sqrt(5);
+      const toFace = await driveHandler(wedge, "replace-face", [click([40, 20, 15], [0, 1, 0]), null, click([10, 15, 15], [-slant, 2 * slant, 0])], ["face"]);
+      assert(designOf(toFace.project).features.some((feature) => feature.kind !== "sketch" && feature.bodyEdit?.kind === "replace-face" && feature.bodyEdit.toFace !== undefined), "replace with a clicked face records the face reference");
+      near(volumeOfBody(toFace.project), 30 * (400 + 400), 1e-3, "the flat wall now lies on the slanted wall's plane: the section is one slope from y 10 to y 30");
+      const toPlaneBad = await driveHandler(wedge, "replace-face", [click([40, 20, 15], [0, 1, 0])], ["1 2"]);
+      equal(designOf(toPlaneBad.project).features.length, designOf(wedge).features.length, "a malformed plane answer records nothing");
     }
   }
 ];

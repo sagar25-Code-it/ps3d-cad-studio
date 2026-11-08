@@ -128,7 +128,7 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
     { id: "modify.chamfer-all", label: "Chamfer all edges…", icon: "chamfer", disabled: !state.generalBodySelected,
       hint: state.generalBodySelected ? "Bevel every sharp convex edge on the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("chamfer", "all") },
     { id: "modify.shell", label: "Shell…", icon: "shell", disabled: !state.generalBodySelected,
-      hint: state.generalBodySelected ? "Hollow the selected solid with the +Z face left open" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("shell") }
+      hint: state.generalBodySelected ? "Hollow the selected solid; click the face(s) to leave open" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("shell") }
   ] };
 
   const view: WorkbenchMenu = { id: "view", label: "View", icon: "view", items: [

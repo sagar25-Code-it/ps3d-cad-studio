@@ -47,7 +47,7 @@ import { domeParamsStretchFlatTests } from "./dome-params-stretch-flat.test.js";
 import { reliefPickHoleDragTests } from "./relief-pick-hole-drag.test.js";
 import { holeTests } from "./hole.test.js";
 import { bodyEditGeometryTests } from "./body-edits.test.js";
-import { bodyEditTimelineTests } from "./body-edit-timeline.test.js";
+import { bodyEditHandlerTests, bodyEditTimelineTests } from "./body-edit-timeline.test.js";
 import { planeTiltTests } from "./plane-tilt.test.js";
 import { planeFrameTests } from "./plane-frame.test.js";
 import { constructionPlaneTests } from "./construction-planes.test.js";
@@ -118,6 +118,7 @@ const tests: readonly TestCase[] = [
   ...holeTests,
   ...bodyEditGeometryTests,
   ...bodyEditTimelineTests,
+  ...bodyEditHandlerTests,
   ...planeTiltTests,
   ...planeFrameTests,
   ...solidOperationsIntegrationTests,

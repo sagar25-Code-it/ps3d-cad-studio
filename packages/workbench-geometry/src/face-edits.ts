@@ -205,3 +205,30 @@ export function replaceFaces(mesh: MeshLike, spec: ReplaceFaceSpec): FaceEditRes
   if (!moved.ok) return { ok: false, message: `Replace face: ${moved.message}` };
   return withMesh(moved.positionsMm, mesh.indices, [`Replaced ${overrides.size} face${overrides.size === 1 ? "" : "s"} by the chosen plane.`]);
 }
+
+/**
+ * The border of each picked face as line segments, for outlining the picks in the viewport. A pick that matches no flat face
+ * is left out.
+ */
+export function faceOutlineSegments(mesh: MeshLike, refs: readonly FaceRefLike[]): readonly (readonly [V3, V3])[] {
+  const analysis = analyzeFaces(mesh);
+  if (typeof analysis === "string") return [];
+  const segments: [V3, V3][] = [];
+  for (const ref of refs) {
+    const found = resolveFace(mesh, analysis, ref);
+    if (!found.ok) continue;
+    const used = new Map<string, { a: V3; b: V3; count: number }>();
+    for (const t of found.region.triangles) {
+      const corners = [0, 1, 2].map((k) => analysis.weld[mesh.indices[t * 3 + k]!]!);
+      for (let k = 0; k < 3; k += 1) {
+        const a = corners[k]!; const b = corners[(k + 1) % 3]!;
+        const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+        const entry = used.get(key);
+        if (entry === undefined) used.set(key, { a: analysis.weldedPositions[a]!, b: analysis.weldedPositions[b]!, count: 1 });
+        else entry.count += 1;
+      }
+    }
+    for (const entry of used.values()) if (entry.count === 1) segments.push([entry.a, entry.b]);
+  }
+  return segments;
+}
