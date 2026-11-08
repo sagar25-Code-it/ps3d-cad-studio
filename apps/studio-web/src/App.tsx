@@ -1841,7 +1841,7 @@ export function App(): React.JSX.Element {
   const createGeneralSolid = async (
     selectedProfileIds: readonly string[],
     _plane: SketchPlane,
-    operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix",
+    operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome",
     valueMm: number,
     edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number },
     direction: "one-side" | "symmetric" | "flipped" = "one-side",
@@ -1860,6 +1860,13 @@ export function App(): React.JSX.Element {
       readonly helixPitchMm?: number;
       readonly helixTurns?: number;
       readonly helixHandedness?: "right" | "left";
+      readonly threadPitchMm?: number;
+      readonly threadTurns?: number;
+      readonly threadDepthMm?: number;
+      readonly threadHandedness?: "right" | "left";
+      readonly ribThicknessMm?: number;
+      readonly ribDirection?: "symmetric" | "one-side";
+      readonly domeHeightMm?: number;
       readonly shellThicknessMm?: number;
       readonly shellOpenFace?: "top" | "bottom" | "none";
       readonly draftAngleDeg?: number;
@@ -1896,7 +1903,7 @@ export function App(): React.JSX.Element {
     }
     if (detectSketchProfiles(projectRef.current.sketch).length === 0) { setStatus("error"); setStatusText("Draw or select a closed profile before creating a solid."); return; }
     setStatus("working");
-    setStatusText(`Building ${operation === "extrude" ? "extruded" : operation === "revolve" ? "revolved" : operation === "sweep" ? "swept" : operation === "loft" ? "lofted" : operation === "edge-fillet" ? "filleted" : operation === "edge-chamfer" ? "chamfered" : operation === "shell" ? "shelled" : operation === "helix" ? "helical" : "drafted"} solid…`);
+    setStatusText(`Building ${operation === "extrude" ? "extruded" : operation === "revolve" ? "revolved" : operation === "sweep" ? "swept" : operation === "loft" ? "lofted" : operation === "edge-fillet" ? "filleted" : operation === "edge-chamfer" ? "chamfered" : operation === "shell" ? "shelled" : operation === "helix" ? "helical" : operation === "thread" ? "threaded" : operation === "rib" ? "ribbed" : operation === "dome" ? "domed" : "drafted"} solid…`);
     const sketchId = await commitWorkingSketch();
     const sketchFeature = designOf(projectRef.current).features.find((feature) => feature.id === sketchId);
     // A refused commit has already reported why (status and diagnostic); keep that message.
@@ -1915,7 +1922,10 @@ export function App(): React.JSX.Element {
                 : operation === "edge-chamfer" ? "Chamfer"
                   : operation === "shell" ? "Shell"
                     : operation === "helix" ? "Helix"
-                      : "Draft")
+                      : operation === "thread" ? "Thread"
+                        : operation === "rib" ? "Rib"
+                          : operation === "dome" ? "Dome"
+                            : "Draft")
       : target.mode === "cut" ? "Cut" : "Join";
     const feature: DesignSolidFeature = {
       id: `feature:${operation}-${crypto.randomUUID()}`,
@@ -1940,6 +1950,13 @@ export function App(): React.JSX.Element {
       ...(operation === "helix" && advancedParams?.helixPitchMm !== undefined ? { helixPitchMm: advancedParams.helixPitchMm } : {}),
       ...(operation === "helix" && advancedParams?.helixTurns !== undefined ? { helixTurns: advancedParams.helixTurns } : {}),
       ...(operation === "helix" && advancedParams?.helixHandedness !== undefined ? { helixHandedness: advancedParams.helixHandedness } : {}),
+      ...(operation === "thread" && advancedParams?.threadPitchMm !== undefined ? { threadPitchMm: advancedParams.threadPitchMm } : {}),
+      ...(operation === "thread" && advancedParams?.threadTurns !== undefined ? { threadTurns: advancedParams.threadTurns } : {}),
+      ...(operation === "thread" && advancedParams?.threadDepthMm !== undefined ? { threadDepthMm: advancedParams.threadDepthMm } : {}),
+      ...(operation === "thread" && advancedParams?.threadHandedness !== undefined ? { threadHandedness: advancedParams.threadHandedness } : {}),
+      ...(operation === "rib" && advancedParams?.ribThicknessMm !== undefined ? { ribThicknessMm: advancedParams.ribThicknessMm } : {}),
+      ...(operation === "rib" && advancedParams?.ribDirection !== undefined ? { ribDirection: advancedParams.ribDirection } : {}),
+      ...(operation === "dome" && advancedParams?.domeHeightMm !== undefined ? { domeHeightMm: advancedParams.domeHeightMm } : {}),
       ...(operation === "loft" && advancedParams?.loftTopScale !== undefined ? { loftTopScale: advancedParams.loftTopScale } : {}),
       ...(operation === "loft" && advancedParams?.loftSecondaryProfileIds !== undefined && advancedParams.loftSecondaryProfileIds.length > 0 ? { loftSecondaryProfileIds: advancedParams.loftSecondaryProfileIds } : {}),
       ...(operation === "loft" && advancedParams?.loftContinuity !== undefined ? { loftContinuity: advancedParams.loftContinuity } : {}),

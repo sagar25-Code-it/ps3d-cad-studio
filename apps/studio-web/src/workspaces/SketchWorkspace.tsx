@@ -141,7 +141,7 @@ interface SketchWorkspaceProps {
   readonly onCreateSolid: (
     profileIds: readonly string[],
     plane: PlaneKey,
-    operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix",
+    operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome",
     valueMm: number,
     edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number },
     direction?: "one-side" | "symmetric" | "flipped",
@@ -164,6 +164,13 @@ interface SketchWorkspaceProps {
       readonly helixPitchMm?: number;
       readonly helixTurns?: number;
       readonly helixHandedness?: "right" | "left";
+      readonly threadPitchMm?: number;
+      readonly threadTurns?: number;
+      readonly threadDepthMm?: number;
+      readonly threadHandedness?: "right" | "left";
+      readonly ribThicknessMm?: number;
+      readonly ribDirection?: "symmetric" | "one-side";
+      readonly domeHeightMm?: number;
     }
   ) => void;
   /** The solids a join or cut can modify. */
@@ -245,7 +252,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [selectionBox, setSelectionBox] = useState<{ readonly start: Vec2; readonly end: Vec2 } | undefined>(undefined);
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
-  const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix">("extrude");
+  const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome">("extrude");
   const [solidValue, setSolidValue] = useState("10");
   const [sweepDx, setSweepDx] = useState("0");
   const [sweepDy, setSweepDy] = useState("0");
@@ -263,6 +270,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [helixPitch, setHelixPitch] = useState("5");
   const [helixTurns, setHelixTurns] = useState("4");
   const [helixHandedness, setHelixHandedness] = useState<"right" | "left">("right");
+  const [threadPitch, setThreadPitch] = useState("2");
+  const [threadTurns, setThreadTurns] = useState("8");
+  const [threadDepth, setThreadDepth] = useState("10");
+  const [threadHandedness, setThreadHandedness] = useState<"right" | "left">("right");
+  const [ribThickness, setRibThickness] = useState("2");
+  const [domeHeight, setDomeHeight] = useState("8");
   const [modifierEdgeSize, setModifierEdgeSize] = useState("1");
   const [shellThickness, setShellThickness] = useState("2");
   const [shellOpenFace, setShellOpenFace] = useState<"top" | "bottom" | "none">("top");
@@ -1152,7 +1165,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <div className="sketch-make-solid" aria-label="Create a solid from a profile">
           <span className="make-solid-title">Create solid</span>
           <div className="make-solid-row">
-            <select aria-label="Operation" value={solidOp} onChange={(event) => { const next = event.target.value as "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix"; setSolidOp(next); setSolidValue(next === "revolve" ? "360" : next === "helix" ? "20" : "20"); }}>
+            <select aria-label="Operation" value={solidOp} onChange={(event) => { const next = event.target.value as "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome"; setSolidOp(next); setSolidValue(next === "revolve" ? "360" : next === "helix" ? "20" : "20"); }}>
               <option value="extrude">Extrude</option>
               <option value="revolve">Revolve</option>
               <option value="sweep">Sweep (linear)</option>
@@ -1162,6 +1175,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="shell">Shell (hollow)</option>
               <option value="draft">Draft (tapered)</option>
               <option value="helix">Helix / Coil</option>
+              <option value="thread">Thread (helical ridge)</option>
+              <option value="rib">Rib (thin wall)</option>
+              <option value="dome">Dome (capped)</option>
             </select>
             <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? "Sweep distance in millimetres" : "Height in millimetres"} type="number" min={solidOp === "revolve" ? 1 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : 1} value={solidValue} disabled={cutThroughAll} onChange={(event) => setSolidValue(event.target.value)} />
             <small>{solidOp === "revolve" ? "°" : "mm"}</small>
@@ -1268,6 +1284,28 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="none">Fully closed</option>
             </select>
           </div>}
+          {solidOp === "thread" && <div className="make-solid-row" aria-label="Thread parameters">
+            <small>Pitch</small>
+            <input aria-label="Thread pitch in millimetres" type="number" min={0.1} step={0.5} value={threadPitch} onChange={(event) => setThreadPitch(event.target.value)} />
+            <small>mm · turns</small>
+            <input aria-label="Thread turns" type="number" min={0.5} max={100} step={0.5} value={threadTurns} onChange={(event) => setThreadTurns(event.target.value)} />
+            <small>· depth</small>
+            <input aria-label="Thread depth in millimetres" type="number" min={0.1} step={0.5} value={threadDepth} onChange={(event) => setThreadDepth(event.target.value)} />
+            <select aria-label="Thread handedness" value={threadHandedness} onChange={(event) => setThreadHandedness(event.target.value === "left" ? "left" : "right")}>
+              <option value="right">Right-handed</option>
+              <option value="left">Left-handed</option>
+            </select>
+          </div>}
+          {solidOp === "rib" && <div className="make-solid-row" aria-label="Rib parameters">
+            <small>Thickness</small>
+            <input aria-label="Rib thickness in millimetres" type="number" min={0.1} step={0.5} value={ribThickness} onChange={(event) => setRibThickness(event.target.value)} />
+            <small>mm</small>
+          </div>}
+          {solidOp === "dome" && <div className="make-solid-row" aria-label="Dome parameters">
+            <small>Dome height</small>
+            <input aria-label="Dome height in millimetres" type="number" step={0.5} value={domeHeight} onChange={(event) => setDomeHeight(event.target.value)} />
+            <small>mm (negative dips inward)</small>
+          </div>}
           {solidOp === "helix" && <div className="make-solid-row" aria-label="Helix parameters">
             <small>Radius</small>
             <input aria-label="Helix coil radius in millimetres" type="number" min={0.1} step={0.5} value={helixRadius} onChange={(event) => setHelixRadius(event.target.value)} />
@@ -1319,7 +1357,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
                     ? { draftAngleDeg: Number(draftAngle), draftNeutralFace }
                     : solidOp === "helix"
                       ? { helixRadiusMm: Number(helixRadius), helixPitchMm: Number(helixPitch), helixTurns: Number(helixTurns), helixHandedness }
-                      : undefined;
+                      : solidOp === "thread"
+                        ? { threadPitchMm: Number(threadPitch), threadTurns: Number(threadTurns), threadDepthMm: Number(threadDepth), threadHandedness }
+                        : solidOp === "rib"
+                          ? { ribThicknessMm: Number(ribThickness) }
+                          : solidOp === "dome"
+                            ? { domeHeightMm: Number(domeHeight) }
+                            : undefined;
             const effectiveProfileIds = solidOp === "loft" && loftMode === "two-profile" && selectedProfileIds.length >= 2
               ? selectedProfileIds.slice(0, 1)
               : selectedProfileIds;
