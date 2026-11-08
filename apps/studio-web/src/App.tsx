@@ -78,6 +78,8 @@ import { flatPatternForBody, sketchNormal, hasModifiers, planeKeyOf, rebuildDepe
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
 import { CombineDialog, type CombineChoice } from "./ui/CombineDialog.js";
+import { PatternDialog, type PatternKind } from "./ui/PatternDialog.js";
+import { addPattern, editPattern, patternGroups, patternableFeatures, previewPattern, requestOfGroup, type PatternRequest } from "./pattern-commit.js";
 import type { BooleanMode } from "../../../packages/workbench-geometry/src/index.js";
 import {
   ThreeViewportAdapter,
@@ -304,6 +306,7 @@ export function App(): React.JSX.Element {
   const [sketchCancelVersion, setSketchCancelVersion] = useState(0);
   const [combineRequest, setCombineRequest] = useState<{ readonly targetId: string | undefined; readonly mode: BooleanMode } | null>(null);
   const [sketchEditTool, setSketchEditTool] = useState<SketchEditToolId | null>(null);
+  const [patternDialog, setPatternDialog] = useState<{ readonly kind: PatternKind; readonly mode: "new" | "edit"; readonly sourceBodyId: string; readonly groupId?: string; readonly initial?: PatternRequest } | null>(null);
   const zebraRef = useRef<{ readonly axis: "x" | "y" | "z"; readonly frequency: number } | null>(null);
   const [zebra, setZebraState] = useState<{ readonly axis: "x" | "y" | "z"; readonly frequency: number } | null>(null);
   const [sketchShowMovable, setSketchShowMovable] = useState(false);
@@ -2324,6 +2327,7 @@ export function App(): React.JSX.Element {
   /** A timeline sketch is reopened for editing; a solid opens its parameter dialog. */
   const editTimelineFeature = (feature: DesignFeature): void => {
     if (feature.kind === "sketch") { applyProjectOperation({ kind: "edit-design-sketch", featureId: feature.id }); return; }
+    if (feature.kind === "pattern") { openPatternEdit(feature); return; }
     setFeatureEdit(feature);
   };
 
@@ -3180,6 +3184,35 @@ export function App(): React.JSX.Element {
     if (bodies.length < 2) { setStatusText("Combine needs two solid bodies. Create them with Make solid in the Sketch workspace."); return; }
     setCombineRequest({ targetId: bodies.some((body) => body.id === selectedId) ? selectedId ?? undefined : undefined, mode: "join" });
   };
+  /** Opens the pattern dialog for the selected solid body. Patterns are timeline steps, so the body must have been built from a sketch. */
+  const openPatternDialog = (kind: PatternKind): void => {
+    const current = projectRef.current;
+    const body = (current.part.generalBodies ?? []).find((candidate) => candidate.id === selectedId);
+    if (body === undefined) { setStatus("ready"); setStatusText("Select a solid body first: patterns repeat a body made with Extrude or Revolve."); return; }
+    if (baseFeatureOf(designOf(current), body.id) === undefined) { setStatus("ready"); setStatusText(`${body.name} is not a step of the timeline (it came from Combine or an import), so a pattern cannot follow it.`); return; }
+    setPatternDialog({ kind, mode: "new", sourceBodyId: body.id });
+  };
+  const openPatternEdit = (feature: DesignSolidFeature): void => {
+    const group = patternGroups(projectRef.current).find((candidate) => candidate.groupId === feature.pattern?.groupId);
+    const request = group === undefined ? undefined : requestOfGroup(group.steps);
+    if (group === undefined || request === undefined) { setStatus("error"); setStatusText("That pattern step has no layout recorded."); return; }
+    setPatternDialog({ kind: request.shape.type, mode: "edit", sourceBodyId: request.sourceBodyId, groupId: group.groupId, initial: request });
+  };
+  /** Adds or updates the pattern as one undo step. Resolves to a message for the dialog when it could not be applied. */
+  const applyPatternRequest = async (request: PatternRequest): Promise<string | undefined> => {
+    const before = projectRef.current;
+    const editing = patternDialog?.mode === "edit" ? patternDialog.groupId : undefined;
+    const outcome = editing !== undefined ? await editPattern(before, editing, request) : await addPattern(before, request);
+    if (!outcome.ok) return outcome.message;
+    if (projectRef.current !== before) return "The design changed while the pattern was rebuilding, so it was not applied. Try it again.";
+    pushProject(outcome.project);
+    setSelectedId(outcome.selectBodyId);
+    setDiagnostic(undefined);
+    setStatus("ready");
+    setStatusText(outcome.summary);
+    setPatternDialog(null);
+    return undefined;
+  };
   const openSketchCreateSolid = (): void => {
     if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
     setSketchOptionsRevealRequest((request) => request + 1);
@@ -3220,6 +3253,7 @@ export function App(): React.JSX.Element {
     onMoveSelectedBody: () => runSelectedPartPreviewAction("edit-transform", "Move Body"),
     onResizeSelectedBody: () => runSelectedPartPreviewAction("edit-size", "Scale Body"),
     onModifyGeneralBody: handleModifyGeneralBody,
+    onPattern: openPatternDialog,
     onFit: fitViewport,
     onHome: homeViewport,
     onToggleGrid: () => setViewportGrid(!viewportState.gridVisible),
@@ -3320,6 +3354,7 @@ export function App(): React.JSX.Element {
       onPartPreviewAction={(operation, commandName) => runSelectedPartPreviewAction(operation, commandName)}
       onPartFeatureAction={(operation, commandName) => runPartFeatureAction(operation, commandName)}
       onModifyGeneralBody={handleModifyGeneralBody}
+      onPattern={openPatternDialog}
       onAddConstructionPlane={handleAddConstructionPlane}
       onAddConstructionAxis={handleAddConstructionAxis}
       onAddConstructionPoint={handleAddConstructionPoint}
@@ -3475,6 +3510,17 @@ export function App(): React.JSX.Element {
     {pendingElectricalTemplate !== undefined && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog compact" role="dialog" aria-modal="true" aria-labelledby="electrical-template-replacement-title" aria-describedby="electrical-template-replacement-description"><header><div><span>SCHEMATIC REPLACEMENT REVIEW</span><h2 id="electrical-template-replacement-title">Replace current devices and nets?</h2></div><button onClick={cancelElectricalTemplateReview} aria-label="Close schematic replacement review">×</button></header><div className="engineering-review-copy" id="electrical-template-replacement-description"><p>Generating <strong>{pendingElectricalTemplate.replaceAll("-", " ")}</strong> replaces all {project.electrical.components.length} current devices and {project.electrical.nets.length} current nets, including local edits. The replacement is one undoable project revision.</p></div><footer><button data-dialog-initial-focus onClick={cancelElectricalTemplateReview}>Cancel</button><button className="danger" onClick={() => { const template = pendingElectricalTemplate; setPendingElectricalTemplate(undefined); if (applyProjectOperation({ kind: "apply-electrical-template", template })) setSelectedId(null); }}>Replace and generate</button></footer></section></div>}
     {pendingVehicleTemplate !== undefined && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog compact" role="dialog" aria-modal="true" aria-labelledby="vehicle-template-replacement-title" aria-describedby="vehicle-template-replacement-description"><header><div><span>VEHICLE TOPOLOGY REPLACEMENT REVIEW</span><h2 id="vehicle-template-replacement-title">Replace the current engineering study?</h2></div><button onClick={() => { setPendingVehicleTemplate(undefined); setStatusText("Vehicle replacement cancelled; the current topology and inputs were preserved."); }} aria-label="Close vehicle topology replacement review">×</button></header><div className="engineering-review-copy" id="vehicle-template-replacement-description"><p>Replacing <strong>{project.vehicle.template.replaceAll("-", " ")}</strong> with <strong>{pendingVehicleTemplate.replaceAll("-", " ")}</strong> resets all {Object.keys(project.vehicle.parameters).length} vehicle inputs, the suspension state, evidence-status fields, and layer visibility to the target generic template. The current {vehiclePreview.geometry.hardpoints.length}-hardpoint graph is removed. The replacement is one undoable project revision.</p><p>The new package remains illustrative and carries the same do-not-fabricate, roadworthiness, and homologation boundaries.</p></div><footer><button data-dialog-initial-focus onClick={() => { setPendingVehicleTemplate(undefined); setStatusText("Vehicle replacement cancelled; the current topology and inputs were preserved."); }}>Cancel</button><button className="danger" onClick={() => { const template = pendingVehicleTemplate; setPendingVehicleTemplate(undefined); if (applyProjectOperation({ kind: "apply-vehicle-template", template })) setSelectedId(null); }}>Replace topology and inputs</button></footer></section></div>}
     {combineRequest !== null && <CombineDialog bodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name, visible: body.visible }))} initialTargetId={combineRequest.targetId} initialMode={combineRequest.mode} onApply={applyCombine} onCancel={() => setCombineRequest(null)} />}
+    {patternDialog !== null && <PatternDialog
+      key={`${patternDialog.mode}:${patternDialog.kind}:${patternDialog.groupId ?? patternDialog.sourceBodyId}`}
+      kind={patternDialog.kind} mode={patternDialog.mode} sourceBodyId={patternDialog.sourceBodyId}
+      sourceName={(project.part.generalBodies ?? []).find((body) => body.id === patternDialog.sourceBodyId)?.name ?? "the body"}
+      features={patternableFeatures(project, patternDialog.sourceBodyId).map((feature) => ({ id: feature.id, name: feature.name }))}
+      axes={(project.part.constructionAxes ?? []).map((axis) => ({ id: axis.id, name: axis.name }))}
+      planes={(project.part.construction ?? []).map((plane) => ({ id: plane.id, name: plane.name }))}
+      {...(patternDialog.initial === undefined ? {} : { initial: patternDialog.initial })}
+      preview={(request) => previewPattern(projectRef.current, request)}
+      onApply={applyPatternRequest}
+      onCancel={() => setPatternDialog(null)} />}
     <CommandPalette open={paletteOpen} workspace={project.activeWorkspace} onClose={() => setPaletteOpen(false)} onCommand={executeCadCommand} />
     {shortcutsOpen && <div className="shortcuts-overlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={() => setShortcutsOpen(false)}>
       <div className="shortcuts-panel" onClick={(event) => event.stopPropagation()}>

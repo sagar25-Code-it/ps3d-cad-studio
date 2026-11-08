@@ -47,6 +47,7 @@ interface WorkbenchRibbonProps {
   readonly onPartPreviewAction: (operation: "edit-transform" | "edit-size" | "edit-appearance" | "duplicate" | "mirror-x" | "pattern-x" | "toggle-visible" | "delete", commandName: string) => void;
   readonly onPartFeatureAction: (operation: "revolve" | "pattern-feature" | "mirror-feature" | "unite" | "subtract" | "trim-body" | "edge-blend" | "chamfer" | "draft" | "shell" | "move-face" | "offset-face" | "replace-face" | "delete-face" | "resize-blend" | "update-model", commandName: string) => void;
   readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell", scope?: "picked" | "all") => void;
+  readonly onPattern: (kind: "rectangular" | "circular" | "mirror") => void;
   readonly onAddConstructionPlane: (mode: "offset" | "angle" | "three-points" | "midplane" | "tangent-to-cylinder" | "perpendicular-to-axis") => void;
   readonly onAddConstructionAxis: (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis") => void;
   readonly onAddConstructionPoint: (mode: "xyz" | "midpoint" | "axis-plane-intersection") => void;
@@ -182,8 +183,8 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       <RibbonGroup label="Feature tools">
         {PART_FEATURES.map((feature) => <RibbonButton key={feature.id} icon={feature.icon} label={feature.label} hint={feature.level} active={props.selectedId === feature.id} onClick={() => props.onSelect(feature.id)} />)}
         <RibbonButton icon="revolve" label="Revolve" hint="closed profile" onClick={() => props.onPartFeatureAction("revolve", "Revolve")} />
-        <RibbonButton icon="pattern" label="Pattern Feature" hint={`${props.project.part.patternCount} × X`} disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("pattern-feature", "Pattern Feature")} />
-        <RibbonButton icon="mirror" label="Mirror Feature" hint="YZ plane" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("mirror-feature", "Mirror Feature")} />
+        <RibbonButton icon="pattern" label="Pattern Feature" hint={`${props.project.part.patternCount} × X · analytic body`} disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("pattern-feature", "Pattern Feature")} />
+        <RibbonButton icon="mirror" label="Mirror Feature" hint="YZ plane · analytic body" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("mirror-feature", "Mirror Feature")} />
       </RibbonGroup>
       <RibbonGroup label="Primitive bodies">
         <RibbonButton icon="box" label="Block" hint="preview body" onClick={() => props.onCreatePartPreviewBody("block")} />
@@ -196,8 +197,8 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="move" label="Move" hint="XYZ / rotate" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-transform", "Move Body")} />
         <RibbonButton icon="scale" label="Size" hint="dimensions" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-size", "Scale Body")} />
         <RibbonButton icon="copy" label="Copy" hint="independent" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("duplicate", "Copy Body")} />
-        <RibbonButton icon="pattern" label="Pattern" hint="3 × X" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("pattern-x", "Pattern Body")} />
-        <RibbonButton icon="mirror" label="Mirror" hint="YZ plane" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("mirror-x", "Mirror Body")} />
+        <RibbonButton icon="pattern" label="Pattern Body" hint="3 × X · preview body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("pattern-x", "Pattern Body")} />
+        <RibbonButton icon="mirror" label="Mirror Body" hint="YZ plane · preview body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("mirror-x", "Mirror Body")} />
         <RibbonButton icon="appearance" label="Appearance" hint="display color" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-appearance", "Edit Object Display")} />
         <RibbonButton icon="eye-off" label="Hide / show" hint="body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("toggle-visible", "Show / Hide Body")} />
         <RibbonButton icon="trash" label="Delete" hint="body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("delete", "Delete Body")} />
@@ -229,6 +230,11 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="insert" label="Point: XYZ" hint="coords" onClick={() => props.onAddConstructionPoint("xyz")} />
         <RibbonButton icon="insert" label="Point: midpoint" hint="(a + b) / 2" onClick={() => props.onAddConstructionPoint("midpoint")} />
         <RibbonButton icon="insert" label="Point: axis ∩ plane" hint="axis + plane" disabled={(props.project.part.constructionAxes?.length ?? 0) === 0} onClick={() => props.onAddConstructionPoint("axis-plane-intersection")} />
+      </RibbonGroup>
+      <RibbonGroup label="Pattern">
+        <RibbonButton icon="pattern" label="Rectangular Pattern" hint="1 or 2 directions · solids" disabled={!generalBodySelected} onClick={() => props.onPattern("rectangular")} />
+        <RibbonButton icon="pattern" label="Circular Pattern" hint="about an axis · solids" disabled={!generalBodySelected} onClick={() => props.onPattern("circular")} />
+        <RibbonButton icon="mirror" label="Mirror" hint="datum / offset / construction plane" disabled={!generalBodySelected} onClick={() => props.onPattern("mirror")} />
       </RibbonGroup>
       <RibbonGroup label="Solid modify">
         <RibbonButton icon="hole" label="Hole" hint="Ø 6 · through" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("hole")} />

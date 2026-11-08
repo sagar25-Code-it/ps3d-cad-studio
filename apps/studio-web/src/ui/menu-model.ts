@@ -63,6 +63,8 @@ export interface WorkbenchMenuActions {
   readonly onMoveSelectedBody: () => void;
   readonly onResizeSelectedBody: () => void;
   readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell", scope?: "picked" | "all") => void;
+  /** Opens the pattern dialog (counts, spacing, axis or plane) for the selected solid. */
+  readonly onPattern: (kind: "rectangular" | "circular" | "mirror") => void;
   readonly onFit: () => void;
   readonly onHome: () => void;
   readonly onToggleGrid: () => void;
@@ -128,7 +130,13 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
     { id: "modify.chamfer-all", label: "Chamfer all edges…", icon: "chamfer", disabled: !state.generalBodySelected,
       hint: state.generalBodySelected ? "Bevel every sharp convex edge on the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("chamfer", "all") },
     { id: "modify.shell", label: "Shell…", icon: "shell", disabled: !state.generalBodySelected,
-      hint: state.generalBodySelected ? "Hollow the selected solid with the +Z face left open" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("shell") }
+      hint: state.generalBodySelected ? "Hollow the selected solid with the +Z face left open" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("shell") },
+    { id: "modify.pattern-rectangular", label: "Rectangular pattern…", icon: "pattern", divider: true, disabled: !state.generalBodySelected,
+      hint: state.generalBodySelected ? "Copies of the solid, or of its holes and cuts, in one or two directions; a timeline step that follows the source" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onPattern("rectangular") },
+    { id: "modify.pattern-circular", label: "Circular pattern…", icon: "pattern", disabled: !state.generalBodySelected,
+      hint: state.generalBodySelected ? "Copies round an X, Y or Z axis through the origin, or a construction axis" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onPattern("circular") },
+    { id: "modify.mirror", label: "Mirror…", icon: "mirror", disabled: !state.generalBodySelected,
+      hint: state.generalBodySelected ? "Reflect the solid, or its holes and cuts, about a datum, an offset plane or a construction plane" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onPattern("mirror") }
   ] };
 
   const view: WorkbenchMenu = { id: "view", label: "View", icon: "view", items: [

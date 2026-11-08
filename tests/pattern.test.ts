@@ -12,6 +12,7 @@ import { replayAllBodies, replayBody } from "../apps/studio-web/src/design-regen
 import { addPattern, editPattern, patternGroups, patternableFeatures, previewPattern, requestOfGroup, type PatternRequest } from "../apps/studio-web/src/pattern-commit.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { isClosedAndOriented } from "./relief-pick-hole-drag.test.js";
+import { formOfRequest, requestOfForm } from "../apps/studio-web/src/pattern-form.js";
 
 let serial = 0;
 type Op = WorkbenchOperation extends infer T ? T extends { readonly kind: infer K } ? Omit<T, "operationId" | "expectedRevision"> & { readonly kind: K } : never : never;
@@ -535,6 +536,47 @@ export const patternTests: readonly TestCase[] = [
       assert(replayed.every((result) => result.message === undefined), "the whole chain replays without a problem");
       const base = baseFeatureOf(designOf(second), patternSteps(second)[1]!.bodyId);
       assert(base?.kind === "pattern", "a copy's base step is its pattern step");
+    }
+  },
+  {
+    name: "the dialog's fields read into requests, refuse nonsense in plain words, and a typed pattern builds real bodies",
+    run: async () => {
+      const base = formOfRequest();
+      const grid = requestOfForm("rectangular", { ...base, countA: "3", spacingA: "70", directionA: "-x", countB: "2", spacingB: "50", directionB: "y" }, PLATE);
+      assert("request" in grid && grid.request.shape.type === "rectangular", "a grid reads into a rectangular request");
+      if ("request" in grid && grid.request.shape.type === "rectangular") {
+        equal(grid.request.shape.directionA.join(","), "-1,0,0", "the direction menu picks a unit vector");
+        equal(grid.request.shape.countA * grid.request.shape.countB, 6, "3 x 2 instances");
+        equal(grid.request.result, "new-bodies", "copies are new bodies by default");
+      }
+      const messageOf = (outcome: ReturnType<typeof requestOfForm>): string => ("message" in outcome ? outcome.message : "");
+      assert(messageOf(requestOfForm("rectangular", { ...base, countA: "1", countB: "1" }, PLATE)).includes("two instances"), "one instance in total is refused");
+      assert(messageOf(requestOfForm("rectangular", { ...base, countA: "2.5" }, PLATE)).includes("whole number"), "a fractional count is refused");
+      assert(messageOf(requestOfForm("rectangular", { ...base, spacingA: "0" }, PLATE)).includes("spacing"), "zero spacing is refused");
+      assert(messageOf(requestOfForm("rectangular", { ...base, sizing: "extent", spacingA: "-3" }, PLATE)).includes("extent"), "a negative extent is refused");
+      assert(messageOf(requestOfForm("rectangular", { ...base, countA: "20", countB: "10" }, PLATE)).includes("100"), "more than 100 instances are refused");
+      assert(messageOf(requestOfForm("circular", { ...base, count: "1" }, PLATE)).includes("2 to 100"), "a circular pattern needs two instances");
+      assert(messageOf(requestOfForm("circular", { ...base, angle: "400" }, PLATE)).includes("360"), "more than a full turn is refused");
+      assert(messageOf(requestOfForm("mirror", { ...base, offset: "far" }, PLATE)).includes("number"), "a non-numeric plane position is refused");
+      assert(messageOf(requestOfForm("rectangular", { ...base, target: "features" }, PLATE)).includes("Tick"), "a pattern of features needs a feature ticked");
+      // Round trip: a request read back into fields and out again is the same request.
+      const typed = requestOfForm("circular", { ...base, count: "6", angle: "-180", axis: "construction-axis:spin", result: "join" }, PLATE);
+      assert("request" in typed, "circular fields read");
+      if (!("request" in typed)) return;
+      const again = requestOfForm("circular", formOfRequest(typed.request), PLATE);
+      assert("request" in again && JSON.stringify(again.request) === JSON.stringify(typed.request), "fields and request round-trip");
+      // A typed pattern drives the real path.
+      const project = await plateProject();
+      const typedMirror = requestOfForm("mirror", { ...base, plane: "yz", offset: "45" }, PLATE);
+      assert("request" in typedMirror, "mirror fields read");
+      if (!("request" in typedMirror)) return;
+      const preview = previewPattern(project, typedMirror.request);
+      assert(preview.ok && preview.instances === 2 && preview.text.includes("2 instances"), `the preview counts the mirror: ${"text" in preview ? preview.text : preview.message}`);
+      const done = await addOk(project, typedMirror.request);
+      near(metricsOf(bodyOf(done, patternSteps(done)[0]!.bodyId)).centroidMm[0], 90, 1e-6, "the plate at x = 0 mirrored about x = 45 lands at x = 90");
+      const lone = previewPattern(project, { shape: rect({ countA: 2, spacingAMm: 10 }), result: "new-bodies", sourceBodyId: PLATE });
+      assert(lone.ok && lone.overlapping && lone.text.includes("overlap"), "the preview warns when copies overlap");
+      assert(!previewPattern(project, { shape: rect(), result: "join", sourceBodyId: "general-body:missing" }).ok, "the preview needs a body");
     }
   },
   {
