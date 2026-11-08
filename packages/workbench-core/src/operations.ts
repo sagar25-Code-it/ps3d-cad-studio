@@ -61,6 +61,7 @@ import { setDesignParameters, settleDesignExpressions } from "./design-parameter
 import { failure, MAX_AUDIT_CHANGED_IDS, validateWorkbenchProject, validSketchPlaneFrame, validSketchPlaneTilt, WORKBENCH_LIMITS } from "./validation.js";
 import { firstNonFinitePath, MODEL_ENVELOPE, sketchEntityProblem, solidEnvelopeProblem, type EnvelopeProblem } from "./envelope.js";
 import { AUDIT_KEEP_FULL, compactAudit } from "./audit-archive.js";
+import { validSketchPlaneFace } from "./feature-refs.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/iu;
@@ -663,10 +664,10 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       );
     }
     case "set-sketch-plane": {
-      const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, ...rest } = project.sketch;
+      const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, ...rest } = project.sketch;
       const offset = operation.offsetMm ?? 0;
       return changed(
-        { ...project, sketch: { ...rest, plane: operation.plane, ...(offset === 0 ? {} : { planeOffsetMm: offset }), ...(operation.tilt === undefined ? {} : { planeTilt: operation.tilt }), ...(operation.frame === undefined ? {} : { planeFrame: operation.frame }) } },
+        { ...project, sketch: { ...rest, plane: operation.plane, ...(offset === 0 ? {} : { planeOffsetMm: offset }), ...(operation.tilt === undefined ? {} : { planeTilt: operation.tilt }), ...(operation.frame === undefined ? {} : { planeFrame: operation.frame }), ...(operation.face === undefined ? {} : { planeFace: operation.face }) } },
         [project.sketch.id],
         operation.frame === undefined
           ? `Placed the sketch on the ${operation.plane.replace("datum:", "").toUpperCase()} plane${offset === 0 ? "" : ` offset ${offset} mm`}${operation.tilt === undefined ? "" : ` tilted ${operation.tilt.angleDeg}° about ${operation.tilt.axis.toUpperCase()}`}.`
@@ -675,7 +676,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "commit-design-sketch": return commitDesignSketch(project, operation.featureId, operation.name);
     case "edit-design-sketch": return editDesignSketch(project, operation.featureId);
-    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt, operation.frame);
+    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt, operation.frame, operation.face);
     case "add-design-solid": return addDesignSolid(project, operation.feature, operation.body);
     case "update-design-solid": return updateDesignSolid(project, operation.feature, operation.body);
     case "regenerate-design": return regenerateDesign(project, operation.results);
@@ -1448,11 +1449,13 @@ function stableId(value: unknown): value is string {
 
 /** The shared payload of the two operations that place a sketch: a datum plane with an optional offset, tilt or (instead of both) frame. */
 function validSketchPlacementInput(input: Record<string, unknown>, common: readonly string[]): boolean {
-  const optional = ["offsetMm", "tilt", "frame"].filter((key) => Object.hasOwn(input, key));
+  const optional = ["offsetMm", "tilt", "frame", "face"].filter((key) => Object.hasOwn(input, key));
   if (!keys(input, [...common, "plane", ...optional]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)) return false;
   if (Object.hasOwn(input, "offsetMm") && !(typeof input.offsetMm === "number" && Number.isFinite(input.offsetMm) && Math.abs(input.offsetMm) <= MODEL_ENVELOPE.maxPlaneOffsetMm)) return false;
   if (Object.hasOwn(input, "tilt") && !validSketchPlaneTilt(input.tilt)) return false;
   if (Object.hasOwn(input, "frame") && (!validSketchPlaneFrame(input.frame) || input.plane !== "datum:xy" || optional.length > 1)) return false;
+  // A face reference rides along with the face's own offset (and nothing else): it is how the sketch finds that face again.
+  if (Object.hasOwn(input, "face") && (!validSketchPlaneFace(input.face) || Object.hasOwn(input, "tilt") || Object.hasOwn(input, "frame"))) return false;
   return true;
 }
 

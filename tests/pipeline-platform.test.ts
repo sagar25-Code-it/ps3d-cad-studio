@@ -1,31 +1,13 @@
-import type { DesignSolidFeature, GeneralSolidBody, SketchEntity, WorkbenchOperation, WorkbenchProject, WorkbenchResult } from "../packages/workbench-core/src/index.js";
+import type { DesignSolidFeature, GeneralSolidBody, SketchEntity, WorkbenchProject, WorkbenchResult } from "../packages/workbench-core/src/index.js";
 import {
   AUDIT_KEEP_FULL, AUDIT_MAX_ENTRIES, WORKBENCH_LIMITS, applyWorkbenchOperation, auditCapacity, compactWorkbenchAudit, createWorkbenchProject, designOf,
   parseWorkbenchProjectText, serializeWorkbenchProject, validateWorkbenchProject
 } from "../packages/workbench-core/src/index.js";
 import { createLatestWinsWriter } from "../apps/studio-web/src/latest-wins-writer.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
-
-let serial = 0;
-type Op = WorkbenchOperation extends infer T ? T extends { readonly kind: infer K } ? Omit<T, "operationId" | "expectedRevision"> & { readonly kind: K } : never : never;
-
-export function pipelineApply(project: WorkbenchProject, operation: Op): WorkbenchResult<{ readonly project: WorkbenchProject; readonly summary: string }> {
-  serial += 1;
-  return applyWorkbenchOperation(project, { ...operation, operationId: `operation:test-pipeline-${serial}`, expectedRevision: project.revision } as WorkbenchOperation);
-}
-
-export function pipelineRun(project: WorkbenchProject, operation: Op): WorkbenchProject {
-  const result = pipelineApply(project, operation);
-  assert(result.ok, `${operation.kind} is accepted: ${result.ok ? "" : result.diagnostics[0]?.message ?? ""}`);
-  return result.value.project;
-}
-
-function message(result: WorkbenchResult<unknown>): string {
-  return result.ok ? "" : result.diagnostics.map((diagnostic) => diagnostic.message).join(" | ");
-}
-
-const line = (id: string, from: readonly [number, number], to: readonly [number, number]): SketchEntity => ({ id: `entity:${id}`, kind: "line", start: from, end: to, construction: false });
-const fresh = (): WorkbenchProject => createWorkbenchProject("project:test-pipeline");
+import { fresh, line, message, pipelineApply, pipelineRun } from "./pipeline-kit.js";
+import { pipelineGeometryTests } from "./pipeline-geometry.test.js";
+import { pipelineSweepTests } from "./pipeline-sweep.test.js";
 
 function tinyBody(id: string, scale = 1): GeneralSolidBody {
   const p = [0, 0, 0, 10 * scale, 0, 0, 0, 10 * scale, 0, 0, 0, 10 * scale];
@@ -55,6 +37,8 @@ function heavyBody(id: string, rings: number): GeneralSolidBody {
 }
 
 export const pipelinePlatformTests: readonly TestCase[] = [
+  ...pipelineGeometryTests,
+  ...pipelineSweepTests,
   {
     name: "P13 an invalid sketch entity is refused with its id, the field and the limit, not a generic project message",
     run: () => {

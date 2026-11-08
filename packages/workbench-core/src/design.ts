@@ -6,6 +6,7 @@ import type {
   DesignSolidFeature,
   GeneralSolidBody,
   SketchDatumPlane,
+  SketchPlaneFaceRef,
   SketchPlaneFrame,
   SketchPlaneTilt,
   WorkbenchDiagnostic,
@@ -17,6 +18,7 @@ import { validFeatureExpressions } from "./feature-bindings.js";
 import { validParameterTable } from "./parameter-graph.js";
 import { EDGE_BLEND_KEYS, validEdgeBlendFields } from "./edge-blend.js";
 import { BODY_EDIT_KINDS, BODY_EDIT_ONLY_KINDS, validBodyEdit } from "./body-edit.js";
+import { FEATURE_REF_KEYS, validFeatureRefs } from "./feature-refs.js";
 
 /**
  * The parametric history ("timeline"): an ordered list of sketch and solid features with a rollback marker. A sketch
@@ -110,7 +112,9 @@ export function dependentsOf(history: DesignHistory, featureId: string): readonl
     grew = false;
     for (const feature of history.features) {
       if (closure.has(feature.id) || feature.kind === "sketch") continue;
-      const builtOnClosure = closure.has(feature.sketchFeatureId);
+      // A sweep also follows the path of another sketch, and a loft takes its second profile from another sketch.
+      const builtOnClosure = closure.has(feature.sketchFeatureId) || (feature.sweepPath !== undefined && closure.has(feature.sweepPath.sketchFeatureId))
+        || (feature.loftSecondarySketchFeatureId !== undefined && closure.has(feature.loftSecondarySketchFeatureId));
       const copiesClosureBody = feature.kind === "pattern" && feature.pattern !== undefined && history.features.some((other) => closure.has(other.id) && other.kind !== "sketch" && !modifiesBody(other) && other.bodyId === feature.pattern!.sourceBodyId);
       const modifiesClosureBody = modifiesBody(feature) && history.features.some((other) => closure.has(other.id) && other.kind !== "sketch" && !modifiesBody(other) && other.bodyId === feature.bodyId);
       if (builtOnClosure || modifiesClosureBody || copiesClosureBody) { closure.add(feature.id); grew = true; }
@@ -204,10 +208,10 @@ export function editDesignSketch(project: WorkbenchProject, featureId: string): 
   return changed({ ...project, sketch: feature.sketch, activeWorkspace: "sketch", design: next }, [featureId], `Reopened ${feature.name} for editing.`);
 }
 
-export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame): DesignChange {
+export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef): DesignChange {
   const history = designOf(project);
-  const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, ...rest } = project.sketch;
-  const sketch = { ...rest, name: "Sketch", plane, ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), ...(frame === undefined ? {} : { planeFrame: frame }), entities: [], constraints: [] };
+  const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, ...rest } = project.sketch;
+  const sketch = { ...rest, name: "Sketch", plane, ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), ...(frame === undefined ? {} : { planeFrame: frame }), ...(face === undefined ? {} : { planeFace: face }), entities: [], constraints: [] };
   const where = frame !== undefined ? "a plane through three points"
     : `the ${plane.replace("datum:", "").toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
   return changed({ ...project, sketch, activeWorkspace: "sketch", design: { ...history, editingSketchId: null } }, [project.sketch.id], `Started a new sketch on ${where}.`);
@@ -217,6 +221,9 @@ function checkSolidFeature(history: DesignHistory, feature: DesignSolidFeature, 
   if (feature.bodyId !== body.id) return fail("INVALID_OPERATION", "The solid's ID must match the feature's body ID.", [feature.id, body.id], "Build the solid with the feature's body ID.");
   const sketch = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
   if (sketch === undefined || sketch.kind !== "sketch") return missing(feature.sketchFeatureId, "The feature must be built on a sketch feature in the timeline.");
+  for (const referenced of [feature.sweepPath?.sketchFeatureId, feature.loftSecondarySketchFeatureId]) {
+    if (referenced !== undefined && !history.features.some((candidate) => candidate.id === referenced && candidate.kind === "sketch")) return missing(referenced, "The sketch this sweep or loft takes its path or second profile from is not in the timeline.");
+  }
   const duplicate = history.features.find((candidate) => (candidate.id === feature.id) !== replacing && candidate.id === feature.id);
   if (duplicate !== undefined) return fail("INVALID_OPERATION", "A timeline feature with this ID already exists.", [feature.id], "Use a new feature ID.");
   if (feature.kind === "pattern" && feature.pattern !== undefined) {
@@ -407,9 +414,9 @@ function validDirectionAndThin(value: Record<string, unknown>): boolean {
 }
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "flangeReliefShape", ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "flangeReliefShape", ...FEATURE_REF_KEYS, ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
-  if (!validExtent(value)) return false;
+  if (!validExtent(value) || !validFeatureRefs(value)) return false;
   if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "sheet-base", "sheet-flange", "sheet-hem", "sheet-edge-flange", "hole", "pattern", "edge-blend", ...BODY_EDIT_ONLY_KINDS, ...SHEET_FEATURE_KINDS].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;

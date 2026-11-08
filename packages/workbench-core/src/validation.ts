@@ -45,6 +45,7 @@ import { createVehicleTemplate, solveVehicleGeometry, VEHICLE_PARAMETER_RANGES }
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { validatePartFeatureStack } from "./part-features.js";
 import { MODEL_ENVELOPE, sketchEntityProblem } from "./envelope.js";
+import { validSketchPlaneFace } from "./feature-refs.js";
 import { AUDIT_CHECKPOINT_KIND, AUDIT_MAX_ENTRIES } from "./audit-archive.js";
 
 export const WORKBENCH_LIMITS = {
@@ -237,7 +238,9 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   const optionalOffset = isRecord(value) && Object.hasOwn(value, "planeOffsetMm") ? ["planeOffsetMm"] : [];
   const optionalTilt = isRecord(value) && Object.hasOwn(value, "planeTilt") ? ["planeTilt"] : [];
   const optionalFrame = isRecord(value) && Object.hasOwn(value, "planeFrame") ? ["planeFrame"] : [];
-  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame])
+  const optionalFace = isRecord(value) && Object.hasOwn(value, "planeFace") ? ["planeFace"] : [];
+  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame, ...optionalFace])
+    || (optionalFace.length > 0 && (!validSketchPlaneFace(value.planeFace) || optionalTilt.length > 0 || optionalFrame.length > 0))
     || (optionalTilt.length > 0 && !validSketchPlaneTilt(value.planeTilt))
     || (optionalFrame.length > 0 && (!validSketchPlaneFrame(value.planeFrame) || value.plane !== "datum:xy" || optionalOffset.length > 0 || optionalTilt.length > 0))
     || value.id !== "sketch:primary-profile" || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(value.plane) || !shortText(value.name, 1, 120)
