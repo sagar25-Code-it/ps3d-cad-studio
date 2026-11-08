@@ -775,12 +775,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const liveFieldErrors = useMemo(() => fieldErrorsFor(dynamicFields, fieldText, evaluateTyped), [dynamicFields, fieldText, props.evaluateText]);
   const fieldErrors = { ...commitErrors, ...liveFieldErrors };
   useEffect(() => { setCommitErrors({}); }, [fieldText, props.tool, pending.length]);
-  const commitDynamicInput = (): void => {
+  /** Places the typed point. Returns false (and keeps the typed text and the focus) when the input was refused. */
+  const commitDynamicInput = (): boolean => {
     const result = resolveDynamicEntry({ tool: props.tool, placed: pending, cursor, fields: dynamicFields, texts: fieldText, evaluate: evaluateTyped, ...(lastPlaced.current === undefined ? {} : { lastPoint: lastPlaced.current }) });
     if (!result.ok) {
       setCommitErrors(result.errors);
       props.onMessage(`${result.message} Nothing was placed.`);
-      return;
+      return false;
     }
     setDynamicFocused(false);
     typedNotes.current = result.notes;
@@ -788,15 +789,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const found: InferenceResult = { point: result.point, snapped: result.guides.length > 0, guides: result.guides };
     if (props.tool === "spline" || props.tool === "spline-control") {
       const next = [...pending, result.point];
-      if (props.tool === "spline" && next.length > 24) { props.onMessage("A spline takes at most 24 fit points. Press Enter to finish."); return; }
+      if (props.tool === "spline" && next.length > 24) { props.onMessage("A spline takes at most 24 fit points. Press Enter to finish."); return false; }
       lastPlaced.current = result.point;
       setPending(next);
       setFieldText({});
       props.onMessage(`${sketchToolLabel(props.tool)}: point ${next.length} accepted (typed).${next.length >= 3 ? " Press Enter to finish." : ""}${result.notes.length === 0 ? "" : ` ${result.notes.join(" ")}`}`);
       typedNotes.current = [];
-      return;
+      return true;
     }
     placePoint(result.point, "typed", found);
+    return true;
   };
 
   const finishSpline = (points: readonly Vec2[]): void => {
@@ -1181,7 +1183,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         if (first !== undefined) requestFieldFocus(first.id);
         return;
       }
-      case "commit-dynamic": commitDynamicInput(); return;
+      case "commit-dynamic": void commitDynamicInput(); return;
       case "select-other": cycleSelectOther(hoverStack, true); return;
       case "toggle-snap": updateAssist({ snap: !assist.snap }); props.onMessage(`Snap ${assist.snap ? "off" : "on"}.`); return;
       case "toggle-ortho": updateAssist({ ortho: !assist.ortho }); props.onMessage(`Ortho lock ${assist.ortho ? "off" : "on"}.`); return;
@@ -1260,9 +1262,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const updateDrag = (event: React.PointerEvent<SVGSVGElement>, gesture: DragGesture): void => {
     const raw = camera.toSketch(event.clientX, event.clientY);
     // Points snap to other geometry while they are dragged; moving a whole curve follows the pointer exactly.
-    const snapping = snapEnabled && gesture.handle.kind !== "body";
+    // Holding Ctrl while dragging a point switches snapping off, and the palette's snap step replaces the grid step.
+    const snapping = snapEnabled && !(event.ctrlKey || event.metaKey) && gesture.handle.kind !== "body";
     const snap: InferenceResult | undefined = snapping
-      ? inferSketchPoint(raw, gesture.base, { toleranceMm: SNAP_PIXELS * px, gridMm: grid.minorMm, excludeEntityIds: [gesture.entityId, ...jointNeighbours(gesture.entityId)] })
+      ? inferSketchPoint(raw, gesture.base, { toleranceMm: SNAP_PIXELS * px, gridMm: assist.snapStepMm ?? grid.minorMm, excludeEntityIds: [gesture.entityId, ...jointNeighbours(gesture.entityId)] })
       : undefined;
     const target = snap?.point ?? raw;
     setCursor(target);
@@ -1936,7 +1939,7 @@ function DynamicInputBox(props: {
   readonly onChange: (id: DynamicFieldId, value: string) => void;
   readonly onFocus: (id: DynamicFieldId) => void;
   readonly onBlur: () => void;
-  readonly onCommit: () => void;
+  readonly onCommit: () => boolean;
   readonly onCancel: () => void;
   readonly onTab: (id: DynamicFieldId, backwards: boolean) => void;
 }): React.JSX.Element {
@@ -1962,7 +1965,7 @@ function DynamicInputBox(props: {
         onChange={(event) => props.onChange(field.id, event.target.value)}
         onKeyDown={(event) => {
           // After placing, give the keyboard back to the canvas so Esc, tool letters and Delete work again.
-          if (event.key === "Enter") { event.preventDefault(); props.onCommit(); event.currentTarget.blur(); }
+          if (event.key === "Enter") { event.preventDefault(); if (props.onCommit()) event.currentTarget.blur(); }
           else if (event.key === "Tab") { event.preventDefault(); props.onTab(field.id, event.shiftKey); }
           else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel(); event.currentTarget.blur(); }
         }}

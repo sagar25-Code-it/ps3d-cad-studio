@@ -689,6 +689,31 @@ export const sketchInputExtrasTests: readonly TestCase[] = [
     }
   },
   {
+    name: "Sketch tool input performance: snapping with polar, select-other hover and typed entry stay fast on a 500-curve sketch",
+    run: () => {
+      const entities: SketchEntity[] = [];
+      for (let index = 0; index < 500; index += 1) {
+        const x = (index % 25) * 40;
+        const y = Math.floor(index / 25) * 40;
+        if (index % 3 === 0) entities.push({ id: `entity:l${index}`, kind: "line", start: [x, y], end: [x + 30, y + 10], construction: false });
+        else if (index % 3 === 1) entities.push({ id: `entity:c${index}`, kind: "circle", center: [x + 10, y + 10], radiusMm: 6, construction: false });
+        else entities.push({ id: `entity:s${index}`, kind: "spline", fitPoints: [[x, y], [x + 8, y + 12], [x + 20, y + 4], [x + 30, y + 14]], construction: false });
+      }
+      const sketch = emptySketch(entities);
+      const started = performance.now();
+      for (let call = 0; call < 100; call += 1) {
+        const pointer: Vec2 = [37 * call % 900, 53 * call % 500];
+        assistedInference({ tool: "slot", pointer, sketch, toleranceMm: 4, gridMm: 5, anchor: [10, 10], settings: settings({ polar: true }) });
+        entitiesUnderPoint(sketch, pointer, 4);
+      }
+      const perCall = (performance.now() - started) / 100;
+      assert(perCall < 25, `a pointer move costs well under a frame on 500 curves (${perCall.toFixed(2)} ms)`);
+      const typed = performance.now();
+      for (let call = 0; call < 2000; call += 1) entry("line", [[0, 0]], [10, 10], { length: "2*5 mm", angle: "30" });
+      assert((performance.now() - typed) / 2000 < 2, "typed entry through the expression engine is cheap");
+    }
+  },
+  {
     name: "Sketch tool input T24: every multi-click tool says what the next click means",
     run: () => {
       for (const tool of ["arc-center", "arc-tangent", "ellipse", "polygon", "slot", "slot-straight", "rectangle-three-point", "circle-three-point"] as const) {
