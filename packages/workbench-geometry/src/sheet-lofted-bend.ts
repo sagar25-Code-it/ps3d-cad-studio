@@ -177,7 +177,7 @@ export function coneDevelopment(bottomRadiusMm: number, topRadiusMm: number, hei
   const outer = big / sinPhi;
   const inner = small / sinPhi;
   const sweep = 2 * Math.PI * sinPhi;
-  const steps = Math.max(8, Math.ceil(sweep * 180 / Math.PI / 3));
+  const steps = Math.max(8, Math.ceil(sweep * 180 / Math.PI / 2));
   const points: Point2[] = [];
   for (let i = 0; i <= steps; i += 1) points.push([outer * Math.cos(sweep * i / steps), outer * Math.sin(sweep * i / steps)]);
   for (let i = steps; i >= 0; i -= 1) points.push([inner * Math.cos(sweep * i / steps), inner * Math.sin(sweep * i / steps)]);
