@@ -346,14 +346,20 @@ export function settleRelations(sketch: WorkbenchSketch, plan: SketchEditPlan, o
     const solved = solveLiveSketch(next.sketch, next.focus);
     if (!solved.ok || solved.movedIds.length === 0) break;
     const moving = new Set(solved.movedIds);
+    const added = new Set(result.addConstraints.map((constraint) => constraint.id));
     const drop = next.sketch.constraints.filter((constraint) => {
-      if (result.addConstraints.some((added) => added.id === constraint.id)) return false;
       if (constraint.suppressed === true || constraint.kind === "fixed" || (options.keep?.has(constraint.id) ?? false)) return false;
       if (!constraint.entityIds.some((id) => moving.has(id) || focus.includes(id))) return false;
       return !solverAccepts(next.sketch, constraint);
     });
     if (drop.length === 0) break;
-    result = { ...result, removeConstraintIds: [...(result.removeConstraintIds ?? []), ...drop.map((constraint) => constraint.id)] };
+    // A relation the live solver cannot hold is dropped, whether it already existed or the edit just made it, instead of failing the edit.
+    const dropIds = new Set(drop.map((constraint) => constraint.id));
+    result = {
+      ...result,
+      addConstraints: result.addConstraints.filter((constraint) => !dropIds.has(constraint.id)),
+      removeConstraintIds: [...(result.removeConstraintIds ?? []), ...drop.filter((constraint) => !added.has(constraint.id)).map((constraint) => constraint.id)]
+    };
   }
   return result;
 }

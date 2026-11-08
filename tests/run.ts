@@ -27,6 +27,7 @@ import { mcpRecipeTests } from "./mcp-recipes.test.js";
 import { selectionMetricTests } from "./selection-metrics.test.js";
 import { sketchSolverTests } from "./sketch-solver.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
+import { sketchEditSuiteTests } from "./sketch-edit-suite.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
 import { meshModifyTests } from "./mesh-modify.test.js";
 import { meshCheckTests } from "./mesh-check.test.js";
@@ -131,6 +132,7 @@ const tests: readonly TestCase[] = [
   ...selectionMetricTests,
   ...sketchSolverTests,
   ...sketchEditToolTests,
+  ...sketchEditSuiteTests,
   ...sketchSplitJogTests,
   ...sketchPathMirrorMoveTests,
   ...sketchClipboardTests,

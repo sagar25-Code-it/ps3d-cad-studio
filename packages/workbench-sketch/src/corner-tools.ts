@@ -79,7 +79,7 @@ export function arcTravel(arc: Arc): ArcTravel | undefined {
   const circle = circumcircle(arc.start, arc.mid, arc.end);
   if (circle === undefined) return undefined;
   const crossValue = (arc.mid[0] - arc.start[0]) * (arc.end[1] - arc.start[1]) - (arc.mid[1] - arc.start[1]) * (arc.end[0] - arc.start[0]);
-  const dir: 1 | -1 = crossValue < 0 ? 1 : -1;
+  const dir: 1 | -1 = crossValue > 0 ? 1 : -1;
   const angleOf = (point: Vec2): number => Math.atan2(point[1] - circle.center[1], point[0] - circle.center[0]);
   const startAngle = angleOf(arc.start);
   const endAngle = angleOf(arc.end);
