@@ -4,6 +4,8 @@ import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc
 import { attachEdgeFlange, booleanMeshes, flangeReliefs, holeCutter, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 import { applyPatternStep } from "./pattern-replay.js";
+import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
+import { createThinRevolveBody, startRevolveAt } from "./revolve-thin.js";
 
 /**
  * Rebuilds the solids of the parametric timeline. The kernel is asynchronous, so the work happens here and its results
@@ -26,10 +28,20 @@ export function planeKeyOf(plane: SketchDatumPlane): SketchPlane {
 }
 
 /** How far from the sketch plane an extrusion starts, along the plane's normal: symmetric straddles it, flipped goes the other way. */
-export function extrudeStartOffsetMm(feature: Pick<DesignSolidFeature, "kind" | "valueMm" | "direction">): number {
+export function extrudeStartOffsetMm(feature: Pick<DesignSolidFeature, "kind" | "valueMm" | "direction" | "secondValueMm">): number {
   if (feature.kind !== "extrude") return 0;
+  if (feature.direction === "two-side") return -(feature.secondValueMm ?? 0);
   const height = Math.abs(feature.valueMm);
   return feature.direction === "symmetric" ? -height / 2 : feature.direction === "flipped" ? -height : 0;
+}
+
+/** How far a revolve turns in all, and where on the sweep it starts (0 at the sketch plane; negative starts before it). */
+export function revolveSpan(feature: Pick<DesignSolidFeature, "valueMm" | "direction" | "secondValueMm">): { readonly totalDeg: number; readonly startDeg: number } {
+  const angle = Math.abs(feature.valueMm);
+  if (feature.direction === "two-side") return { totalDeg: angle + (feature.secondValueMm ?? 0), startDeg: -(feature.secondValueMm ?? 0) };
+  if (feature.direction === "symmetric") return { totalDeg: angle, startDeg: -angle / 2 };
+  if (feature.direction === "flipped") return { totalDeg: angle, startDeg: -angle };
+  return { totalDeg: angle, startDeg: 0 };
 }
 
 function shifted(body: GeneralSolidBody, normal: readonly [number, number, number], offsetMm: number): GeneralSolidBody {
@@ -50,11 +62,22 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   const region = resolveProfileRegion(profiles, feature.profileIds, { includeIslands: feature.kind === "extrude" && feature.edge === undefined });
   if (!region.ok) return { ok: false, message: region.diagnostics[0]?.message ?? "The sketch has no closed profile for this feature." };
   const plane = planeKeyOf(sketch.plane);
+  const sweep = feature.kind === "revolve" ? revolveSpan(feature) : undefined;
+  if (sweep !== undefined && sweep.totalDeg > 360 + 1e-9) return { ok: false, message: "A revolve cannot turn more than 360 degrees in all. Use a smaller angle." };
+  const reach = feature.kind === "extrude" && feature.direction === "two-side" ? Math.abs(feature.valueMm) + (feature.secondValueMm ?? 0) : sweep?.totalDeg ?? Math.abs(feature.valueMm);
+  if (feature.kind === "revolve" && feature.thinWallMm !== undefined) {
+    if (region.value.holes.length > 0) return { ok: false, message: "A thin revolve follows one outline. Select the outer profile alone." };
+    const thin = await createThinRevolveBody({ outlineMm: profileOutlineMm(region.value.outer.boundary), plane, angleDeg: reach, wallMm: feature.thinWallMm, side: feature.thinSide ?? "inside", bodyId: feature.bodyId, name: feature.name, color });
+    if (!thin.ok) return { ok: false, message: thin.message };
+    const started = sweep === undefined || sweep.startDeg === 0 ? thin.body : { ...thin.body, positionsMm: startRevolveAt(thin.body.positionsMm, plane, sweep.startDeg) };
+    const thinPlaced = shifted(started, NORMALS[plane], sketch.planeOffsetMm ?? 0);
+    return { ok: true, body: isPlaced(sketch) ? { ...thinPlaced, positionsMm: placePositions(thinPlaced.positionsMm, sketch) } : thinPlaced };
+  }
   const built = await createGeneralSolidBody({
     profile: region.value.outer,
     plane,
     operation: feature.kind,
-    valueMm: Math.abs(feature.valueMm),
+    valueMm: reach,
     ...(region.value.holes.length === 0 ? {} : { holes: region.value.holes }),
     bodyId: feature.bodyId,
     name: feature.name,
@@ -111,7 +134,8 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     ...(feature.kind === "draft" && feature.draftNeutralFace !== undefined ? { draftNeutralFace: feature.draftNeutralFace } : {})
   });
   if (!built.ok) return { ok: false, message: built.message };
-  const placed = shifted(built.body, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0));
+  const started = sweep === undefined || sweep.startDeg === 0 ? built.body : { ...built.body, positionsMm: startRevolveAt(built.body.positionsMm, plane, sweep.startDeg) };
+  const placed = shifted(started, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0));
   // A sketch on an angle or three-point plane is built on its datum plane and then moved onto that plane, which keeps the face names.
   return { ok: true, body: isPlaced(sketch) ? { ...placed, positionsMm: placePositions(placed.positionsMm, sketch) } : placed };
 }
@@ -158,8 +182,8 @@ function stepsOfBody(history: ReturnType<typeof designOf>, bodyId: string): read
  * A body with no joins or cuts is always rebuilt, even while it is off, so its stored shape never goes stale; a body with
  * joins or cuts is only replayed while its own step is live.
  */
-export async function replayBody(project: WorkbenchProject, bodyId: string): Promise<readonly RebuildResult[]> {
-  return (await replayBodyState(project, bodyId)).results;
+export async function replayBody(project: WorkbenchProject, bodyId: string, fresh?: ReadonlyMap<string, GeneralSolidBody>): Promise<readonly RebuildResult[]> {
+  return (await replayBodyState(project, bodyId, Infinity, 0, fresh)).results;
 }
 
 /** The finished shapes of bodies replayed up to a timeline position, shared by the copies of one pattern so the source is only replayed once. */
@@ -180,7 +204,7 @@ function bodyBefore(project: WorkbenchProject, bodyId: string, limitIndex: numbe
 }
 
 /** Replays one body and also returns its finished shape. With `limitIndex`, the replay stops before the timeline step at that position. */
-export async function replayBodyState(project: WorkbenchProject, bodyId: string, limitIndex = Infinity, depth = 0): Promise<{ readonly results: readonly RebuildResult[]; readonly current?: GeneralSolidBody }> {
+export async function replayBodyState(project: WorkbenchProject, bodyId: string, limitIndex = Infinity, depth = 0, fresh?: ReadonlyMap<string, GeneralSolidBody>): Promise<{ readonly results: readonly RebuildResult[]; readonly current?: GeneralSolidBody }> {
   const history = designOf(project);
   const steps = stepsOfBody(history, bodyId);
   const base = steps.find((step) => !modifiesBody(step));
@@ -263,16 +287,32 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
     const sketchFeature = history.features.find((candidate): candidate is DesignSketchFeature => candidate.id === step.sketchFeatureId && candidate.kind === "sketch");
     if (sketchFeature === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sketch this feature was built on is no longer in the timeline." }); continue; }
     const modifies = modifiesBody(step);
-    const sized = modifies && step.extent === "through-all" && current !== undefined ? throughAllOverride(step, sketchFeature, current) : step;
-    const built = await rebuildSolidFeature(modifies ? { ...sized, bodyId: `${step.id}:tool` } : sized, sketchFeature, existing?.color);
+    let sized = modifies && step.extent === "through-all" && current !== undefined ? throughAllOverride(step, sketchFeature, current) : step;
+    // A "to" extent is measured from the target's shape as it is at this point of the replay.
+    let trim: Extract<Awaited<ReturnType<typeof resolveExtent>>, { readonly ok: true }>["trim"];
+    let warning: string | undefined;
+    if (isToExtent(step.extent)) {
+      const resolved = await resolveExtent(step, sketchFeature, { bodyOf: (id) => id === bodyId ? current : fresh?.get(id) ?? project.part.generalBodies?.find((candidate) => candidate.id === id) }, (probe) => rebuildSolidFeature(probe, sketchFeature, existing?.color));
+      if (!resolved.ok) { outcomes.set(step.id, { featureId: step.id, message: resolved.message }); continue; }
+      sized = resolved.step;
+      trim = resolved.trim;
+      warning = resolved.warning;
+    }
+    const applied: RebuildResult = warning === undefined ? { featureId: step.id } : { featureId: step.id, message: warning };
+    let built = await rebuildSolidFeature(modifies ? { ...sized, bodyId: `${step.id}:tool` } : sized, sketchFeature, existing?.color);
     if (!built.ok) { outcomes.set(step.id, { featureId: step.id, message: built.message }); continue; }
-    if (!modifies) { current = built.body; baseBody = built.body; outcomes.set(step.id, { featureId: step.id }); continue; }
+    if (trim !== undefined) {
+      const trimmedTool = await trimToFace(built.body, trim);
+      if (!trimmedTool.ok) { outcomes.set(step.id, { featureId: step.id, message: trimmedTool.message }); continue; }
+      built = trimmedTool;
+    }
+    if (!modifies) { current = built.body; baseBody = built.body; outcomes.set(step.id, applied); continue; }
     if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this step changes could not be built, so there is nothing to modify." }); continue; }
     if (step.operation !== "join" && step.operation !== "cut") { outcomes.set(step.id, { featureId: step.id, message: "The modifier step has no boolean operation set." }); continue; }
     const combined = await combineGeneralBodies({ target: current, tool: built.body, mode: step.operation, bodyId, name: current.name });
     if (!combined.ok) { outcomes.set(step.id, { featureId: step.id, message: combined.message }); continue; }
     current = { ...combined.body, color: current.color };
-    outcomes.set(step.id, { featureId: step.id });
+    outcomes.set(step.id, applied);
   }
   // The final shape travels on the step that made the body; the other steps only report whether they applied.
   if (current !== undefined) outcomes.set(base.id, { ...(outcomes.get(base.id) ?? { featureId: base.id }), body: current });
@@ -284,8 +324,43 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
 export async function replayAllBodies(project: WorkbenchProject): Promise<readonly RebuildResult[]> {
   const history = designOf(project);
   const bodyIds = [...new Set(history.features.filter((feature): feature is DesignSolidFeature => feature.kind !== "sketch").map((feature) => feature.bodyId))];
+  return replayBodies(project, bodyIds);
+}
+
+/** The bodies in an order where each comes after the bodies its steps reach for (a "to" extent), otherwise in the order given. */
+function targetsFirst(history: ReturnType<typeof designOf>, bodyIds: readonly string[]): readonly string[] {
+  const wanted = new Set(bodyIds);
+  const reaches = new Map<string, Set<string>>();
+  for (const feature of history.features) {
+    if (feature.kind === "sketch" || feature.extentTarget === undefined || feature.extentTarget.bodyId === feature.bodyId) continue;
+    const set = reaches.get(feature.bodyId) ?? new Set<string>();
+    set.add(feature.extentTarget.bodyId);
+    reaches.set(feature.bodyId, set);
+  }
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  const visit = (bodyId: string): void => {
+    if (seen.has(bodyId)) return;
+    seen.add(bodyId);
+    for (const target of reaches.get(bodyId) ?? []) if (wanted.has(target)) visit(target);
+    ordered.push(bodyId);
+  };
+  for (const bodyId of bodyIds) visit(bodyId);
+  return ordered;
+}
+
+/**
+ * Replays the given bodies in timeline order. A body that reaches another one (an extrusion up to its face, say) sees that body as
+ * just rebuilt in this same pass, not the older shape stored in the project.
+ */
+async function replayBodies(project: WorkbenchProject, bodyIds: readonly string[]): Promise<readonly RebuildResult[]> {
   const results: RebuildResult[] = [];
-  for (const bodyId of bodyIds) results.push(...await replayBody(project, bodyId));
+  const fresh = new Map<string, GeneralSolidBody>();
+  for (const bodyId of targetsFirst(designOf(project), bodyIds)) {
+    const replayed = await replayBody(project, bodyId, fresh);
+    for (const result of replayed) if (result.body !== undefined) fresh.set(bodyId, result.body);
+    results.push(...replayed);
+  }
   return results;
 }
 
@@ -294,14 +369,22 @@ export async function rebuildDependents(project: WorkbenchProject, sketchFeature
   const history = designOf(project);
   if (!history.features.some((feature) => feature.id === sketchFeatureId && feature.kind === "sketch")) return [];
   const affected = new Set(dependentsOf(history, sketchFeatureId).filter((feature): feature is DesignSolidFeature => feature.kind !== "sketch").map((feature) => feature.bodyId));
-  const results: RebuildResult[] = [];
-  for (const bodyId of affected) results.push(...await replayBody(project, bodyId));
-  return results;
+  // A body that reaches one of these (up to its face, vertex or itself) changes with it.
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const feature of history.features) {
+      if (feature.kind === "sketch" || affected.has(feature.bodyId) || feature.extentTarget === undefined || !affected.has(feature.extentTarget.bodyId)) continue;
+      affected.add(feature.bodyId);
+      grew = true;
+    }
+  }
+  const order = [...new Set(history.features.filter((feature): feature is DesignSolidFeature => feature.kind !== "sketch").map((feature) => feature.bodyId))].filter((bodyId) => affected.has(bodyId));
+  return replayBodies(project, order);
 }
 
 /** Whether any step of the design joins or cuts, which is when a change to the timeline has to be replayed rather than just shown or hidden. */
 export function hasModifiers(project: WorkbenchProject): boolean {
-  return designOf(project).features.some((feature: DesignFeature) => modifiesBody(feature) || feature.kind === "pattern");
+  return designOf(project).features.some((feature: DesignFeature) => modifiesBody(feature) || feature.kind === "pattern" || (feature.kind !== "sketch" && isToExtent(feature.extent)));
 }
 
 /**

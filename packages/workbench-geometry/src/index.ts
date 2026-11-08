@@ -15,3 +15,6 @@ export * from "./flat-pattern.js";
 export * from "./curve-fit.js";
 export * from "./sketch-project.js";
 export * from "./pattern.js";
+export * from "./extent-distance.js";
+export * from "./vertex-pick.js";
+export * from "./polygon-offset.js";

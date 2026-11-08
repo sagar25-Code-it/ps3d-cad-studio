@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SOLVABLE_POINT_REFS, constraintFit, planeWorldCoordinate, type ConstraintFit, type SketchDatumPlane, type SketchDimensionName, type SketchEntity, type SketchConstraintKind, type SketchPointRef, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
+import { SOLVABLE_POINT_REFS, constraintFit, planeWorldCoordinate, type DesignExtentTarget, type GeneralSolidBody, type ConstraintFit, type SketchDatumPlane, type SketchDimensionName, type SketchEntity, type SketchConstraintKind, type SketchPointRef, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
 import {
   analyzeWorkbenchSketch,
   buildSketchEntity,
@@ -36,6 +36,8 @@ import { createBlockLibrary, makeSketchBlock } from "../../../../packages/workbe
 import { entitiesInSelectionBox, selectionBoxMode, selectionRect, type SketchSelectionBoxMode } from "../../../../packages/workbench-sketch/src/selection.js";
 import { DEFAULT_JOG_PARAMS, SKETCH_EDIT_TOOL_LABELS, SketchEditPanel, SketchRelationList, isClickEditTool, type JogParams, type SketchEditToolId, type StretchWindowRect } from "./SketchEditPanel.js";
 import { SketchRepairPanel } from "./SketchRepairPanel.js";
+import { ReachOptions } from "./ReachOptions.js";
+import { DEFAULT_REACH, buildReach, isReachTarget, type ReachSettings } from "../reach-settings.js";
 import { SketchGrid } from "./sketch/SketchGrid.js";
 import { ConstraintExtras, ExtraDimensionMarks, type ConstraintExtrasBridge, type SetDimensionRequest } from "./sketch/ConstraintExtras.js";
 import { angleDimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
@@ -158,9 +160,14 @@ interface SketchWorkspaceProps {
     operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem",
     valueMm: number,
     edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number },
-    direction?: "one-side" | "symmetric" | "flipped",
+    direction?: "one-side" | "symmetric" | "flipped" | "two-side",
     target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" },
     advancedParams?: {
+      readonly secondValueMm?: number;
+      readonly extent?: "to-face" | "to-body" | "to-vertex" | "to-first" | "to-last";
+      readonly extentTarget?: DesignExtentTarget;
+      readonly thinWallMm?: number;
+      readonly thinSide?: "inside" | "outside" | "center";
       readonly sweepDirectionMm?: readonly [number, number, number];
       readonly sweepPathEntityId?: string;
       readonly sweepTwistDeg?: number;
@@ -194,6 +201,8 @@ interface SketchWorkspaceProps {
   ) => void;
   /** The solids a join or cut can modify. */
   readonly solidBodies: readonly { readonly id: string; readonly name: string }[];
+  /** The same solids with their shapes, for the faces and vertices a "to" extent can reach. */
+  readonly targetBodies: readonly GeneralSolidBody[];
   readonly onChangePlane: () => void;
   readonly editTool: SketchEditToolId | null;
   readonly showMovable: boolean;
@@ -320,17 +329,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [shellOpenFace, setShellOpenFace] = useState<"top" | "bottom" | "none">("top");
   const [draftAngle, setDraftAngle] = useState("5");
   const [draftNeutralFace, setDraftNeutralFace] = useState<"top" | "bottom">("bottom");
-  const [solidDirection, setSolidDirection] = useState<"one-side" | "symmetric" | "flipped">("one-side");
+  const [reach, setReach] = useState<ReachSettings>(DEFAULT_REACH);
   const [solidResult, setSolidResult] = useState<"new-body" | "join" | "cut">("new-body");
   const [solidTarget, setSolidTarget] = useState("");
-  const [solidExtent, setSolidExtent] = useState<"distance" | "through-all">("distance");
   // A join or cut acts on the picked solid, else the selected one, else the newest.
   const effectiveTarget = props.solidBodies.some((body) => body.id === solidTarget) ? solidTarget
     : props.solidBodies.some((body) => body.id === props.selectedId) ? props.selectedId ?? ""
       : props.solidBodies.at(-1)?.id ?? "";
   const modifying = solidResult !== "new-body" && props.solidBodies.length > 0 && effectiveTarget !== "";
   // Through all applies to an extruded cut: the cutter is stretched across the solid when the timeline rebuilds.
-  const cutThroughAll = modifying && solidResult === "cut" && solidOp === "extrude" && solidExtent === "through-all";
+  const cutThroughAll = modifying && solidResult === "cut" && solidOp === "extrude" && reach.extent === "through-all";
+  // A "to" extent measures its own distance or angle from the target, so the typed value is not used.
+  const reachesTarget = (solidOp === "extrude" || solidOp === "revolve") && isReachTarget(reach.extent) && !cutThroughAll;
   const [edgeKind, setEdgeKind] = useState<"none" | "chamfer" | "fillet">("none");
   const [edgeSize, setEdgeSize] = useState("2");
   const [showProfiles, setShowProfiles] = useState(true);
@@ -1431,7 +1441,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="sheet-flange">Sheet metal: flange</option>
               <option value="sheet-hem">Sheet metal: hem</option>
             </select>
-            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? "Sweep distance in millimetres" : "Height in millimetres"} type="number" min={solidOp === "revolve" ? 1 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : 1} value={solidValue} disabled={cutThroughAll} onChange={(event) => setSolidValue(event.target.value)} />
+            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? "Sweep distance in millimetres" : "Height in millimetres"} type="number" min={solidOp === "revolve" ? 1 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : 1} value={solidValue} disabled={cutThroughAll || reachesTarget} onChange={(event) => setSolidValue(event.target.value)} />
             <small>{solidOp === "revolve" ? "°" : "mm"}</small>
           </div>
           <small className="make-solid-plane">On the {planePlacement}</small>
@@ -1449,19 +1459,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
                 {props.solidBodies.map((body) => <option key={body.id} value={body.id}>{body.name}</option>)}
               </select>}
           </div>}
-          {solidResult === "cut" && solidOp === "extrude" && props.solidBodies.length > 0 && <div className="make-solid-row" aria-label="Cut extent">
-            <select aria-label="Cut extent" value={solidExtent} onChange={(event) => setSolidExtent(event.target.value === "through-all" ? "through-all" : "distance")}>
-              <option value="distance">Distance</option>
-              <option value="through-all">Through all</option>
-            </select>
-          </div>}
-          {solidOp === "extrude" && !cutThroughAll && <div className="make-solid-row" aria-label="Extrude direction">
-            <select aria-label="Extrusion direction" value={solidDirection} onChange={(event) => setSolidDirection(event.target.value as "one-side" | "symmetric" | "flipped")}>
-              <option value="one-side">One side</option>
-              <option value="symmetric">Symmetric</option>
-              <option value="flipped">Flipped</option>
-            </select>
-          </div>}
+          {(solidOp === "extrude" || solidOp === "revolve") && <ReachOptions operation={solidOp} settings={reach} onChange={setReach} bodies={props.targetBodies} selectedId={props.selectedId} cutting={solidResult === "cut" && props.solidBodies.length > 0} />}
           {solidOp === "sweep" && <div className="make-solid-row" aria-label="Sweep mode">
             <select aria-label="Sweep mode" value={sweepMode} onChange={(event) => setSweepMode(event.target.value as "direction" | "path")}>
               <option value="direction">Linear direction</option>
@@ -1610,6 +1608,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             </>}
           </div>}
           <button className="palette-action primary" disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying) || (solidOp !== "extrude" && solidOp !== "revolve" && solidResult !== "new-body")} onClick={() => {
+            const reachResult = solidOp === "extrude" || solidOp === "revolve" ? buildReach(solidOp, reach, Number(solidValue), props.targetBodies, props.selectedId) : undefined;
+            if (reachResult !== undefined && !reachResult.ok) { props.onMessage(reachResult.message); return; }
             const sweepTwistValue = Number(sweepTwist);
             const loftTangencyWeightValue = Number(loftTangencyWeight);
             const advanced = solidOp === "sweep"
@@ -1641,7 +1641,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
                                 ? { sheetThicknessMm: Number(sheetThickness), sheetBendRadiusMm: Number(sheetBendRadius), flangeLengthMm: Number(flangeLength), flangeAngleDeg: Number(flangeAngle) }
                                 : solidOp === "sheet-hem"
                                   ? { sheetThicknessMm: Number(sheetThickness), sheetBendRadiusMm: Number(sheetBendRadius), flangeLengthMm: Number(flangeLength), hemStyle }
-                                  : undefined;
+                                  : reachResult?.ok === true ? reachResult.params : undefined;
             const effectiveProfileIds = solidOp === "loft" && loftMode === "two-profile" && selectedProfileIds.length >= 2
               ? selectedProfileIds.slice(0, 1)
               : selectedProfileIds;
@@ -1658,7 +1658,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               solidOp,
               cutThroughAll && !(Number(solidValue) > 0) ? 1 : Number(solidValue),
               edgeForOp,
-              solidOp === "extrude" ? solidDirection : undefined,
+              reachResult?.ok === true ? reachResult.direction : undefined,
               modifying ? { mode: solidResult, bodyId: effectiveTarget, ...(cutThroughAll ? { extent: "through-all" as const } : {}) } : undefined,
               advanced
             );

@@ -76,6 +76,9 @@ import { sketchSplitJogTests } from "./sketch-split-jog.test.js";
 import { sketchPathMirrorMoveTests } from "./sketch-path-mirror-move.test.js";
 import { sketchClipboardTests } from "./sketch-clipboard.test.js";
 import { sketchRepairTests } from "./sketch-repair.test.js";
+import { extentTerminationTests } from "./extent-terminations.test.js";
+import { revolveTerminationTests } from "./revolve-terminations.test.js";
+import { reachUiTests } from "./reach-ui.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -156,7 +159,10 @@ const tests: readonly TestCase[] = [
   ...workbenchMcpTests,
   ...fileWorkspaceTests,
   ...publicReleaseTests,
-  ...topologyNamingTests
+  ...topologyNamingTests,
+  ...extentTerminationTests,
+  ...revolveTerminationTests,
+  ...reachUiTests
 ];
 let failures = 0;
 

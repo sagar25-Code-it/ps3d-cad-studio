@@ -54,6 +54,8 @@ interface WorkbenchRibbonProps {
   readonly onAddConstructionAxis: (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis") => void;
   readonly onAddConstructionPoint: (mode: "xyz" | "midpoint" | "axis-plane-intersection") => void;
   readonly onEdgeFlange: () => void;
+  /** Extrude or revolve the newest sketch up to a face, a solid or a vertex picked in the 3D view. */
+  readonly onReachTo: (mode: "face" | "body" | "vertex" | "revolve-face") => void;
   readonly onFlatPattern: (format: "svg" | "dxf") => void;
   readonly zebra: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null;
   readonly onZebra: (next: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null) => void;
@@ -283,6 +285,12 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="fillet" label="Fillet All" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("fillet", "all")} />
         <RibbonButton icon="chamfer" label="Chamfer All" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer", "all")} />
         <RibbonButton icon="shell" label="Shell" hint="open +Z" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("shell")} />
+      </RibbonGroup>
+      <RibbonGroup label="Reach to">
+        <RibbonButton icon="box" label="Extrude to Face" hint="newest sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("face")} />
+        <RibbonButton icon="box" label="Extrude to Object" hint="newest sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("body")} />
+        <RibbonButton icon="box" label="Extrude to Vertex" hint="corners marked · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("vertex")} />
+        <RibbonButton icon="revolve" label="Revolve to Face" hint="newest sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("revolve-face")} />
       </RibbonGroup>
       <RibbonGroup label="Sheet metal">
         <RibbonButton icon="bore" label="Edge Flange" hint="pick edge · bend" disabled={!generalBodySelected} onClick={props.onEdgeFlange} />

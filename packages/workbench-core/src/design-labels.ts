@@ -9,8 +9,25 @@ export type DesignFeatureStatus = "error" | "suppressed" | "rolled-back" | "inac
 const DIRECTION: Readonly<Record<NonNullable<DesignSolidFeature["direction"]>, string>> = {
   "one-side": "one side",
   symmetric: "symmetric",
-  flipped: "flipped"
+  flipped: "flipped",
+  "two-side": "two sides"
 };
+
+const EXTENT_TEXT: Readonly<Record<string, string>> = {
+  "to-face": "to face",
+  "to-body": "to object",
+  "to-vertex": "to vertex",
+  "to-first": "to first face",
+  "to-last": "to last face"
+};
+
+function sweptAmount(feature: DesignSolidFeature, unit: string): string {
+  const reached = feature.extent === undefined ? undefined : EXTENT_TEXT[feature.extent];
+  if (reached !== undefined) return `${reached} (${trimNumber(feature.valueMm)}${unit} when picked)`;
+  if (feature.direction === "two-side") return `${trimNumber(feature.valueMm)}${unit} + ${trimNumber(feature.secondValueMm ?? 0)}${unit} two sides`;
+  const side = feature.direction === undefined || feature.direction === "one-side" ? "" : ` ${DIRECTION[feature.direction]}`;
+  return `${trimNumber(feature.valueMm)}${unit}${side}`;
+}
 
 /** The timeline step that owns a body, if any. A body made by Combine, or saved before the timeline existed, has none. */
 export function featureOfBody(history: DesignHistory, bodyId: string): DesignSolidFeature | undefined {
@@ -46,9 +63,9 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
   const source = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
   const amount = feature.extent === "through-all" ? "through all"
     : feature.kind === "extrude"
-      ? `${trimNumber(feature.valueMm)} mm${feature.direction === undefined || feature.direction === "one-side" ? "" : ` ${DIRECTION[feature.direction]}`}`
+      ? sweptAmount(feature, " mm")
       : feature.kind === "revolve"
-        ? `${trimNumber(feature.valueMm)}°`
+        ? `${sweptAmount(feature, "°")}${feature.thinWallMm === undefined ? "" : ` · thin ${trimNumber(feature.thinWallMm)} mm ${feature.thinSide ?? "inside"}`}`
         : feature.kind === "sweep"
           ? `${trimNumber(feature.valueMm)} mm sweep`
           : feature.kind === "loft"
