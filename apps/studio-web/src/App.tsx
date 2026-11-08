@@ -58,8 +58,12 @@ import {
   type SketchPlaneTilt,
   type WorkbenchSketchConstraint,
   type Vec3,
-  type WorkspaceId
+  type WorkspaceId,
+  defaultPrimitive,
+  isNewPrimitiveShape
 } from "../../../packages/workbench-core/src/index.js";
+import { newPrimitiveMesh } from "../../../packages/workbench-geometry/src/primitive-bodies.js";
+import { evaluateConstructionPlane, planeFrameOfFace, resolveBinder } from "../../../packages/workbench-geometry/src/index.js";
 import { describePickedEdge, flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, nearestPickableEdge, pickableEdges, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
 import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
 import { listPierceHits, pierceRefreshEdit, refreshPierceConstraints } from "../../../packages/workbench-geometry/src/sketch-pierce.js";
@@ -133,6 +137,8 @@ import { WorkbenchRibbon } from "./ui/WorkbenchRibbon.js";
 import { SaveProjectDialog } from "./ui/SaveProjectDialog.js";
 import { NewProjectDialog } from "./ui/NewProjectDialog.js";
 import { SketchPlaneDialog, type SketchFaceOption } from "./ui/SketchPlaneDialog.js";
+import { ConstructionPlaneDialog, type ConstructionPlaneMode } from "./ui/ConstructionPlaneDialog.js";
+import { binderTargetFromPick, edgeRefFromPick, sketchPathOptions } from "./construction-ui.js";
 import { buildWorkbenchMenus } from "./ui/menu-model.js";
 import { exportFileName, safeFileStem } from "./file-names.js";
 import { selectionMetrics } from "./selection-metrics.js";
@@ -294,6 +300,9 @@ export function App(): React.JSX.Element {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [sketchPlaneDialogOpen, setSketchPlaneDialogOpen] = useState(false);
+  /** The plane-through-two-edges / plane-along-path dialog, and whether it has stepped aside for a viewport click. */
+  const [constructionDialog, setConstructionDialog] = useState<ConstructionPlaneMode | null>(null);
+  const [constructionPicking, setConstructionPicking] = useState(false);
   /** "set" moves the working sketch to a plane; "new" finishes it and starts another on the chosen plane. */
   const [sketchPlaneDialogMode, setSketchPlaneDialogMode] = useState<"set" | "new">("set");
   const [featureEdit, setFeatureEdit] = useState<DesignSolidFeature | undefined>(undefined);
@@ -368,11 +377,31 @@ export function App(): React.JSX.Element {
     ? [{ plane: plane.definition.basePlane.replace("datum:", "") as SketchPlane, tilt: { axis: plane.definition.axis, angleDeg: plane.definition.angleDeg }, label: plane.name }]
     : []), [project.part.construction]);
   /** The part's three-point construction planes, offered in the sketch plane dialog as ready-made sketch planes. */
-  const framePlaneOptions = useMemo(() => (project.part.construction ?? []).flatMap((plane) => {
-    if (plane.definition.kind !== "three-points") return [];
-    const frame = frameThroughPoints(plane.definition.points);
-    return "error" in frame ? [] : [{ frame, label: plane.name }];
-  }), [project.part.construction]);
+  const framePlaneOptions = useMemo(() => {
+    const bodies = project.part.generalBodies ?? [];
+    const axes = project.part.constructionAxes ?? [];
+    const binders = project.part.constructionBinders ?? [];
+    const fromPlanes = (project.part.construction ?? []).flatMap((plane) => {
+      if (plane.definition.kind === "three-points") {
+        const frame = frameThroughPoints(plane.definition.points);
+        return "error" in frame ? [] : [{ frame, label: plane.name }];
+      }
+      // A plane through two edges or along a path is as good a sketch plane as a three-point one: its frame is the sketch frame.
+      if (plane.definition.kind === "through-two-edges" || plane.definition.kind === "along-path") {
+        const frame = evaluateConstructionPlane(plane, bodies, axes, binders);
+        return "error" in frame ? [] : [{ frame: { originMm: frame.origin, uAxis: frame.uAxis, normal: frame.normal }, label: plane.name, hint: frame.description }];
+      }
+      return [];
+    });
+    // A face binder offers the face it follows right now.
+    const fromBinders = binders.flatMap((binder) => {
+      if (binder.target.kind !== "face") return [];
+      const resolved = resolveBinder(binder, bodies);
+      const frame = "error" in resolved ? undefined : planeFrameOfFace(resolved);
+      return frame === undefined ? [] : [{ frame, label: binder.name, hint: "Face binder · the sketch starts at the face's centre, facing out of the solid" }];
+    });
+    return [...fromPlanes, ...fromBinders];
+  }, [project.part.construction, project.part.generalBodies, project.part.constructionAxes, project.part.constructionBinders]);
   const sketchFaceOptions = useMemo(() => {
     const options: SketchFaceOption[] = [];
     for (const body of project.part.generalBodies ?? []) {
@@ -860,6 +889,7 @@ export function App(): React.JSX.Element {
     const current = projectRef.current;
     const ordinal = (current.part.previewBodies?.length ?? 0) + 1;
     const sizeMm = defaultPartPreviewSize(shape);
+    const primitiveParams = isNewPrimitiveShape(shape) ? defaultPrimitive(shape).primitiveParams : undefined;
     const body: PartPreviewBody = {
       id: `part-body:user-${crypto.randomUUID()}`,
       name: `${partPreviewShapeLabel(shape)} ${ordinal}`,
@@ -868,7 +898,8 @@ export function App(): React.JSX.Element {
       color: partPreviewColor(shape),
       translationMm: [current.part.widthMm / 2 + 28 + ((ordinal - 1) % 4) * 38, (Math.floor((ordinal - 1) / 4) - 0.5) * 34, sizeMm[2] / 2],
       rotationDeg: [0, 0, 0],
-      sizeMm
+      sizeMm,
+      ...(primitiveParams === undefined ? {} : { primitiveParams })
     };
     if (applyProjectOperation({ kind: "add-part-preview-bodies", bodies: [body] })) setSelectedId(body.id);
   };
@@ -1025,7 +1056,8 @@ export function App(): React.JSX.Element {
     setStatusText(`Applied ${label} to ${body.name}.`);
   };
 
-  const handleAddConstructionPlane = (mode: "offset" | "angle" | "three-points" | "midplane" | "tangent-to-cylinder" | "perpendicular-to-axis"): void => {
+  const handleAddConstructionPlane = (mode: "offset" | "angle" | "three-points" | "midplane" | "tangent-to-cylinder" | "perpendicular-to-axis" | ConstructionPlaneMode): void => {
+    if (mode === "through-two-edges" || mode === "along-path") { setConstructionDialog(mode); return; }
     const current = projectRef.current;
     const existing = current.part.construction ?? [];
     const ordinal = existing.length + 1;
@@ -1103,6 +1135,92 @@ export function App(): React.JSX.Element {
     if (!applyProjectOperation({ kind: "add-construction-plane", plane })) { setStatus("ready"); setStatusText(`The project rejected ${labelText}.`); return; }
     setSelectedId(plane.id);
     setStatusText(`Created ${plane.name} (plane ${ordinal}).`);
+  };
+
+  /** Waits for a click on a straight edge of a solid and records it for the plane dialog; the dialog steps aside meanwhile. */
+  const pickEdgeForConstructionPlane = async (): ReturnType<React.ComponentProps<typeof ConstructionPlaneDialog>["onPickEdge"]> => {
+    const bodies = (projectRef.current.part.generalBodies ?? []).filter((body) => body.visible);
+    const guides: ViewportGuideSegment[] = [];
+    for (const body of bodies) {
+      const edges = pickableEdges({ positionsMm: body.positionsMm, indices: body.indices });
+      if (typeof edges !== "string") for (const edge of edges) guides.push([edge.a, edge.b]);
+    }
+    setConstructionPicking(true);
+    const picked = await requestViewportPick("Plane through two edges: click a straight edge of a solid (the edges are outlined)", guides);
+    setConstructionPicking(false);
+    if (picked === null) return { ok: false, message: "No edge was picked." };
+    const body = bodies.find((candidate) => candidate.id === picked.semanticId);
+    if (body === undefined) return { ok: false, message: "The click did not land on a solid body. Click an edge of a solid." };
+    return edgeRefFromPick(body, picked.pointMm);
+  };
+
+  const confirmConstructionPlane = (name: string, definition: import("../../../packages/workbench-core/src/index.js").ConstructionPlaneDefinition): void => {
+    const plane = { id: `construction-plane:${crypto.randomUUID()}`, name, visible: true, definition };
+    setConstructionDialog(null);
+    if (!applyProjectOperation({ kind: "add-construction-plane", plane })) { setStatus("ready"); setStatusText(`The project rejected ${name}.`); return; }
+    setSelectedId(plane.id);
+    setStatusText(`Created ${name}. Start a sketch on it from the sketch plane dialog.`);
+  };
+
+  /** Shape binder (a whole solid), face binder or edge binder (a click): a reference that follows its solid through a rebuild. */
+  const handleAddConstructionBinder = async (kind: "body" | "face" | "edge"): Promise<void> => {
+    const bodies = projectRef.current.part.generalBodies ?? [];
+    if (bodies.length === 0) { setStatus("ready"); setStatusText("A binder points at a solid. Create a solid first."); return; }
+    let body: GeneralSolidBody | undefined = bodies.find((candidate) => candidate.id === selectedId);
+    let pointMm: Vec3 | undefined;
+    if (kind === "body") {
+      body = body ?? (bodies.length === 1 ? bodies[0] : undefined);
+      if (body === undefined) { setStatus("ready"); setStatusText("Shape binder: select a solid first."); return; }
+    } else {
+      const guides: ViewportGuideSegment[] = [];
+      if (kind === "edge") {
+        for (const candidate of bodies.filter((entry) => entry.visible)) {
+          const edges = pickableEdges({ positionsMm: candidate.positionsMm, indices: candidate.indices });
+          if (typeof edges !== "string") for (const edge of edges) guides.push([edge.a, edge.b]);
+        }
+      }
+      const picked = await requestViewportPick(kind === "face" ? "Face binder: click the face to follow" : "Edge binder: click a sharp edge to follow", guides);
+      if (picked === null) return;
+      body = bodies.find((candidate) => candidate.id === picked.semanticId);
+      if (body === undefined) { setStatus("ready"); setStatusText("The click did not land on a solid body."); return; }
+      pointMm = picked.pointMm;
+    }
+    const target = binderTargetFromPick(body, kind, pointMm);
+    if (!target.ok) { setStatus("ready"); setStatusText(`${kind === "body" ? "Shape" : kind === "face" ? "Face" : "Edge"} binder: ${target.message}`); return; }
+    const ordinal = (projectRef.current.part.constructionBinders?.length ?? 0) + 1;
+    const binder = { id: `binder:${crypto.randomUUID()}`, name: `${kind === "body" ? "Shape" : kind === "face" ? "Face" : "Edge"} binder ${ordinal} · ${body.name}`.slice(0, 120), visible: true, target: target.value };
+    if (!applyProjectOperation({ kind: "add-construction-binder", binder })) return;
+    setSelectedId(binder.id);
+    setStatusText(`${binder.name} follows ${target.message}. It re-resolves when ${body.name} is rebuilt.`);
+  };
+
+  /** Hide, show, delete or sketch on a selected plane or binder. */
+  const handleConstructionReference = (id: string, action: "toggle" | "delete" | "sketch"): void => {
+    const isBinder = id.startsWith("binder:");
+    if (action === "toggle") { applyProjectOperation(isBinder ? { kind: "toggle-construction-binder-visibility", binderId: id } : { kind: "toggle-construction-plane-visibility", planeId: id }); return; }
+    if (action === "delete") { if (applyProjectOperation(isBinder ? { kind: "delete-construction-binder", binderId: id } : { kind: "delete-construction-plane", planeId: id })) setSelectedId(null); return; }
+    // Sketch on it: the reference's current frame becomes the new sketch's plane (a snapshot, like a three-point plane).
+    const part = projectRef.current.part;
+    const bodies = part.generalBodies ?? [];
+    let frame: SketchPlaneFrame | undefined;
+    if (isBinder) {
+      const binder = (part.constructionBinders ?? []).find((candidate) => candidate.id === id);
+      const resolved = binder === undefined ? undefined : resolveBinder(binder, bodies);
+      frame = resolved === undefined || "error" in resolved ? undefined : planeFrameOfFace(resolved);
+    } else {
+      const plane = (part.construction ?? []).find((candidate) => candidate.id === id);
+      if (plane?.definition.kind === "three-points") { const through = frameThroughPoints(plane.definition.points); frame = "error" in through ? undefined : through; }
+      else if (plane !== undefined) { const evaluated = evaluateConstructionPlane(plane, bodies, part.constructionAxes ?? [], part.constructionBinders ?? []); frame = "error" in evaluated ? undefined : { originMm: evaluated.origin, uAxis: evaluated.uAxis, normal: evaluated.normal }; }
+    }
+    if (frame === undefined) { setStatus("ready"); setStatusText("A sketch needs a flat, resolvable plane or face; this reference is not one right now."); return; }
+    const sketchFrame = frame;
+    void (async () => {
+      await commitWorkingSketch();
+      if (applyProjectOperation({ kind: "new-design-sketch", plane: "datum:xy", frame: sketchFrame }, false)) {
+        if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
+        setStatusText("New sketch on the selected plane. It keeps the plane as it is now; later changes to the plane do not move it.");
+      }
+    })();
   };
 
   const handleAddConstructionAxis = (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis"): void => {
@@ -1784,17 +1902,20 @@ export function App(): React.JSX.Element {
   };
 
   const createComponentFromPartBody = (body: PartPreviewBody): void => {
+    // The newer primitives have no component shape of their own, so they travel as a mesh snapshot in the body's local frame.
+    const primitiveMesh = newPrimitiveMesh(body);
     const component: ComponentInstance = {
       id: `component:part-body-${crypto.randomUUID()}`,
       name: `${body.name} · component`,
-      shape: body.shape === "block" ? "box" : body.shape === "revolved" ? "ring" : body.shape,
+      shape: primitiveMesh !== undefined ? "mesh" : body.shape === "block" ? "box" : body.shape === "revolved" ? "ring" : (body.shape as Exclude<PartPreviewBody["shape"], "revolved" | "block" | "ellipsoid" | "prism" | "wedge" | "spiral" | "tube">),
       grounded: false,
       visible: true,
       color: body.color,
       translationMm: body.translationMm,
       rotationDeg: body.rotationDeg,
       sizeMm: body.sizeMm,
-      explosionDirection: [0.2, -0.14, 0.62]
+      explosionDirection: [0.2, -0.14, 0.62],
+      ...(primitiveMesh === undefined ? {} : { mesh: { positionsMm: primitiveMesh.positions, indices: primitiveMesh.indices } })
     };
     if (!applyProjectOperation({ kind: "add-assembly-component", component })) return;
     switchWorkspace("assembly");
@@ -3424,7 +3545,8 @@ export function App(): React.JSX.Element {
   const deleteSelection = (): void => {
     if (selectedTimelineFeature !== undefined) { timelineOperation({ kind: "delete-design-feature", featureId: selectedTimelineFeature.id }, () => setSelectedId(null)); return; }
     if (previewBodySelected && selectedId !== null) { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId: selectedId })) setSelectedId(null); return; }
-    if (selectedGeneralBody !== undefined) { if (applyProjectOperation({ kind: "delete-general-body", bodyId: selectedGeneralBody.id })) setSelectedId(null); }
+    if (selectedGeneralBody !== undefined) { if (applyProjectOperation({ kind: "delete-general-body", bodyId: selectedGeneralBody.id })) setSelectedId(null); return; }
+    if (selectedId?.startsWith("binder:") === true || selectedId?.startsWith("construction-plane:") === true) handleConstructionReference(selectedId, "delete");
   };
   const workbenchMenus = buildWorkbenchMenus({
     workspace: project.activeWorkspace,
@@ -3438,7 +3560,7 @@ export function App(): React.JSX.Element {
     previewBodySelected,
     generalBodySelected: selectedGeneralBody !== undefined,
     ...(selectedTimelineFeature === undefined ? {} : { selectedFeature: { name: selectedTimelineFeature.name, suppressed: selectedTimelineFeature.suppressed, kind: selectedTimelineFeature.kind } }),
-    selectionDeletable: selectedTimelineFeature !== undefined || previewBodySelected || selectedGeneralBody !== undefined
+    selectionDeletable: selectedTimelineFeature !== undefined || previewBodySelected || selectedGeneralBody !== undefined || (selectedId?.startsWith("binder:") ?? false) || (selectedId?.startsWith("construction-plane:") ?? false)
   }, {
     onUndo: () => historyActionRef.current.undo(),
     onRedo: () => historyActionRef.current.redo(),
@@ -3563,6 +3685,7 @@ export function App(): React.JSX.Element {
       onModifyGeneralBody={handleModifyGeneralBody}
       onPattern={openPatternDialog}
       onAddConstructionPlane={handleAddConstructionPlane}
+      onAddConstructionBinder={(kind) => void handleAddConstructionBinder(kind)}
       onAddConstructionAxis={handleAddConstructionAxis}
       onAddConstructionPoint={handleAddConstructionPoint}
       zebra={zebra}
@@ -3675,7 +3798,7 @@ export function App(): React.JSX.Element {
         {quickMeasure !== undefined && <div className="quick-measure-bar" role="status" aria-live="polite" aria-label="Quick measure"><span className="quick-measure-title">{quickMeasure.title}</span>{quickMeasure.metrics.map((metric, index) => <span key={index}>{metric}</span>)}</div>}
       </section>}
       {!masterCartOpen && <>
-      {project.activeWorkspace === "part" && activeImport === undefined && <PartInspector onGeneralBodyToAssembly={createComponentFromGeneralBody} onGeneralBodyVisibility={(bodyId) => { applyProjectOperation({ kind: "toggle-general-body-visibility", bodyId }); }} onGeneralBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-general-body", bodyId })) setSelectedId(null); }} design={designOf(project)} onEditFeature={editTimelineFeature} part={project.part} model={model} working={status === "working"} bodyColor={viewportState.bodyColor} shadingMode={viewportState.shadingMode} selectedId={selectedId} selectedFace={selectedFace !== null && selectedFace.bodyId === selectedId ? selectedFace.faceIndex : null} onSelectFace={(bodyId, faceIndex) => setSelectedFace(faceIndex === null ? null : { bodyId, faceIndex })} onSelect={setSelectedId} onBodyColor={(color) => viewportRef.current?.setBodyColor(color)} onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)} onCommit={(parameter, value) => void commitPartParameter(parameter, value)} onInsertIntoAssembly={insertCurrentPartIntoAssembly} onCreatePreviewBody={createPartPreviewBody} onPreviewBodyTransform={(bodyId, translationMm, rotationDeg) => applyProjectOperation({ kind: "set-part-preview-body-transform", bodyId, translationMm, rotationDeg })} onPreviewBodySize={(bodyId, sizeMm) => applyProjectOperation({ kind: "set-part-preview-body-size", bodyId, sizeMm })} onPreviewBodyColor={(bodyId, color) => applyProjectOperation({ kind: "set-part-preview-body-color", bodyId, color })} onPreviewBodyVisibility={(bodyId) => applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId })} onPreviewBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId })) setSelectedId(null); }} />}
+      {project.activeWorkspace === "part" && activeImport === undefined && <PartInspector onGeneralBodyToAssembly={createComponentFromGeneralBody} onGeneralBodyVisibility={(bodyId) => { applyProjectOperation({ kind: "toggle-general-body-visibility", bodyId }); }} onGeneralBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-general-body", bodyId })) setSelectedId(null); }} design={designOf(project)} onEditFeature={editTimelineFeature} part={project.part} model={model} working={status === "working"} bodyColor={viewportState.bodyColor} shadingMode={viewportState.shadingMode} selectedId={selectedId} selectedFace={selectedFace !== null && selectedFace.bodyId === selectedId ? selectedFace.faceIndex : null} onSelectFace={(bodyId, faceIndex) => setSelectedFace(faceIndex === null ? null : { bodyId, faceIndex })} onSelect={setSelectedId} onBodyColor={(color) => viewportRef.current?.setBodyColor(color)} onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)} onCommit={(parameter, value) => void commitPartParameter(parameter, value)} onInsertIntoAssembly={insertCurrentPartIntoAssembly} onCreatePreviewBody={createPartPreviewBody} onPreviewBodyTransform={(bodyId, translationMm, rotationDeg) => applyProjectOperation({ kind: "set-part-preview-body-transform", bodyId, translationMm, rotationDeg })} onPreviewBodySize={(bodyId, sizeMm, primitiveParams) => applyProjectOperation({ kind: "set-part-preview-body-size", bodyId, sizeMm, ...(primitiveParams === undefined ? {} : { primitiveParams }) })} onPreviewBodyColor={(bodyId, color) => applyProjectOperation({ kind: "set-part-preview-body-color", bodyId, color })} onPreviewBodyVisibility={(bodyId) => applyProjectOperation({ kind: "toggle-part-preview-body-visibility", bodyId })} onPreviewBodyDelete={(bodyId) => { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId })) setSelectedId(null); }} onConstructionReference={handleConstructionReference} />}
       {project.activeWorkspace === "part" && activeImport !== undefined && <ImportedModelInspector result={activeImport} onExchange={() => setExchangeOpen(true)} onClear={clearActiveImport} />}
       {project.activeWorkspace === "assembly" && <AssemblyInspector assembly={displayedAssembly} maxExplodeMm={assemblyExplodeMaxMm} selectedId={selectedId} interferences={interferences} onTemplate={requestAssemblyTemplate} onExplodePreview={previewAssemblyExplode} onExplodeCommit={commitAssemblyExplode} onMove={(componentId, translationMm) => applyProjectOperation({ kind: "set-component-translation", componentId, translationMm })} onToggleGrounded={(componentId) => applyProjectOperation({ kind: "toggle-component-grounded", componentId })} onToggleVisible={(componentId) => applyProjectOperation({ kind: "toggle-component-visibility", componentId })} onDelete={deleteAssemblyComponent} onAddMate={(mate) => applyProjectOperation({ kind: "add-assembly-mate", mate })} onSolveMates={() => applyProjectOperation({ kind: "solve-assembly-mates" })} onDeleteMate={(mateId) => { if (applyProjectOperation({ kind: "delete-assembly-mate", mateId }) && selectedId === mateId) setSelectedId(null); }} onSelect={setSelectedId} onOpenElectricalSource={(componentId) => { switchWorkspace("electrical"); setSelectedId(componentId ?? null); setTreeRevealRequest((request) => request + 1); }} />}
       {project.activeWorkspace === "surface" && <SurfaceInspector surface={project.surface} metrics={surfacePreview.metrics} onParameter={(parameter, value) => applyProjectOperation({ kind: "set-surface-parameter", parameter, value })} />}
@@ -3757,6 +3880,7 @@ export function App(): React.JSX.Element {
       }}
       onClose={() => setNewDialogOpen(false)}
     />
+    <ConstructionPlaneDialog open={constructionDialog !== null} mode={constructionDialog ?? "through-two-edges"} axes={project.part.constructionAxes ?? []} bodies={project.part.generalBodies ?? []} binders={project.part.constructionBinders ?? []} paths={constructionDialog === null ? [] : sketchPathOptions(project.sketch, designOf(project))} picking={constructionPicking} onPickEdge={pickEdgeForConstructionPlane} onConfirm={confirmConstructionPlane} onClose={() => setConstructionDialog(null)} />
     <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} initialTilt={sketchPlaneDialogMode === "new" ? undefined : project.sketch.planeTilt} anglePlanes={anglePlaneOptions} framePlanes={framePlaneOptions} faces={sketchFaceOptions} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
     <ChangeParametersDialog open={parametersOpen} project={project} busy={status === "working"} onApply={changeParameters} onClose={() => setParametersOpen(false)} />
     <FeatureEditDialog feature={featureEdit} project={project} busy={status === "working"} onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />
@@ -3772,6 +3896,7 @@ function ViewportMetrics(props: { readonly workspace: WorkspaceId; readonly mode
 }
 
 function defaultPartPreviewSize(shape: PartPreviewBodyShape): Vec3 {
+  if (isNewPrimitiveShape(shape)) return defaultPrimitive(shape).sizeMm;
   if (shape === "block") return [36, 28, 20];
   if (shape === "sphere") return [26, 26, 26];
   if (shape === "cone") return [28, 14, 34];
@@ -3781,6 +3906,7 @@ function defaultPartPreviewSize(shape: PartPreviewBodyShape): Vec3 {
 }
 
 function partPreviewShapeLabel(shape: PartPreviewBodyShape): string {
+  if (isNewPrimitiveShape(shape)) return shape.charAt(0).toUpperCase() + shape.slice(1);
   if (shape === "block") return "Block";
   if (shape === "cylinder") return "Cylinder";
   if (shape === "cone") return "Cone";
@@ -3808,7 +3934,7 @@ function clonePartPreviewBody(body: PartPreviewBody, suffix: string, deltaMm: Ve
 
 function orientedPreviewEnvelope(body: PartPreviewBody): Vec3 {
   if (body.shape === "sphere") return body.sizeMm;
-  const half: Vec3 = body.shape === "block"
+  const half: Vec3 = body.shape === "block" || body.shape === "ellipsoid" || body.shape === "wedge"
     ? [body.sizeMm[0] / 2, body.sizeMm[1] / 2, body.sizeMm[2] / 2]
     : [body.sizeMm[0] / 2, body.sizeMm[0] / 2, body.sizeMm[2] / 2];
   const rx = body.rotationDeg[0] * Math.PI / 180;

@@ -51,7 +51,8 @@ interface WorkbenchRibbonProps {
   readonly onPartFeatureAction: (operation: "revolve" | "pattern-feature" | "mirror-feature" | "unite" | "subtract" | "trim-body" | "edge-blend" | "chamfer" | "draft" | "shell" | "move-face" | "offset-face" | "replace-face" | "delete-face" | "resize-blend" | "update-model", commandName: string) => void;
   readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell", scope?: "picked" | "all") => void;
   readonly onPattern: (kind: "rectangular" | "circular" | "mirror") => void;
-  readonly onAddConstructionPlane: (mode: "offset" | "angle" | "three-points" | "midplane" | "tangent-to-cylinder" | "perpendicular-to-axis") => void;
+  readonly onAddConstructionPlane: (mode: "offset" | "angle" | "three-points" | "midplane" | "tangent-to-cylinder" | "perpendicular-to-axis" | "through-two-edges" | "along-path") => void;
+  readonly onAddConstructionBinder: (kind: "body" | "face" | "edge") => void;
   readonly onAddConstructionAxis: (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis") => void;
   readonly onAddConstructionPoint: (mode: "xyz" | "midpoint" | "axis-plane-intersection") => void;
   readonly onEdgeFlange: () => void;
@@ -236,6 +237,11 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="cone" label="Cone" hint="preview body" onClick={() => props.onCreatePartPreviewBody("cone")} />
         <RibbonButton icon="sphere" label="Sphere" hint="preview body" onClick={() => props.onCreatePartPreviewBody("sphere")} />
         <RibbonButton icon="torus" label="Torus" hint="preview body" onClick={() => props.onCreatePartPreviewBody("torus")} />
+        <RibbonButton icon="ellipsoid" label="Ellipsoid" hint="three axes" onClick={() => props.onCreatePartPreviewBody("ellipsoid")} />
+        <RibbonButton icon="prism" label="Prism" hint="n sides" onClick={() => props.onCreatePartPreviewBody("prism")} />
+        <RibbonButton icon="wedge" label="Wedge" hint="sloped" onClick={() => props.onCreatePartPreviewBody("wedge")} />
+        <RibbonButton icon="spiral" label="Spiral" hint="flat ribbon" onClick={() => props.onCreatePartPreviewBody("spiral")} />
+        <RibbonButton icon="tube" label="Tube" hint="hollow" onClick={() => props.onCreatePartPreviewBody("tube")} />
       </RibbonGroup>
       <RibbonGroup label="Direct body edit">
         <RibbonButton icon="move" label="Move" hint="XYZ / rotate" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-transform", "Move Body")} />
@@ -266,6 +272,11 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="projection" label="Midplane" hint="between two offsets" onClick={() => props.onAddConstructionPlane("midplane")} />
         <RibbonButton icon="projection" label="Tangent Plane" hint="body + angle" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onAddConstructionPlane("tangent-to-cylinder")} />
         <RibbonButton icon="projection" label="Plane ⟂ axis" hint="axis + point" disabled={(props.project.part.constructionAxes?.length ?? 0) === 0} onClick={() => props.onAddConstructionPlane("perpendicular-to-axis")} />
+        <RibbonButton icon="projection" label="Plane via 2 edges" hint="parallel or crossing" onClick={() => props.onAddConstructionPlane("through-two-edges")} />
+        <RibbonButton icon="projection" label="Plane on path" hint="at t along a curve" onClick={() => props.onAddConstructionPlane("along-path")} />
+        <RibbonButton icon="insert" label="Shape binder" hint="follows a solid" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onAddConstructionBinder("body")} />
+        <RibbonButton icon="insert" label="Face binder" hint="click a face" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onAddConstructionBinder("face")} />
+        <RibbonButton icon="insert" label="Edge binder" hint="click an edge" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onAddConstructionBinder("edge")} />
         <RibbonButton icon="axes" label="Axis: 2 points" hint="a → b" onClick={() => props.onAddConstructionAxis("two-points")} />
         <RibbonButton icon="axes" label="Axis: point + dir" hint="origin + vec" onClick={() => props.onAddConstructionAxis("point-and-direction")} />
         <RibbonButton icon="axes" label="Axis: plane ∩ plane" hint="two datums" onClick={() => props.onAddConstructionAxis("plane-intersection")} />

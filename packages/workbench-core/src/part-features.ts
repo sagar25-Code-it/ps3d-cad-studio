@@ -4,6 +4,7 @@ import type {
   PartPreviewBody,
   Vec3
 } from "./types.js";
+import { primitiveHasParallelZFaces, primitiveMirrorSupported } from "./primitive-bodies.js";
 
 const EPSILON = 1e-7;
 const MIN_WALL_MM = 0.5;
@@ -72,6 +73,9 @@ export function mirrorPartBody(input: {
   readonly newBodyId: string;
   readonly plane: "xy" | "xz" | "yz";
 }): PartFeatureResult<PartPreviewBody> {
+  if (!primitiveMirrorSupported(input.body, input.plane)) {
+    return unsupported(`A ${input.body.shape} is not symmetric across the ${input.plane.toUpperCase()} plane, so a plain mirror copy would be a different body.`, [input.body.id], "Mirror it across a plane it is symmetric about, or copy it and rotate the copy.");
+  }
   const [x, y, z] = input.body.translationMm;
   const [rx, ry, rz] = input.body.rotationDeg;
   const transform = input.plane === "yz"
@@ -106,7 +110,7 @@ export function trimPartBody(input: {
   readonly keptLengthMm: number;
   readonly side: "negative" | "positive";
 }): PartFeatureResult<PartPreviewBody> {
-  if (input.body.shape === "sphere" || input.keptLengthMm <= 0 || input.keptLengthMm >= input.body.sizeMm[2]) {
+  if (input.body.shape === "sphere" || !primitiveHasParallelZFaces(input.body.shape) || input.keptLengthMm <= 0 || input.keptLengthMm >= input.body.sizeMm[2]) {
     return unsupported("Trim Body supports a non-spherical analytic body and must remove a positive portion of its local Z length.", [input.body.id], "Choose a kept length greater than 0 and smaller than the current body height.");
   }
   if (input.body.shellThicknessMm !== undefined || input.body.edgeTreatment !== undefined || input.body.draftAngleDeg !== undefined) {
@@ -181,6 +185,9 @@ export function movePartBodyFace(input: {
     return unsupported("Move/Offset Face currently requires a plain or through-bored analytic body.", [input.body.id], "Heal the shell, edge treatment, or draft before editing this face.");
   }
   const axis = faceAxis(input.face);
+  if (!primitiveHasParallelZFaces(input.body.shape)) {
+    return unsupported(`A ${input.body.shape} has no pair of parallel planar faces to move.`, [input.body.id], "Resize it in the Analytic dimensions instead.");
+  }
   if (input.body.shape !== "block" && axis !== 2) {
     return unsupported("Non-block analytic bodies currently expose only their planar local ±Z faces for direct editing.", [input.body.id], "Select a local Z face or use a block for X/Y face editing.");
   }

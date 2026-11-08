@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ModelSuccessResponse } from "../../../../packages/worker-protocol/src/index.js";
 import type { ViewportShadingMode } from "../../../../packages/viewport-three/src/index.js";
-import { describeFeature, featureOfBody, featureStatus, featureStatusText, solidMetrics, type DesignHistory, type DesignSolidFeature, type GeneralSolidBody, type PartIntent, type PartPreviewBody, type PartPreviewBodyShape, type Vec3 } from "../../../../packages/workbench-core/src/index.js";
+import { describeFeature, featureOfBody, featureStatus, featureStatusText, isNewPrimitiveShape, normalizePrimitiveSize, primitiveSizeLabels, solidMetrics, validPrimitiveBody, type DesignHistory, type DesignSolidFeature, type GeneralSolidBody, type PartIntent, type PartPreviewBody, type PartPreviewBodyShape, type PartPrimitiveParams, type Vec3 } from "../../../../packages/workbench-core/src/index.js";
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 import { PartAppearanceControls } from "../ui/PartAppearanceControls.js";
+import { ConstructionReferenceCard } from "./ConstructionReferenceCard.js";
 
 type PartParameter = "widthMm" | "heightMm" | "thicknessMm" | "holeDiameterMm" | "edgeTreatmentMm" | "patternCount" | "revolveAngleDeg";
 
@@ -40,10 +41,12 @@ interface PartInspectorProps {
   readonly onSelect: (id: string | null) => void;
   readonly onCreatePreviewBody: (shape: PartPreviewBodyShape) => void;
   readonly onPreviewBodyTransform: (bodyId: string, translationMm: Vec3, rotationDeg: Vec3) => void;
-  readonly onPreviewBodySize: (bodyId: string, sizeMm: Vec3) => void;
+  readonly onPreviewBodySize: (bodyId: string, sizeMm: Vec3, primitiveParams?: PartPrimitiveParams) => void;
   readonly onPreviewBodyColor: (bodyId: string, color: string) => void;
   readonly onPreviewBodyVisibility: (bodyId: string) => void;
   readonly onPreviewBodyDelete: (bodyId: string) => void;
+  /** Hide / show, delete, or start a sketch from a selected construction plane or binder. */
+  readonly onConstructionReference?: (id: string, action: "toggle" | "delete" | "sketch") => void;
 }
 
 export function PartInspector(props: PartInspectorProps): React.JSX.Element {
@@ -57,6 +60,7 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
     {selectedGeneralBody === undefined
       ? <div className="inspector-title"><div><p>Part intent</p><h2>{props.part.name}</h2></div><CapabilityBadge level="qualified" /></div>
       : <div className="inspector-title"><div><p>Selected solid</p><h2>{selectedGeneralBody.name}</h2></div></div>}
+    {props.onConstructionReference !== undefined && <ConstructionReferenceCard part={props.part} selectedId={props.selectedId} onAction={props.onConstructionReference} />}
     {selectedGeneralBody !== undefined && <SolidCard
       body={selectedGeneralBody}
       history={props.design}
@@ -79,7 +83,7 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
     <section className="inspector-section preview-body-card"><header><strong>Independent preview bodies</strong><span>{previewBodies.length} bodies</span></header>
       <p>Analytic bodies remain separate from the qualified plate. Supported revolve, pattern, mirror, Boolean, trim, detail, shell, draft, and planar-face edits are revisioned and regenerate visible closed meshes.</p>
       <div className="preview-body-create" aria-label="Create preview primitive">
-        {(["block", "cylinder", "cone", "sphere"] as const).map((shape) => <button key={shape} onClick={() => props.onCreatePreviewBody(shape)}><CommandIcon name={shape} />{shape}</button>)}
+        {(["block", "cylinder", "cone", "sphere", "torus", "ellipsoid", "prism", "wedge", "spiral", "tube"] as const).map((shape) => <button key={shape} onClick={() => props.onCreatePreviewBody(shape)}><CommandIcon name={shape} />{shape}</button>)}
       </div>
       {previewBodies.length === 0 ? <div className="preview-body-empty">Create a primitive here or from All Commands.</div> : <div className="preview-body-list">
         {previewBodies.map((body) => <button key={body.id} className={body.id === props.selectedId ? "active" : ""} onClick={() => props.onSelect(body.id === props.selectedId ? null : body.id)}><i style={{ background: body.color }} /><span><strong>{body.name}</strong><small>{featureSummary(body)} | {body.visible ? "shown" : "hidden"}</small></span></button>)}
@@ -180,21 +184,27 @@ function SolidCard(props: {
 function PreviewBodyEditor(props: {
   readonly body: PartPreviewBody;
   readonly onTransform: (bodyId: string, translationMm: Vec3, rotationDeg: Vec3) => void;
-  readonly onSize: (bodyId: string, sizeMm: Vec3) => void;
+  readonly onSize: (bodyId: string, sizeMm: Vec3, primitiveParams?: PartPrimitiveParams) => void;
   readonly onColor: (bodyId: string, color: string) => void;
   readonly onVisibility: (bodyId: string) => void;
   readonly onDelete: (bodyId: string) => void;
 }): React.JSX.Element {
   const [transform, setTransform] = useState(() => transformStrings(props.body));
   const [size, setSize] = useState(() => sizeStrings(props.body));
-  useEffect(() => { setTransform(transformStrings(props.body)); setSize(sizeStrings(props.body)); }, [props.body]);
+  const newShape = isNewPrimitiveShape(props.body.shape) ? props.body.shape : undefined;
+  const labels = newShape === undefined ? undefined : primitiveSizeLabels(newShape);
+  const [countText, setCountText] = useState(() => primitiveCountText(props.body));
+  useEffect(() => { setTransform(transformStrings(props.body)); setSize(sizeStrings(props.body)); setCountText(primitiveCountText(props.body)); }, [props.body]);
   const translation = [Number(transform.tx), Number(transform.ty), Number(transform.tz)] as Vec3;
   const rotation = [Number(transform.rx), Number(transform.ry), Number(transform.rz)] as Vec3;
   const rawSize = [Number(size.x), Number(size.y), Number(size.z)] as Vec3;
-  const normalizedSize: Vec3 = props.body.shape === "cylinder" ? [rawSize[0], rawSize[0], rawSize[2]]
+  const normalizedSize: Vec3 = props.body.shape === "cylinder" || props.body.shape === "prism" || props.body.shape === "spiral" ? [rawSize[0], rawSize[0], rawSize[2]]
     : props.body.shape === "sphere" ? [rawSize[0], rawSize[0], rawSize[0]] : rawSize;
+  const count = Number(countText);
+  const nextParams: PartPrimitiveParams | undefined = props.body.shape === "prism" ? { sides: count } : props.body.shape === "spiral" ? { turns: count } : undefined;
+  const primitiveValid = newShape === undefined || (normalizePrimitiveSize(newShape, normalizedSize) !== undefined && validPrimitiveBody({ shape: newShape, sizeMm: normalizedSize, ...(nextParams === undefined ? {} : { primitiveParams: nextParams }) }));
   const transformValid = [...translation, ...rotation].every(Number.isFinite);
-  const sizeValid = normalizedSize.every(Number.isFinite) && normalizedSize[0] > 0 && normalizedSize[2] > 0 && normalizedSize[1] >= 0
+  const sizeValid = primitiveValid && normalizedSize.every(Number.isFinite) && normalizedSize[0] > 0 && normalizedSize[2] > 0 && normalizedSize[1] >= 0
     && (props.body.shape !== "revolved" || (normalizedSize[1] > 0 && normalizedSize[1] < normalizedSize[0]));
   return <div className="preview-body-editor">
     <div className="preview-body-editor-title"><span><CommandIcon name={bodyShapeIcon(props.body)} /></span><div><small>ANALYTIC BODY / DIRECT EDIT</small><strong>{props.body.name}</strong></div></div>
@@ -203,16 +213,22 @@ function PreviewBodyEditor(props: {
       {(["tx", "ty", "tz", "rx", "ry", "rz"] as const).map((key) => <label key={key}><span>{key.toUpperCase()}</span><input type="number" step={key.startsWith("r") ? 1 : 0.5} value={transform[key]} onChange={(event) => setTransform((current) => ({ ...current, [key]: event.target.value }))} /><small>{key.startsWith("r") ? "°" : "mm"}</small></label>)}
     </div><button disabled={!transformValid} onClick={() => props.onTransform(props.body.id, translation, rotation)}>Apply transform</button></fieldset>
     <fieldset><legend>Analytic dimensions</legend><div className="preview-body-fields size">
-      <label><span>{props.body.shape === "cone" ? "Base diameter" : props.body.shape === "block" ? "Width" : props.body.shape === "revolved" ? "Outer diameter" : "Diameter"}</span><input type="number" min="0.01" step="0.5" value={size.x} onChange={(event) => setSize((current) => ({ ...current, x: event.target.value }))} /><small>mm</small></label>
-      {(props.body.shape === "block" || props.body.shape === "cone" || props.body.shape === "revolved") && <label><span>{props.body.shape === "cone" ? "Top diameter" : props.body.shape === "revolved" ? "Inner diameter" : "Depth"}</span><input type="number" min={props.body.shape === "cone" ? 0 : 0.01} step="0.5" value={size.y} onChange={(event) => setSize((current) => ({ ...current, y: event.target.value }))} /><small>mm</small></label>}
-      {props.body.shape !== "sphere" && <label><span>Height</span><input type="number" min="0.01" step="0.5" value={size.z} onChange={(event) => setSize((current) => ({ ...current, z: event.target.value }))} /><small>mm</small></label>}
-    </div><button disabled={!sizeValid} onClick={() => props.onSize(props.body.id, normalizedSize)}>Apply dimensions</button></fieldset>
+      <label><span>{labels?.x ?? (props.body.shape === "cone" ? "Base diameter" : props.body.shape === "block" ? "Width" : props.body.shape === "revolved" ? "Outer diameter" : "Diameter")}</span><input type="number" min="0.01" step="0.5" value={size.x} onChange={(event) => setSize((current) => ({ ...current, x: event.target.value }))} /><small>mm</small></label>
+      {(props.body.shape === "block" || props.body.shape === "cone" || props.body.shape === "revolved" || labels?.y !== undefined) && <label><span>{labels?.y ?? (props.body.shape === "cone" ? "Top diameter" : props.body.shape === "revolved" ? "Inner diameter" : "Depth")}</span><input type="number" min={props.body.shape === "cone" ? 0 : 0.01} step="0.5" value={size.y} onChange={(event) => setSize((current) => ({ ...current, y: event.target.value }))} /><small>mm</small></label>}
+      {props.body.shape === "prism" && <label><span>Sides</span><input type="number" min="3" max="64" step="1" value={countText} onChange={(event) => setCountText(event.target.value)} /><small>flat faces</small></label>}
+      {props.body.shape === "spiral" && <label><span>Turns</span><input type="number" min="0.5" max="20" step="0.5" value={countText} onChange={(event) => setCountText(event.target.value)} /><small>turns</small></label>}
+      {props.body.shape !== "sphere" && (labels === undefined || labels.z !== undefined) && <label><span>{labels?.z ?? "Height"}</span><input type="number" min="0.01" step="0.5" value={size.z} onChange={(event) => setSize((current) => ({ ...current, z: event.target.value }))} /><small>mm</small></label>}
+    </div><button disabled={!sizeValid} onClick={() => nextParams === undefined ? props.onSize(props.body.id, normalizedSize) : props.onSize(props.body.id, normalizedSize, nextParams)}>Apply dimensions</button></fieldset>
     <div className="preview-body-appearance"><label><span>Body color</span><input type="color" value={props.body.color} onChange={(event) => props.onColor(props.body.id, event.target.value)} /></label><button onClick={() => props.onVisibility(props.body.id)}><CommandIcon name={props.body.visible ? "eye-off" : "eye"} />{props.body.visible ? "Hide" : "Show"}</button><button className="danger" onClick={() => props.onDelete(props.body.id)}><CommandIcon name="trash" />Delete</button></div>
   </div>;
 }
 
 function transformStrings(body: PartPreviewBody): { tx: string; ty: string; tz: string; rx: string; ry: string; rz: string } {
   return { tx: String(body.translationMm[0]), ty: String(body.translationMm[1]), tz: String(body.translationMm[2]), rx: String(body.rotationDeg[0]), ry: String(body.rotationDeg[1]), rz: String(body.rotationDeg[2]) };
+}
+
+function primitiveCountText(body: PartPreviewBody): string {
+  return String(body.primitiveParams?.sides ?? body.primitiveParams?.turns ?? "");
 }
 
 function sizeStrings(body: PartPreviewBody): { x: string; y: string; z: string } {

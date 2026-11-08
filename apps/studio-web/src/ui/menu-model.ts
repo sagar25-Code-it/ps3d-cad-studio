@@ -1,4 +1,4 @@
-import type { WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
+import type { PartPreviewBodyShape, WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
 
 /**
  * The application menubar, built as data so tests can hold it against the project state. Every item is a real,
@@ -52,7 +52,7 @@ export interface WorkbenchMenuActions {
   readonly onCommandPalette: () => void;
   readonly onNewSketch: () => void;
   readonly onCreateSolidFromSketch: () => void;
-  readonly onCreatePrimitive: (shape: "block" | "cylinder" | "cone" | "sphere" | "torus") => void;
+  readonly onCreatePrimitive: (shape: PartPreviewBodyShape) => void;
   readonly onCombine: () => void;
   readonly onInsertToAssembly: () => void;
   readonly onMasterCart: () => void;
@@ -104,6 +104,11 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
     { id: "create.cone", label: "Cone", icon: "cone", hint: "Independent preview body", action: () => actions.onCreatePrimitive("cone") },
     { id: "create.sphere", label: "Sphere", icon: "sphere", hint: "Independent preview body", action: () => actions.onCreatePrimitive("sphere") },
     { id: "create.torus", label: "Torus", icon: "torus", hint: "Ring body: sizeMm[0] = major diameter, sizeMm[2] = tube diameter", action: () => actions.onCreatePrimitive("torus") },
+    { id: "create.ellipsoid", label: "Ellipsoid", icon: "ellipsoid", hint: "Three independent axis diameters", action: () => actions.onCreatePrimitive("ellipsoid") },
+    { id: "create.prism", label: "Prism", icon: "prism", hint: "Regular n-sided prism (3 to 64 sides)", action: () => actions.onCreatePrimitive("prism") },
+    { id: "create.wedge", label: "Wedge", icon: "wedge", hint: "Right-triangle wedge: width, depth, height", action: () => actions.onCreatePrimitive("wedge") },
+    { id: "create.spiral", label: "Spiral", icon: "spiral", hint: "Flat Archimedean ribbon with a chosen number of turns", action: () => actions.onCreatePrimitive("spiral") },
+    { id: "create.tube", label: "Tube", icon: "tube", hint: "Hollow cylinder: outer diameter, inner diameter, length", action: () => actions.onCreatePrimitive("tube") },
     { id: "create.insert-assembly", label: "Insert part into assembly", icon: "assemble", divider: true, action: actions.onInsertToAssembly },
     { id: "create.master-cart", label: "Master Cart component library", icon: "master-cart", action: actions.onMasterCart },
     { id: "create.render-studio", label: "Render Studio scene", icon: "appearance", action: actions.onRenderStudio }

@@ -1,5 +1,6 @@
 import type { GeneralSolidBody, PartPreviewBody, SketchEntity, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
-import { designOf, solidMetrics } from "../../../packages/workbench-core/src/index.js";
+import { designOf, isNewPrimitiveShape, solidMetrics } from "../../../packages/workbench-core/src/index.js";
+import { primitiveVolumeMm3 } from "../../../packages/workbench-geometry/src/primitive-bodies.js";
 import { detectSketchProfiles } from "../../../packages/workbench-sketch/src/index.js";
 
 /** What the status bar shows, one short line per metric, for whatever is selected. Pure. */
@@ -59,6 +60,15 @@ function previewBodyMetrics(body: PartPreviewBody): SelectionMetricsReading {
     const volume = 2 * Math.PI * Math.PI * R * r * r;
     const area = 4 * Math.PI * Math.PI * R * r;
     return { title: `${body.name} · torus`, metrics: [`Major Ø ${sigFigs(sx)} mm · tube Ø ${sigFigs(sz)} mm`, `Volume ${sigFigs(volume)} mm³ · surface ${sigFigs(area)} mm²`] };
+  }
+  const exact = primitiveVolumeMm3(body);
+  if (exact !== undefined && isNewPrimitiveShape(body.shape)) {
+    const detail = body.shape === "prism" ? ` · ${body.primitiveParams?.sides ?? "?"} sides`
+      : body.shape === "spiral" ? ` · ${body.primitiveParams?.turns ?? "?"} turns`
+        : body.shape === "tube" ? ` · bore Ø ${sigFigs(sy)} mm` : "";
+    const size = body.shape === "tube" || body.shape === "prism" || body.shape === "spiral"
+      ? `Ø ${sigFigs(sx)} mm · length ${sigFigs(sz)} mm` : `${sigFigs(sx)} × ${sigFigs(sy)} × ${sigFigs(sz)} mm`;
+    return { title: `${body.name} · ${body.shape}`, metrics: [`${size}${detail}`, `Volume ${sigFigs(exact)} mm³`] };
   }
   if (body.shape === "sphere") {
     const r = sx / 2;

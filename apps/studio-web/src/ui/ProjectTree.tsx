@@ -4,6 +4,8 @@ import { dependentsOf, describeFeature, designOf, featureOfBody, featureStatus, 
 import type { DesignHealthReport } from "../../../../packages/workbench-health/src/index.js";
 import { analyzeWorkbenchSketch, detectSketchProfiles } from "../../../../packages/workbench-sketch/src/index.js";
 import type { WorkbenchSketch } from "../../../../packages/workbench-core/src/index.js";
+import { evaluateConstructionPlane, resolveBinder } from "../../../../packages/workbench-geometry/src/index.js";
+import { describeBinderKind } from "../construction-ui.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, inferCommandIcon } from "./CommandIcon.js";
 
@@ -74,6 +76,14 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
       <TreeItem kind="datum" id="datum:yz" label="YZ plane" meta="reference" selectedId={selectedId} onSelect={onSelect} indent />
       <TreeItem kind="datum" id="datum:xz" label="XZ plane" meta="reference" selectedId={selectedId} onSelect={onSelect} indent />
       {(project.part.constructionAxes ?? []).map((axis) => <TreeItem key={axis.id} kind="datum" id={axis.id} label={axis.name} meta={`axis · ${axis.definition.kind.replaceAll("-", " ")}${axis.visible ? "" : " · hidden"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
+      {(project.part.construction ?? []).map((plane) => {
+        const frame = evaluateConstructionPlane(plane, project.part.generalBodies ?? [], project.part.constructionAxes ?? [], project.part.constructionBinders ?? []);
+        return <TreeItem key={plane.id} kind="datum" id={plane.id} label={plane.name} meta={`plane · ${plane.definition.kind.replaceAll("-", " ")}${plane.visible ? "" : " · hidden"}${"error" in frame ? ` · broken: ${frame.error}` : ""}`} selectedId={selectedId} onSelect={onSelect} indent />;
+      })}
+      {(project.part.constructionBinders ?? []).map((binder) => {
+        const resolved = resolveBinder(binder, project.part.generalBodies ?? []);
+        return <TreeItem key={binder.id} kind="datum" id={binder.id} label={binder.name} meta={`${describeBinderKind(binder)}${binder.visible ? "" : " · hidden"} · ${"error" in resolved ? `lost: ${resolved.error}` : "resolved"}`} selectedId={selectedId} onSelect={onSelect} indent />;
+      })}
       {(project.part.constructionPoints ?? []).map((point) => <TreeItem key={point.id} kind="datum" id={point.id} label={point.name} meta={`point · ${point.definition.kind.replaceAll("-", " ")}${point.visible ? "" : " · hidden"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
     </TreeSection>}
     {showSketch && <TreeSection title={`Sketches · ${project.sketch.entities.length} entities · ${sketchProfiles.length} profiles`} badge="preview">

@@ -10,6 +10,8 @@ export * from "./electrical-routing.js";
 export * from "./vehicle.js";
 export * from "./master-cart.js";
 export * from "./part-features.js";
+export * from "./primitive-bodies.js";
+export * from "./construction-refs.js";
 export * from "./validation.js";
 export * from "./operations.js";
 export { resizeSketchEntity } from "./sketch-dimension-edit.js";

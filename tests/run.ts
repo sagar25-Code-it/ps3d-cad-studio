@@ -55,6 +55,9 @@ import { bodyFlexTests } from "./body-flex.test.js";
 import { bodyWebTests, bodyWebTimelineTests } from "./body-web.test.js";
 import { bodyWrapTests, bodyWrapTimelineTests } from "./body-wrap.test.js";
 import { bodyEditFlowTests, bodyEditMenuTests } from "./body-edit-flows.test.js";
+import { primitiveBodyTests } from "./primitive-bodies.test.js";
+import { planesAndBindersTests } from "./planes-and-binders.test.js";
+import { constructionUiTests } from "./construction-ui.test.js";
 import { planeTiltTests } from "./plane-tilt.test.js";
 import { planeFrameTests } from "./plane-frame.test.js";
 import { sketchProjectTests } from "./sketch-project.test.js";
@@ -153,6 +156,9 @@ const tests: readonly TestCase[] = [
   ...bodyWrapTimelineTests,
   ...bodyEditFlowTests,
   ...bodyEditMenuTests,
+  ...primitiveBodyTests,
+  ...planesAndBindersTests,
+  ...constructionUiTests,
   ...planeTiltTests,
   ...planeFrameTests,
   ...sketchProjectTests,

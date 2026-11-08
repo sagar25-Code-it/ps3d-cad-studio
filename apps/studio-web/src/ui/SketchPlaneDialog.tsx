@@ -41,6 +41,8 @@ export interface SketchAngleOption {
 export interface SketchFrameOption {
   readonly frame: SketchPlaneFrame;
   readonly label: string;
+  /** What to say under the name; absent for a three-point plane. */
+  readonly hint?: string;
 }
 
 /** Reads "x, y, z" (commas, semicolons or spaces) as a point in millimetres, or undefined when it is not three numbers. */
@@ -171,13 +173,13 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
           ><CommandIcon name="projection" /><span><strong>{option.label}</strong><small>{option.plane.toUpperCase()} turned {option.tilt.angleDeg}° about {option.tilt.axis.toUpperCase()}</small></span></button>)}
         </div>}
         {(props.framePlanes?.length ?? 0) > 0 && <div className="sketch-plane-faces">
-          <small className="sketch-plane-faces-title">Or sketch on a three-point plane of this part</small>
+          <small className="sketch-plane-faces-title">Or sketch on a construction plane or face binder of this part</small>
           {props.framePlanes!.map((option, index) => <button
             key={`${option.label}:${index}`}
             type="button"
             className="sketch-plane-face"
             onClick={() => props.onConfirm("xy", 0, undefined, option.frame)}
-          ><CommandIcon name="projection" /><span><strong>{option.label}</strong><small>Through 3 points · the sketch starts at the first point</small></span></button>)}
+          ><CommandIcon name="projection" /><span><strong>{option.label}</strong><small>{option.hint ?? "Through 3 points · the sketch starts at the first point"}</small></span></button>)}
         </div>}
         <div className="sketch-plane-faces sketch-plane-points">
           <small className="sketch-plane-faces-title">Or sketch on the plane through three points</small>

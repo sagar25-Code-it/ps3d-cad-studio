@@ -185,6 +185,11 @@ function geometry(name: string): React.ReactNode {
     case "cylinder": return <><ellipse cx="12" cy="6" rx="6" ry="3" /><path d="M6 6v12c0 1.7 2.7 3 6 3s6-1.3 6-3V6" /><path d="M6 18c0 1.7 2.7 3 6 3s6-1.3 6-3" /></>;
     case "cone": return <><ellipse cx="12" cy="18" rx="7" ry="3" /><path d="M5 18 10 5M19 18 14 5" /><ellipse cx="12" cy="5" rx="2" ry="1" /></>;
     case "sphere": return <><circle cx="12" cy="12" r="8" /><ellipse cx="12" cy="12" rx="3.4" ry="8" /><path d="M4 12h16" /></>;
+    case "ellipsoid": return <><ellipse cx="12" cy="12" rx="9" ry="6" /><ellipse cx="12" cy="12" rx="3.6" ry="6" /><path d="M3 12h18" /></>;
+    case "prism": return <><path d="m12 3 7 4v8l-7 4-7-4V7z" /><path d="M12 3v16M5 7l7 4 7-4" opacity=".5" /></>;
+    case "wedge": return <><path d="M4 18h16V9L4 18zM4 18V9h0" /><path d="M4 18 12 6l8 3" opacity=".6" /></>;
+    case "spiral": return <><path d="M12 12h1.5a2.5 2.5 0 1 0-2.5-2.5 4 4 0 1 1 4 4 5.5 5.5 0 1 1-5.5-5.5 7 7 0 1 1 7 7" /></>;
+    case "tube": return <><ellipse cx="12" cy="6" rx="7" ry="3" /><ellipse cx="12" cy="6" rx="4" ry="1.7" /><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6" /></>;
     case "torus": return <><ellipse cx="12" cy="12" rx="9" ry="4" /><ellipse cx="12" cy="12" rx="3.5" ry="1.5" /></>;
     case "lock": return <><rect x="5" y="11" width="14" height="9" rx="1.5" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /><circle cx="12" cy="15.5" r="1.3" fill="currentColor" /></>;
     case "hole": return <><path d="m4 8 8-4 8 4-8 4zM4 8v8l8 4 8-4V8" /><ellipse cx="12" cy="8" rx="3.5" ry="1.7" /><path d="M8.5 8v8c0 .9 1.6 1.5 3.5 1.5s3.5-.6 3.5-1.5V8" /></>;
