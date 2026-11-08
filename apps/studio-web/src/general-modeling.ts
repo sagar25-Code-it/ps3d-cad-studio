@@ -1,5 +1,6 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { booleanMeshes, revolveAxisRelation, tessellateDome, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateBentStrip, tessellateRevolve, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
+import { booleanMeshes, splitMeshPieces, revolveAxisRelation, tessellateDome, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateBentStrip, tessellateRevolve, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism, evaluateProfileRevolution, stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { profileOutlineMm, stableEntityToken, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
@@ -158,7 +159,7 @@ function kernelHole(profile: SketchProfile, plane: SketchPlane): ProfileHole {
 }
 
 export type CreateGeneralSolidResult =
-  | { readonly ok: true; readonly body: GeneralSolidBody }
+  | { readonly ok: true; readonly body: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[] }
   | { readonly ok: false; readonly message: string };
 
 /**
@@ -444,6 +445,8 @@ export interface CombineGeneralBodiesRequest {
   readonly mode: BooleanMode;
   readonly bodyId: string;
   readonly name: string;
+  /** A cut that severs the target keeps every piece: the largest as `body`, the rest as `pieces`, instead of being refused. */
+  readonly allowSplit?: boolean;
 }
 
 /**
@@ -459,35 +462,33 @@ export async function combineGeneralBodies(request: CombineGeneralBodiesRequest)
     indices: body.indices,
     ...(body.brep === undefined ? {} : { faceTriangles: body.brep.faceTriangles })
   });
-  const combined = booleanMeshes(input(request.target), input(request.tool), request.mode);
+  const combined = booleanMeshes(input(request.target), input(request.tool), request.mode, request.allowSplit === true ? { allowSplit: true } : {});
   if (!combined.ok) return { ok: false, message: combined.message };
-  const { positionsMm, indices, origins } = combined.value;
-  if (positionsMm.length > 300_000 || indices.length > 300_000) return { ok: false, message: "The result has too many triangles to store. Simplify one of the bodies and try again." };
+  if (combined.value.positionsMm.length > 300_000 || combined.value.indices.length > 300_000) return { ok: false, message: "The result has too many triangles to store. Simplify one of the bodies and try again." };
 
   const sourceRole = (source: "target" | "tool", face: number): string => {
     const body = source === "target" ? request.target : request.tool;
     return `${source}.${face < 0 ? "mesh" : body.brep?.faces[face]?.role ?? `face-${face}`}`;
   };
-  const roles = [...new Set(origins.map((origin) => sourceRole(origin.source, origin.face)))].sort();
-  const faceIndex = new Map(roles.map((role, index) => [role, index]));
-  const faceTriangles = origins.map((origin) => faceIndex.get(sourceRole(origin.source, origin.face))!);
-  const areas = new Array<number>(roles.length).fill(0);
-  for (let triangle = 0; triangle < indices.length / 3; triangle += 1) {
-    const [a, b, c] = [indices[triangle * 3]! * 3, indices[triangle * 3 + 1]! * 3, indices[triangle * 3 + 2]! * 3];
-    const ux = positionsMm[b]! - positionsMm[a]!; const uy = positionsMm[b + 1]! - positionsMm[a + 1]!; const uz = positionsMm[b + 2]! - positionsMm[a + 2]!;
-    const vx = positionsMm[c]! - positionsMm[a]!; const vy = positionsMm[c + 1]! - positionsMm[a + 1]!; const vz = positionsMm[c + 2]! - positionsMm[a + 2]!;
-    areas[faceTriangles[triangle]!]! += 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
-  }
-  const edges = new Set<string>();
-  for (let triangle = 0; triangle < indices.length; triangle += 3) {
-    for (const [from, to] of [[indices[triangle]!, indices[triangle + 1]!], [indices[triangle + 1]!, indices[triangle + 2]!], [indices[triangle + 2]!, indices[triangle]!]] as const) edges.add(from < to ? `${from},${to}` : `${to},${from}`);
-  }
-  const faces = await Promise.all(roles.map(async (role, index) => ({ role, key: await stableFaceKey(request.bodyId, role), areaMm2: areas[index]! })));
-  return {
-    ok: true,
-    body: {
-      id: request.bodyId,
-      name: request.name,
+  const build = async (positionsMm: readonly number[], indices: readonly number[], origins: typeof combined.value.origins, bodyId: string, name: string): Promise<GeneralSolidBody> => {
+    const roles = [...new Set(origins.map((origin) => sourceRole(origin.source, origin.face)))].sort();
+    const faceIndex = new Map(roles.map((role, index) => [role, index]));
+    const faceTriangles = origins.map((origin) => faceIndex.get(sourceRole(origin.source, origin.face))!);
+    const areas = new Array<number>(roles.length).fill(0);
+    for (let triangle = 0; triangle < indices.length / 3; triangle += 1) {
+      const [a, b, c] = [indices[triangle * 3]! * 3, indices[triangle * 3 + 1]! * 3, indices[triangle * 3 + 2]! * 3];
+      const ux = positionsMm[b]! - positionsMm[a]!; const uy = positionsMm[b + 1]! - positionsMm[a + 1]!; const uz = positionsMm[b + 2]! - positionsMm[a + 2]!;
+      const vx = positionsMm[c]! - positionsMm[a]!; const vy = positionsMm[c + 1]! - positionsMm[a + 1]!; const vz = positionsMm[c + 2]! - positionsMm[a + 2]!;
+      areas[faceTriangles[triangle]!]! += 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    }
+    const edges = new Set<string>();
+    for (let triangle = 0; triangle < indices.length; triangle += 3) {
+      for (const [from, to] of [[indices[triangle]!, indices[triangle + 1]!], [indices[triangle + 1]!, indices[triangle + 2]!], [indices[triangle + 2]!, indices[triangle]!]] as const) edges.add(from < to ? `${from},${to}` : `${to},${from}`);
+    }
+    const faces = await Promise.all(roles.map(async (role, index) => ({ role, key: await stableFaceKey(bodyId, role), areaMm2: areas[index]! })));
+    return {
+      id: bodyId,
+      name,
       visible: true,
       color: request.target.color,
       positionsMm: [...positionsMm],
@@ -498,6 +499,16 @@ export async function combineGeneralBodies(request: CombineGeneralBodiesRequest)
         faceTriangles,
         origin: "mesh-boolean"
       }
-    }
+    };
   };
+  const { positionsMm, indices, origins } = combined.value;
+  if (combined.value.pieceCount <= 1) return { ok: true, body: await build(positionsMm, indices, origins, request.bodyId, request.name) };
+  // The Boolean severed the target: the largest piece keeps the body, the others become bodies of their own.
+  const parts = splitMeshPieces(positionsMm, indices);
+  const bodies: GeneralSolidBody[] = [];
+  for (const [position, part] of parts.entries()) {
+    const ordinal = position + 1;
+    bodies.push(await build(part.positionsMm, part.indices, part.sourceTriangles.map((triangle) => origins[triangle]!), ordinal === 1 ? request.bodyId : splitPieceId(request.bodyId, ordinal), ordinal === 1 ? request.name : splitPieceName(request.name, ordinal)));
+  }
+  return { ok: true, body: bodies[0]!, pieces: bodies.slice(1) };
 }

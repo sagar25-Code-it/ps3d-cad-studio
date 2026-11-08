@@ -32,6 +32,13 @@ export interface BooleanMeshOutput {
   /** One entry per result triangle. */
   readonly origins: readonly BooleanTriangleOrigin[];
   readonly volumeMm3: number;
+  /** How many separate closed pieces the result has (1 unless `allowSplit` let a cut sever the target). */
+  readonly pieceCount: number;
+}
+
+export interface BooleanOptions {
+  /** Let a cut or intersection leave several separate pieces instead of refusing; the caller splits the mesh into bodies. */
+  readonly allowSplit?: boolean;
 }
 
 export type BooleanMeshResult =
@@ -62,7 +69,7 @@ const FRONT = 1;
 const BACK = 2;
 const SPANNING = 3;
 
-export function booleanMeshes(target: BooleanMeshInput, tool: BooleanMeshInput, mode: BooleanMode): BooleanMeshResult {
+export function booleanMeshes(target: BooleanMeshInput, tool: BooleanMeshInput, mode: BooleanMode, options: BooleanOptions = {}): BooleanMeshResult {
   const first = readSolid(target, "target");
   if (typeof first === "string") return { ok: false, message: first };
   const second = readSolid(tool, "tool");
@@ -98,7 +105,8 @@ export function booleanMeshes(target: BooleanMeshInput, tool: BooleanMeshInput, 
   if (typeof cleaned === "string") return { ok: false, message: cleaned };
   const volume = signedVolume(cleaned.positions, cleaned.triangles);
   const tolerance = 1e-6 * (first.volume + second.volume) + 1e-6;
-  const verdict = judgeResult(mode, volume, first.volume, second.volume, tolerance, componentCount(cleaned.triangles));
+  const pieceCount = componentCount(cleaned.triangles);
+  const verdict = judgeResult(mode, volume, first.volume, second.volume, tolerance, pieceCount, options.allowSplit === true);
   if (verdict !== undefined) return { ok: false, message: verdict };
 
   return {
@@ -107,14 +115,15 @@ export function booleanMeshes(target: BooleanMeshInput, tool: BooleanMeshInput, 
       positionsMm: cleaned.positions.flat(),
       indices: cleaned.triangles.flatMap((triangle) => [triangle.a, triangle.b, triangle.c]),
       origins: cleaned.triangles.map((triangle): BooleanTriangleOrigin => ({ source: triangle.source === 0 ? "target" : "tool", face: triangle.face })),
-      volumeMm3: volume
+      volumeMm3: volume,
+      pieceCount
     }
   };
 }
 
-function judgeResult(mode: BooleanMode, volume: number, targetVolume: number, toolVolume: number, tolerance: number, components: number): string | undefined {
+function judgeResult(mode: BooleanMode, volume: number, targetVolume: number, toolVolume: number, tolerance: number, components: number, allowSplit: boolean): string | undefined {
   if (!(volume > tolerance)) return mode === "intersect" ? "The bodies do not overlap, so their intersection is empty." : "The result is empty.";
-  if (components > 1) {
+  if (components > 1 && !(allowSplit && mode !== "join")) {
     return mode === "join"
       ? "The bodies do not touch, so joining them would give two separate solids."
       : `The ${mode === "cut" ? "cut divides the target into" : "intersection is"} ${components} separate pieces, which is not supported yet.`;

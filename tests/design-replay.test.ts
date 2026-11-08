@@ -88,7 +88,7 @@ export const designReplayTests: readonly TestCase[] = [
     }
   },
   {
-    name: "editing the cut's sketch and replaying moves the hole's size, and a cut that would split the solid is reported and skipped",
+    name: "editing the cut's sketch and replaying moves the hole's size, and a cut that severs the solid keeps both pieces",
     run: async () => {
       const hole: SketchEntity = { id: "entity:hole", kind: "circle", center: [0, 12], radiusMm: 4, construction: false };
       let project = withCut(await plateWithSecondSketch(hole));
@@ -102,15 +102,15 @@ export const designReplayTests: readonly TestCase[] = [
       const bigger = PLATE_MINUS_BORE - Math.PI * 6 ** 2 * 10;
       near(bodyVolume(project), bigger, bigger * 0.03, "the larger hole took more material");
 
-      // A slot wider than the gap between the plate's edges would cut it in two: the step is flagged and left out.
+      // A slot that crosses the whole plate cuts it in two: both halves are kept, the larger as the body (see split-pieces.test.ts).
       let split = await plateWithSecondSketch({ id: "entity:slot", kind: "rectangle", center: [0, 0], widthMm: 10, heightMm: 100, rotationDeg: 0, construction: false });
       split = withCut(split);
       const results = await replayBody(split, BODY);
-      const failed = results.find((result) => result.featureId === "feature:cut-1");
-      assert(failed?.message !== undefined, "the cut that splits the plate is reported");
+      const cutResult = results.find((result) => result.featureId === "feature:cut-1");
+      assert(cutResult?.message === undefined, "the cut that severs the plate is applied, not refused");
       split = apply(split, results);
-      near(bodyVolume(split), PLATE_MINUS_BORE, PLATE_MINUS_BORE * 0.03, "the plate is left as it was");
-      assert(designOf(split).features.find((feature) => feature.id === "feature:cut-1")?.health !== undefined, "and the step is flagged in the timeline");
+      equal((split.part.generalBodies ?? []).length, 2, "the plate became two bodies");
+      near(bodyVolume(split), 25 * 40 * 10, 25 * 40 * 10 * 0.01, "the body keeps one half");
     }
   },
   {

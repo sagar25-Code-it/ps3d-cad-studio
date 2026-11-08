@@ -2240,9 +2240,14 @@ export function App(): React.JSX.Element {
     if (!rebuilt.ok) { setStatus("error"); setStatusText(rebuilt.message); return; }
     let resultBody = rebuilt.body;
     if (targetBody !== undefined && target !== undefined) {
-      const combined = await combineGeneralBodies({ target: targetBody, tool: rebuilt.body, mode: target.mode, bodyId: targetBody.id, name: targetBody.name });
+      const combined = await combineGeneralBodies({ target: targetBody, tool: rebuilt.body, mode: target.mode, bodyId: targetBody.id, name: targetBody.name, ...(target.mode === "cut" ? { allowSplit: true } : {}) });
       if (!combined.ok) { setStatus("error"); setStatusText(`${verb} did not change the solid: ${combined.message}`); return; }
       resultBody = { ...combined.body, color: targetBody.color };
+      // A cut that severs the solid keeps every piece: the step is added through a replay, which files the other pieces as bodies.
+      if ((combined.pieces ?? []).length > 0) {
+        if (await commitWithReplay({ kind: "add-design-solid", feature, body: resultBody }, feature.id)) { switchWorkspace("part"); setSelectedId(bodyId); setStatus("ready"); }
+        return;
+      }
     }
     if (applyProjectOperation({ kind: "add-design-solid", feature, body: resultBody }, false)) {
       switchWorkspace("part");

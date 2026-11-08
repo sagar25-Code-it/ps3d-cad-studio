@@ -1,7 +1,7 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
-import { dependentsOf, designOf, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
+import { dependentsOf, designOf, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
-import { attachEdgeFlange, booleanMeshes, flangeReliefs, holeCutter, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
+import { attachEdgeFlange, booleanMeshes, splitMeshPieces, flangeReliefs, holeCutter, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout } from "../../../packages/workbench-geometry/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 
 /**
@@ -15,6 +15,8 @@ export type SolidRebuild =
 export interface RebuildResult {
   readonly featureId: string;
   readonly body?: GeneralSolidBody;
+  /** Bodies a cut or hole severed from `body`; they are named after it (see splitPieceId) and travel with it. */
+  readonly pieces?: readonly GeneralSolidBody[];
   readonly message?: string;
 }
 
@@ -168,6 +170,9 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
   const outcomes = new Map<string, RebuildResult>();
   let current: GeneralSolidBody | undefined;
   let baseBody: GeneralSolidBody | undefined;
+  // A cut or hole that severs the body leaves several closed pieces: the largest carries on as the body, the rest are kept here.
+  const pieces: GeneralSolidBody[] = [];
+  const keepPiece = (piece: GeneralSolidBody): void => { pieces.push({ ...piece, color: current?.color ?? piece.color }); };
   for (const step of steps) {
     // A lone body is rebuilt whatever its state; the steps of a chain only while they are live.
     if (chained && !isFeatureActive(history, step.id)) continue;
@@ -196,6 +201,10 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
       const { brep: _faceNames, ...withoutFaces } = current;
       void _faceNames;
       current = { ...withoutFaces, positionsMm: [...drilled.positionsMm], indices: [...drilled.indices] };
+      for (const part of drilled.pieces ?? []) {
+        const ordinal = pieces.length + 2;
+        keepPiece({ id: splitPieceId(bodyId, ordinal), name: splitPieceName(current.name, ordinal), visible: true, color: current.color, positionsMm: [...part.positionsMm], indices: [...part.indices] });
+      }
       outcomes.set(step.id, { featureId: step.id });
       continue;
     }
@@ -211,9 +220,11 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
       if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "Indent needs an existing body to carve out of." }); continue; }
       const toolBody = project.part.generalBodies?.find((candidate) => candidate.id === step.indentToolBodyId);
       if (toolBody === undefined) { outcomes.set(step.id, { featureId: step.id, message: `Indent tool body '${step.indentToolBodyId}' is not in the part.` }); continue; }
-      const combined = await combineGeneralBodies({ target: current, tool: toolBody, mode: "cut", bodyId, name: current.name });
+      const combined = await combineGeneralBodies({ target: current, tool: toolBody, mode: "cut", bodyId, name: current.name, allowSplit: true });
       if (!combined.ok) { outcomes.set(step.id, { featureId: step.id, message: combined.message }); continue; }
-      current = { ...combined.body, color: current.color };
+      const parent = current;
+      current = { ...combined.body, color: parent.color };
+      for (const part of combined.pieces ?? []) keepPiece(renumberedPiece(part, bodyId, parent.name, pieces.length + 2));
       outcomes.set(step.id, { featureId: step.id });
       continue;
     }
@@ -226,14 +237,21 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
     if (!modifies) { current = built.body; baseBody = built.body; outcomes.set(step.id, { featureId: step.id }); continue; }
     if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this step changes could not be built, so there is nothing to modify." }); continue; }
     if (step.operation !== "join" && step.operation !== "cut") { outcomes.set(step.id, { featureId: step.id, message: "The modifier step has no boolean operation set." }); continue; }
-    const combined = await combineGeneralBodies({ target: current, tool: built.body, mode: step.operation, bodyId, name: current.name });
+    const combined = await combineGeneralBodies({ target: current, tool: built.body, mode: step.operation, bodyId, name: current.name, ...(step.operation === "cut" ? { allowSplit: true } : {}) });
     if (!combined.ok) { outcomes.set(step.id, { featureId: step.id, message: combined.message }); continue; }
-    current = { ...combined.body, color: current.color };
+    const parent = current;
+    current = { ...combined.body, color: parent.color };
+    for (const part of combined.pieces ?? []) keepPiece(renumberedPiece(part, bodyId, parent.name, pieces.length + 2));
     outcomes.set(step.id, { featureId: step.id });
   }
   // The final shape travels on the step that made the body; the other steps only report whether they applied.
-  if (current !== undefined) outcomes.set(base.id, { ...(outcomes.get(base.id) ?? { featureId: base.id }), body: current });
+  if (current !== undefined) outcomes.set(base.id, { ...(outcomes.get(base.id) ?? { featureId: base.id }), body: current, ...(pieces.length === 0 ? {} : { pieces }) });
   return steps.flatMap((step) => { const outcome = outcomes.get(step.id); return outcome === undefined ? [] : [outcome]; });
+}
+
+/** A piece the Boolean named for a single cut, renamed so its number continues after the pieces already split off this body. */
+function renumberedPiece(piece: GeneralSolidBody, bodyId: string, name: string, ordinal: number): GeneralSolidBody {
+  return { ...piece, id: splitPieceId(bodyId, ordinal), name: splitPieceName(name, ordinal) };
 }
 
 /** Replays every body of the timeline. */
@@ -445,7 +463,7 @@ export async function flatPatternForBody(project: WorkbenchProject, bodyId: stri
 }
 
 export type HoleDrilling =
-  | { readonly ok: true; readonly positionsMm: readonly number[]; readonly indices: readonly number[] }
+  | { readonly ok: true; readonly positionsMm: readonly number[]; readonly indices: readonly number[]; readonly pieces?: readonly { readonly positionsMm: readonly number[]; readonly indices: readonly number[] }[] }
   | { readonly ok: false; readonly message: string };
 
 /**
@@ -473,7 +491,10 @@ export function drillHole(step: DesignSolidFeature, body: { readonly positionsMm
     ...(step.holeSinkAngleDeg === undefined ? {} : { sinkAngleDeg: step.holeSinkAngleDeg })
   });
   if (!cutter.ok) return { ok: false, message: cutter.message };
-  const cut = booleanMeshes({ positionsMm: body.positionsMm, indices: body.indices }, { positionsMm: cutter.positionsMm, indices: cutter.indices }, "cut");
+  const cut = booleanMeshes({ positionsMm: body.positionsMm, indices: body.indices }, { positionsMm: cutter.positionsMm, indices: cutter.indices }, "cut", { allowSplit: true });
   if (!cut.ok) return { ok: false, message: `The hole could not be cut: ${cut.message}` };
-  return { ok: true, positionsMm: cut.value.positionsMm, indices: cut.value.indices };
+  if (cut.value.pieceCount <= 1) return { ok: true, positionsMm: cut.value.positionsMm, indices: cut.value.indices };
+  // A hole wider than what it passes through severs the body: the largest piece stays the body, the others are returned beside it.
+  const parts = splitMeshPieces(cut.value.positionsMm, cut.value.indices);
+  return { ok: true, positionsMm: parts[0]!.positionsMm, indices: parts[0]!.indices, pieces: parts.slice(1).map((part) => ({ positionsMm: part.positionsMm, indices: part.indices })) };
 }

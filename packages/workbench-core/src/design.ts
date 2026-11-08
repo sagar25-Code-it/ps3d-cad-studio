@@ -33,6 +33,21 @@ function fail(code: WorkbenchDiagnostic["code"], message: string, relatedIds: re
 
 const missing = (id: string, message: string): DesignChange => fail("BROKEN_REFERENCE", message, [id], "Refresh the project and pick an existing feature.");
 
+/** The ID of the `ordinal`-th piece (2, 3, ...) a body was split into by a cut or hole; piece 1 keeps the body's own ID. */
+export function splitPieceId(bodyId: string, ordinal: number): string {
+  return `${bodyId}.piece-${ordinal}`;
+}
+
+/** The display name of the `ordinal`-th piece of a split body. */
+export function splitPieceName(name: string, ordinal: number): string {
+  return `${name} (piece ${ordinal})`;
+}
+
+/** Whether `candidateId` names a piece that was split off the body `bodyId`. */
+export function isSplitPieceOf(bodyId: string, candidateId: string): boolean {
+  return candidateId.startsWith(`${bodyId}.piece-`);
+}
+
 export function emptyDesignHistory(): DesignHistory {
   return { features: [], rollbackIndex: 0, editingSketchId: null };
 }
@@ -224,7 +239,7 @@ export function updateDesignSolid(project: WorkbenchProject, feature: DesignSoli
   return changed(withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, next), [feature.id, body.id], `Updated ${feature.name}.`);
 }
 
-export function regenerateDesign(project: WorkbenchProject, results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly message?: string }[]): DesignChange {
+export function regenerateDesign(project: WorkbenchProject, results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string }[]): DesignChange {
   const history = designOf(project);
   const byId = new Map(results.map((result) => [result.featureId, result] as const));
   if (byId.size !== results.length) return fail("INVALID_OPERATION", "A feature appears twice in the rebuild results.", [], "Send one result per feature.");
@@ -232,13 +247,21 @@ export function regenerateDesign(project: WorkbenchProject, results: readonly { 
     const feature = history.features.find((candidate) => candidate.id === result.featureId);
     if (feature === undefined || feature.kind === "sketch") return missing(result.featureId, "A rebuilt feature does not exist or is not a solid feature.");
     if (result.body !== undefined && result.body.id !== feature.bodyId) return fail("INVALID_OPERATION", "A rebuilt solid must keep its feature's body ID.", [feature.id], "Build the solid with the feature's body ID.");
+    if (result.pieces !== undefined && (result.body === undefined || result.pieces.some((piece) => !isSplitPieceOf(feature.bodyId, piece.id)))) return fail("INVALID_OPERATION", "Pieces split off a solid must be named after the solid they came from.", [feature.id], "Name each piece with splitPieceId.");
   }
-  const bodies = (project.part.generalBodies ?? []).map((candidate) => {
+  const rebuiltRoots = results.flatMap((result) => result.body === undefined ? [] : [result.body.id]);
+  const existingBodies = project.part.generalBodies ?? [];
+  const priorVisibility = new Map(existingBodies.map((candidate) => [candidate.id, candidate.visible] as const));
+  // A rebuilt body replaces the pieces it split into last time; the new pieces (if any) come back after the bodies.
+  const kept = existingBodies.filter((candidate) => !rebuiltRoots.some((root) => isSplitPieceOf(root, candidate.id)));
+  const newPieces = results.flatMap((result) => (result.pieces ?? []).map((piece) => ({ ...piece, visible: priorVisibility.get(piece.id) ?? piece.visible })));
+  if (kept.length + newPieces.length > MAX_GENERAL_BODIES) return fail("RESOURCE_LIMIT", "Splitting the solid would pass the part's body limit.", [project.part.id], "Delete a general body before cutting the solid apart.");
+  const bodies = kept.map((candidate) => {
     for (const result of results) {
       if (result.body !== undefined && result.body.id === candidate.id) return { ...result.body, visible: candidate.visible };
     }
     return candidate;
-  });
+  }).concat(newPieces);
   const features = history.features.map((feature): DesignFeature => {
     const result = byId.get(feature.id);
     if (result === undefined) return feature;
@@ -249,7 +272,7 @@ export function regenerateDesign(project: WorkbenchProject, results: readonly { 
   return changed(
     withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, { ...history, features }),
     results.map((result) => result.featureId),
-    `Rebuilt ${results.length - failed} feature${results.length - failed === 1 ? "" : "s"}${failed === 0 ? "" : `; ${failed} could not be rebuilt`}.`
+    `Rebuilt ${results.length - failed} feature${results.length - failed === 1 ? "" : "s"}${failed === 0 ? "" : `; ${failed} could not be rebuilt`}.${newPieces.length === 0 ? "" : ` The solid was cut into ${newPieces.length + results.filter((result) => result.pieces !== undefined && result.body !== undefined).length} separate bodies (${newPieces.map((piece) => piece.name).join(", ")} split off).`}`
   );
 }
 
@@ -274,7 +297,7 @@ export function deleteDesignFeature(project: WorkbenchProject, featureId: string
     rollbackIndex: history.rollbackIndex - removedBeforeMarker,
     editingSketchId: history.editingSketchId !== null && removed.has(history.editingSketchId) ? null : history.editingSketchId
   };
-  const bodies = (project.part.generalBodies ?? []).filter((candidate) => !goneBodies.has(candidate.id));
+  const bodies = (project.part.generalBodies ?? []).filter((candidate) => !goneBodies.has(candidate.id) && ![...goneBodies].some((root) => isSplitPieceOf(root, candidate.id)));
   const extra = removed.size - 1;
   return changed(withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, next), [...removed], `Deleted ${feature.name}${extra === 0 ? "" : ` and the ${extra} feature${extra === 1 ? "" : "s"} built on it`}.`);
 }
