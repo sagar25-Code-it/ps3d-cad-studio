@@ -11,6 +11,8 @@ export type SketchHotkeyAction =
   | { readonly kind: "dimension" }
   | { readonly kind: "edit-tool"; readonly tool: "trim" | "offset" }
   | { readonly kind: "toggle-construction" }
+  /** Q: everything drawn from now on is construction geometry (or back). */
+  | { readonly kind: "toggle-draw-construction" }
   | { readonly kind: "fit" }
   | { readonly kind: "pan-mode" }
   | { readonly kind: "select-tool" }
@@ -107,6 +109,7 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
   if (key === "t") return { kind: "edit-tool", tool: "trim" };
   if (key === "o") return { kind: "edit-tool", tool: "offset" };
   if (key === "x") return { kind: "toggle-construction" };
+  if (key === "q") return { kind: "toggle-draw-construction" };
   if (key === "f") return { kind: "fit" };
   if (key === "v") return { kind: "select-tool" };
   if (key === "p") return { kind: "pan-mode" };
@@ -123,6 +126,7 @@ export const SKETCH_HOTKEY_HELP: readonly { readonly keys: string; readonly acti
   { keys: "T", action: "Trim" },
   { keys: "O", action: "Offset" },
   { keys: "X", action: "Toggle construction on the selection" },
+  { keys: "Q", action: "Draw as construction: new curves are construction geometry (toggle)" },
   { keys: "V", action: "Select tool" },
   { keys: "P", action: "Pan navigation" },
   { keys: "F", action: "Fit the sketch to the window" },

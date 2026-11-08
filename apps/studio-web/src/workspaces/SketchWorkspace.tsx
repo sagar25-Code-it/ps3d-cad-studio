@@ -24,6 +24,7 @@ import { deleteCurveHeal, jogLine, splitAt } from "../../../../packages/workbenc
 import { mirrorImages, withDynamicMirror } from "../../../../packages/workbench-sketch/src/dynamic-mirror.js";
 import { copySketchSelection, cutSketchSelection, nextPasteNumber, parseClipboard, pasteSketchClipboard, readSketchClipboard, serializeClipboard, storeSketchClipboard, type SketchClipboard } from "../../../../packages/workbench-sketch/src/sketch-clipboard.js";
 import { SKETCH_HOTKEY_HELP, type SketchHotkeyAction } from "../../../../packages/workbench-sketch/src/hotkeys.js";
+import { DRAW_CONSTRUCTION_OFF_MESSAGE, DRAW_CONSTRUCTION_ON_MESSAGE, entityForDrawMode, planForDrawMode } from "../../../../packages/workbench-sketch/src/draw-construction.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
 import { autoConstraintsFor, dropConstraintFor, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
@@ -258,6 +259,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [inference, setInference] = useState<InferenceResult | undefined>(undefined);
   // Relations drawn with a shape (Coincident at snapped ends, Horizontal on a level guide...) and the snap each placed point had.
   const [autoConstrain, setAutoConstrain] = useState(true);
+  const [drawAsConstruction, setDrawAsConstruction] = useState(false);
   const [pendingInference, setPendingInference] = useState<readonly PlacedPointInference[]>([]);
   // Picking the points of a Coincident or Midpoint relation on the canvas.
   const [pickRelation, setPickRelation] = useState<"coincident" | "midpoint" | null>(null);
@@ -477,14 +479,15 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     [dynamicMirrorEntity, previewEntity, previewShape]
   );
   /** Applies a drawing edit; with Dynamic Mirror on, the mirror images of what was drawn go in the same edit. */
-  const applyDrawn = (plan: SketchEditPlan): boolean | void => {
+  const applyDrawn = (drawnPlan: SketchEditPlan): boolean | void => {
+    const plan = planForDrawMode(drawnPlan, drawAsConstruction);
     if (dynamicMirrorAxis === null) return props.onApplyEdit(plan);
     const outcome = withDynamicMirror({ sketch: props.sketch, newId: (prefix) => `${prefix}:user-${crypto.randomUUID()}` }, dynamicMirrorAxis, plan);
     if (outcome.mirrored > 0) props.onMessage(`Mirrored ${outcome.mirrored} curve${outcome.mirrored === 1 ? "" : "s"} about ${dynamicMirrorAxis.replace(/^entity:/u, "")}${outcome.withoutRelations ? " (as exact copies; the solver would not take the symmetry relations)" : ""}.`);
     return props.onApplyEdit(outcome.plan);
   };
   const addDrawn = (entity: SketchEntity): void => {
-    if (dynamicMirrorAxis === null) { props.onAddEntity(entity); return; }
+    if (dynamicMirrorAxis === null) { props.onAddEntity(entityForDrawMode(entity, drawAsConstruction)); return; }
     applyDrawn({ label: `Added ${entity.kind}`, removeEntityIds: [], updateEntities: [], addEntities: [entity], addConstraints: [] });
   };
   const editContext = () => ({ sketch: props.sketch, newId: (prefix: "entity" | "constraint"): string => `${prefix}:user-${crypto.randomUUID()}` });
@@ -735,7 +738,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
     const built = buildControlPointSpline(controls, closed, curveFields.keepPolygon, ids);
     if (!built.ok) { props.onMessage(built.diagnostics[0]?.message ?? "The spline was rejected."); setPending([]); return; }
-    const accepted = props.onApplyEdit({ label: `Added control-point spline (${controls.length} control points${closed ? ", closed" : ""})`, removeEntityIds: [], updateEntities: [], addEntities: built.value.entities, addConstraints: built.value.constraints });
+    const accepted = props.onApplyEdit(planForDrawMode({ label: `Added control-point spline (${controls.length} control points${closed ? ", closed" : ""})`, removeEntityIds: [], updateEntities: [], addEntities: built.value.entities, addConstraints: built.value.constraints }, drawAsConstruction));
     if (accepted === false) return;
     setPending([]);
     props.onMessage(`Added ${closed ? "closed " : ""}control-point spline from ${controls.length} control points${closed ? " as two splines that meet at two points, so it bounds a profile" : ""}.`);
@@ -762,7 +765,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
     const step = extendProfileChain(chain, point, curveFields.profileMode, PICK_PIXELS * px, ids);
     if (!step.ok) { props.onMessage(`${step.diagnostics[0]?.message ?? "The segment was rejected."} Place the point somewhere else, or press Esc to stop.`); return; }
-    const { entity, constraints, chain: next, closed } = step.value;
+    const { constraints, chain: next, closed } = step.value;
+    const entity = entityForDrawMode(step.value.entity, drawAsConstruction);
     let accepted: boolean | void = undefined;
     if (constraints.length > 0) accepted = props.onApplyEdit({ label: `Added profile ${entity.kind} ${next.segments}`, removeEntityIds: [], updateEntities: [], addEntities: [entity], addConstraints: constraints });
     // If the solver refused the relations, the segment itself is still drawn.
@@ -1059,6 +1063,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         props.onApplyEdit({ label: `Deleted ${selectionIds.length} curve${selectionIds.length === 1 ? "" : "s"}`, removeEntityIds: selectionIds, updateEntities: [], addEntities: [], addConstraints: [] });
         setSelectionIds([]);
         props.onSelect(null);
+        return;
+      case "toggle-draw-construction":
+        setDrawAsConstruction(!drawAsConstruction);
+        props.onMessage(drawAsConstruction ? DRAW_CONSTRUCTION_OFF_MESSAGE : DRAW_CONSTRUCTION_ON_MESSAGE);
         return;
       case "toggle-construction":
         if (selectedEntities.length === 0) { props.onMessage("Select curves first, then press X to turn them into construction geometry (or back)."); return; }
@@ -1426,6 +1434,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Sketch grid" active={props.viewportState.gridVisible} onToggle={props.onGrid} />
         <PaletteToggle label="Snap" active={snapEnabled} onToggle={setSnapEnabled} />
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
+        <PaletteToggle label="Draw as construction (Q)" active={drawAsConstruction} onToggle={(next) => { setDrawAsConstruction(next); props.onMessage(next ? DRAW_CONSTRUCTION_ON_MESSAGE : DRAW_CONSTRUCTION_OFF_MESSAGE); }} />
         {props.tool === "polygon" && <label className="palette-number"><span>Polygon sides</span><input type="number" min={POLYGON_MIN_SIDES} max={POLYGON_MAX_SIDES} step={1} value={polygonSides} aria-label="Number of polygon sides" onChange={(event) => setPolygonSides(event.target.value)} /></label>}
         <SketchCurveOptionsPanel tool={props.tool} fields={curveFields} onChange={setCurveFields} blockNames={blockNames} selectedCount={selectedEntities.length} onSaveBlock={saveSelectionAsBlock} />
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
