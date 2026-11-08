@@ -32,6 +32,17 @@ const hold = (entityId: string, priority: 0 | 1 | 2 = 2): LiveAnchor => ({ entit
 const free = (entityId: string, ref: LiveAnchor["ref"]): LiveAnchor => ({ entityId, ref, priority: 0 });
 const keep = (entityId: string, ref: LiveAnchor["ref"], priority: 0 | 1 | 2 = 2): LiveAnchor => ({ entityId, ref, priority });
 
+/**
+ * The curve that gives way to a joint at one of its points, with the least change to its shape. A rectangle corner or an arc end is
+ * derived from the curve's centre, size and turn, so freeing the point would free all of those and the solver would stretch or turn
+ * the curve a little to save moving it; only the centre is freed instead, which carries the point by sliding the whole curve.
+ */
+function carry(entities: ReadonlyMap<string, SketchEntity>, entityId: string, ref: LiveAnchor["ref"]): readonly LiveAnchor[] {
+  const kind = entities.get(entityId)?.kind;
+  const derived = (kind === "rectangle" && String(ref).startsWith("corner-")) || (kind === "arc" && (ref === "start" || ref === "end" || ref === "mid"));
+  return holdExcept(entityId, derived ? "center" : ref);
+}
+
 /** Everything of the entity is held except the named part, which is free to move. */
 const holdExcept = (entityId: string, ref: LiveAnchor["ref"], priority: 0 | 1 | 2 = 2): readonly LiveAnchor[] => [hold(entityId, priority), free(entityId, ref)];
 
@@ -54,14 +65,14 @@ export function anchorsForConstraint(constraint: WorkbenchSketchConstraint, enti
     case "collinear":
       return [hold(first!)];
     case "coincident": {
-      if (points[0] === "curve") return [...holdExcept(second!, points[1] ?? "self"), hold(first!)];
-      if (points[1] === "curve") return [...holdExcept(first!, points[0] ?? "self"), hold(second!)];
+      if (points[0] === "curve") return [...carry(entities, second!, points[1] ?? "self"), hold(first!)];
+      if (points[1] === "curve") return [...carry(entities, first!, points[0] ?? "self"), hold(second!)];
       // A curve joined at both ends to others (part of a chain or loop) moves with its chain instead of being anchored by its far end.
       if (isChained(second!, siblings)) return [hold(first!)];
-      return [hold(first!), ...holdExcept(second!, points[1] ?? "self")];
+      return [hold(first!), ...carry(entities, second!, points[1] ?? "self")];
     }
     case "midpoint":
-      return [hold(second!), ...holdExcept(first!, points[0] ?? "self")];
+      return [hold(second!), ...carry(entities, first!, points[0] ?? "self")];
     case "tangent": {
       if (kindOf(first) === "line" || isSketchDatumEntityId(first!)) return [hold(first!), keep(second!, "center", 1)];
       if (kindOf(second) === "line" || isSketchDatumEntityId(second!)) return [hold(second!), keep(first!, "center", 1)];
@@ -153,9 +164,9 @@ export function anchorsForDimension(constraint: WorkbenchSketchConstraint, entit
         case "aligned":
         case "horizontal":
         case "vertical":
-          return [hold(first!), ...holdExcept(second!, points[1] ?? "self")];
+          return [hold(first!), ...carry(entities, second!, points[1] ?? "self")];
         case "point-line":
-          return [hold(second!), ...holdExcept(first!, points[0] ?? "self")];
+          return [hold(second!), ...carry(entities, first!, points[0] ?? "self")];
         case "line-line":
           return [hold(first!)];
         case "width":
