@@ -28,6 +28,7 @@ import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
 import { resizeSketchEntity, setSketchDimension } from "./sketch-dimension-edit.js";
 import { solveAssemblyMates } from "./assembly-solve.js";
+import { friendlySketchText, sketchEntityName } from "./sketch-names.js";
 import {
   addDesignSolid,
   commitDesignSketch,
@@ -113,8 +114,10 @@ export function applyWorkbenchOperation(
     return failure("RESOURCE_LIMIT", "The preview audit reached its 500-entry limit.", [current.value.id], "Export the project and start a compacted revision lineage.");
   }
 
-  const changed = settleDesignExpressions(current.value, operation, applyIntent(current.value, operation), resizeSketchEntity);
-  if (!changed.ok) return changed;
+  const settled = settleDesignExpressions(current.value, operation, applyIntent(current.value, operation), resizeSketchEntity);
+  // Messages name sketch geometry as "Line 3", never by its generated id (see sketch-names.ts).
+  if (!settled.ok) return { ok: false, diagnostics: settled.diagnostics.map((entry) => ({ ...entry, message: friendlySketchText(entry.message, [current.value.sketch]), recovery: friendlySketchText(entry.recovery, [current.value.sketch]) })) };
+  const changed = { ok: true as const, value: { ...settled.value, summary: friendlySketchText(settled.value.summary, [settled.value.project.sketch, current.value.sketch]) } };
   const nextRevision = current.value.revision + 1;
   const next: WorkbenchProject = {
     ...refreshMateStatuses(changed.value.project, operation.kind),
@@ -573,7 +576,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       return changed({ ...project, activeWorkspace: operation.workspace }, [project.id], `Opened ${workspaceLabel(operation.workspace)} workspace.`);
     case "add-sketch-entity": {
       if (project.sketch.entities.some((entity) => entity.id === operation.entity.id)) return invalidOperation("The sketch entity ID already exists.");
-      return changed({ ...project, sketch: { ...project.sketch, entities: [...project.sketch.entities, operation.entity] } }, [operation.entity.id], `Added ${operation.entity.kind} ${operation.entity.id}.`);
+      return changed({ ...project, sketch: { ...project.sketch, entities: [...project.sketch.entities, operation.entity] } }, [operation.entity.id], `Added ${sketchEntityName({ entities: [...project.sketch.entities, operation.entity] }, operation.entity.id)}.`);
     }
     case "delete-sketch-entity": {
       if (!project.sketch.entities.some((entity) => entity.id === operation.entityId)) return broken(operation.entityId, "The sketch entity does not exist.");
@@ -1313,7 +1316,7 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   if (solved.movedIds.length > 0) {
     return failure(
       "CONSTRAINT_CONFLICT",
-      `This edit conflicts with a sketch relation on ${solved.movedIds.map((id) => id.replace(/^entity:/u, "")).join(", ")}. ${solved.notes.join("; ")}.`,
+      `This edit conflicts with a sketch relation on ${solved.movedIds.map((id) => sketchEntityName(next, id)).join(", ")}. ${solved.notes.join("; ")}.`,
       solved.movedIds,
       "Use Relax Relations on the affected geometry, then repeat the edit."
     );

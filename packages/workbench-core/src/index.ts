@@ -28,6 +28,7 @@ export * from "./solid-metrics.js";
 export * from "./design-labels.js";
 export * from "./sheet-features.js";
 export * from "./planar-faces.js";
+export * from "./sketch-names.js";
 export { dragLiveSketch, solveLiveSketch, type LiveDragTarget, type LiveSketchSolveReport } from "./sketch-solve.js";
 export * from "./engineering-intent.js";
 export * from "./subd-cage.js";

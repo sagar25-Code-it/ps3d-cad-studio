@@ -1083,10 +1083,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         return;
       }
       case "focus-dynamic": {
-        const first = dynamicFields[0];
-        if (first !== undefined) requestFieldFocus(first.id);
+        const target = action.backwards ? dynamicFields.at(-1) : dynamicFields[0];
+        if (target !== undefined) requestFieldFocus(target.id);
         return;
       }
+      case "end-chain": setPending([]); props.onMessage("Line chain ended. The segments already placed are kept."); return;
       case "copy": copySelection(false); return;
       case "cut": copySelection(true); return;
       case "paste": pasteClipboard(); return;

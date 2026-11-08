@@ -30,8 +30,10 @@ export type SketchHotkeyAction =
   | { readonly kind: "paste" }
   /** A digit, point or minus pressed while typed-input fields are showing: start typing into the first field. */
   | { readonly kind: "type-value"; readonly key: string }
-  /** Tab while typed-input fields are showing: move the focus into them. */
-  | { readonly kind: "focus-dynamic" };
+  /** Tab (or Shift+Tab, `backwards`) while typed-input fields are showing: move the focus into them, starting from the first (or last) field. */
+  | { readonly kind: "focus-dynamic"; readonly backwards: boolean }
+  /** Enter on the Line tool: end the chain being drawn. The segments already placed are kept; only the open end is dropped. */
+  | { readonly kind: "end-chain" };
 
 export interface SketchHotkeyInput {
   readonly key: string;
@@ -58,12 +60,38 @@ export interface SketchHotkeyContext {
   readonly dynamicFieldCount: number;
 }
 
-const LETTER_TOOLS: Readonly<Record<string, Exclude<SketchTool, "select">>> = {
-  l: "line",
-  r: "rectangle",
-  c: "circle",
-  a: "arc"
+type DrawingTool = Exclude<SketchTool, "select">;
+
+/**
+ * Letter keys and the tool variants each one reaches. The first press picks the first tool; pressing the same letter again while one of
+ * its tools is active steps to the next variant and wraps around (R: 2-point, centre, 3-point rectangle). The ribbon chips come from
+ * this table, so a chip never advertises a key that does nothing.
+ */
+export const SKETCH_LETTER_FAMILIES: Readonly<Record<string, readonly DrawingTool[]>> = {
+  l: ["line"],
+  r: ["rectangle", "rectangle-center", "rectangle-three-point"],
+  c: ["circle", "circle-two-point", "circle-three-point"],
+  a: ["arc", "arc-center", "arc-tangent"],
+  e: ["ellipse"]
 };
+
+/** The key text for a tool button: "R" for the first variant, "R ×2" when R must be pressed twice, undefined for tools with no key. */
+export function sketchToolHotkeyChip(tool: SketchTool): string | undefined {
+  if (tool === "select") return "V";
+  for (const [letter, family] of Object.entries(SKETCH_LETTER_FAMILIES)) {
+    const index = family.indexOf(tool as DrawingTool);
+    if (index >= 0) return index === 0 ? letter.toUpperCase() : `${letter.toUpperCase()} ×${index + 1}`;
+  }
+  return undefined;
+}
+
+/** The tool the letter selects now: the next variant when a tool of the same family is already active, else the family's first tool. */
+function familyTool(letter: string, active: SketchTool): DrawingTool | undefined {
+  const family = SKETCH_LETTER_FAMILIES[letter];
+  if (family === undefined) return undefined;
+  const index = family.indexOf(active as DrawingTool);
+  return family[(index + 1) % family.length];
+}
 
 export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHotkeyContext): SketchHotkeyAction | undefined {
   if (input.alt) return undefined;
@@ -96,12 +124,15 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
     if (context.pendingPoints > 0) return { kind: "cancel-points" };
     return context.curveSelectionCount > 0 ? { kind: "delete-selection" } : undefined;
   }
-  if (key === "Enter") return ((context.tool === "spline" || context.tool === "spline-control") && context.pendingPoints >= 3) || (context.tool === "profile" && context.pendingPoints >= 1) ? { kind: "finish" } : undefined;
-  if (key === "Tab") return context.dynamicFieldCount > 0 && !input.shift ? { kind: "focus-dynamic" } : undefined;
+  if (key === "Enter") {
+    if (context.tool === "line" && context.pendingPoints >= 1) return { kind: "end-chain" };
+    return ((context.tool === "spline" || context.tool === "spline-control") && context.pendingPoints >= 3) || (context.tool === "profile" && context.pendingPoints >= 1) ? { kind: "finish" } : undefined;
+  }
+  if (key === "Tab") return context.dynamicFieldCount > 0 ? { kind: "focus-dynamic", backwards: input.shift } : undefined;
   if (context.dynamicFieldCount > 0 && /^[0-9.,-]$/.test(input.key)) return { kind: "type-value", key: input.key };
 
   if (input.shift) return undefined;
-  const tool = LETTER_TOOLS[key];
+  const tool = familyTool(key, context.tool);
   if (tool !== undefined) return { kind: "tool", tool };
   if (key === "d") return { kind: "dimension" };
   if (key === "t") return { kind: "edit-tool", tool: "trim" };
@@ -116,9 +147,10 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
 /** Human-readable shortcut chips for tool buttons and the help sheet. */
 export const SKETCH_HOTKEY_HELP: readonly { readonly keys: string; readonly action: string }[] = [
   { keys: "L", action: "Line" },
-  { keys: "R", action: "2-point rectangle" },
-  { keys: "C", action: "Center-radius circle" },
-  { keys: "A", action: "3-point arc" },
+  { keys: "R", action: "Rectangle: 2-point; press R again for centre, again for 3-point" },
+  { keys: "C", action: "Circle: centre-radius; press C again for 2-point, again for 3-point" },
+  { keys: "A", action: "Arc: 3-point; press A again for centerpoint, again for tangent" },
+  { keys: "E", action: "Centre ellipse" },
   { keys: "D", action: "Sketch dimension" },
   { keys: "T", action: "Trim" },
   { keys: "O", action: "Offset" },
@@ -126,10 +158,12 @@ export const SKETCH_HOTKEY_HELP: readonly { readonly keys: string; readonly acti
   { keys: "V", action: "Select tool" },
   { keys: "P", action: "Pan navigation" },
   { keys: "F", action: "Fit the sketch to the window" },
-  { keys: "Esc", action: "Cancel points, then tool, then selection" },
-  { keys: "Backspace", action: "Remove the last placed point" },
-  { keys: "Delete", action: "Delete the selected curves" },
-  { keys: "Enter", action: "Finish a spline" },
+  { keys: "Esc", action: "Backs out one level: a drag, the points being placed, a pick mode, the dimension or edit tool, the drawing tool, then the selection" },
+  { keys: "Backspace", action: "Remove the last placed point; with no points pending, delete the selected curves" },
+  { keys: "Delete", action: "Drop the points being placed (a line chain keeps its finished segments); with no points pending, delete the selected curves" },
+  { keys: "Enter", action: "End a line chain, finish a spline or profile" },
+  { keys: "Tab / Shift+Tab", action: "Move into the typed-input fields (first / last field)" },
+  { keys: "0-9 . -", action: "While typed-input fields show: start typing the first value" },
   { keys: "Ctrl+A", action: "Select every visible curve" },
   { keys: "Ctrl+C / Ctrl+X / Ctrl+V", action: "Copy, cut and paste the selected curves with their relations" },
   { keys: "Wheel", action: "Zoom at the cursor" },
