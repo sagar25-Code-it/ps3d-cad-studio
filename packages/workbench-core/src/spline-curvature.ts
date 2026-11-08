@@ -61,21 +61,42 @@ function knotExponent(ring: readonly SplinePoint[], closed: boolean): number {
   return 0.75 * Math.min(1, Math.max(0, (ratio - 4) / 4));
 }
 
+interface PreparedSpline {
+  readonly closed: boolean;
+  readonly ring: readonly SplinePoint[];
+  readonly count: number;
+  readonly exponent: number;
+}
+
+/**
+ * What every span of one fit list shares: whether it is periodic, the ring of distinct points and the knot exponent (a scan of all the
+ * chords). Computing it once per list, not once per sample, makes sampling a spline linear in its fit points instead of quadratic
+ * (a 64-point spline was 140 times slower than the uniform curve it replaced). The cache is keyed on the array, which callers do not mutate.
+ */
+const PREPARED = new WeakMap<readonly SplinePoint[], PreparedSpline>();
+
+function preparedSpline(fit: readonly SplinePoint[]): PreparedSpline {
+  const cached = PREPARED.get(fit);
+  if (cached !== undefined && cached.count === (cached.closed ? fit.length - 1 : fit.length)) return cached;
+  const closed = isPeriodicSpline(fit);
+  const ring = closed ? fit.slice(0, -1) : fit;
+  const made: PreparedSpline = { closed, ring, count: ring.length, exponent: knotExponent(ring, closed) };
+  PREPARED.set(fit, made);
+  return made;
+}
+
 /**
  * One span as a cubic Hermite segment: its end points and the end tangents with respect to the span parameter s in [0, 1].
  * The tangents are the non-uniform Catmull-Rom ones; with even spacing they are (P2 - P0) / 2 and (P3 - P1) / 2. The ends of an
  * open spline repeat the end point as the missing neighbour, with the knot gap mirrored from the next span.
  */
 export function splineSpanHermite(fit: readonly SplinePoint[], span: number): { readonly p1: SplinePoint; readonly p2: SplinePoint; readonly m1: SplinePoint; readonly m2: SplinePoint } {
-  const closed = isPeriodicSpline(fit);
-  const ring = closed ? fit.slice(0, -1) : fit;
-  const count = ring.length;
+  const { closed, ring, count, exponent } = preparedSpline(fit);
   const at = (index: number): SplinePoint => (closed ? ring[((index % count) + count) % count]! : ring[Math.min(count - 1, Math.max(0, index))]!);
   const q0 = at(span - 1);
   const q1 = at(span);
   const q2 = at(span + 1);
   const q3 = at(span + 2);
-  const exponent = knotExponent(ring, closed);
   const gap = (a: SplinePoint, b: SplinePoint): number => Math.max(Math.pow(Math.hypot(b[0] - a[0], b[1] - a[1]), exponent), 1e-9);
   const d12 = gap(q1, q2);
   const d01 = !closed && span === 0 ? d12 : gap(q0, q1);

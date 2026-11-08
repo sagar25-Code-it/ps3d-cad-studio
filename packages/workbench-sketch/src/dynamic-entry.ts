@@ -29,8 +29,16 @@ export type FieldParse =
 const FRACTION_WITH_UNIT = /^([+-]?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|in|deg|rad)$/;
 const DECIMAL_COMMA = /^([+-]?\d*),(\d+)(\s*[a-zA-Z]*)$/;
 
-/** Makes `1/2in` mean half an inch (the engine reads it as one over two inches), and `7,5 mm` seven and a half. */
-function friendlyText(text: string): string {
+/** The unit a bare number is read in: the document's. A length typed with a unit (`12 mm`, `0.5 in`) never depends on it. */
+export type EntryUnit = "mm" | "in";
+const MM_PER_INCH = 25.4;
+
+/** A number written with both a comma and a point (1,000.5): neither a decimal comma nor something the expression engine can read. */
+const COMMA_AND_POINT = /^[+-]?\d[\d,]*,\d[\d,]*\.\d+\s*[a-zA-Z]*$|^[+-]?\d+\.\d+,\d+/;
+
+/** Makes `1/2in` mean half an inch (the engine reads it as one over two inches), `7,5 mm` seven and a half, and `45°` forty-five degrees. */
+function friendlyText(rawText: string): string {
+  const text = rawText.replace(/\s*[°º]/g, " deg");
   const fraction = FRACTION_WITH_UNIT.exec(text);
   if (fraction !== null) return `(${fraction[1]}/${fraction[2]})*1 ${fraction[3]}`;
   const comma = DECIMAL_COMMA.exec(text);
@@ -44,7 +52,7 @@ const KIND_WORDS: Readonly<Record<DynamicField["kind"], string>> = { length: "a 
  * Reads one field's text. A length or coordinate must come out as a length (a plain number is millimetres); an angle must
  * be an angle (a plain number is degrees). A `@` or `#` prefix is accepted on X and Y only (see parseCoordinatePair for pairs).
  */
-export function parseFieldEntry(text: string, field: DynamicField, evaluate: EvaluateText = plainEvaluator): FieldParse {
+export function parseFieldEntry(text: string, field: DynamicField, evaluate: EvaluateText = plainEvaluator, unit: EntryUnit = "mm"): FieldParse {
   let body = text.trim();
   let prefix: "" | "@" | "#" = "";
   if (body.startsWith("@") || body.startsWith("#")) {
@@ -53,6 +61,7 @@ export function parseFieldEntry(text: string, field: DynamicField, evaluate: Eva
     if (field.kind !== "coordinate") return { ok: false, message: `${prefix} only works in the X and Y fields, or as a pair such as ${prefix}12,5.` };
   }
   if (body === "" || body === "-" || body === "+") return { ok: false, message: `Type ${KIND_WORDS[field.kind]} for ${field.label.toLowerCase()}.` };
+  if (COMMA_AND_POINT.test(body)) return { ok: false, message: `Write ${body.replace(/,(?=\d{3}(\D|$))/g, "")} without the thousands comma: a comma here is a decimal comma (7,5 is 7.5).` };
   const evaluated = evaluate(friendlyText(body));
   if (!evaluated.ok) return { ok: false, message: evaluated.message };
   const quantity = evaluated.quantity;
@@ -63,18 +72,31 @@ export function parseFieldEntry(text: string, field: DynamicField, evaluate: Eva
     return { ok: false, message: `${field.label} needs a length, not ${describeDimension(quantity)}.` };
   }
   if (!Number.isFinite(quantity.value)) return { ok: false, message: `${field.label} is not a finite number.` };
-  return { ok: true, value: quantity.value, prefix };
+  // A bare number is in the document's unit; the field is millimetres underneath, so a bare 2 in an inch document is 50.8.
+  const bare = isScalar && field.kind !== "angle";
+  return { ok: true, value: bare && unit === "in" ? quantity.value * MM_PER_INCH : quantity.value, prefix };
 }
 
-/** Splits `a,b` or `a;b` at the first separator that is not inside brackets. */
-function splitPair(text: string): readonly [string, string] | undefined {
+/**
+ * Splits `a,b` or `a;b` at the separator that is not inside brackets. With a semicolon the commas are decimal commas (`#1,5;2,5`). Without
+ * one the pair must have exactly one comma: a second comma used to be read as the decimal comma of the second number, so `#1,2,3` placed
+ * the point (1, 2.3) without a word. Returns an error message when the separators are ambiguous.
+ */
+function splitPair(text: string): readonly [string, string] | { readonly error: string } | undefined {
   let depth = 0;
+  const commas: number[] = [];
+  const semicolons: number[] = [];
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index]!;
     if (character === "(") depth += 1;
     else if (character === ")") depth -= 1;
-    else if ((character === "," || character === ";") && depth === 0) return [text.slice(0, index), text.slice(index + 1)];
+    else if (depth === 0 && character === ",") commas.push(index);
+    else if (depth === 0 && character === ";") semicolons.push(index);
   }
+  if (semicolons.length > 1) return { error: "A coordinate pair has one semicolon between X and Y, for example #1,5;2,5." };
+  if (semicolons.length === 1) return [text.slice(0, semicolons[0]!), text.slice(semicolons[0]! + 1)];
+  if (commas.length > 1) return { error: "A coordinate pair has one comma between X and Y. Write decimals with a point (#1.5,2.5), or separate X and Y with a semicolon when you use decimal commas (#1,5;2,5)." };
+  if (commas.length === 1) return [text.slice(0, commas[0]!), text.slice(commas[0]! + 1)];
   return undefined;
 }
 
@@ -83,17 +105,19 @@ export type PairParse =
   | { readonly ok: false; readonly message: string };
 
 /** `#x,y` (absolute) or `@x,y` (relative to the previous point). Returns undefined when the text is not a coordinate pair at all. */
-export function parseCoordinatePair(text: string, evaluate: EvaluateText = plainEvaluator): PairParse | undefined {
+export function parseCoordinatePair(text: string, evaluate: EvaluateText = plainEvaluator, unit: EntryUnit = "mm"): PairParse | undefined {
   const trimmed = text.trim();
   if (!trimmed.startsWith("@") && !trimmed.startsWith("#")) return undefined;
   const relative = trimmed.startsWith("@");
-  const pair = splitPair(trimmed.slice(1));
-  if (pair === undefined) return undefined;
+  const split = splitPair(trimmed.slice(1));
+  if (split === undefined) return undefined;
+  if ("error" in split) return { ok: false, message: split.error };
+  const pair = split;
   const xField: DynamicField = { id: "x", label: "X", unit: "mm", kind: "coordinate" };
   const yField: DynamicField = { id: "y", label: "Y", unit: "mm", kind: "coordinate" };
-  const x = parseFieldEntry(pair[0], xField, evaluate);
+  const x = parseFieldEntry(pair[0], xField, evaluate, unit);
   if (!x.ok) return { ok: false, message: x.message };
-  const y = parseFieldEntry(pair[1], yField, evaluate);
+  const y = parseFieldEntry(pair[1], yField, evaluate, unit);
   if (!y.ok) return { ok: false, message: y.message };
   return { ok: true, x: x.value, y: y.value, relative };
 }
@@ -108,6 +132,8 @@ export interface DynamicEntryInput {
   readonly evaluate?: EvaluateText;
   /** What `@` is measured from when no point has been placed yet: the last point of the previous shape. Defaults to the origin. */
   readonly lastPoint?: Vec2;
+  /** The document's unit: a bare number typed in a length field is in it (default millimetres). */
+  readonly unit?: EntryUnit;
 }
 
 export type DynamicEntryResult =
@@ -149,15 +175,15 @@ export function resolveDynamicEntry(input: DynamicEntryInput): DynamicEntryResul
 
   // A coordinate pair in any field names the whole point.
   for (const field of typedFields) {
-    const pair = parseCoordinatePair(input.texts[field.id]!, evaluate);
+    const pair = parseCoordinatePair(input.texts[field.id]!, evaluate, input.unit ?? "mm");
     if (pair === undefined) continue;
     if (!pair.ok) return { ok: false, errors: { [field.id]: pair.message }, message: `${field.label}: ${pair.message}` };
     const point: Vec2 = pair.relative ? [reference[0] + pair.x, reference[1] + pair.y] : [pair.x, pair.y];
-    return { ok: true, point: [Math.round(point[0] * 1e9) / 1e9, Math.round(point[1] * 1e9) / 1e9], notes: [`${pair.relative ? "Relative" : "Absolute"} coordinates (${pair.x}, ${pair.y}) mm.`], guides: [], typed: {} };
+    return { ok: true, point: [Math.round(point[0] * 1e9) / 1e9, Math.round(point[1] * 1e9) / 1e9], notes: [`${pair.relative ? "Relative" : "Absolute"} coordinates (${formatEntryNumber(pair.x, input.unit ?? "mm")}, ${formatEntryNumber(pair.y, input.unit ?? "mm")}) ${input.unit ?? "mm"}.`], guides: [], typed: {} };
   }
 
   for (const field of typedFields) {
-    const parsed = parseFieldEntry(input.texts[field.id]!, field, evaluate);
+    const parsed = parseFieldEntry(input.texts[field.id]!, field, evaluate, input.unit ?? "mm");
     if (!parsed.ok) { errors[field.id] = parsed.message; continue; }
     let value = parsed.value;
     if (parsed.prefix === "@") value += field.id === "x" ? reference[0] : reference[1];
@@ -177,17 +203,28 @@ export function resolveDynamicEntry(input: DynamicEntryInput): DynamicEntryResul
 }
 
 /** Which fields currently hold text that cannot be read, for showing an error state while the user types. Blank fields are fine. */
-export function fieldErrorsFor(fields: readonly DynamicField[], texts: Partial<Record<DynamicFieldId, string>>, evaluate: EvaluateText = plainEvaluator): Partial<Record<DynamicFieldId, string>> {
+export function fieldErrorsFor(fields: readonly DynamicField[], texts: Partial<Record<DynamicFieldId, string>>, evaluate: EvaluateText = plainEvaluator, unit: EntryUnit = "mm"): Partial<Record<DynamicFieldId, string>> {
   const errors: Partial<Record<DynamicFieldId, string>> = {};
   for (const field of fields) {
     const text = texts[field.id];
     if (text === undefined || text.trim() === "") continue;
     // A lone sign or prefix is a half-typed value, not yet an error.
     if (/^[-+@#]?$/.test(text.trim())) continue;
-    const pair = parseCoordinatePair(text, evaluate);
+    const pair = parseCoordinatePair(text, evaluate, unit);
     if (pair !== undefined) { if (!pair.ok) errors[field.id] = pair.message; continue; }
-    const parsed = parseFieldEntry(text, field, evaluate);
+    const parsed = parseFieldEntry(text, field, evaluate, unit);
     if (!parsed.ok) errors[field.id] = parsed.message;
   }
   return errors;
+}
+
+/** A millimetre value as the number shown in the document's unit (no unit symbol), trimmed of float dust. */
+export function formatEntryNumber(valueMm: number, unit: EntryUnit): number {
+  const shown = unit === "in" ? valueMm / MM_PER_INCH : valueMm;
+  return Number(shown.toFixed(unit === "in" ? 4 : 3));
+}
+
+/** The unit a typed-input field is labelled with: lengths follow the document, angles stay in degrees. */
+export function entryUnitLabel(field: Pick<DynamicField, "kind" | "unit">, unit: EntryUnit): string {
+  return field.kind === "angle" ? field.unit : unit;
 }
