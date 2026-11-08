@@ -5,6 +5,7 @@ export * from "./surface.js";
 export * from "./tessellate.js";
 export * from "./mesh-boolean.js";
 export * from "./mesh-modify.js";
+export * from "./analysis-index.js";
 export * from "./construction-geometry.js";
 export * from "./sheet-metal.js";
 export * from "./sheet-edge-flange.js";

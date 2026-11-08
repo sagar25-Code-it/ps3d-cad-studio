@@ -29,6 +29,8 @@ import { sketchSolverTests } from "./sketch-solver.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
 import { meshModifyTests } from "./mesh-modify.test.js";
+import { meshCheckTests } from "./mesh-check.test.js";
+import { bodyAnalysisTests } from "./body-analysis.test.js";
 import { holeWizardTests } from "./hole-wizard.test.js";
 import { sketchChamferModeTests } from "./sketch-chamfer-modes.test.js";
 import { sketchArcAndSlotModeTests } from "./sketch-arc-and-slot-modes.test.js";
@@ -99,6 +101,8 @@ const tests: readonly TestCase[] = [
   ...sketchEditToolTests,
   ...meshBooleanTests,
   ...meshModifyTests,
+  ...meshCheckTests,
+  ...bodyAnalysisTests,
   ...holeWizardTests,
   ...sketchChamferModeTests,
   ...sketchArcAndSlotModeTests,
