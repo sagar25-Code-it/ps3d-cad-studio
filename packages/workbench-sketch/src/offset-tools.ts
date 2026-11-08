@@ -349,6 +349,8 @@ interface Built {
   readonly parts: readonly { readonly source: Round; readonly made: SketchEntity; readonly atFrom: SketchPointRef; readonly atTo: SketchPointRef }[];
   readonly fillers: readonly { readonly made: SketchEntity; readonly afterPiece: number }[];
   readonly samples: readonly (readonly Vec2[])[];
+  /** The runs that must stay at least the offset distance from the source (a chamfer cuts inside that distance on purpose). */
+  readonly checked: readonly (readonly Vec2[])[];
 }
 
 function buildOffsetChain(context: SketchEditContext, chain: Chain, signed: number, corner: OffsetCorner, flags: (entity: SketchEntity) => { readonly construction: boolean; readonly visible?: boolean }): Built | string {
@@ -372,6 +374,7 @@ function buildOffsetChain(context: SketchEditContext, chain: Chain, signed: numb
   const parts: { source: Round; made: SketchEntity; atFrom: SketchPointRef; atTo: SketchPointRef }[] = [];
   const fillers: { made: SketchEntity; afterPiece: number }[] = [];
   const samples: (readonly Vec2[])[] = [];
+  const checked: (readonly Vec2[])[] = [];
   for (let index = 0; index < count; index += 1) {
     const carrier = carriers[index]!;
     const piece = carrier.piece;
@@ -390,6 +393,7 @@ function buildOffsetChain(context: SketchEditContext, chain: Chain, signed: numb
       entities.push(line);
       parts.push({ source: piece.entity, made: line, atFrom: piece.forward ? "start" : "end", atTo: piece.forward ? "end" : "start" });
       samples.push([from, to]);
+      checked.push([from, to]);
     } else {
       const center = carrier.center!;
       const radius = carrier.radius!;
@@ -405,7 +409,9 @@ function buildOffsetChain(context: SketchEditContext, chain: Chain, signed: numb
       const arc: Arc = piece.forward ? { id, kind: "arc", start: from, mid: middle, end: to, ...shared } : { id, kind: "arc", start: to, mid: middle, end: from, ...shared };
       entities.push(arc);
       parts.push({ source: piece.entity, made: arc, atFrom: piece.forward ? "start" : "end", atTo: piece.forward ? "end" : "start" });
-      samples.push(Array.from({ length: 25 }, (_, step): Vec2 => [center[0] + radius * Math.cos(startAngle + (sigma * sweep * step) / 24), center[1] + radius * Math.sin(startAngle + (sigma * sweep * step) / 24)]));
+      const run = Array.from({ length: 25 }, (_, step): Vec2 => [center[0] + radius * Math.cos(startAngle + (sigma * sweep * step) / 24), center[1] + radius * Math.sin(startAngle + (sigma * sweep * step) / 24)]);
+      samples.push(run);
+      checked.push(run);
     }
     const joint = after;
     if (joint?.filler !== undefined) {
@@ -416,10 +422,12 @@ function buildOffsetChain(context: SketchEditContext, chain: Chain, signed: numb
         : { id: fillerId, kind: "arc", start: joint.filler.from, mid: joint.filler.mid!, end: joint.filler.to, ...flagsOf };
       entities.push(made);
       fillers.push({ made, afterPiece: index });
-      samples.push(joint.filler.kind === "line" ? [joint.filler.from, joint.filler.to] : arcSamples(made as Arc));
+      const fillerRun = joint.filler.kind === "line" ? [joint.filler.from, joint.filler.to] : arcSamples(made as Arc);
+      samples.push(fillerRun);
+      if (joint.filler.kind === "arc") checked.push(fillerRun);
     }
   }
-  return { entities, parts, fillers, samples };
+  return { entities, parts, fillers, samples, checked };
 }
 
 function arcSamples(arc: Arc): readonly Vec2[] {
@@ -653,7 +661,7 @@ export function offsetEntities(context: SketchEditContext, ids: readonly string[
           // The source is a polyline of 48 chords per arc, which sits inside its arcs by at most the chord sag.
           const sag = Math.max(0, ...chain.pieces.map((piece) => (piece.radius === undefined ? 0 : piece.radius * (1 - Math.cos(Math.PI / 48)))));
           const floor = Math.abs(signed) * (1 - 1e-3) - 1e-6 - sag;
-          const tooClose = runs.some((run) => (run.length === 2 ? densify(run, Math.abs(signed) / 2) : run).some((point) => distanceToRuns(point, originals) < floor));
+          const tooClose = result.checked.some((run) => (run.length === 2 ? densify(run, Math.abs(signed) / 2) : run).some((point) => distanceToRuns(point, originals) < floor));
           if (tooClose) return reject("The offset overlaps itself: some feature of the shape is narrower than twice the distance.", ids, "Use a smaller distance, or offset to the other side.");
         }
         added.push(...result.entities);
