@@ -13,6 +13,7 @@ export type Point2 = readonly [number, number];
 
 const COINCIDENT = 1e-12;
 const DEGENERATE_AREA = 1e-14;
+const MAX_BRIDGE_ATTEMPTS = 4000;
 
 /** Signed area of a closed loop: positive when counter-clockwise. */
 export function signedArea2(points: readonly Point2[]): number {
@@ -135,24 +136,51 @@ function indexRange(start: number, count: number): number[] {
   return Array.from({ length: count }, (_, offset) => start + offset);
 }
 
-/** Splices a hole into the outer ring through the shortest bridge that crosses nothing. */
+/**
+ * Whether the direction from the ring vertex at `position` toward `target` points into the region the ring encloses (the ring runs
+ * counter-clockwise around its interior, so the interior is on the left). A vertex that appears twice because an earlier bridge touched
+ * it has two corners; only the corner whose wedge holds the bridge is a valid place to splice.
+ */
+function opensToward(ring: readonly number[], position: number, target: Point2, points: readonly Point2[]): boolean {
+  const here = points[ring[position]!]!;
+  const before = points[ring[(position + ring.length - 1) % ring.length]!]!;
+  const after = points[ring[(position + 1) % ring.length]!]!;
+  const wx = after[0] - here[0];
+  const wy = after[1] - here[1];
+  const ux = before[0] - here[0];
+  const uy = before[1] - here[1];
+  const dx = target[0] - here[0];
+  const dy = target[1] - here[1];
+  const cross = (ax: number, ay: number, bx: number, by: number): number => ax * by - ay * bx;
+  if (cross(wx, wy, ux, uy) > DEGENERATE_AREA) return cross(wx, wy, dx, dy) > 0 && cross(dx, dy, ux, uy) > 0;
+  return !(cross(ux, uy, dx, dy) >= 0 && cross(dx, dy, wx, wy) >= 0);
+}
+
+/**
+ * Splices a hole into the ring through the shortest bridge that crosses nothing and leaves both ends through their interior wedge.
+ * Hole corners are tried right-most first and ring corners nearest first, so a hole that lines up with the others is still joined.
+ */
 function bridgeHole(ring: readonly number[], hole: readonly number[], points: readonly Point2[], otherHoles: readonly (readonly number[])[]): number[] {
-  let holeStart = 0;
-  for (let index = 1; index < hole.length; index += 1) {
-    const candidate = points[hole[index]!]!;
-    const best = points[hole[holeStart]!]!;
-    if (candidate[0] > best[0] + COINCIDENT || (Math.abs(candidate[0] - best[0]) <= COINCIDENT && candidate[1] < best[1])) holeStart = index;
-  }
-  const holePoint = points[hole[holeStart]!]!;
-  const candidates = ring
-    .map((pointIndex, position) => ({ position, distance: squaredDistance(points[pointIndex]!, holePoint) }))
-    .sort((left, right) => left.distance - right.distance);
-  for (const { position } of candidates) {
-    const ringPoint = points[ring[position]!]!;
-    if (!bridgeIsClear(holePoint, ringPoint, ring, hole, otherHoles, points)) continue;
-    const holeSequence: number[] = [];
-    for (let step = 0; step < hole.length; step += 1) holeSequence.push(hole[(holeStart + step) % hole.length]!);
-    return [...ring.slice(0, position + 1), ...holeSequence, hole[holeStart]!, ring[position]!, ...ring.slice(position + 1)];
+  const holeOrder = hole
+    .map((pointIndex, position) => ({ position, point: points[pointIndex]! }))
+    .sort((left, right) => (Math.abs(left.point[0] - right.point[0]) <= COINCIDENT ? left.point[1] - right.point[1] : right.point[0] - left.point[0]));
+  let tried = 0;
+  for (const start of holeOrder) {
+    const holePoint = start.point;
+    const candidates = ring
+      .map((pointIndex, position) => ({ position, distance: squaredDistance(points[pointIndex]!, holePoint) }))
+      .sort((left, right) => left.distance - right.distance);
+    for (const { position } of candidates) {
+      tried += 1;
+      if (tried > MAX_BRIDGE_ATTEMPTS) break;
+      const ringPoint = points[ring[position]!]!;
+      if (!opensToward(ring, position, holePoint, points) || !opensToward(hole, start.position, ringPoint, points)) continue;
+      if (!bridgeIsClear(holePoint, ringPoint, ring, hole, otherHoles, points)) continue;
+      const holeSequence: number[] = [];
+      for (let step = 0; step < hole.length; step += 1) holeSequence.push(hole[(start.position + step) % hole.length]!);
+      return [...ring.slice(0, position + 1), ...holeSequence, hole[start.position]!, ring[position]!, ...ring.slice(position + 1)];
+    }
+    if (tried > MAX_BRIDGE_ATTEMPTS) break;
   }
   throw new Error("A hole could not be connected to the profile outline.");
 }
