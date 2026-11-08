@@ -56,6 +56,8 @@ export function anchorsForConstraint(constraint: WorkbenchSketchConstraint, enti
     case "coincident": {
       if (points[0] === "curve") return [...holdExcept(second!, points[1] ?? "self"), hold(first!)];
       if (points[1] === "curve") return [...holdExcept(first!, points[0] ?? "self"), hold(second!)];
+      // A curve joined at both ends to others (part of a chain or loop) moves with its chain instead of being anchored by its far end.
+      if (isChained(second!, siblings)) return [hold(first!)];
       return [hold(first!), ...holdExcept(second!, points[1] ?? "self")];
     }
     case "midpoint":
@@ -86,6 +88,19 @@ export function preserveForConstraint(constraint: WorkbenchSketchConstraint, ent
   const [, second] = constraint.entityIds;
   if (second === undefined || entities.get(second)?.kind !== "line") return [];
   return constraint.kind === "parallel" || constraint.kind === "perpendicular" || constraint.kind === "collinear" || (constraint.kind === "angle" && constraint.driven !== true) ? [second] : [];
+}
+
+/** Whether the entity has Coincident joints at both its start and its end. */
+function isChained(id: string, constraints: readonly WorkbenchSketchConstraint[]): boolean {
+  const refs = new Set<string>();
+  for (const candidate of constraints) {
+    if (candidate.kind !== "coincident" || candidate.suppressed === true || candidate.points === undefined) continue;
+    candidate.entityIds.forEach((entityId, index) => {
+      const ref = candidate.points?.[index];
+      if (entityId === id && (ref === "start" || ref === "end")) refs.add(ref);
+    });
+  }
+  return refs.has("start") && refs.has("end");
 }
 
 /** Lines held tangent to a circle or arc: when the circle is resized they stay put and the circle's centre gives way. */

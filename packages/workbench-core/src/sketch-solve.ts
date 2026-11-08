@@ -107,9 +107,13 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
   }
   // Unless told otherwise, the curve the caller just edited is the reference and what is joined to it follows.
   const anchors = toSolverAnchors(options.anchors ?? (drag === undefined ? (focusEntityIds ?? []).map((entityId): LiveAnchor => ({ entityId, ref: "self", priority: 2 })) : []));
-  const preserve = (options.preserve ?? []).filter((id) => document.geometry.some((candidate) => candidate.id === id));
+  // A line joined to others at both ends belongs to a chain or a loop: when the chain is moved or pinned the line travels with it instead of stretching.
+  // (A dragged corner still stretches its neighbours.)
+  const inDocument = (id: string): boolean => document.geometry.some((candidate) => candidate.id === id);
+  const chained = (drag === undefined ? linesJoinedAtBothEnds(sketch) : []).filter(inDocument);
+  const preserve = (options.preserve ?? []).filter(inDocument);
   const result = drag === undefined
-    ? solveAnalyticSketch({ document, mode: "regenerate", anchors, preserve, labels: translation.labels })
+    ? solveAnalyticSketch({ document, mode: "regenerate", anchors, preserve, preserveWeak: chained, labels: translation.labels })
     : solveAnalyticSketch({ document, mode: "drag", anchors, preserve, labels: translation.labels, dragTarget: { reference: { entityId: drag.entityId, selector: solverSelector(drag.point) }, positionMm: drag.positionMm } });
   const errors = result.diagnostics.filter((diagnostic) => diagnostic.severity === "error" && !diagnostic.unsupported);
   if (result.status === "failed" || errors.length > 0) {
@@ -135,6 +139,19 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
     return replacement;
   });
   return { ok: true, entities: nextEntities, movedIds, notes, unsolved: unsolvedList, redundant: toLiveSets(result.dof.relationSets ?? [], "redundant") };
+}
+
+/** Lines that have a Coincident joint at their start and another at their end. */
+function linesJoinedAtBothEnds(sketch: WorkbenchSketch): readonly string[] {
+  const ends = new Map<string, Set<string>>();
+  for (const constraint of sketch.constraints) {
+    if (constraint.kind !== "coincident" || constraint.suppressed === true || constraint.points === undefined) continue;
+    constraint.entityIds.forEach((id, index) => {
+      const ref = constraint.points?.[index];
+      if (ref === "start" || ref === "end") ends.set(id, (ends.get(id) ?? new Set<string>()).add(ref));
+    });
+  }
+  return [...ends.entries()].filter(([, refs]) => refs.has("start") && refs.has("end")).map(([id]) => id);
 }
 
 /** Maps the solver's relation sets (solver IDs) onto the constraints the user made. */

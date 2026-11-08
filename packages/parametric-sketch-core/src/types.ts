@@ -305,6 +305,8 @@ export interface SketchSolveRequest {
   readonly anchors?: readonly SolveAnchor[];
   /** Entities whose size (a line's length, a circle's radius, a rectangle's sides) should be kept while their direction or position changes. */
   readonly preserve?: readonly string[];
+  /** Entities whose size is kept only as a mild preference (it gives way to `preserve`): the lines of a chain or loop. */
+  readonly preserveWeak?: readonly string[];
   /** Human-readable names for constraints, dimensions and geometry, used in diagnostics. */
   readonly labels?: Readonly<Record<string, string>>;
 }

@@ -187,7 +187,7 @@ function makeParts(component: Component, frozen: Uint8Array, includeSoft: boolea
   };
   for (const equation of component.hard) push(equation, 1);
   if (includeSoft) {
-    for (const equation of component.soft) push(equation, SOFT_FACTOR);
+    for (const equation of component.soft) push(equation, equation.softFactor ?? SOFT_FACTOR);
     for (const goal of component.goals) push(goal.equation, goal.factor);
   }
   return { parts, rowCount };
@@ -226,6 +226,7 @@ function levenbergMarquardt(model: SolverModel, component: Component, frozen: Ui
   let lambda = includeSoft ? 1e-6 : 1e-8;
   let iteration = 0;
   let moved = 0;
+  let stalled = false;
   for (; iteration < maxIterations; iteration += 1) {
     const hardNow = maxHard(parts, residual);
     if (!includeSoft && hardNow <= CONVERGED) break;
@@ -328,8 +329,10 @@ function levenbergMarquardt(model: SolverModel, component: Component, frozen: Ui
         evaluateAll(parts, x, residual);
         const next = sumOfSquares(parts, residual) + (includeSoft ? stayCost() : 0);
         if (next < cost || (next <= cost && largest <= 1e-14)) {
+          // In the soft phase a step that no longer lowers the cost in a meaningful way means the minimum is reached; going on would only amplify round-off along flat directions.
+          if (includeSoft && cost - next <= 1e-9 * cost) stalled = true;
           cost = next;
-          lambda = Math.max(lambda * 0.2, includeSoft ? 1e-9 : 1e-12);
+          lambda = Math.max(lambda * 0.2, includeSoft ? 1e-7 : 1e-12);
           accepted = true;
           moved = largest;
           break;
@@ -342,7 +345,7 @@ function levenbergMarquardt(model: SolverModel, component: Component, frozen: Ui
       evaluateAll(parts, x, residual);
       break;
     }
-    if (includeSoft && moved <= 1e-12) break;
+    if (includeSoft && (moved <= 1e-12 || stalled)) break;
   }
   return { iterations: iteration, hard: maxHard(parts, residual), moved };
 }

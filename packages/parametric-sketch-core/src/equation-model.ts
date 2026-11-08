@@ -24,6 +24,8 @@ export interface Equation {
   readonly id: string;
   readonly source: "constraint" | "dimension";
   readonly size: number;
+  /** For a soft (keep-the-shape) equation: its weight relative to a hard relation. */
+  readonly softFactor?: number;
   /** Every variable index the residuals read (frozen ones included). */
   readonly vars: readonly number[];
   readonly entities: readonly string[];
@@ -792,13 +794,17 @@ class ModelBuilder {
 
   // ------------------------------------------------------------------ shape preservation
 
-  addShapePreservation(only: ReadonlySet<string>): void {
+  addShapePreservation(only: ReadonlySet<string>, factor: number): void {
     for (const entry of this.layout.values()) {
       if (!only.has(entry.id)) continue;
       const b = entry.base;
       const x0 = this.x0;
       const add = (size: number, vars: readonly number[], evaluate: EvalFn): void => {
-        this.soft.push({ id: `shape:${entry.id}`, source: "constraint", size, vars, entities: [entry.id], eval: evaluate });
+        if (factor === 0) {
+          this.equations.push({ id: `shape:${entry.id}`, source: "constraint", size, vars, entities: [entry.id], eval: evaluate });
+          return;
+        }
+        this.soft.push({ id: `shape:${entry.id}`, source: "constraint", size, softFactor: factor, vars, entities: [entry.id], eval: evaluate });
       };
       switch (entry.geometry.kind) {
         case "line":
@@ -855,6 +861,8 @@ export interface BuildOptions {
   readonly anchors?: readonly SolveAnchor[];
   /** Entities whose size is kept while their position and direction change (a line turned parallel keeps its length). */
   readonly preserve?: ReadonlySet<string>;
+  /** Entities whose size is only mildly preferred; gives way to `preserve`. */
+  readonly preserveWeak?: ReadonlySet<string>;
 }
 
 /** Builds the equation system for the active (not suppressed) geometry, constraints and driving dimensions of a document. */
@@ -874,7 +882,10 @@ export function buildSolverModel(document: ParametricSketchDocument, options: Bu
   }
   for (const dimension of document.dimensions.filter((candidate) => !candidate.suppressed && candidate.mode === "driving")) builder.addDimension(dimension);
   if (options.anchors !== undefined) builder.applyAnchors(options.anchors);
-  if (options.preserve !== undefined && options.preserve.size > 0) builder.addShapePreservation(options.preserve);
+  // A size that must be kept is an equation of its own (the solver retries without it if the other relations cannot allow it);
+  // a size that is only preferred is a soft term that every real relation outweighs.
+  if (options.preserve !== undefined && options.preserve.size > 0) builder.addShapePreservation(options.preserve, 0);
+  if (options.preserveWeak !== undefined && options.preserveWeak.size > 0) builder.addShapePreservation(new Set([...options.preserveWeak].filter((id) => options.preserve?.has(id) !== true)), 3e-4);
   return {
     document: active,
     layout: builder.layout,

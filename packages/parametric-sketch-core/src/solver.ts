@@ -24,6 +24,7 @@ import type {
   SketchGeometry,
   SketchRelationSet,
   SketchSolveRequest,
+  SolveAnchor,
   SketchSolveResult
 } from "./types.js";
 import { validateParametricSketch } from "./validation.js";
@@ -55,9 +56,13 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
   const tolerance = request.toleranceMm ?? DEFAULT_TOLERANCE_MM;
   const diagnostics: SketchDiagnostic[] = [...validation.diagnostics];
   const labelOf = makeLabeler(request.document, request.labels);
-  const preserveOption = request.mode === "validate" ? {} : { preserve: new Set(request.preserve ?? defaultPreserve(request.document)) };
+  const strong = request.mode === "validate" ? new Set<string>() : new Set(request.preserve ?? defaultPreserve(request.document));
+  const weak = request.mode === "validate" || request.preserveWeak === undefined ? undefined : new Set(request.preserveWeak);
+  const preserveOption: { readonly preserve?: ReadonlySet<string>; readonly preserveWeak?: ReadonlySet<string> } = { preserve: strong, ...(weak === undefined ? {} : { preserveWeak: weak }) };
   // Unless the caller says who stays put, the geometry a relation names first is the reference.
   const anchors = request.mode === "validate" ? [] : request.anchors ?? defaultAnchors(request.document);
+  // The relations alone, with nothing preferred or pinned: what the degrees of freedom and the names of conflicts are read from.
+  const relations = buildSolverModel(request.document, {});
   let model = buildSolverModel(request.document, { anchors, ...preserveOption });
   for (const candidate of model.diagnostics) addUniqueDiagnostic(diagnostics, candidate);
 
@@ -87,13 +92,17 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
       failed = true;
     } else {
       let outcome = solveModel(model, { tolerance }, pointer?.frozen);
-      if (!outcome.ok && pointer === undefined && anchors.length > 0) {
-        // The geometry the hints wanted to keep still cannot be kept (a Fix elsewhere, or a dimension on it): solve again with nothing preferred.
-        const retry = buildSolverModel(request.document, preserveOption);
-        const second = solveModel(retry, { tolerance });
-        if (second.ok) {
-          model = retry;
-          outcome = second;
+      if (!outcome.ok && pointer === undefined && (anchors.length > 0 || strong.size > 0)) {
+        // The sizes and places the hints wanted to keep cannot be kept (a Fix elsewhere, or a dimension on them): solve again with less required.
+        const attempts: readonly (readonly SolveAnchor[])[] = [anchors, []];
+        for (const attemptAnchors of attempts) {
+          const retry = buildSolverModel(request.document, { anchors: attemptAnchors, ...(weak === undefined ? {} : { preserveWeak: weak }) });
+          const second = solveModel(retry, { tolerance });
+          if (second.ok) {
+            model = retry;
+            outcome = second;
+            break;
+          }
         }
       }
       if (!outcome.ok && pointer?.goal !== undefined) {
@@ -104,7 +113,8 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
       }
       if (!outcome.ok) {
         failed = true;
-        reportFailure(model, outcome.failing, labelOf, diagnostics, request.mode === "drag" ? "DRAG_CONFLICT" : undefined);
+        relations.x.set(model.x);
+        reportFailure(relations, outcome.failing.filter((report) => !report.equation.id.startsWith("shape:") && report.equation.id !== "drag:pointer"), labelOf, diagnostics, request.mode === "drag" ? "DRAG_CONFLICT" : undefined);
       } else {
         document = applySolution(model);
         const collapse = findCollapse(model, document, labelOf);
@@ -125,12 +135,13 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
   }
 
   const measurements = measureDimensions(document, diagnostics);
-  if (!failed) verifyDrivingDimensions(document, model, measurements, diagnostics, tolerance);
+  if (!failed) verifyDrivingDimensions(document, relations, measurements, diagnostics, tolerance);
   const hasError = diagnostics.some((candidate) => candidate.severity === "error" && !candidate.unsupported);
   const hasUnsupported = diagnostics.some((candidate) => candidate.unsupported);
   // The analysis reads the geometry the answer will have: the solved numbers, or the stored ones when nothing was applied.
-  if (document === request.document) model.x.set(model.x0);
-  const rank = analyzeRank(model, { invalid: hasError && !diagnostics.some(isConflict) });
+  if (document === request.document) relations.x.set(relations.x0);
+  else relations.x.set(model.x);
+  const rank = analyzeRank(relations, { invalid: hasError && !diagnostics.some(isConflict) });
   const sets: readonly SketchRelationSet[] = describeSets(rank.sets, labelOf);
   const dof: SketchDofState = {
     ...rank.dof,
@@ -150,8 +161,8 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
     dof,
     measurements,
     // Validation applies nothing; it only reports which relations the stored geometry violates.
-    appliedConstraintIds: failed || request.mode === "validate" ? [] : [...model.appliedConstraints].sort(),
-    appliedDimensionIds: failed || request.mode === "validate" ? [] : [...model.appliedDimensions].sort(),
+    appliedConstraintIds: failed || request.mode === "validate" ? [] : [...relations.appliedConstraints].sort(),
+    appliedDimensionIds: failed || request.mode === "validate" ? [] : [...relations.appliedDimensions].sort(),
     deterministicFingerprint: fingerprint(nextDocument)
   };
 }
