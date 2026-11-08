@@ -44,6 +44,14 @@ export interface DimensionLayout {
 }
 
 export const DIMENSION_OFFSET_PX = 30;
+
+/** Per-dimension display choices: how far the dimension line stands off the geometry, and how the value is written. */
+export interface DimensionLayoutOptions {
+  /** Distance of the dimension line from the geometry in screen pixels; defaults to DIMENSION_OFFSET_PX. */
+  readonly offsetPx?: number;
+  /** Writes a value (millimetres; for a circle the diameter) as the label text. Defaults to three decimals without a unit. */
+  readonly format?: (value: number) => string;
+}
 export const DIMENSION_OVERSHOOT_PX = 6;
 export const DIMENSION_GAP_PX = 3;
 
@@ -51,16 +59,19 @@ function formatValue(value: number): string {
   return String(Number(value.toFixed(3)));
 }
 
+const writer = (options: DimensionLayoutOptions | undefined): ((value: number) => string) => options?.format ?? formatValue;
+
 function unit(from: Vec2, to: Vec2): Vec2 {
   const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
   return length < 1e-12 ? [1, 0] : [(to[0] - from[0]) / length, (to[1] - from[1]) / length];
 }
 
 /** A linear dimension between two points, stood off to the side given by `normal`. */
-function linear(start: Vec2, end: Vec2, normal: Vec2, valueMm: number, pxMm: number, labelPrefix = ""): DimensionLayout {
+function linear(start: Vec2, end: Vec2, normal: Vec2, valueMm: number, pxMm: number, labelPrefix = "", options?: DimensionLayoutOptions): DimensionLayout {
   const direction = unit(start, end);
-  const offset = DIMENSION_OFFSET_PX * pxMm;
-  const reach = (DIMENSION_OFFSET_PX + DIMENSION_OVERSHOOT_PX) * pxMm;
+  const standoff = options?.offsetPx ?? DIMENSION_OFFSET_PX;
+  const offset = standoff * pxMm;
+  const reach = (standoff + DIMENSION_OVERSHOOT_PX) * pxMm;
   const gap = DIMENSION_GAP_PX * pxMm;
   const at = (point: Vec2, distance: number): Vec2 => [point[0] + normal[0] * distance, point[1] + normal[1] * distance];
   const first = at(start, offset);
@@ -70,7 +81,7 @@ function linear(start: Vec2, end: Vec2, normal: Vec2, valueMm: number, pxMm: num
     dimensionLine: { from: first, to: second },
     arrows: [{ tip: first, direction: [-direction[0], -direction[1]] }, { tip: second, direction }],
     textAt: [(first[0] + second[0]) / 2 + normal[0] * 9 * pxMm, (first[1] + second[1]) / 2 + normal[1] * 9 * pxMm],
-    label: `${labelPrefix}${formatValue(valueMm)}`
+    label: `${labelPrefix}${writer(options)(valueMm)}`
   };
 }
 
@@ -84,9 +95,9 @@ function upwardNormal(direction: Vec2): Vec2 {
  * The layout of a driving dimension on an entity, or undefined when the entity has no such dimension.
  * Circles are shown as a diameter (Ø) even though the stored value is the radius.
  */
-export function dimensionLayout(entity: SketchEntity, dimension: DrivingDimensionKind, valueMm: number, pxMm: number): DimensionLayout | undefined {
+export function dimensionLayout(entity: SketchEntity, dimension: DrivingDimensionKind, valueMm: number, pxMm: number, options?: DimensionLayoutOptions): DimensionLayout | undefined {
   if (entity.kind === "line" && dimension === "length") {
-    return linear(entity.start, entity.end, upwardNormal(unit(entity.start, entity.end)), valueMm, pxMm);
+    return linear(entity.start, entity.end, upwardNormal(unit(entity.start, entity.end)), valueMm, pxMm, "", options);
   }
   if (entity.kind === "rectangle" && (dimension === "width" || dimension === "height")) {
     const radians = (entity.rotationDeg * Math.PI) / 180;
@@ -95,8 +106,8 @@ export function dimensionLayout(entity: SketchEntity, dimension: DrivingDimensio
     const corners = entityPoints(entity);
     // Corners run (-w,-h), (w,-h), (w,h), (-w,h) in the rectangle's own frame.
     return dimension === "width"
-      ? linear(corners[0]!, corners[1]!, [-axisY[0], -axisY[1]], valueMm, pxMm)
-      : linear(corners[1]!, corners[2]!, axisX, valueMm, pxMm);
+      ? linear(corners[0]!, corners[1]!, [-axisY[0], -axisY[1]], valueMm, pxMm, "", options)
+      : linear(corners[1]!, corners[2]!, axisX, valueMm, pxMm, "", options);
   }
   if (entity.kind === "circle" && dimension === "radius") {
     const angle = (35 * Math.PI) / 180;
@@ -109,7 +120,7 @@ export function dimensionLayout(entity: SketchEntity, dimension: DrivingDimensio
       // The arrows touch the curve from inside, pointing outward at both ends.
       arrows: [{ tip: near, direction: [-direction[0], -direction[1]] }, { tip: far, direction }],
       textAt: [far[0] + direction[0] * 16 * pxMm, far[1] + direction[1] * 16 * pxMm],
-      label: `Ø${formatValue(valueMm * 2)}`
+      label: `Ø${writer(options)(valueMm * 2)}`
     };
   }
   if (entity.kind === "arc" && dimension === "arc-length") return arcLengthDimensionLayout(entity, valueMm, pxMm);

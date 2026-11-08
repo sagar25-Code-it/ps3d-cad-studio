@@ -182,8 +182,9 @@ const insertAt = <T>(items: readonly T[], index: number, item: T): readonly T[] 
 
 export function commitDesignSketch(project: WorkbenchProject, featureId: string, name: string): DesignChange {
   const history = designOf(project);
-  if (project.sketch.entities.length === 0) return fail("INVALID_OPERATION", "The sketch is empty, so there is nothing to finish.", [project.sketch.id], "Draw at least one curve first.");
   const editing = history.features.find((feature): feature is DesignSketchFeature => feature.id === history.editingSketchId && feature.kind === "sketch");
+  // A new sketch needs a curve, but emptying a sketch that is already in the timeline is a real edit and finishing it records the empty sketch.
+  if (project.sketch.entities.length === 0 && editing === undefined) return fail("INVALID_OPERATION", "The sketch is empty, so there is nothing to finish.", [project.sketch.id], "Draw at least one curve first.");
   if (editing !== undefined) {
     const next: DesignHistory = { ...history, features: history.features.map((feature) => feature.id === editing.id ? { ...editing, sketch: project.sketch } : feature) };
     return changed(withHistory(project, next), [editing.id], `Updated ${editing.name} in the timeline.`);

@@ -1,5 +1,6 @@
 import { NEW_PRIMITIVE_SHAPES, validPrimitiveBody } from "./primitive-bodies.js";
 import { validConstructionBinder, validNewPlaneDefinition } from "./construction-refs.js";
+import { MAX_SPLINE_FIT_POINTS } from "./spline-limits.js";
 import {
   WORKBENCH_FORMAT,
   WORKBENCH_SCHEMA_VERSION,
@@ -282,7 +283,7 @@ function validateEntity(value: unknown): value is SketchEntity {
   }
   if (value.kind === "spline") {
     return exactKeys(value, ["id", "kind", "fitPoints", "construction", ...optionalVisibility])
-      && Array.isArray(value.fitPoints) && value.fitPoints.length >= 3 && value.fitPoints.length <= 24
+      && Array.isArray(value.fitPoints) && value.fitPoints.length >= 3 && value.fitPoints.length <= MAX_SPLINE_FIT_POINTS
       && value.fitPoints.every((point, index, all) => vec2(point) && (index === 0 || distance(all[index - 1] as readonly [number, number], point) >= WORKBENCH_LIMITS.minGeometryMm));
   }
   return false;

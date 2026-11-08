@@ -12,6 +12,7 @@ import {
 import { entityExtents } from "./index.js";
 import { editPlan, type SketchEditContext, type SketchEditPlan, type SketchEditResult } from "./edit-tools.js";
 import { cloneWithRelations, internalRelations, planHolds } from "./sketch-clone.js";
+import { MAX_SPLINE_FIT_POINTS } from "../../workbench-core/src/spline-limits.js";
 
 /**
  * The sketch clipboard (Ctrl+C / Ctrl+X / Ctrl+V). Copy takes the selected entities with the relations that only involve them, in plain
@@ -125,7 +126,7 @@ function validEntity(value: unknown): value is SketchEntity {
     case "point": return isPoint(value.point);
     case "rectangle": return isPoint(value.center) && finite(value.widthMm) && finite(value.heightMm) && value.widthMm > 0 && value.heightMm > 0 && finite(value.rotationDeg);
     case "ellipse": return isPoint(value.center) && finite(value.majorRadiusMm) && finite(value.minorRadiusMm) && value.majorRadiusMm > 0 && value.minorRadiusMm > 0 && finite(value.rotationDeg);
-    case "spline": return Array.isArray(value.fitPoints) && value.fitPoints.length >= 3 && value.fitPoints.length <= 24 && value.fitPoints.every(isPoint);
+    case "spline": return Array.isArray(value.fitPoints) && value.fitPoints.length >= 3 && value.fitPoints.length <= MAX_SPLINE_FIT_POINTS && value.fitPoints.every(isPoint);
     default: return false;
   }
 }

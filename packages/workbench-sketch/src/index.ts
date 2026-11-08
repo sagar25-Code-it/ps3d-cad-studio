@@ -7,6 +7,7 @@ import {
   type WorkbenchSketch
 } from "../../workbench-core/src/index.js";
 import { CURVE_TOOL_LABELS, curveToolRequiredPoints, isFixedCurveTool, type CurveToolId, type FixedCurveToolId } from "./curve-tools.js";
+import { MAX_SPLINE_FIT_POINTS } from "../../workbench-core/src/spline-limits.js";
 
 /**
  * The short names remain the default Fusion-familiar variants so existing
@@ -396,7 +397,7 @@ export function buildSketchEntity(tool: Exclude<SketchTool, "select">, points: r
     return { ok: true, value: { id, kind: "point", point: points[0]!, construction: true } };
   }
   if (tool === "spline" && points.length >= 3) {
-    if (points.length > 24) return degenerate("A spline takes at most 24 fit points.");
+    if (points.length > MAX_SPLINE_FIT_POINTS) return degenerate(`A spline takes at most ${MAX_SPLINE_FIT_POINTS} fit points.`);
     if (points.some((point, index) => index > 0 && distance(points[index - 1]!, point) < 0.01)) return degenerate("Consecutive spline fit points must be at least 0.01 mm apart.");
     return { ok: true, value: { id, kind: "spline", fitPoints: points, construction: false } };
   }

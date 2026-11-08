@@ -22,6 +22,13 @@ export type SketchHotkeyAction =
   | { readonly kind: "exit-edit-tool" }
   | { readonly kind: "clear-selection" }
   | { readonly kind: "delete-selection" }
+  /** Delete or Backspace with relations selected on the canvas (and no curves): remove just those relations. */
+  | { readonly kind: "delete-constraints" }
+  /** Z: drag a window on the canvas to zoom to it. Shift+F: zoom to the selected curves. */
+  | { readonly kind: "zoom-window" }
+  | { readonly kind: "zoom-selection" }
+  /** I: the Measure tool (distance between two points, angle between two lines). It never adds a relation. */
+  | { readonly kind: "measure" }
   | { readonly kind: "finish" }
   | { readonly kind: "select-all" }
   /** Ctrl/Cmd+C, X and V: the sketch clipboard. Copy and cut need a curve selection; paste is always offered and says if the clipboard is empty. */
@@ -56,6 +63,8 @@ export interface SketchHotkeyContext {
   readonly dragging: boolean;
   /** How many typed-input fields (length, angle, width...) the canvas is showing next to the cursor. */
   readonly dynamicFieldCount: number;
+  /** Relations (glyphs or dimension labels) selected on the canvas. Delete removes them when no curve is selected. */
+  readonly constraintSelectionCount?: number;
 }
 
 const LETTER_TOOLS: Readonly<Record<string, Exclude<SketchTool, "select">>> = {
@@ -90,17 +99,17 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
   }
   if (key === "Backspace") {
     if (context.pendingPoints > 0) return { kind: "undo-point" };
-    return context.curveSelectionCount > 0 ? { kind: "delete-selection" } : undefined;
+    return context.curveSelectionCount > 0 ? { kind: "delete-selection" } : (context.constraintSelectionCount ?? 0) > 0 ? { kind: "delete-constraints" } : undefined;
   }
   if (key === "Delete") {
     if (context.pendingPoints > 0) return { kind: "cancel-points" };
-    return context.curveSelectionCount > 0 ? { kind: "delete-selection" } : undefined;
+    return context.curveSelectionCount > 0 ? { kind: "delete-selection" } : (context.constraintSelectionCount ?? 0) > 0 ? { kind: "delete-constraints" } : undefined;
   }
   if (key === "Enter") return ((context.tool === "spline" || context.tool === "spline-control") && context.pendingPoints >= 3) || (context.tool === "profile" && context.pendingPoints >= 1) ? { kind: "finish" } : undefined;
   if (key === "Tab") return context.dynamicFieldCount > 0 && !input.shift ? { kind: "focus-dynamic" } : undefined;
   if (context.dynamicFieldCount > 0 && /^[0-9.,-]$/.test(input.key)) return { kind: "type-value", key: input.key };
 
-  if (input.shift) return undefined;
+  if (input.shift) return key === "f" ? { kind: "zoom-selection" } : undefined;
   const tool = LETTER_TOOLS[key];
   if (tool !== undefined) return { kind: "tool", tool };
   if (key === "d") return { kind: "dimension" };
@@ -108,6 +117,8 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
   if (key === "o") return { kind: "edit-tool", tool: "offset" };
   if (key === "x") return { kind: "toggle-construction" };
   if (key === "f") return { kind: "fit" };
+  if (key === "z") return { kind: "zoom-window" };
+  if (key === "i") return { kind: "measure" };
   if (key === "v") return { kind: "select-tool" };
   if (key === "p") return { kind: "pan-mode" };
   return undefined;
@@ -126,9 +137,12 @@ export const SKETCH_HOTKEY_HELP: readonly { readonly keys: string; readonly acti
   { keys: "V", action: "Select tool" },
   { keys: "P", action: "Pan navigation" },
   { keys: "F", action: "Fit the sketch to the window" },
+  { keys: "Shift+F", action: "Zoom to the selected curves" },
+  { keys: "Z", action: "Zoom window: drag a rectangle to zoom to it" },
+  { keys: "I", action: "Measure: two points for a distance, two lines for an angle" },
   { keys: "Esc", action: "Cancel points, then tool, then selection" },
   { keys: "Backspace", action: "Remove the last placed point" },
-  { keys: "Delete", action: "Delete the selected curves" },
+  { keys: "Delete", action: "Delete the selected curves, or the selected relation" },
   { keys: "Enter", action: "Finish a spline" },
   { keys: "Ctrl+A", action: "Select every visible curve" },
   { keys: "Ctrl+C / Ctrl+X / Ctrl+V", action: "Copy, cut and paste the selected curves with their relations" },

@@ -7,6 +7,10 @@ import {
   type WorkbenchSketch
 } from "../../workbench-core/src/index.js";
 import { entityPoints } from "./index.js";
+import { setSplineTangent, splineTangentHandles } from "./spline-helpers.js";
+
+/** A spline's tangent handle stands this fraction of the curve's velocity from its fit point: the Bezier-equivalent handle of a Catmull-Rom curve. */
+export const SPLINE_TANGENT_TIP_SCALE = 1 / 3;
 
 /**
  * Direct manipulation: what a press-and-drag on a curve, one of its points or one of its handles does.
@@ -21,6 +25,10 @@ export type DragHandle =
   | { readonly kind: "radius" }
   | { readonly kind: "corner"; readonly index: number }
   | { readonly kind: "fit"; readonly index: number }
+  /** The tip of a spline's tangent handle at a fit point: dragging it turns and lengthens the tangent there. */
+  | { readonly kind: "tangent"; readonly index: number }
+  /** An end of an ellipse's major or minor axis: dragging it resizes the ellipse (the major end also turns it). */
+  | { readonly kind: "ellipse-axis"; readonly which: "major" | "minor" }
   | { readonly kind: "body" };
 
 export type DragResult =
@@ -135,8 +143,36 @@ export function dragSketchHandle(sketch: WorkbenchSketch, entityId: string, hand
     }
   }
 
+  if (entity.kind === "ellipse") {
+    if (handle.kind === "point" && handle.ref === "center") return liveDrag(sketch, entityId, "center", pointerMm);
+    if (handle.kind === "body") return liveDrag(sketch, entityId, "center", [entity.center[0] + delta[0], entity.center[1] + delta[1]]);
+    if (handle.kind === "ellipse-axis") {
+      if (isFixed(sketch, entityId)) return fail(fixedNote);
+      const dx = pointerMm[0] - entity.center[0];
+      const dy = pointerMm[1] - entity.center[1];
+      if (handle.which === "major") {
+        const majorRadiusMm = Math.hypot(dx, dy);
+        if (majorRadiusMm < 0.01) return fail("An ellipse radius must be at least 0.01 mm.");
+        let rotationDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+        if (rotationDeg > 180 - 1e-9) rotationDeg -= 360;
+        // The minor radius can never exceed the major one, so a major end dragged inward carries the minor radius with it.
+        return settle(sketch, { ...entity, majorRadiusMm, minorRadiusMm: Math.min(entity.minorRadiusMm, majorRadiusMm), rotationDeg });
+      }
+      const radians = (entity.rotationDeg * Math.PI) / 180;
+      const minorRadiusMm = Math.abs(-dx * Math.sin(radians) + dy * Math.cos(radians));
+      if (minorRadiusMm < 0.01) return fail("An ellipse radius must be at least 0.01 mm.");
+      return settle(sketch, { ...entity, minorRadiusMm: Math.min(minorRadiusMm, entity.majorRadiusMm) });
+    }
+  }
+
   if (entity.kind === "spline") {
     if (isFixed(sketch, entityId)) return fail(fixedNote);
+    if (handle.kind === "tangent") {
+      const at = entity.fitPoints[handle.index];
+      if (at === undefined) return fail("That fit point does not exist.");
+      const edited = setSplineTangent(entity, handle.index, [(pointerMm[0] - at[0]) / SPLINE_TANGENT_TIP_SCALE, (pointerMm[1] - at[1]) / SPLINE_TANGENT_TIP_SCALE]);
+      return edited.ok ? settle(sketch, { ...entity, fitPoints: edited.fitPoints }) : fail(edited.message);
+    }
     if (handle.kind === "body") return settle(sketch, { ...entity, fitPoints: entity.fitPoints.map((point): Vec2 => [point[0] + delta[0], point[1] + delta[1]]) });
     if (handle.kind === "fit") {
       const fitPoints = entity.fitPoints.map((point, index): Vec2 => index === handle.index ? pointerMm : point);
@@ -184,6 +220,20 @@ export function grabHandlesOf(entity: SketchEntity): readonly SketchGrabHandle[]
   }
   if (entity.kind === "point") return [make("self", { kind: "point", ref: "self" }, entity.point, "Sketch point")];
   if (entity.kind === "rectangle") return entityPoints(entity).map((corner, index) => make(`corner-${index}`, { kind: "corner", index }, corner, "Rectangle corner"));
-  if (entity.kind === "ellipse") return [make("center", { kind: "point", ref: "center" } as const, entity.center, "Ellipse center")];
+  if (entity.kind === "ellipse") {
+    const radians = (entity.rotationDeg * Math.PI) / 180;
+    return [
+      make("center", { kind: "point", ref: "center" } as const, entity.center, "Ellipse center"),
+      make("major", { kind: "ellipse-axis", which: "major" } as const, [entity.center[0] + entity.majorRadiusMm * Math.cos(radians), entity.center[1] + entity.majorRadiusMm * Math.sin(radians)], "Ellipse major radius"),
+      make("minor", { kind: "ellipse-axis", which: "minor" } as const, [entity.center[0] - entity.minorRadiusMm * Math.sin(radians), entity.center[1] + entity.minorRadiusMm * Math.cos(radians)], "Ellipse minor radius")
+    ];
+  }
   return entity.fitPoints.map((point, index) => make(`fit-${index}`, { kind: "fit", index }, point, "Spline point"));
+}
+
+/** The tangent handle of one fit point of a spline, drawn at the tip, as a grab handle. Shown only for the fit point the person is working on. */
+export function splineTangentGrabHandle(entity: Extract<SketchEntity, { kind: "spline" }>, index: number): SketchGrabHandle | undefined {
+  const handle = splineTangentHandles(entity, SPLINE_TANGENT_TIP_SCALE).find((candidate) => candidate.index === index);
+  if (handle === undefined) return undefined;
+  return { id: `grab:${entity.id}:tangent-${index}`, handle: { kind: "tangent", index }, point: handle.tip, label: `Tangent at spline point ${index + 1}` };
 }

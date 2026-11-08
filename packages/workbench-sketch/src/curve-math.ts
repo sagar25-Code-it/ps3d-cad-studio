@@ -1,5 +1,6 @@
 import { failure, type SketchEntity, type Vec2, type WorkbenchResult } from "../../workbench-core/src/index.js";
 import type { ShapeIds, SketchShape } from "./shapes.js";
+import { MAX_SPLINE_FIT_POINTS } from "../../workbench-core/src/spline-limits.js";
 
 /** Small 2D helpers shared by the curve-tool modules (kept here so the tools stay independent of each other). */
 export type { ShapeIds, SketchShape };
@@ -116,7 +117,7 @@ export function badShape(message: string, recovery = "Place the points somewhere
 /** A fit-point spline entity, refused when the points are too close together or too few for one. */
 export function splineFromPoints(fitPoints: readonly Vec2[], id: string, construction = false): WorkbenchResult<Extract<SketchEntity, { kind: "spline" }>> {
   if (fitPoints.length < 3) return badShape("A spline needs at least three fit points.");
-  if (fitPoints.length > 24) return badShape("A spline takes at most 24 fit points.");
+  if (fitPoints.length > MAX_SPLINE_FIT_POINTS) return badShape(`A spline takes at most ${MAX_SPLINE_FIT_POINTS} fit points.`);
   if (fitPoints.some((point, index) => index > 0 && dist(fitPoints[index - 1]!, point) < 0.01)) return badShape("The curve is too small: consecutive fit points would be closer than 0.01 mm.");
   if (fitPoints.some((point) => !Number.isFinite(point[0]) || !Number.isFinite(point[1]))) return badShape("The curve could not be computed from these points.");
   return { ok: true, value: { id, kind: "spline", fitPoints, construction } };

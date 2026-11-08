@@ -3,6 +3,7 @@ import { sampleArc, sampleSpline } from "./index.js";
 import { editPlan, type SketchEditContext, type SketchEditResult } from "./edit-tools.js";
 import { curveEnd, isOpenCurve, jointBetween, withCurveEnd, type CurveEnd } from "./endpoint-join.js";
 import { pinnedAmong, planHolds } from "./sketch-clone.js";
+import { MAX_SPLINE_FIT_POINTS } from "../../workbench-core/src/spline-limits.js";
 
 /**
  * Make Path: chains the selected open curves (lines, arcs, splines) into one ordered path, walking end to end from a free end,
@@ -208,7 +209,7 @@ export function pathToSpline(context: SketchEditContext, path: SketchPath): Sket
     for (let index = 0; index < spare.length && drop > 0; index += dropEvery) { removed.add(spare[index]!); drop -= 1; }
     kept = kept.filter((entry) => !removed.has(entry));
   }
-  if (kept.length > 24) return failure("INVALID_OPERATION", `The path has ${kept.length} joints and a spline holds at most 24 fit points.`, path.segments.map((segment) => segment.entityId), "Chain fewer curves, or simplify the path.");
+  if (kept.length > MAX_SPLINE_FIT_POINTS) return failure("INVALID_OPERATION", `The path has ${kept.length} joints and a spline holds at most ${MAX_SPLINE_FIT_POINTS} fit points.`, path.segments.map((segment) => segment.entityId), "Chain fewer curves, or simplify the path.");
   if (kept.length < 3) return failure("INVALID_OPERATION", "The path is too short to become a spline.", path.segments.map((segment) => segment.entityId), "Select more curves.");
   const spline: SketchEntity = { id: context.newId("entity"), kind: "spline", fitPoints: kept.map((entry) => entry.point), construction: true };
   return editPlan(`Joined the path into one construction spline through ${kept.length} points`, { addEntities: [spline] });
