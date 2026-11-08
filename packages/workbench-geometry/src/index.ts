@@ -12,3 +12,7 @@ export * from "./hole.js";
 export * from "./plane-tilt.js";
 export * from "./sketch-placement.js";
 export * from "./flat-pattern.js";
+export * from "./sheet-miter.js";
+export * from "./sheet-jog.js";
+export * from "./bend-table.js";
+export * from "./sheet-lofted-bend.js";

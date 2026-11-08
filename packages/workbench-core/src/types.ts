@@ -1,3 +1,5 @@
+import type { SheetBendTable } from "./sheet-features.js";
+
 export const WORKBENCH_FORMAT = "ps3d-workbench-project" as const;
 export const WORKBENCH_SCHEMA_VERSION = 1 as const;
 export const WORKBENCH_APPLICATION_VERSION = "0.2.0-preview.1" as const;
@@ -1031,7 +1033,7 @@ export interface DesignSketchFeature extends DesignFeatureBase {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "sheet-jog" | "sheet-lofted-bend";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
@@ -1181,6 +1183,21 @@ export interface DesignSolidFeature extends DesignFeatureBase {
    * stops half of it short of the corner; a flange end that meets no other flange is not shortened. 0 or absent means no relief.
    */
   readonly flangeReliefMm?: number;
+  /**
+   * Sheet-edge-flange only: makes the step a miter flange. The edges that follow `flangeEdgeIndex` along the plate's outline, in running
+   * order; the flange bends along all of them with a mitre joint at every corner between two. All share this step's radius, length and angle.
+   */
+  readonly flangeMiterEdges?: readonly number[];
+  /** Sheet-base / sheet-flange / sheet-hem / extruded plate / lofted bend: the bend table the flat pattern reads K-factors from. */
+  readonly sheetBendTable?: SheetBendTable;
+  /** Sheet-jog only: the plate edge the jog line runs parallel to (index as for an edge flange). */
+  readonly jogEdgeIndex?: number;
+  /** Sheet-jog only: distance from that edge, into the plate, to where the first bend of the jog starts (mm). */
+  readonly jogPositionMm?: number;
+  /** Sheet-jog only: how far the far side steps up (positive, along the sheet normal) or down (negative), in mm. */
+  readonly jogOffsetMm?: number;
+  /** Sheet-jog only: angle of the sloping web of the jog from the sheet, 1 to 89 degrees. */
+  readonly jogAngleDeg?: number;
   /** Hole only: the shape. A tapped hole is recorded as a plain hole at its tap-drill diameter. */
   readonly holeStyle?: "simple" | "counterbore" | "countersink";
   /** Hole only: the point on the face where the hole starts, in millimetres. */
