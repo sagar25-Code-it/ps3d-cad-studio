@@ -70,14 +70,15 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   const profiles = detectSketchProfiles(sketch);
   const lost = lostProfileRefs(profiles, feature.profileIds);
   if (lost.length > 0) return { ok: false, message: `${feature.name}: a profile this feature was built on no longer exists in its sketch (${lost.join("; ")}). Edit the sketch to close it again, or delete the feature.` };
-  const region = resolveProfileRegion(profiles, feature.profileIds, { includeIslands: feature.kind === "extrude" && feature.edge === undefined });
+  // The holes of a region are holes in every solid built from it (a thin-wall revolve follows the outline alone, and the other kinds take the outline only).
+  const region = resolveProfileRegion(profiles, feature.profileIds, { includeIslands: feature.kind === "extrude" || feature.kind === "sweep" || feature.kind === "loft" || (feature.kind === "revolve" && feature.thinWallMm === undefined) });
   if (!region.ok) return { ok: false, message: `${feature.name}: ${region.diagnostics[0]?.message ?? "The sketch has no closed profile for this feature."}` };
   const groups = region.value.groups;
   if (groups.length > 1 && feature.kind !== "extrude" && feature.kind !== "revolve") {
     return { ok: false, message: `${feature.name}: a ${feature.kind} is built from one region, but ${groups.length} separate regions are selected. Select a single region, or use an extrude or revolve for several.` };
   }
   if (groups.length > 1 && feature.kind === "revolve" && feature.thinWallMm !== undefined) return { ok: false, message: `${feature.name}: a thin revolve follows one outline. Select a single region.` };
-  const warnings = region.value.warnings;
+  const warnings = feature.edge !== undefined && groups.some((group) => group.holes.length > 0) ? [...region.value.warnings, "The chamfer or fillet is applied to the outline; the holes keep their sharp edges."] : region.value.warnings;
   const plane = planeKeyOf(sketch.plane);
   if (feature.kind === "sheet-lofted-bend") {
     const lofted = loftedBendBody(feature, profiles, region.value.outer, plane, color);

@@ -663,7 +663,7 @@ export interface ProfilePrismRequest {
   readonly normal: readonly [number, number, number];
   readonly heightMeters: number;
   readonly toleranceMeters?: number;
-  /** Optional chamfer or fillet of the prism's vertical edges (applied to the counter-clockwise-normalised loop). */
+  /** Optional chamfer or fillet of the prism's vertical edges (applied to the counter-clockwise-normalised outline; the walls of holes keep their sharp edges). */
   readonly cornerTreatment?: CornerTreatment;
   /**
    * Treat the whole loop as one smooth side face (`face.lateral`, cylindrical) instead of one
@@ -733,7 +733,6 @@ export async function evaluateProfilePrism(request: ProfilePrismRequest): Promis
   if (reversedToCounterClockwise) points = [...points].reverse();
   if (request.smoothSides === true && request.cornerTreatment !== undefined) throw new Error("A smooth (circular) profile has no corners to chamfer or fillet.");
   if (request.edgeGroups !== undefined && (request.smoothSides === true || request.cornerTreatment !== undefined)) throw new Error("Explicit edge groups cannot be combined with smooth sides or a corner treatment.");
-  if (request.cornerTreatment !== undefined && (request.holes?.length ?? 0) > 0) throw new Error("Chamfer and fillet of a profile with holes is not supported.");
   const holeLoops = (request.holes ?? []).map((hole): PrismLoop => holeLoop(hole, normal));
   let outer: PrismLoop;
   if (request.smoothSides === true) {

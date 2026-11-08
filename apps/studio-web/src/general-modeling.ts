@@ -1,6 +1,6 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
 import { splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
-import { adaptiveFacetCount, booleanMeshes, splitMeshPieces, revolveAxisRelation, revolveSegmentsForRadius, tessellateDome, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateBentStrip, tessellateRevolve, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { adaptiveFacetCount, booleanMeshes, splitMeshPieces, revolveAxisRelation, revolveSegmentsForRadius, tessellateDome, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateBentStrip, tessellateRevolve, tessellateRevolveRegion, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism, evaluateProfileRevolution, stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { profileOutlineMm, stableEntityToken, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
@@ -182,12 +182,27 @@ function kernelHole(profile: SketchProfile, plane: SketchPlane): ProfileHole {
   };
 }
 
+/** A revolve of an outline with holes: the holes turn into voids (a full turn) or tunnels through the end faces (a partial one). */
+function revolveWithHoles(request: CreateGeneralSolidRequest, polygonMm: readonly PolygonPoint[], base: Omit<GeneralSolidBody, "positionsMm" | "indices">): CreateGeneralSolidResult {
+  if (revolveAxisRelation(polygonMm) === "crosses") {
+    return { ok: false, message: "The profile crosses the revolve axis (the sketch Y axis), so it would overlap itself. Draw the profile entirely on one side of the Y axis, or move it so it only touches the axis." };
+  }
+  try {
+    const mesh = tessellateRevolveRegion(polygonMm, (request.holes ?? []).map((hole) => profilePolygonMm(hole.boundary)), request.valueMm, request.plane);
+    if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be converted into a solid." };
+    if (mesh.positionsMm.length / 3 > 99_000) return { ok: false, message: "The revolved region has too many vertices to store. Use fewer holes or a smaller angle." };
+    return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
+  } catch (error) {
+    return { ok: false, message: `The solid kernel could not revolve this profile: ${error instanceof Error ? error.message : "a hole crosses the outline"}` };
+  }
+}
+
 export type CreateGeneralSolidResult =
   | { readonly ok: true; readonly body: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[] }
   | { readonly ok: false; readonly message: string };
 
 /** Joins solids that do not touch into one body: their meshes side by side, their faces named per region. */
-function mergeRegionBodies(bodies: readonly GeneralSolidBody[], base: { readonly id: string; readonly name: string; readonly color: string }): GeneralSolidBody {
+export function mergeRegionBodies(bodies: readonly GeneralSolidBody[], base: { readonly id: string; readonly name: string; readonly color: string }): GeneralSolidBody {
   const positionsMm: number[] = [];
   const indices: number[] = [];
   const faces: { role: string; key: string; areaMm2: number }[] = [];
@@ -430,7 +445,6 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
       if (!Number.isFinite(request.edge.sizeMm) || request.edge.sizeMm <= 0) return { ok: false, message: `Enter a positive ${request.edge.kind === "chamfer" ? "chamfer distance" : "fillet radius"}.` };
     }
     const holes = request.holes ?? [];
-    if (holes.length > 0 && request.edge !== undefined) return { ok: false, message: "Chamfer and fillet are not available for a profile with holes yet. Extrude without an edge treatment, or select the outer profile alone." };
     const outerGroups = curveEdgeGroups(request.profile.boundary, "face.seg");
     try {
       const prism = await evaluateProfilePrism({
@@ -465,7 +479,7 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
       return { ok: false, message: detail !== "" ? `The solid kernel could not extrude this profile: ${detail}` : "The solid kernel could not extrude this profile." };
     }
   }
-  if ((request.holes?.length ?? 0) > 0) return { ok: false, message: "Revolve does not support profiles with holes. Select the outer profile alone." };
+  if ((request.holes?.length ?? 0) > 0) return revolveWithHoles(request, polygonMm, base);
 
   // A profile with points on both sides of the axis would sweep over itself. Reject it clearly
   // instead of producing an overlapping, unvalidated mesh (CAD tools do the same).

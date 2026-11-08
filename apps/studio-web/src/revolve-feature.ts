@@ -27,8 +27,8 @@ export async function revolveAboutChosenAxis(
   const outline = profileOutlineMm(region.outer.boundary);
   // The classic path: the sketch Y axis with the profile on its positive side (touching it is fine).
   if (resolved.isDefault && revolveAxisRelation(outline) !== "crosses" && outline.every(([x]) => x >= -1e-6)) return undefined;
-  if (region.holes.length > 0) return { ok: false, message: "Revolve does not support profiles with holes. Select the outer profile alone." };
-  const prepared = prepareRevolve(resolved.axis, region.outer);
+  if (region.holes.length > 0 && feature.thinWallMm !== undefined) return { ok: false, message: "A thin revolve follows one outline. Select the outer profile alone." };
+  const prepared = prepareRevolve(resolved.axis, region.outer, region.holes);
   if (!prepared.ok) return prepared;
   const built = await buildAxisRevolve({ feature, prepared: prepared.prepared, plane, totalDeg: span.totalDeg, startDeg: span.startDeg, color });
   if (!built.ok) return built;
