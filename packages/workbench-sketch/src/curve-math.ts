@@ -1,5 +1,6 @@
 import { SPLINE_MAX_FIT_POINTS, SPLINE_MIN_FIT_POINTS, failure, type SketchEntity, type Vec2, type WorkbenchResult } from "../../workbench-core/src/index.js";
 import type { ShapeIds, SketchShape } from "./shapes.js";
+import { MAX_SPLINE_FIT_POINTS } from "../../workbench-core/src/spline-limits.js";
 
 /** Small 2D helpers shared by the curve-tool modules (kept here so the tools stay independent of each other). */
 export type { ShapeIds, SketchShape };

@@ -63,6 +63,7 @@ import {
   type VehicleTemplateId,
   type WorkbenchOperation,
   type WorkbenchProject,
+  type WorkbenchSketch,
   type WorkbenchSelectionKind,
   type SketchPlaneFrame,
   type SketchPlaneTilt,
@@ -179,6 +180,8 @@ import type { AnalysisMode } from "./analysis/analysis-session.js";
 import { SketchWorkspace } from "./workspaces/SketchWorkspace.js";
 import { SKETCH_EDIT_TOOL_LABELS, type SketchEditToolId } from "./workspaces/SketchEditPanel.js";
 import type { SketchEditPlan } from "../../../packages/workbench-sketch/src/edit-tools.js";
+import { selectionCountLabel } from "../../../packages/workbench-sketch/src/selection-actions.js";
+import { cancelSketchSession, commitWorkingSketchAtomically, type CommitOutcome } from "./sketch-session.js";
 import { PartInspector } from "./workspaces/PartInspector.js";
 import { ImportedModelInspector } from "./workspaces/ImportedModelInspector.js";
 import { AssemblyInspector } from "./workspaces/AssemblyInspector.js";
@@ -365,6 +368,15 @@ export function App(): React.JSX.Element {
   const activeImportRef = useRef<ExchangeImportResult | undefined>(undefined);
   const [sketchTool, setSketchTool] = useState<SketchTool>("select");
   const [sketchCancelVersion, setSketchCancelVersion] = useState(0);
+  // Curves, profiles and relations selected on the sketch canvas (the canvas keeps its own selection), for the status bar.
+  const [sketchSelectionCount, setSketchSelectionCount] = useState(0);
+  // The working sketch as it was when the Sketch workspace was entered: what Cancel in the confirmation corner returns a new sketch to.
+  const sketchEntryRef = useRef<WorkbenchSketch | undefined>(project.activeWorkspace === "sketch" ? project.sketch : undefined);
+  const previousWorkspaceRef = useRef(project.activeWorkspace);
+  useEffect(() => {
+    if (project.activeWorkspace === "sketch" && previousWorkspaceRef.current !== "sketch") sketchEntryRef.current = projectRef.current.sketch;
+    previousWorkspaceRef.current = project.activeWorkspace;
+  }, [project.activeWorkspace]);
   const [combineRequest, setCombineRequest] = useState<{ readonly targetId: string | undefined; readonly mode: BooleanMode } | null>(null);
   const [sketchEditTool, setSketchEditTool] = useState<SketchEditToolId | null>(null);
   const [patternDialog, setPatternDialog] = useState<{ readonly kind: PatternKind; readonly mode: "new" | "edit"; readonly sourceBodyId: string; readonly groupId?: string; readonly initial?: PatternRequest } | null>(null);
@@ -2419,43 +2431,60 @@ export function App(): React.JSX.Element {
     if (response !== undefined) acceptResponse(response);
   };
 
-  /** Rebuilds every timeline solid that depends on a sketch feature and applies the results (or flags the ones that failed). */
-  const rebuildFrom = async (sketchFeatureId: string): Promise<void> => {
-    const results = await rebuildDependents(projectRef.current, sketchFeatureId);
-    if (results.length === 0) return;
-    if (!applyProjectOperation({ kind: "regenerate-design", results }, false)) return;
-    const failed = results.filter((result) => result.message !== undefined);
-    setStatus(failed.length > 0 ? "error" : "ready");
-    setStatusText(failed.length > 0
-      ? `${failed.length} timeline step${failed.length === 1 ? "" : "s"} could not be rebuilt: ${failed[0]!.message}`
-      : `Rebuilt ${results.length} timeline step${results.length === 1 ? "" : "s"} from the edited sketch.`);
-  };
+  /** What the last commit of the working sketch did, so Finish can report a rebuild that failed. */
+  const lastSketchCommitRef = useRef<CommitOutcome | undefined>(undefined);
+  const lastSketchCommit = (): CommitOutcome | undefined => lastSketchCommitRef.current;
 
   /**
    * Brings the timeline up to date with the working sketch: a new sketch feature, or an update of the one being edited
-   * (which rebuilds the solids built on it). Returns the sketch feature's ID, or undefined if there is nothing to finish.
+   * (which rebuilds the solids built on it). The sketch update, the rebuilt solids and any `then` operations are ONE project and
+   * ONE Undo step. Returns the sketch feature's ID, or undefined if there is nothing to finish or the commit was refused.
    */
-  const commitWorkingSketch = async (): Promise<string | undefined> => {
-    const current = projectRef.current;
-    const history = designOf(current);
-    const editing = history.features.find((feature) => feature.id === history.editingSketchId && feature.kind === "sketch");
-    if (current.sketch.entities.length === 0) return editing?.id;
-    if (editing?.kind === "sketch" && JSON.stringify(editing.sketch) === JSON.stringify(current.sketch)) return editing.id;
-    if (!applyProjectOperation({ kind: "commit-design-sketch", featureId: `feature:sketch-${crypto.randomUUID()}`, name: nextFeatureName(history, "Sketch") }, false)) return undefined;
-    const sketchId = designOf(projectRef.current).editingSketchId ?? undefined;
-    if (sketchId !== undefined && editing !== undefined) await rebuildFrom(sketchId);
-    return sketchId;
+  const commitWorkingSketch = async (then: Parameters<typeof commitWorkingSketchAtomically>[1]["then"] = []): Promise<string | undefined> => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const current = projectRef.current;
+      const outcome = await commitWorkingSketchAtomically(current, { featureId: `feature:sketch-${crypto.randomUUID()}`, name: nextFeatureName(designOf(current), "Sketch"), then });
+      if (!outcome.ok) { setStatus("error"); setStatusText(outcome.message); return undefined; }
+      // The kernel rebuild is asynchronous; if the project moved meanwhile, redo the finish on the newer project rather than overwrite it.
+      if (projectRef.current.revision !== current.revision) continue;
+      lastSketchCommitRef.current = outcome.value;
+      if (outcome.value.changed) pushProject(outcome.value.project);
+      const { failed, rebuilt } = outcome.value;
+      if (failed.length > 0) { setStatus("error"); setStatusText(`${failed.length} timeline step${failed.length === 1 ? "" : "s"} could not be rebuilt: ${failed[0]!.message}`); }
+      else if (rebuilt.length > 0) { setStatus("ready"); setStatusText(`Rebuilt ${rebuilt.length} timeline step${rebuilt.length === 1 ? "" : "s"} from the edited sketch.`); }
+      return outcome.value.sketchFeatureId;
+    }
+    setStatus("error");
+    setStatusText("The project changed while the sketch was being finished. Press Finish again.");
+    return undefined;
   };
 
   const finishSketch = async (): Promise<void> => {
     setStatus("working");
+    lastSketchCommitRef.current = undefined;
     const sketchId = await commitWorkingSketch();
-    setStatus("ready");
+    const failedRebuild = lastSketchCommit()?.failed ?? [];
+    setStatus(failedRebuild.length > 0 ? "error" : "ready");
     planeOfferRef.current = planeOfferAfterFinish(planeOfferRef.current);
     switchWorkspace("part");
+    if (failedRebuild.length > 0) { setStatusText(`Finished the sketch, but ${failedRebuild.length} timeline step${failedRebuild.length === 1 ? "" : "s"} could not be rebuilt: ${failedRebuild[0]!.message}`); return; }
     setStatusText(sketchId === undefined
       ? "Sketch session finished. There was no closed geometry to record yet."
-      : "Finished the sketch into the timeline. Extrude it with Create solid in the Sketch palette; editing it later rebuilds what is built on it.");
+      : lastSketchCommit()?.changed === false
+        ? "Sketch session finished. The timeline already held this sketch."
+        : "Finished the sketch into the timeline. Extrude it with Create solid in the Sketch palette; editing it later rebuilds what is built on it.");
+
+  };
+
+  /** Cancel in the confirmation corner: throws away this session's sketch edits (one Undo step), then returns to Design. */
+  const cancelSketch = (): void => {
+    setSketchCancelVersion((version) => version + 1);
+    const outcome = cancelSketchSession(projectRef.current, sketchEntryRef.current);
+    if (!outcome.ok) { setStatus("error"); setStatusText(outcome.message); return; }
+    if (outcome.value.kind === "discarded") pushProject(outcome.value.project);
+    switchWorkspace("part");
+    setStatus("ready");
+    setStatusText(outcome.value.kind === "discarded" ? `Cancelled the sketch. ${outcome.value.summary} Ctrl+Z brings the changes back.` : "Cancelled the sketch. There were no changes to discard.");
   };
 
   /** Extrude or revolve the working sketch's profiles into a new timeline feature and solid. */
@@ -2758,7 +2787,21 @@ export function App(): React.JSX.Element {
 
   /** A timeline sketch is reopened for editing; a solid opens its parameter dialog. */
   const editTimelineFeature = (feature: DesignFeature): void => {
-    if (feature.kind === "sketch") { applyProjectOperation({ kind: "edit-design-sketch", featureId: feature.id }); return; }
+    if (feature.kind === "sketch") {
+      // Reopening replaces the working sketch with the timeline's snapshot, so unfinished work is committed first (and can be undone), in one step.
+      void (async () => {
+        lastSketchCommitRef.current = undefined;
+        const kept = await commitWorkingSketch([{ kind: "edit-design-sketch", featureId: feature.id }]);
+        const outcome = lastSketchCommit();
+        if (kept === undefined && outcome === undefined) return;
+        if (outcome === undefined) return;
+        setStatus(outcome.failed.length > 0 ? "error" : "ready");
+        setStatusText(outcome.failed.length > 0
+          ? `Reopened ${feature.name}, but ${outcome.failed.length} timeline step${outcome.failed.length === 1 ? "" : "s"} could not be rebuilt from your unfinished edits: ${outcome.failed[0]!.message}`
+          : `Reopened ${feature.name} for editing.${outcome.sketchFeatureId !== undefined && outcome.sketchFeatureId !== feature.id ? " Your unfinished sketch work was kept in the timeline first (Ctrl+Z undoes both)." : ""}`);
+      })();
+      return;
+    }
     if (feature.kind === "pattern") { openPatternEdit(feature); return; }
     setFeatureEdit(feature);
   };
@@ -3915,7 +3958,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace displayUnit={document.displayUnit} projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={(text) => setStatusText(friendlySketchText(text, [projectRef.current.sketch]))} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams)} onChangePlane={() => openSketchPlaneDialog("set")} onDisplayUnit={(unit) => void changeUnit(unit)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={() => { setSketchCancelVersion((version) => version + 1); switchWorkspace("part"); setStatusText("Cancelled the sketch and returned to Design. Pending points were dropped; committed geometry is kept."); }} evaluateText={(text) => evaluateTextInDesign(designOf(project), text)} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace displayUnit={document.displayUnit} projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={(text) => setStatusText(friendlySketchText(text, [projectRef.current.sketch]))} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams)} onChangePlane={() => openSketchPlaneDialog("set")} onDisplayUnit={(unit) => void changeUnit(unit)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={cancelSketch} onSelectionCount={setSketchSelectionCount} evaluateText={(text) => evaluateTextInDesign(designOf(project), text)} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl
@@ -3989,7 +4032,7 @@ export function App(): React.JSX.Element {
       onDelete={(feature) => timelineOperation({ kind: "delete-design-feature", featureId: feature.id }, () => setSelectedId(null))}
       onRename={(feature, name) => { applyProjectOperation({ kind: "rename-design-feature", featureId: feature.id, name }); }}
     />}
-    <footer className="app-status"><div className={`status-copy ${status}`} role="status" aria-live="polite"><span />{statusText}</div><div className="status-facts"><a className="app-brand-credit" href="/about" title={`${PS3D_BRAND.name} - ${PS3D_BRAND.serviceLine}`}>{PS3D_BRAND.name}</a><button className={`status-health ${designHealth.overallStatus}`} onClick={openDesignHealth}>health {designHealth.score}</button><button className="status-shortcuts" onClick={() => setShortcutsOpen(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">? keys</button><button className="status-build" onClick={() => setAboutOpen(true)} title="Which build is running. Click for details and to copy it." aria-label={formatBuildLabel(buildUpdate.running)}>{formatBuildLabel(buildUpdate.running)}</button><span>{document.displayUnit}</span><span>{selectedId === null ? "0 selected" : "1 selected"}</span><span>{renderStudioOpen ? `${renderSettings.resolution} ${renderSettings.format}` : masterCartOpen ? "parametric preview" : isThreeDimensional ? viewportState.selectionFilter : project.activeWorkspace === "electrical" ? `ERC ${electrical.erc.status}` : "local"}</span><span>{renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace}</span></div>{diagnostic !== undefined && <div className="diagnostic-toast" role="alert"><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span><small>{diagnostic.recovery}</small><button onClick={() => setDiagnostic(undefined)} aria-label="Dismiss diagnostic">×</button></div>}</footer>
+    <footer className="app-status"><div className={`status-copy ${status}`} role="status" aria-live="polite"><span />{statusText}</div><div className="status-facts"><a className="app-brand-credit" href="/about" title={`${PS3D_BRAND.name} - ${PS3D_BRAND.serviceLine}`}>{PS3D_BRAND.name}</a><button className={`status-health ${designHealth.overallStatus}`} onClick={openDesignHealth}>health {designHealth.score}</button><button className="status-shortcuts" onClick={() => setShortcutsOpen(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">? keys</button><button className="status-build" onClick={() => setAboutOpen(true)} title="Which build is running. Click for details and to copy it." aria-label={formatBuildLabel(buildUpdate.running)}>{formatBuildLabel(buildUpdate.running)}</button><span>{document.displayUnit}</span><span>{project.activeWorkspace === "sketch" ? selectionCountLabel(sketchSelectionCount) : selectedId === null ? "0 selected" : "1 selected"}</span><span>{renderStudioOpen ? `${renderSettings.resolution} ${renderSettings.format}` : masterCartOpen ? "parametric preview" : isThreeDimensional ? viewportState.selectionFilter : project.activeWorkspace === "electrical" ? `ERC ${electrical.erc.status}` : "local"}</span><span>{renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace}</span></div>{diagnostic !== undefined && <div className="diagnostic-toast" role="alert"><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span><small>{diagnostic.recovery}</small><button onClick={() => setDiagnostic(undefined)} aria-label="Dismiss diagnostic">×</button></div>}</footer>
     <SmartFaultBrain workspace={project.activeWorkspace} report={designHealth} {...(diagnostic === undefined ? {} : { diagnostic })} onDesignHealth={openDesignHealth} onWorkspace={switchWorkspace} />
     {electromechanicalReviewOpen && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog exact-candidate" role="dialog" aria-modal="true" aria-labelledby="electromechanical-review-title" aria-describedby="electromechanical-review-description">
         <header><div><span>EXACT CANDIDATE REPLACEMENT REVIEW</span><h2 id="electromechanical-review-title">Circuit → wired mounting plate</h2></div><button data-dialog-initial-focus onClick={() => { setElectromechanicalReviewOpen(false); setElectromechanicalAcknowledged(false); }} aria-label="Close circuit to mounting plate review">×</button></header>

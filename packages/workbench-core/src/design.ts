@@ -213,8 +213,9 @@ export function uniqueFeatureName(history: DesignHistory, name: string, exceptFe
 export function commitDesignSketch(project: WorkbenchProject, featureId: string, nameInput: string): DesignChange {
   const history = designOf(project);
   const name = history.features.some((feature) => feature.id === history.editingSketchId) ? nameInput : uniqueFeatureName(history, nameInput.trim());
-  if (project.sketch.entities.length === 0) return fail("INVALID_OPERATION", "The sketch is empty, so there is nothing to finish.", [project.sketch.id], "Draw at least one curve first.");
   const editing = history.features.find((feature): feature is DesignSketchFeature => feature.id === history.editingSketchId && feature.kind === "sketch");
+  // A new sketch needs a curve, but emptying a sketch that is already in the timeline is a real edit and finishing it records the empty sketch.
+  if (project.sketch.entities.length === 0 && editing === undefined) return fail("INVALID_OPERATION", "The sketch is empty, so there is nothing to finish.", [project.sketch.id], "Draw at least one curve first.");
   if (editing !== undefined) {
     const next: DesignHistory = { ...history, features: history.features.map((feature) => feature.id === editing.id ? { ...editing, sketch: project.sketch } : feature) };
     return changed(withHistory(project, next), [editing.id], `Updated ${editing.name} in the timeline.`);

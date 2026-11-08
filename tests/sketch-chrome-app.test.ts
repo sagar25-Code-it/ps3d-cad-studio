@@ -97,8 +97,9 @@ export const sketchChromeAppTests: TestCase[] = [
     name: "Sketch units E18: the dimension editor names its unit (degrees for an angle), is no longer hard-wired to millimetres, and the Sketch palette has a unit switch",
     run: () => {
       const workspace = repoFile("apps/studio-web/src/workspaces/SketchWorkspace.tsx");
-      assert(!workspace.includes("aria-label={`${props.label} in millimetres`}"), "the editor's accessible name is no longer always millimetres");
-      assert(workspace.includes('unitSymbol={dimensionEdit.dimension === "angle" ? "°" : unit}') && workspace.includes('unitName={dimensionEdit.dimension === "angle" ? "degrees" : unitWord(unit)}'), "an angle is labelled in degrees");
+      const editor = repoFile("apps/studio-web/src/workspaces/sketch/DimensionEditor.tsx");
+      assert(!editor.includes("aria-label={`${props.label} in millimetres`}") && !workspace.includes("aria-label={`${props.label} in millimetres`}"), "the editor's accessible name is no longer always millimetres");
+      assert(workspace.includes('unitLabel={dimensionEdit.dimension === "angle" ? "°" : dimensionDisplay.unit}') && workspace.includes('unitName={dimensionEdit.dimension === "angle" ? "degrees" : unitWord(unit)}') && editor.includes("props.unitName ?? props.unitLabel"), "an angle is labelled in degrees");
       assert(workspace.includes('aria-label="Sketch display units"'), "the palette can switch the unit without leaving Sketch");
       // Lengths are read by the unit-aware reader (fractions, feet and inches, a typed unit suffix) with the display unit as the default.
       assert(workspace.includes("parseAngleText(dimensionText)") && workspace.includes("readSketchLength(dimensionText, props.displayUnit ?? \"mm\")"), "typed text is read as degrees or as a length in the display unit");

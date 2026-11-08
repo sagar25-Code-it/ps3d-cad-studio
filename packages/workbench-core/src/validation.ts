@@ -2,6 +2,7 @@ import { circleThroughThreePoints } from "./arc-geometry.js";
 import { SPLINE_MAX_FIT_POINTS, SPLINE_MIN_FIT_POINTS } from "./spline-limits.js";
 import { NEW_PRIMITIVE_SHAPES, validPrimitiveBody } from "./primitive-bodies.js";
 import { validConstructionBinder, validNewPlaneDefinition } from "./construction-refs.js";
+import { MAX_SPLINE_FIT_POINTS } from "./spline-limits.js";
 import {
   WORKBENCH_FORMAT,
   WORKBENCH_SCHEMA_VERSION,

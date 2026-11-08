@@ -13,6 +13,7 @@ import {
   type SketchExtents,
   type SketchViewBox
 } from "../../../../../packages/workbench-sketch/src/camera.js";
+import { cameraForExtents } from "../../../../../packages/workbench-sketch/src/camera-zoom.js";
 
 export interface SketchCameraController {
   /** Attach to the sketch `<svg>`: it measures the canvas and owns wheel zoom. */
@@ -27,6 +28,8 @@ export interface SketchCameraController {
   readonly toSketch: (clientX: number, clientY: number) => Vec2;
   readonly fit: () => void;
   readonly zoomAtCenter: (factor: number) => void;
+  /** Frames a rectangle of the sketch in the part of the canvas the floating panels do not cover (zoom window, zoom to selection). */
+  readonly frame: (extents: SketchExtents) => void;
   readonly beginPan: (event: React.PointerEvent<SVGSVGElement>) => void;
   /** True when the event belonged to an active pan and has been handled. */
   readonly movePan: (event: React.PointerEvent<SVGSVGElement>) => boolean;
@@ -172,6 +175,13 @@ export function useSketchCamera(extents: SketchExtents | undefined, fitKey: stri
     setCamera(zoomCamera(cameraRef.current, cameraRef.current.centerMm, factor));
   }, [setCamera]);
 
+  const frame = useCallback((extents: SketchExtents): void => {
+    const element = nodeRef.current;
+    const current = sizeRef.current;
+    if (element === null || current.width < 8 || current.height < 8) return;
+    setCamera(cameraForExtents(extents, current, measureInsets(element)));
+  }, [setCamera]);
+
   const beginPan = useCallback((event: React.PointerEvent<SVGSVGElement>): void => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -210,6 +220,7 @@ export function useSketchCamera(extents: SketchExtents | undefined, fitKey: stri
     toSketch,
     fit,
     zoomAtCenter,
+    frame,
     beginPan,
     movePan,
     endPan

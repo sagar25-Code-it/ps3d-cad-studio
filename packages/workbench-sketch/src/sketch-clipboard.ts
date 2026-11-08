@@ -14,7 +14,7 @@ import {
 } from "../../workbench-core/src/index.js";
 import { entityExtents } from "./index.js";
 import { editPlan, type SketchEditContext, type SketchEditPlan, type SketchEditResult } from "./edit-tools.js";
-import { cloneWithRelations, internalRelations } from "./sketch-clone.js";
+import { cloneWithRelations, internalRelations, planHolds } from "./sketch-clone.js";
 import { alignParallelDirections, finishPlan } from "./edit-relations.js";
 
 /**

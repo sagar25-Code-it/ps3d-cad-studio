@@ -58,10 +58,25 @@ import { ReachOptions } from "./ReachOptions.js";
 import { DEFAULT_REACH, buildReach, isReachTarget, type ReachSettings } from "../reach-settings.js";
 import { SketchGrid } from "./sketch/SketchGrid.js";
 import { ConstraintExtras, ExtraDimensionMarks, type ConstraintExtrasBridge, type SetDimensionRequest } from "./sketch/ConstraintExtras.js";
-import { angleDimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
-import { angleBetweenLinesDeg, arcShape, entityLengthMm } from "../../../../packages/workbench-core/src/sketch-measure.js";
+import { angleDimensionLayout, type DimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
+import { angleBetweenLinesDeg, arcShape, entityLengthMm, measureDimensionConstraint } from "../../../../packages/workbench-core/src/sketch-measure.js";
 import { useSketchCamera } from "./sketch/useSketchCamera.js";
 import { useSketchHotkeys } from "./sketch/useSketchHotkeys.js";
+import { ConstraintDisplayPanel, ConstraintGlyphLayer, ConstraintRecordList } from "./sketch/ConstraintGlyphs.js";
+import { DimensionEditor } from "./sketch/DimensionEditor.js";
+import { DimensionMarks } from "./sketch/DimensionMarks.js";
+import { SplineHandles } from "./sketch/SplineHandles.js";
+import { MeasureOverlay } from "./sketch/MeasureOverlay.js";
+import { usePersistedState } from "./sketch/usePersistedState.js";
+import { DEFAULT_CONSTRAINT_DISPLAY, constraintKindsPresent, constraintRows, constraintsToDraw, describeConstraint, entityOrdinalLabels, layoutConstraintGlyphs, parseConstraintDisplay, redundantConstraintIds, type ConstraintDisplaySettings } from "../../../../packages/workbench-sketch/src/constraint-glyph-layout.js";
+import { DEFAULT_DIMENSION_DISPLAY, clampPrecision, dimensionEditText, dimensionNormal, dragDimensionOffset, formatLengthLabel, isRepositionable, parseDimensionDisplay, parseDimensionInput, parseDimensionOffsets, sameDimensionValue, serializeDimensionOffsets, stackDimensionLabels, type DimensionDisplaySettings, type DimensionOffsets } from "../../../../packages/workbench-sketch/src/dimension-display.js";
+import { EMPTY_LINE_CHAIN, extendLineChain, keepResolvableConstraints, lineChainSegments, profileChainStillValid, reconcileLineChain, startLineChain, type LineChainState } from "../../../../packages/workbench-sketch/src/line-chain.js";
+import { constrainEachPlan, constructionSelectionPlan, deleteSelectionPlan, fixSelectionPlan, selectionIsFixed, sketchSelectionTotal, unfixSelectionPlan, visibilitySelectionPlan, type SelectionActionResult } from "../../../../packages/workbench-sketch/src/selection-actions.js";
+import { insertSplineFitPoint, nearestPointOnSpline, removeSplineFitPoint } from "../../../../packages/workbench-sketch/src/spline-edit.js";
+import { canvasHitSizes, describeEntityForAccessibility, focusAfter, resolveCanvasKey } from "../../../../packages/workbench-sketch/src/canvas-keyboard.js";
+import { selectionExtents, zoomWindowExtents } from "../../../../packages/workbench-sketch/src/camera-zoom.js";
+import { EMPTY_MEASURE, addMeasurePick, describeMeasurement, pickMeasureTarget, type MeasureState } from "../../../../packages/workbench-sketch/src/sketch-measure-tool.js";
+import { MAX_SPLINE_FIT_POINTS } from "../../../../packages/workbench-core/src/spline-limits.js";
 import { loadStoredSnapAssist, storeSnapAssist, useSketchKeymap } from "./sketch/useSketchKeymap.js";
 import { useModifierKeys } from "./sketch/useModifierKeys.js";
 import { SketchInputPalette } from "./sketch/SketchInputPalette.js";
@@ -114,6 +129,19 @@ interface DirectSketchDimension {
 }
 
 type PlaneKey = "xy" | "xz" | "yz";
+
+/** The inline dimension editor: which dimension it edits, where it opens, and the stored value it started from. */
+interface DimensionEditState {
+  readonly entityId: string;
+  readonly dimension: DrivingDimension;
+  readonly anchor: Vec2;
+  readonly label: string;
+  readonly secondEntityId?: string;
+  /** The value the editor started from, in millimetres (degrees for an angle; a circle's diameter), so Enter without typing changes nothing. */
+  readonly storedValue: number | undefined;
+  /** True when the dimension was already a reference one when the editor opened. */
+  readonly wasReference: boolean;
+}
 
 /** A defining point of an entity that Coincident and Midpoint can be anchored to. */
 interface RelationPoint {
@@ -262,10 +290,12 @@ interface SketchWorkspaceProps {
   readonly onActivateEditTool: (tool: SketchEditToolId) => void;
   /** OK click in the viewport Confirmation Corner: commit the sketch to the timeline and return to Design. */
   readonly onFinishSketch: () => void;
-  /** Cancel click in the viewport Confirmation Corner: drop pending points and leave the sketch workspace. */
+  /** Cancel click in the viewport Confirmation Corner: discard this session's sketch edits and leave the sketch workspace. */
   readonly onCancelSketch: () => void;
   /** Evaluates typed text (units, expressions, parameter names) for the dynamic input; without it only numbers, units and functions work. */
   readonly evaluateText?: EvaluateText;
+  /** Reports how many curves, profiles and relations are selected on the canvas, for the status bar. */
+  readonly onSelectionCount?: (count: number) => void;
 }
 
 /** A press on a curve or one of its handles that may turn into a drag. */
@@ -310,9 +340,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [pickRelation, setPickRelation] = useState<"coincident" | "midpoint" | null>(null);
   const [pickedPoint, setPickedPoint] = useState<RelationPoint | undefined>(undefined);
   // The in-place value editor for a driving dimension (opened from Sketch Dimension, or by clicking a dimension's text).
-  const [dimensionEdit, setDimensionEdit] = useState<{ readonly entityId: string; readonly dimension: DrivingDimension; readonly anchor: Vec2; readonly label: string; readonly secondEntityId?: string } | undefined>(undefined);
+  const [dimensionEdit, setDimensionEdit] = useState<DimensionEditState | undefined>(undefined);
   const [dimensionText, setDimensionText] = useState("");
   const [polygonSides, setPolygonSides] = useSketchPref("polygonSides", String(POLYGON_DEFAULT_SIDES));
+  // The editor's Reference checkbox: a reference dimension is measured and never moves the geometry.
+  const [dimensionReference, setDimensionReference] = useState(false);
   // The extra curve tools (rounded rectangle, conics, blend, profile, text ...): their palette numbers, and the Profile chain being drawn.
   const [curveFields, setCurveFields] = useSketchPref("curveFields", DEFAULT_CURVE_OPTION_FIELDS);
   const profileChain = useRef<ProfileChain | undefined>(undefined);
@@ -327,8 +359,27 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const fieldRefs = useRef<Partial<Record<DynamicFieldId, HTMLInputElement | null>>>({});
   const focusSerial = useRef(0);
   // The first point of the line chain being drawn and how many segments it has, so a line that ends where it began closes the loop.
-  const chainStart = useRef<Vec2 | undefined>(undefined);
-  const chainSegments = useRef(0);
+  const lineChain = useRef<LineChainState>(EMPTY_LINE_CHAIN);
+  // Relations picked on the canvas (glyphs and dimension labels), and the one under the pointer.
+  const [selectedConstraintIds, setSelectedConstraintIds] = useState<readonly string[]>([]);
+  const [hoverConstraintId, setHoverConstraintId] = useState<string | null>(null);
+  // How relations and dimensions are shown. These are per-viewer display choices, remembered in this browser.
+  const [constraintDisplay, setConstraintDisplay] = usePersistedState<ConstraintDisplaySettings>("ps3d.sketch.constraintDisplay", DEFAULT_CONSTRAINT_DISPLAY, parseConstraintDisplay, JSON.stringify);
+  const [storedDimensionDisplay, setDimensionDisplay] = usePersistedState<DimensionDisplaySettings>("ps3d.sketch.dimensionDisplay", DEFAULT_DIMENSION_DISPLAY, parseDimensionDisplay, JSON.stringify);
+  // The unit is the document's (the Units choice in the palette), so every dimension label and editor agrees; the decimals and the "show unit" choice are per-browser display settings.
+  const dimensionDisplay: DimensionDisplaySettings = { ...storedDimensionDisplay, unit: props.displayUnit ?? "mm" };
+  const [dimensionOffsets, setDimensionOffsets] = usePersistedState<DimensionOffsets>(`ps3d.sketch.dimensionOffsets.${props.sketch.id}`, {}, parseDimensionOffsets, serializeDimensionOffsets);
+  const dimensionDrag = useRef<{ readonly pointerId: number; readonly constraintId: string; readonly startMm: Vec2; readonly startClient: readonly [number, number]; readonly startOffsetPx: number; readonly layoutAt: (offsetPx: number) => DimensionLayout | undefined; moved: boolean } | undefined>(undefined);
+  const [dimensionDragOffset, setDimensionDragOffset] = useState<{ readonly constraintId: string; readonly offsetPx: number } | undefined>(undefined);
+  // Keyboard access to the canvas, spline fit-point work, zoom window and the Measure tool.
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const [activeFit, setActiveFit] = useState<{ readonly entityId: string; readonly index: number } | undefined>(undefined);
+  const [zoomWindowMode, setZoomWindowMode] = useState(false);
+  const [measureMode, setMeasureMode] = useState(false);
+  const [measureState, setMeasureState] = useState<MeasureState>(EMPTY_MEASURE);
+  const [coarsePointer] = useState(() => { try { return window.matchMedia("(pointer: coarse)").matches; } catch { return false; } });
+  const hitSizes = canvasHitSizes(coarsePointer);
   /** Centerpoint arc: how far the pointer has travelled round the centre since the start click, which fixes the arc's direction (it may pass 180 degrees). */
   const arcTrack = useRef<ArcSweepTrack | undefined>(undefined);
   /** Dynamic-input fields typed so far in the shape being drawn, so the finished shape can keep them as dimensions and relations. */
@@ -600,6 +651,52 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (dynamicMirrorAxis === null) { props.onAddEntity(entityForDrawMode(entity, drawAsConstruction)); return; }
     applyDrawn({ label: `Added ${entity.kind}`, removeEntityIds: [], updateEntities: [], addEntities: [entity], addConstraints: [] });
   };
+  const newConstraintId = (): string => `constraint:user-${crypto.randomUUID()}`;
+  const entityLabels = useMemo(() => entityOrdinalLabels(props.sketch.entities), [props.sketch.entities]);
+  const redundantIds = useMemo(() => redundantConstraintIds(workingSketch.constraints, analysis), [workingSketch.constraints, analysis]);
+  const constraintTitles = useMemo(() => new Map(props.sketch.constraints.map((constraint) => [constraint.id, describeConstraint(constraint, entityLabels)] as const)), [props.sketch.constraints, entityLabels]);
+  const glyphs = useMemo(() => layoutConstraintGlyphs(
+    constraintsToDraw(visibleSketch.constraints, showConstraints ? constraintDisplay : { ...constraintDisplay, level: "none" }, { selectedEntityIds: selectionIds, hoveredEntityId: hoverId, selectedConstraintIds, hoveredConstraintId: hoverConstraintId, alwaysShowIds: redundantIds }),
+    visibleEntities,
+    { mmPerPx: px, redundant: redundantIds, ...(coarsePointer ? { radiusPx: hitSizes.glyphPx } : {}) }
+  ), [visibleSketch.constraints, visibleEntities, showConstraints, constraintDisplay, selectionIds, hoverId, selectedConstraintIds, hoverConstraintId, redundantIds, px, coarsePointer, hitSizes.glyphPx]);
+  // The curves a hovered or selected relation relates light up.
+  const relatedIds = useMemo(() => {
+    const focus = hoverConstraintId !== null ? [hoverConstraintId] : selectedConstraintIds;
+    return new Set(props.sketch.constraints.filter((constraint) => focus.includes(constraint.id)).flatMap((constraint) => constraint.entityIds));
+  }, [props.sketch.constraints, hoverConstraintId, selectedConstraintIds]);
+  const recordRows = useMemo(() => constraintRows(props.sketch.constraints, entityLabels), [props.sketch.constraints, entityLabels]);
+  const constraintKinds = useMemo(() => constraintKindsPresent(props.sketch.constraints), [props.sketch.constraints]);
+  // Driving dimensions: stacked so labels never overlap, at the stand-off the person dragged them to.
+  const dimensionViews = useMemo(() => {
+    const requests = drivingDimensions.map((view) => {
+      const id = view.constraint.id;
+      return {
+        id,
+        layoutAt: (offsetPx: number) => dimensionLayout(view.entity, view.dimension, view.constraint.dimension === "diameter" ? (view.constraint.valueMm ?? 0) / 2 : view.constraint.valueMm ?? 0, px, { offsetPx, format: (value) => formatLengthLabel(value, dimensionDisplay) }),
+        userOffsetPx: dimensionDragOffset?.constraintId === id ? dimensionDragOffset.offsetPx : dimensionOffsets[id]
+      };
+    });
+    return stackDimensionLabels(requests, px).flatMap((entry) => {
+      const view = drivingDimensions.find((candidate) => candidate.constraint.id === entry.id);
+      const request = requests.find((candidate) => candidate.id === entry.id);
+      return view === undefined || request === undefined ? [] : [{ ...entry, view, layoutAt: request.layoutAt }];
+    });
+  }, [drivingDimensions, px, dimensionDisplay, dimensionOffsets, dimensionDragOffset]);
+  const selectionTotal = sketchSelectionTotal({ curves: selectionIds.length, profiles: selectedProfileIds.length, constraints: selectedConstraintIds.length });
+  useEffect(() => { props.onSelectionCount?.(selectionTotal); }, [selectionTotal]);
+  // Relations that no longer exist cannot stay selected.
+  useEffect(() => {
+    setSelectedConstraintIds((current) => current.every((id) => props.sketch.constraints.some((constraint) => constraint.id === id)) ? current : current.filter((id) => props.sketch.constraints.some((constraint) => constraint.id === id)));
+    setHoverConstraintId((current) => current !== null && props.sketch.constraints.some((constraint) => constraint.id === current) ? current : null);
+  }, [props.sketch.constraints]);
+  useEffect(() => {
+    setActiveFit((current) => {
+      if (current === undefined) return current;
+      const spline = props.sketch.entities.find((entity) => entity.id === current.entityId);
+      return spline?.kind === "spline" && current.index < spline.fitPoints.length ? current : undefined;
+    });
+  }, [props.sketch.entities]);
   const editContext = () => ({ sketch: props.sketch, newId: (prefix: "entity" | "constraint"): string => `${prefix}:user-${crypto.randomUUID()}` });
   /** Puts the clipboard on the system clipboard as text too, so it can be pasted into another window; failure is harmless. */
   const shareClipboardText = (clipboard: SketchClipboard): void => {
@@ -624,7 +721,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     props.onActivateTool("text");
     props.onMessage(`Editing the text "${text.text}": change it in the Sketch palette and press Apply to the text, or click the sketch to move it there.`);
   };
-  const handleCanvasDoubleClick = (event: React.MouseEvent<SVGSVGElement>): void => {
+  /** Double-click on a placed text re-opens it for editing. */
+  const handleTextDoubleClick = (event: React.MouseEvent<SVGSVGElement>): void => {
     const id = (event.target as Element).closest<SVGElement>("[data-selection-id]")?.dataset["selectionId"];
     const text = id === undefined ? undefined : findTextObject(props.sketch, id);
     if (text === undefined) return;
@@ -677,8 +775,24 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [props.sketch, props.tool, props.cancelVersion]);
   useEffect(() => setPending([]), [props.tool, props.cancelVersion]);
   useEffect(() => {
-    if (pending.length === 0) { chainStart.current = undefined; chainSegments.current = 0; profileChain.current = undefined; arcTrack.current = undefined; typedTrail.current = {}; setPendingInference([]); }
+    if (pending.length === 0) { lineChain.current = EMPTY_LINE_CHAIN; profileChain.current = undefined; arcTrack.current = undefined; typedTrail.current = {}; setPendingInference([]); }
   }, [pending.length]);
+  // Undo (or any edit that removes the newest line) walks a line chain back to the previous vertex, so the next segment starts there and
+  // joins the surviving line instead of floating at a vertex that no longer exists. A Profile chain whose last segment is gone restarts.
+  useEffect(() => {
+    if (props.tool === "line" && lineChain.current.start !== undefined) {
+      const result = reconcileLineChain(lineChain.current, props.sketch.entities);
+      if (!result.changed) return;
+      lineChain.current = result.chain;
+      setPending(result.pending);
+      setPendingInference(result.tailInference === undefined ? [] : [result.tailInference]);
+      props.onMessage(`Stepped the line chain back to the previous point (${lineChainSegments(result.chain)} segment${lineChainSegments(result.chain) === 1 ? "" : "s"} left). Keep clicking to continue from there.`);
+    } else if (props.tool === "profile" && profileChain.current !== undefined && !profileChainStillValid(profileChain.current, props.sketch.entities)) {
+      profileChain.current = undefined;
+      setPending([]);
+      props.onMessage("The profile's last segment was removed, so the profile chain stopped. Click to start a new one.");
+    }
+  }, [props.sketch.entities]);
   // Starting a drawing tool, Sketch Dimension or an edit tool ends relation picking; switching to Select (which picking itself does) does not.
   useEffect(() => {
     if (props.tool !== "select" || props.dimensionMode || props.editTool !== null) { setPickRelation(null); setPickedPoint(undefined); }
@@ -815,6 +929,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       if (event.shiftKey || event.ctrlKey || event.metaKey) return;
       setSelectionIds([]);
       setSelectedProfileIds([]);
+      setSelectedConstraintIds([]);
+      setActiveFit(undefined);
       if (props.dimensionMode) setDimensionPoints([]);
       props.onSelect(null);
       return;
@@ -837,7 +953,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       ...pending.map((earlier, index): PlacedPointInference => pendingInference[index] ?? { point: earlier }),
       { point, ...(found?.primary === undefined ? {} : { primary: found.primary }), ...(found === undefined ? {} : { guides: found.guides }), ...(previous === undefined ? {} : { anchor: previous }) }
     ];
-    if (points.length === 1 && props.tool === "line") { chainStart.current = point; chainSegments.current = 0; }
+    if (points.length === 1 && props.tool === "line") lineChain.current = startLineChain(point, placed[0]);
     if (props.tool === "arc-center" && points.length === 2) arcTrack.current = startArcSweepTrack(points[0]!, points[1]!);
     if (points.length < requiredSketchPoints(props.tool)) {
       setPending(points);
@@ -870,7 +986,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       return;
     }
     // A shape whose points snapped to other geometry is added together with the relations that implies, in one undoable edit.
-    const snappedRelations = autoConstrain ? autoConstraintsFor({ tool: props.tool, entity: built.value, placed, sketch: props.sketch, newId: () => `constraint:auto-${crypto.randomUUID()}` }) : [];
+    // Never send a relation that names a curve that is not there (an undone chain end, say): the project would refuse the whole edit.
+    const snappedRelations = autoConstrain ? keepResolvableConstraints(autoConstraintsFor({ tool: props.tool, entity: built.value, placed, sketch: props.sketch, newId: () => `constraint:auto-${crypto.randomUUID()}` }), props.sketch.entities.map((entity) => entity.id), [built.value.id]).kept : [];
     // A value the user typed is design intent: it becomes a driving dimension, and a typed 0 or 90 degrees becomes Horizontal or Vertical.
     const typedRelations = typedIntentConstraints({ tool: props.tool, entity: built.value, typed: typedTrail.current, newId: () => `constraint:typed-${crypto.randomUUID()}` })
       .filter((relation) => !snappedRelations.some((existing) => existing.kind === relation.kind && relation.dimension === undefined));
@@ -885,14 +1002,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const relationNote = relations.length > 0 && accepted !== false ? ` with ${relations.length} automatic relation${relations.length === 1 ? "" : "s"} (${[...new Set(relations.map((relation) => relation.kind))].join(", ")})` : "";
     if (props.tool === "line") {
       // A line carries on from where it ended, like a polyline, until Esc. Ending on the first point closes the loop.
-      const segments = chainSegments.current + 1;
-      const start = chainStart.current;
+      const segments = lineChainSegments(lineChain.current) + 1;
+      const start = lineChain.current.start;
       if (segments >= 3 && start !== undefined && Math.hypot(point[0] - start[0], point[1] - start[1]) < 1e-6) {
         setPending([]);
         say(`Closed the loop after ${segments} lines. The shape is now a closed profile.`);
         return;
       }
-      chainSegments.current = segments;
+      lineChain.current = extendLineChain(lineChain.current, built.value.id);
       setPending([point]);
       // The next segment starts where this one ended, so it is joined to it automatically.
       setPendingInference([{ point, primary: { kind: "endpoint", point, entityId: built.value.id, selector: "end", distanceMm: 0 } }]);
@@ -997,8 +1114,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     props.onMessage(`Added profile ${entity.kind} ${next.segments}. Keep clicking, click the start to close it, or press Esc to stop.`);
   };
 
-  /** Opens the value editor next to a curve's dimension: the length of a line, the diameter of a circle, the width or height of a rectangle. */
-  const openDimensionEditor = (entity: SketchEntity, requested: DrivingDimension): void => {
+  /** Opens the value editor at a curve's dimension (or at the click): the length of a line, the diameter of a circle, the width or height of a rectangle. */
+  const openDimensionEditor = (entity: SketchEntity, requested: DrivingDimension, anchorOverride?: Vec2): void => {
     // An arc is dimensioned by its radius (its length is in the inspector) and an ellipse by its perimeter (its axes are in the inspector).
     const dimension: DrivingDimension = entity.kind === "arc" ? "radius" : entity.kind === "ellipse" ? "perimeter" : requested;
     const arcRadius = entity.kind === "arc" ? arcShape(entity.start, entity.mid, entity.end)?.radiusMm : undefined;
@@ -1008,56 +1125,88 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           : entity.kind === "arc" ? arcRadius
             : entity.kind === "ellipse" ? entityLengthMm(entity) : undefined;
     if (current === undefined) { props.onMessage("Only lines, circles, rectangles, arcs and ellipses take a driving dimension here; splines are reference only (see Angle, arc length, perimeter)."); return; }
-    const existing = props.sketch.constraints.find((constraint) => constraint.entityIds.length === 1 && constraint.entityIds[0] === entity.id && constraint.valueMm !== undefined && constraint.driven !== true
-      && (dimension === "arc-length" ? constraint.kind === "arc-length" : dimension === "perimeter" ? constraint.kind === "perimeter" : constraint.dimension === dimension));
-    const shown = existing?.valueMm === undefined ? current : (entity.kind === "circle" ? existing.valueMm * 2 : existing.valueMm);
+    const matches = (constraint: WorkbenchSketchConstraint): boolean => constraint.entityIds.length === 1 && constraint.entityIds[0] === entity.id
+      && (dimension === "arc-length" ? constraint.kind === "arc-length" : dimension === "perimeter" ? constraint.kind === "perimeter" : constraint.dimension === dimension || (constraint.kind === "radius" && dimension === "radius"));
+    const driving = props.sketch.constraints.find((constraint) => matches(constraint) && constraint.valueMm !== undefined && constraint.driven !== true);
+    const wasReference = driving === undefined && props.sketch.constraints.some((constraint) => matches(constraint) && constraint.driven === true);
+    const shown = driving?.valueMm === undefined ? current : (entity.kind === "circle" ? driving.valueMm * 2 : driving.valueMm);
     const layout = dimensionLayout(entity, dimension, entity.kind === "circle" ? shown / 2 : shown, px);
-    const next = {
+    const next: DimensionEditState = {
       entityId: entity.id,
       dimension,
-      anchor: layout?.textAt ?? entityAnchor(entity),
-      label: dimension === "arc-length" ? "Arc length" : dimension === "perimeter" ? "Perimeter" : entity.kind === "arc" ? "Radius" : entity.kind === "circle" ? "Diameter" : dimension === "width" ? "Width" : dimension === "height" ? "Height" : "Length"
+      anchor: anchorOverride ?? layout?.textAt ?? entityAnchor(entity),
+      label: dimension === "arc-length" ? "Arc length" : dimension === "perimeter" ? "Perimeter" : entity.kind === "arc" ? "Radius" : entity.kind === "circle" ? "Diameter" : dimension === "width" ? "Width" : dimension === "height" ? "Height" : "Length",
+      storedValue: driving === undefined ? undefined : shown,
+      wasReference
     };
     // Opened after the press has finished: the browser moves focus off the editor on mouse-down, which would close it again at once.
     window.setTimeout(() => {
       setDimensionEdit(next);
+      setDimensionReference(wasReference);
       // A dimension bound to an expression shows the expression, so it can be edited as text; a circle shows its diameter.
-      const bound = existing?.expression === undefined ? undefined : entity.kind === "circle" ? unhalvedExpression(existing.expression) : existing.expression;
-      const inInches = (props.displayUnit ?? "mm") === "in" && dimension !== "angle";
-      setDimensionText(bound ?? (inInches ? String(Number((shown / 25.4).toFixed(4))) : String(Number(shown.toFixed(3)))));
+      const bound = driving?.expression === undefined ? undefined : entity.kind === "circle" ? unhalvedExpression(driving.expression) : driving.expression;
+      setDimensionText(bound ?? dimensionEditText(shown, dimensionDisplay));
     }, 0);
   };
 
-  /** Opens the value editor for an existing angle, arc-length or perimeter dimension, from a click on its text. */
+  /** Opens the value editor for an existing angle, arc-length or perimeter dimension (or a reference length, width, height or radius), from a double-click on its text. */
   const openExtraDimensionEditor = (constraint: WorkbenchSketchConstraint, anchor: Vec2): void => {
-    const name: DrivingDimension = constraint.kind === "angle" ? "angle" : constraint.kind === "arc-length" ? "arc-length" : "perimeter";
-    const value = constraint.kind === "angle" ? constraint.valueDeg : constraint.valueMm;
+    const reference = constraint.driven === true;
+    const plain: readonly string[] = ["length", "width", "height", "radius"];
+    // Distances between points or lines, diameters and ellipse axes are changed in the inspector (their value fields live there), not on the canvas.
+    if (constraint.kind === "distance" && constraint.dimension !== undefined && !plain.includes(constraint.dimension)) { props.onMessage("Select this dimension's curves and change the distance in the Sketch inspector."); return; }
+    const name: DrivingDimension = constraint.kind === "angle" ? "angle" : constraint.kind === "arc-length" ? "arc-length" : constraint.kind === "perimeter" ? "perimeter" : constraint.kind === "radius" ? "radius" : constraint.dimension === "width" ? "width" : constraint.dimension === "height" ? "height" : "length";
+    const measured = reference ? measureDimensionConstraint(props.sketch, constraint) : undefined;
+    const value = reference ? measured : constraint.kind === "angle" ? constraint.valueDeg : constraint.valueMm;
     if (value === undefined) return;
-    const next = { entityId: constraint.entityIds[0]!, dimension: name, anchor, label: name === "angle" ? "Angle (degrees)" : name === "arc-length" ? "Arc length" : "Perimeter", ...(constraint.entityIds[1] === undefined ? {} : { secondEntityId: constraint.entityIds[1] }) };
-    window.setTimeout(() => { setDimensionEdit(next); setDimensionText(constraint.kind === "angle" ? String(Number(value.toFixed(3))) : lengthText(value)); }, 0);
+    const owner = props.sketch.entities.find((entity) => entity.id === constraint.entityIds[0]);
+    const diameter = owner?.kind === "circle" && name === "radius";
+    const shown = diameter ? value * 2 : value;
+    const label = name === "angle" ? "Angle (degrees)" : name === "arc-length" ? "Arc length" : name === "perimeter" ? "Perimeter" : diameter ? "Diameter" : name === "width" ? "Width" : name === "height" ? "Height" : name === "radius" ? "Radius" : "Length";
+    const next: DimensionEditState = { entityId: constraint.entityIds[0]!, dimension: name, anchor, label, storedValue: reference ? undefined : shown, wasReference: reference, ...(constraint.entityIds[1] === undefined ? {} : { secondEntityId: constraint.entityIds[1] }) };
+    window.setTimeout(() => {
+      setDimensionEdit(next);
+      setDimensionReference(reference);
+      setDimensionText(name === "angle" ? String(Number(shown.toPrecision(12))) : dimensionEditText(shown, dimensionDisplay));
+    }, 0);
   };
 
   const commitDimensionEdit = (): void => {
     const edit = dimensionEdit;
     if (edit === undefined) return;
-    // A length is read with its unit (12 mm, 1/2 in, 3/4"); a bare number takes the display unit. An angle stays a plain number of degrees.
+    // A length is read with its unit (12 mm, 1/2 in, 3/4"); a bare number takes the display unit. An angle is a plain number of degrees.
     const lengthRead = edit.dimension === "angle" ? undefined : readSketchLength(dimensionText, props.displayUnit ?? "mm");
-    const typed = edit.dimension === "angle" ? parseAngleText(dimensionText) : lengthRead?.ok === true ? lengthRead.valueMm : undefined;
     const entity = props.sketch.entities.find((candidate) => candidate.id === edit.entityId);
+    const second = edit.secondEntityId === undefined ? undefined : { secondEntityId: edit.secondEntityId };
+    // Reference: the dimension is measured and never moves the geometry.
+    if (dimensionReference) {
+      if (edit.wasReference) { props.onMessage("This is already a reference dimension. Untick Reference to make it drive the geometry."); setDimensionEdit(undefined); return; }
+      props.onSetDimension(edit.entityId, edit.dimension, 1, { driven: true, ...(second ?? {}) });
+      setDimensionEdit(undefined);
+      return;
+    }
+    const angle = edit.dimension === "angle";
+    const text = dimensionText.trim();
+    const typed = angle ? parseAngleText(dimensionText) : lengthRead?.ok === true ? lengthRead.valueMm : undefined;
     // Text that is not a number is an expression (plate_w / 2): the dimension is bound to it. The project checks it and says what is wrong.
-    if (typed === undefined && dimensionText.trim() !== "" && dimensionText.trim() !== "-") {
-      const text = dimensionText.trim();
+    if (typed === undefined && text !== "" && text !== "-") {
       // Only a plain length, width, height or radius can follow an expression; an angle, an arc length and a perimeter take numbers.
-      if (!["length", "width", "height", "radius"].includes(edit.dimension)) { props.onMessage(edit.dimension === "angle" ? "Type an angle from 0 up to 360 degrees." : "Type a size greater than zero."); return; }
+      if (!["length", "width", "height", "radius"].includes(edit.dimension)) { props.onMessage(angle ? "Type an angle from 0 up to 360 degrees." : "Type a size greater than zero."); return; }
       props.onSetDimension(edit.entityId, edit.dimension, 1, { expression: entity?.kind === "circle" ? halvedExpression(text) : text });
       setDimensionEdit(undefined);
       return;
     }
     if (typed !== undefined && edit.dimension !== "angle" && typed > 0 && typed < 0.01) { props.onMessage("The smallest size a sketch can hold is 0.01 mm. Type a larger value."); return; }
     if (typed !== undefined && edit.dimension !== "angle" && typed > 200_000) { props.onMessage("The largest sketch size is 200,000 mm (200 m). Type a smaller value."); return; }
-    if (typed === undefined || (edit.dimension === "angle" ? typed < 0 || typed >= 360 : typed <= 0)) { props.onMessage(edit.dimension === "angle" ? "Type an angle from 0 up to 360 degrees." : "Type a size greater than zero."); return; }
+    if (typed === undefined || (angle ? typed < 0 || typed >= 360 : typed <= 0)) { props.onMessage(angle ? "Type an angle from 0 up to 360 degrees." : "Type a size greater than zero."); return; }
+    // Enter without typing changes nothing: the editor starts from the exact stored value, so there is nothing to re-drive.
+    if (!edit.wasReference && edit.storedValue !== undefined && sameDimensionValue(typed, edit.storedValue)) {
+      props.onMessage("The dimension already has that value; nothing changed.");
+      setDimensionEdit(undefined);
+      return;
+    }
     // A circle is dimensioned by its diameter on the canvas; the model stores the radius.
-    props.onSetDimension(edit.entityId, edit.dimension, entity?.kind === "circle" && edit.dimension === "radius" ? typed / 2 : typed, edit.secondEntityId === undefined ? undefined : { secondEntityId: edit.secondEntityId });
+    props.onSetDimension(edit.entityId, edit.dimension, entity?.kind === "circle" && edit.dimension === "radius" ? typed / 2 : typed, second);
     setDimensionEdit(undefined);
   };
 
@@ -1107,6 +1256,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const selectEntity = (id: string, additive: boolean): void => {
     if (pickRelation === "midpoint" && pickedPoint !== undefined) { completeMidpoint(id); return; }
     if (pickRelation !== null) return;
+    if (!additive) setSelectedConstraintIds([]);
+    if (activeFit !== undefined && activeFit.entityId !== id) setActiveFit(undefined);
     if (props.viewportState.selectionFilter === "profile") {
       const profile = profiles.find((candidate) => candidate.entityIds.includes(id));
       if (profile !== undefined) selectProfile(profile, additive);
@@ -1141,9 +1292,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           const dy = cursor[1] - entity.center[1];
           const localX = dx * Math.cos(radians) + dy * Math.sin(radians);
           const localY = -dx * Math.sin(radians) + dy * Math.cos(radians);
-          openDimensionEditor(entity, Math.abs(Math.abs(localY) - entity.heightMm / 2) <= Math.abs(Math.abs(localX) - entity.widthMm / 2) ? "width" : "height");
+          openDimensionEditor(entity, Math.abs(Math.abs(localY) - entity.heightMm / 2) <= Math.abs(Math.abs(localX) - entity.widthMm / 2) ? "width" : "height", cursor);
         } else if (entity !== undefined) {
-          openDimensionEditor(entity, entity.kind === "circle" ? "radius" : "length");
+          openDimensionEditor(entity, entity.kind === "circle" ? "radius" : "length", cursor);
         }
         props.onMessage("Type the value and press Enter. Esc closes the editor; pick two blue points instead for a reference distance.");
       }
@@ -1159,8 +1310,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         const existing = props.sketch.constraints.find((constraint) => constraint.kind === "angle" && constraint.driven !== true && constraint.entityIds[0] === firstLine.id && constraint.entityIds[1] === secondLine.id);
         const shown = existing?.valueDeg ?? angleBetweenLinesDeg(firstLine, secondLine);
         const layout = angleDimensionLayout(firstLine, secondLine, shown, px);
-        const next = { entityId: firstLine.id, secondEntityId: secondLine.id, dimension: "angle" as const, anchor: layout?.textAt ?? entityAnchor(firstLine), label: "Angle (degrees)" };
-        window.setTimeout(() => { setDimensionEdit(next); setDimensionText(String(Number(shown.toFixed(3)))); }, 0);
+        const next: DimensionEditState = { entityId: firstLine.id, secondEntityId: secondLine.id, dimension: "angle", anchor: layout?.textAt ?? entityAnchor(firstLine), label: "Angle (degrees)", storedValue: existing?.valueDeg, wasReference: false };
+        window.setTimeout(() => { setDimensionEdit(next); setDimensionReference(false); setDimensionText(String(Number(shown.toPrecision(12)))); }, 0);
         props.onMessage("Type the angle in degrees from the first line to the second and press Enter.");
         return;
       }
@@ -1176,11 +1327,20 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       ? dimensionPoints.filter((candidate) => candidate.id !== point.id)
       : dimensionPoints.length < 2 ? [...dimensionPoints, point] : [point];
     setDimensionPoints(next);
+    const resolved = next.length === 2 ? resolveDirectSketchDimension(next) : undefined;
+    const target = resolved?.driving === undefined ? undefined : props.sketch.entities.find((entity) => entity.id === resolved.driving!.entityId);
+    if (resolved !== undefined && target !== undefined) {
+      openDimensionEditor(target, resolved.driving!.dimension, [(resolved.first.point[0] + resolved.second.point[0]) / 2, (resolved.first.point[1] + resolved.second.point[1]) / 2]);
+      props.onMessage(`${resolved.label}: type the value and press Enter.`);
+      return;
+    }
     props.onMessage(next.length === 0
       ? "Definition point cleared. Pick a point to start a dimension."
       : next.length === 1
         ? `${next[0]!.label} selected. Pick a second definition point.`
-        : "Point-to-point dimension selected; edit it when it maps to a supported driving parameter.");
+        : resolved === undefined
+          ? "Point-to-point dimension selected."
+          : `Reference distance ${formatLengthLabel(resolved.valueMm, dimensionDisplay)} (ΔX ${formatLengthLabel(resolved.delta[0], dimensionDisplay)}, ΔY ${formatLengthLabel(resolved.delta[1], dimensionDisplay)}). A driving distance between two different curves needs the two-curve dimension; this is measured only.`);
   };
 
   const selectProfile = (profile: SketchProfile, additive: boolean): void => {
@@ -1214,8 +1374,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const fitTwo = (kind: SketchConstraintKind): ConstraintFit => lastTwo.length === 2 ? constraintFit(kind, lastTwo.map((entity) => entity.kind)) : { ok: false, reason: "Select two curves; Shift-click the second." };
   const fitThree = (): ConstraintFit => lastThree.length === 3 ? constraintFit("symmetry", lastThree.map((entity) => entity.kind)) : { ok: false, reason: "Select the two curves to mirror, then the axis line last." };
   const fixedIds = selectedEntity === undefined ? [] : props.sketch.constraints.filter((constraint) => constraint.kind === "fixed" && constraint.suppressed !== true && constraint.entityIds.includes(selectedEntity.id)).map((constraint) => constraint.id);
-  const horizontalFit = fitOne("horizontal");
-  const verticalFit = fitOne("vertical");
+  // Horizontal and Vertical apply to every selected line; the other one-curve actions apply to the whole selection too.
+  const fitEach = (kind: "horizontal" | "vertical"): ConstraintFit => selectedEntities.some((entity) => constraintFit(kind, [entity.kind]).ok) ? { ok: true } as ConstraintFit : { ok: false, reason: selectedEntities.length === 0 ? "Select one or more lines." : "None of the selected curves is a line." };
+  const horizontalFit = fitEach("horizontal");
+  const verticalFit = fitEach("vertical");
+  const selectionFixed = selectionIsFixed(props.sketch, selectionIds);
+  const selectionCount = selectionIds.length;
+  const scopeSuffix = selectionCount > 1 ? ` (${selectionCount})` : "";
   const parallelFit = fitTwo("parallel");
   const perpendicularFit = fitTwo("perpendicular");
   const collinearFit = fitTwo("collinear");
@@ -1233,17 +1398,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (request === null || request.serial === handledRequestRef.current) return;
     handledRequestRef.current = request.serial;
     if (selectionIds.length === 0) { props.onMessage("Select one or more curves first."); return; }
-    if (request.command === "fix-curve") {
-      const already = new Set(props.sketch.constraints.filter((constraint) => constraint.kind === "fixed" && constraint.suppressed !== true).flatMap((constraint) => constraint.entityIds));
-      const targets = selectedEntities.filter((entity) => !already.has(entity.id));
-      if (targets.length === 0) { props.onMessage("The selected curves are already fixed."); return; }
-      props.onApplyEdit({
-        label: `Fixed ${targets.length} curve${targets.length === 1 ? "" : "s"}`,
-        removeEntityIds: [], updateEntities: [], addEntities: [],
-        addConstraints: targets.map((entity) => ({ id: `constraint:user-${crypto.randomUUID()}`, kind: "fixed" as const, entityIds: [entity.id] }))
-      });
-      return;
-    }
+    if (request.command === "fix-curve") { runSelectionAction(fixSelectionPlan(props.sketch, selectedEntities, newConstraintId)); return; }
     const family = request.command === "relax-relations" ? "relations" : "dimensions";
     const active = constraintsOnEntities(props.sketch, selectionIds, family, false);
     const relaxed = constraintsOnEntities(props.sketch, selectionIds, family, true);
@@ -1269,6 +1424,52 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     props.onMessage(`Select other: ${label} (${candidates.findIndex((candidate) => candidate.id === next) + 1} of ${candidates.length} under the pointer). ${fromKeyboard ? "Tab" : "Alt-click"} again for the next.`);
   };
 
+  /** Every inspector button, ribbon command and hotkey that edits the selection goes through here, so they all act on the whole selection. */
+  const runSelectionAction = (result: SelectionActionResult): boolean => {
+    if (!result.ok) { props.onMessage(result.message); return false; }
+    return props.onApplyEdit(result.plan) !== false;
+  };
+  const removeActiveFitPoint = (): boolean => {
+    if (activeFit === undefined) return false;
+    const spline = props.sketch.entities.find((entity) => entity.id === activeFit.entityId);
+    if (spline?.kind !== "spline") return false;
+    const edited = removeSplineFitPoint(spline, activeFit.index);
+    if (!edited.ok) { props.onMessage(edited.message); return true; }
+    if (props.onApplyEdit({ label: `Removed spline point ${activeFit.index + 1}`, removeEntityIds: [], updateEntities: [edited.entity], addEntities: [], addConstraints: [] }) !== false) setActiveFit({ entityId: spline.id, index: edited.index });
+    return true;
+  };
+  const deleteSelectedConstraints = (ids: readonly string[]): void => {
+    const present = ids.filter((id) => props.sketch.constraints.some((constraint) => constraint.id === id));
+    if (present.length === 0) return;
+    // One undo step for the lot: a single edit that removes the relations by ID.
+    const accepted = props.onApplyEdit({ label: `Deleted ${present.length} relation${present.length === 1 ? "" : "s"}`, removeEntityIds: [], updateEntities: [], addEntities: [], addConstraints: [], removeConstraintIds: present });
+    if (accepted !== false) setSelectedConstraintIds((current) => current.filter((id) => !present.includes(id)));
+  };
+  const selectConstraint = (id: string, additive: boolean): void => {
+    setSelectedConstraintIds((current) => additive ? (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]) : [id]);
+    if (!additive) { setSelectionIds([]); setSelectedProfileIds([]); props.onSelect(null); }
+    const constraint = props.sketch.constraints.find((candidate) => candidate.id === id);
+    if (constraint !== undefined) props.onMessage(`${describeConstraint(constraint, entityLabels)} selected. Press Delete to remove it.`);
+  };
+  const frameSelection = (): void => {
+    const extents = selectionExtents(visibleEntities, selectionIds);
+    if (extents === undefined) { props.onMessage("Select one or more curves first, then zoom to them."); return; }
+    camera.frame(extents);
+    props.onMessage(`Zoomed to ${selectionIds.length} selected curve${selectionIds.length === 1 ? "" : "s"}.`);
+  };
+  const startZoomWindow = (): void => {
+    setMeasureMode(false);
+    setZoomWindowMode(true);
+    props.onMessage("Zoom window: drag a rectangle on the canvas. Esc cancels.");
+  };
+  const startMeasure = (): void => {
+    setZoomWindowMode(false);
+    setMeasureState(EMPTY_MEASURE);
+    setMeasureMode(true);
+    if (props.tool !== "select") props.onActivateTool("select");
+    props.onMessage("Measure: click two points for a distance, or two lines for an angle. Nothing is added to the sketch. Esc finishes.");
+  };
+
   const handleHotkey = (action: SketchHotkeyAction): void => {
     switch (action.kind) {
       case "tool": props.onActivateTool(action.tool); return;
@@ -1291,33 +1492,34 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         return;
       case "exit-pick": setPickRelation(null); setPickedPoint(undefined); props.onMessage("Relation picking cancelled."); return;
       case "exit-dimension": props.onExitDimension(); return;
-      case "exit-edit-tool": props.onCloseEditTool(); return;
+      case "exit-edit-tool":
+        // Esc also ends the zoom window and the Measure tool, which behave like edit tools.
+        if (zoomWindowMode || measureMode) { setZoomWindowMode(false); setMeasureMode(false); setMeasureState(EMPTY_MEASURE); setSelectionBox(undefined); props.onMessage("Finished."); return; }
+        props.onCloseEditTool();
+        return;
       case "clear-selection":
         setSelectOther(undefined);
         setSelectionIds([]);
         setSelectedProfileIds([]);
+        setSelectedConstraintIds([]);
+        setActiveFit(undefined);
         props.onSelect(null);
         return;
       case "delete-selection":
         if (selectionIds.length === 0) return;
-        props.onApplyEdit({ label: `Deleted ${selectionIds.length} curve${selectionIds.length === 1 ? "" : "s"}`, removeEntityIds: selectionIds, updateEntities: [], addEntities: [], addConstraints: [] });
-        setSelectionIds([]);
-        props.onSelect(null);
+        // With a spline fit point picked, Delete removes that point; otherwise it removes the selected curves.
+        if (selectionIds.length === 1 && activeFit?.entityId === selectionIds[0] && removeActiveFitPoint()) return;
+        if (runSelectionAction(deleteSelectionPlan(props.sketch, selectionIds))) { setSelectionIds([]); props.onSelect(null); }
         return;
       case "toggle-draw-construction":
         setDrawAsConstruction(!drawAsConstruction);
         props.onMessage(drawAsConstruction ? DRAW_CONSTRUCTION_OFF_MESSAGE : DRAW_CONSTRUCTION_ON_MESSAGE);
         return;
-      case "toggle-construction":
-        if (selectedEntities.length === 0) { props.onMessage("Select curves first, then press X to turn them into construction geometry (or back)."); return; }
-        props.onApplyEdit({
-          label: `Toggled construction on ${selectedEntities.length} curve${selectedEntities.length === 1 ? "" : "s"}`,
-          removeEntityIds: [],
-          updateEntities: selectedEntities.map((entity) => ({ ...entity, construction: !entity.construction })),
-          addEntities: [],
-          addConstraints: []
-        });
-        return;
+      case "delete-constraints": deleteSelectedConstraints(selectedConstraintIds); return;
+      case "zoom-window": startZoomWindow(); return;
+      case "zoom-selection": frameSelection(); return;
+      case "measure": if (measureMode) { setMeasureMode(false); setMeasureState(EMPTY_MEASURE); props.onMessage("Measure finished."); } else startMeasure(); return;
+      case "toggle-construction": runSelectionAction(constructionSelectionPlan(selectedEntities)); return;
       case "finish":
         if (props.tool === "spline-control") { if (pending.length >= 3) finishControlSpline(pending, false); return; }
         if (props.tool === "profile") { profileChain.current = undefined; setPending([]); props.onMessage("Profile finished."); return; }
@@ -1356,7 +1558,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
   useSketchHotkeys({
     enabled: true,
-    context: { tool: props.tool, pendingPoints: pending.length, selectionCount: selectionIds.length + selectedProfileIds.length, curveSelectionCount: selectionIds.length, dimensionMode: props.dimensionMode, editToolActive: props.editTool !== null, pickingRelation: pickRelation !== null, dragging: dragLive !== undefined || (dragGesture.current?.moved ?? false), dynamicFieldCount: dynamicFields.length, dynamicTyped: Object.keys(fieldText).length > 0, overlapUnderCursor: hoverStack.length },
+    context: { tool: props.tool, pendingPoints: pending.length, selectionCount: selectionIds.length + selectedProfileIds.length + selectedConstraintIds.length, curveSelectionCount: selectionIds.length, constraintSelectionCount: selectedConstraintIds.length, dimensionMode: props.dimensionMode, editToolActive: props.editTool !== null || zoomWindowMode || measureMode, pickingRelation: pickRelation !== null, dragging: dragLive !== undefined || (dragGesture.current?.moved ?? false), dynamicFieldCount: dynamicFields.length, dynamicTyped: Object.keys(fieldText).length > 0, overlapUnderCursor: hoverStack.length },
     onAction: handleHotkey
   });
 
@@ -1470,6 +1672,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (event.button !== 0) return;
     setSelectOther(undefined);
     if (pickRelation !== null) return;
+    if (zoomWindowMode) {
+      // Zoom window: the next drag on the canvas draws the rectangle to zoom to.
+      event.currentTarget.setPointerCapture(event.pointerId);
+      boxGesture.current = { pointerId: event.pointerId, startClient: [event.clientX, event.clientY], startMm: camera.toSketch(event.clientX, event.clientY), additive: false, profileId: undefined, dragging: false };
+      return;
+    }
+    if (measureMode) { measureClick(camera.toSketch(event.clientX, event.clientY)); return; }
     const selecting = props.tool === "select" && !isClickEditTool(props.editTool) && !props.dimensionMode;
     if (selecting) {
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -1494,6 +1703,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   const handleCanvasPointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (camera.movePan(event)) return;
+    const labelDrag = dimensionDrag.current;
+    if (labelDrag !== undefined && labelDrag.pointerId === event.pointerId) {
+      // Dragging a dimension label moves its dimension line; the pointer is only captured once the press has become a drag, so a plain click or double-click still reaches the label.
+      if (!labelDrag.moved) {
+        if (Math.hypot(event.clientX - labelDrag.startClient[0], event.clientY - labelDrag.startClient[1]) < 4) return;
+        labelDrag.moved = true;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
+      const layout = labelDrag.layoutAt(labelDrag.startOffsetPx);
+      if (layout !== undefined) setDimensionDragOffset({ constraintId: labelDrag.constraintId, offsetPx: dragDimensionOffset(layout, labelDrag.startOffsetPx, labelDrag.startMm, camera.toSketch(event.clientX, event.clientY), px) });
+      return;
+    }
     const grab = dragGesture.current;
     if (grab !== undefined && grab.pointerId === event.pointerId) {
       if (!grab.moved && Math.hypot(event.clientX - grab.startClient[0], event.clientY - grab.startClient[1]) < 4) return;
@@ -1526,6 +1747,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       setSelectionIds([]);
       return;
     }
+    const labelDrag = dimensionDrag.current;
+    if (labelDrag !== undefined && labelDrag.pointerId === event.pointerId) {
+      dimensionDrag.current = undefined;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      const dragged = dimensionDragOffset;
+      setDimensionDragOffset(undefined);
+      if (labelDrag.moved && event.type !== "pointercancel" && dragged !== undefined && dragged.constraintId === labelDrag.constraintId) {
+        setDimensionOffsets((current) => ({ ...current, [labelDrag.constraintId]: dragged.offsetPx }));
+        props.onMessage("Moved the dimension. Its position is remembered in this browser; it is not part of the model.");
+      }
+      return;
+    }
     const grab = dragGesture.current;
     if (grab !== undefined && grab.pointerId === event.pointerId) {
       dragGesture.current = undefined;
@@ -1540,6 +1773,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setSelectionBox(undefined);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (event.type === "pointercancel") return;
+    if (zoomWindowMode) {
+      const extents = gesture.dragging ? zoomWindowExtents(gesture.startMm, camera.toSketch(event.clientX, event.clientY), px) : undefined;
+      if (extents === undefined) { props.onMessage("Drag a rectangle to zoom to it, or press Esc to cancel."); return; }
+      camera.frame(extents);
+      setZoomWindowMode(false);
+      props.onMessage("Zoomed to the window.");
+      return;
+    }
     if (gesture.dragging && props.editTool === "stretch") {
       // With Stretch active a drag on empty canvas sets the window instead of selecting.
       const end = camera.toSketch(event.clientX, event.clientY);
@@ -1563,15 +1804,73 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     } else pointer(event, true);
   };
 
+  /** One click of the Measure tool: the first pick is remembered, the second gives the distance or the angle. Nothing is added to the sketch. */
+  const measureClick = (point: Vec2): void => {
+    const first = measureState.result === undefined ? measureState.picks[0] : undefined;
+    const target = pickMeasureTarget(props.sketch, point, hitSizes.pickPx * px, first?.kind === "line" ? "line" : "any");
+    if (target === undefined) { props.onMessage("Click on a line to measure its angle to the first line."); return; }
+    const next = addMeasurePick(measureState, target);
+    setMeasureState(next);
+    props.onMessage(next.result !== undefined ? `${describeMeasurement(next.result)}. Click again to measure something else; Esc finishes.` : `${target.kind === "line" ? "Line" : `Point (${target.label})`} picked. Pick a second point for a distance, or a second line for an angle.`);
+  };
+
+  /** Double-click on a placed text re-opens it for editing; on a spline it adds a fit point where the curve is. */
+  const handleCanvasDoubleClick = (event: React.MouseEvent<SVGSVGElement>): void => {
+    handleTextDoubleClick(event);
+    if (event.defaultPrevented || !interactive || props.dimensionMode) return;
+    const at = camera.toSketch(event.clientX, event.clientY);
+    const target = selectionIds.length === 1 ? visibleEntities.find((entity) => entity.id === selectionIds[0]) : undefined;
+    if (target?.kind !== "spline") return;
+    const onCurve = nearestPointOnSpline(target, at);
+    if (onCurve === undefined || onCurve.distanceMm > hitSizes.pickPx * 1.5 * px) return;
+    // A double-click on an existing fit point is on its handle, not a request for a new point.
+    if (target.fitPoints.some((point) => Math.hypot(point[0] - at[0], point[1] - at[1]) < hitSizes.grabHitPx * px)) return;
+    const edited = insertSplineFitPoint(target, at);
+    if (!edited.ok) { props.onMessage(edited.message); return; }
+    if (props.onApplyEdit({ label: `Added spline point ${edited.index + 1}`, removeEntityIds: [], updateEntities: [edited.entity], addEntities: [], addConstraints: [] }) !== false) {
+      setActiveFit({ entityId: target.id, index: edited.index });
+      props.onMessage(`Added fit point ${edited.index + 1} (${edited.entity.fitPoints.length} of ${MAX_SPLINE_FIT_POINTS} possible). Drag it, or drag its tangent handle; Delete removes it.`);
+    }
+  };
+
+  /** Keys pressed while the canvas itself has the focus: walk through the curves and select them without a mouse. */
+  const handleCanvasKeyDown = (event: React.KeyboardEvent<SVGSVGElement>): void => {
+    if (event.target !== event.currentTarget) return;
+    const action = resolveCanvasKey({ key: event.key, ctrl: event.ctrlKey, meta: event.metaKey, alt: event.altKey, shift: event.shiftKey });
+    if (action === undefined || (action.kind === "select-focused" && focusedId === null)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (action.kind === "select-focused") {
+      if (focusedId !== null) { selectEntity(focusedId, action.additive); announceFocus(focusedId, true); }
+      return;
+    }
+    const next = focusAfter(visibleEntities, focusedId, action);
+    setFocusedId(next);
+    if (next !== null) announceFocus(next, selectionIds.includes(next));
+  };
+  const announceFocus = (id: string, selected: boolean): void => {
+    const index = visibleEntities.findIndex((entity) => entity.id === id);
+    const entity = visibleEntities[index];
+    if (entity === undefined) return;
+    setAnnouncement(describeEntityForAccessibility(entity, entityLabels.get(id) ?? entity.kind, index + 1, visibleEntities.length, selected));
+  };
+
   const interactive = props.tool === "select" && props.viewportState.navigationMode !== "pan" && !camera.spaceHeld && !isClickEditTool(props.editTool) && !underlayPick.active;
   const box = camera.viewBox;
   const canvasClasses = [
     "sketch-canvas",
     showProfiles ? "show-profiles" : "hide-profiles",
     camera.panning ? "panning" : camera.spaceHeld || navigationPan ? "pan-ready" : "",
-    dragLive !== undefined ? "dragging" : ""
+    dragLive !== undefined ? "dragging" : "",
+    zoomWindowMode ? "zoom-window" : "",
+    measureMode ? "measuring" : ""
   ].filter(Boolean).join(" ");
-  const constraintSlots = new Map<string, number>();
+  const pressDimension = (entry: (typeof dimensionViews)[number], event: React.PointerEvent, additive: boolean): void => {
+    selectConstraint(entry.id, additive);
+    if (!interactive || additive || event.button !== 0 || !isRepositionable(entry.layout)) return;
+    dimensionDrag.current = { pointerId: event.pointerId, constraintId: entry.id, startMm: camera.toSketch(event.clientX, event.clientY), startClient: [event.clientX, event.clientY], startOffsetPx: entry.offsetPx, layoutAt: entry.layoutAt, moved: false };
+  };
+  const activeSpline = activeFit === undefined ? undefined : visibleEntities.find((entity) => entity.id === activeFit.entityId);
   const curvatureCombs = showComb ? sketchCurvatureCombs(visibleEntities, 60 * px * combScale) : [];
 
   return <SketchUnitContext.Provider value={props.displayUnit ?? "mm"}>
@@ -1583,8 +1882,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         data-sketch-canvas={plane}
         viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
         preserveAspectRatio="xMidYMid meet"
-        role="img"
+        role="application"
+        aria-roledescription="sketch canvas"
+        tabIndex={0}
+        aria-describedby="sketch-canvas-help"
         aria-label={`${planeInfo.name} sketch with ${props.sketch.entities.length} entities and ${analysis.degreesOfFreedom} estimated degrees of freedom`}
+        onKeyDown={handleCanvasKeyDown}
         onPointerDownCapture={handleCanvasPointerDownCapture}
         onPointerMove={handleCanvasPointerMove}
         onPointerDown={handleCanvasPointerDown}
@@ -1615,7 +1918,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         />
         {props.sketch.underlay !== undefined && <UnderlayLayer underlay={props.sketch.underlay} />}
         {showProfiles && profiles.map((profile) => <SketchProfileShape key={profile.id} profile={profile} selected={selectedProfileIds.includes(profile.id)} {...(interactive ? { onSelect: (additive: boolean) => selectProfile(profile, additive) } : {})} />)}
-        {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} name={entityNames.get(entity.id)} px={px} selected={selectionIds.includes(entity.id)} hovered={hoverId === entity.id} movable={props.showMovable && movableIds.has(entity.id)} constrained={analysis.entityFreedom[entity.id] === 0} {...(interactive ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive), onHover: (inside: boolean) => setHoverId(inside ? entity.id : null), onGrab: (event: React.PointerEvent, handle: DragHandle) => beginDrag(event, entity.id, handle), handles: grabHandlesOf(entity) } : {})} />)}
+        {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} name={entityNames.get(entity.id)} px={px} selected={selectionIds.includes(entity.id)} hovered={hoverId === entity.id} related={relatedIds.has(entity.id)} focused={focusedId === entity.id} handleRadiusPx={hitSizes.grabHandlePx} hitRadiusPx={hitSizes.grabHitPx} movable={props.showMovable && movableIds.has(entity.id)} constrained={analysis.entityFreedom[entity.id] === 0} {...(interactive ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive), onHover: (inside: boolean) => setHoverId(inside ? entity.id : null), onGrab: (event: React.PointerEvent, handle: DragHandle) => beginDrag(event, entity.id, handle), onHandlePick: (handle: SketchGrabHandle) => setActiveFit(handle.handle.kind === "fit" ? { entityId: entity.id, index: handle.handle.index } : undefined), handles: grabHandlesOf(entity) } : {})} />)}
+        {interactive && activeSpline?.kind === "spline" && activeFit !== undefined && selectionIds.includes(activeSpline.id) && <SplineHandles spline={activeSpline} activeIndex={activeFit.index} px={px} handleRadiusPx={hitSizes.grabHandlePx} hitRadiusPx={hitSizes.grabHitPx} canRemove={activeSpline.fitPoints.length > 3} onGrab={(event, handle) => beginDrag(event, activeSpline.id, handle)} onRemove={() => { removeActiveFitPoint(); }} />}
         {curvatureCombs.map(({ entityId, comb }) => <g key={`comb:${entityId}`} className="curvature-comb" data-comb-entity={entityId} pointerEvents="none" fill="none" stroke="#d9480f" strokeWidth={px}>
           {comb.teeth.map((tooth, index) => <line key={index} x1={tooth.base[0]} y1={-tooth.base[1]} x2={tooth.tip[0]} y2={-tooth.tip[1]} strokeOpacity={0.7} />)}
           <polyline points={comb.envelope.map((point) => `${point[0]},${-point[1]}`).join(" ")} strokeWidth={1.4 * px} />
@@ -1624,8 +1928,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {previewShape?.entities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
         {mirrorGhosts.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
         {props.editTool !== null && editPreview.map((entity) => <SketchEntityShape key={`edit-preview-${entity.id}`} entity={entity} px={px} selected={false} hovered={false} preview />)}
-        {showDimensions && drivingDimensions.map((view) => <DimensionMarks key={view.constraint.id} entity={view.entity} dimension={view.dimension} valueMm={view.constraint.dimension === "diameter" ? (view.constraint.valueMm ?? 0) / 2 : view.constraint.valueMm ?? 0} relaxed={view.constraint.suppressed === true} px={px} {...(interactive ? { onEdit: () => openDimensionEditor(view.entity, view.dimension) } : {})} />)}
-        {showDimensions && <ExtraDimensionMarks sketch={visibleSketch} px={px} {...(interactive ? { onEdit: openExtraDimensionEditor } : {})} />}
+        {showDimensions && dimensionViews.map((entry) => <DimensionMarks key={entry.id} constraintId={entry.id} entityId={entry.view.entity.id} layout={entry.layout} px={px} relaxed={entry.view.constraint.suppressed === true} selected={selectedConstraintIds.includes(entry.id)} interactive={interactive} repositionable={isRepositionable(entry.layout)} title={constraintTitles.get(entry.id) ?? "Dimension"} onPress={(event, additive) => pressDimension(entry, event, additive)} onEdit={() => openDimensionEditor(entry.view.entity, entry.view.dimension)} />)}
+        {showDimensions && <ExtraDimensionMarks sketch={visibleSketch} px={px} selectedIds={selectedConstraintIds} {...(interactive ? { onEdit: openExtraDimensionEditor, onSelect: selectConstraint } : {})} />}
         {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r={4 * px} className="pending-point" />)}
         {underlayPick.points.length > 0 && props.editTool === "underlay" && <g className="underlay-pick" pointerEvents="none" stroke="#d9480f" strokeWidth={1.5 * px} fill="none">
           {underlayPick.points.length === 2 && <line x1={underlayPick.points[0]![0]} y1={-underlayPick.points[0]![1]} x2={underlayPick.points[1]![0]} y2={-underlayPick.points[1]![1]} strokeDasharray={`${6 * px} ${4 * px}`} />}
@@ -1633,31 +1937,27 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         </g>}
         {props.tool !== "select" && pointerInside && !camera.panning && inference !== undefined && <InferenceMarks inference={inference} px={px} />}
         {props.tool !== "select" && pointerInside && !camera.panning && <circle cx={cursor[0]} cy={-cursor[1]} r={3.5 * px} className="cursor-point" />}
-        {showDimensions && visibleEntities.filter((entity) => !dimensionedIds.has(entity.id)).map((entity) => <SketchDimensionGlyph key={`dimension:${entity.id}`} entity={entity} px={px} />)}
-        {showConstraints && visibleSketch.constraints.map((constraint) => {
-          const primary = constraint.entityIds[0] ?? "";
-          const slot = constraintSlots.get(primary) ?? 0;
-          constraintSlots.set(primary, slot + 1);
-          return <ConstraintGlyph key={constraint.id} constraint={constraint} entities={visibleEntities} px={px} slot={slot} />;
-        })}
+        {showDimensions && visibleEntities.filter((entity) => !dimensionedIds.has(entity.id)).map((entity) => <SketchDimensionGlyph key={`dimension:${entity.id}`} entity={entity} px={px} label={(value) => formatLengthLabel(value, dimensionDisplay)} />)}
+        <ConstraintGlyphLayer glyphs={glyphs} px={px} selectedIds={selectedConstraintIds} hoveredId={hoverConstraintId} interactive={interactive} titles={constraintTitles} onHover={setHoverConstraintId} onSelect={selectConstraint} />
+        {measureMode && <MeasureOverlay state={measureState} px={px} />}
         {pickRelation !== null && visibleEntities.flatMap(relationPoints).map((handle) => <rect
           key={handle.id}
           className={`relation-point${pickedPoint?.id === handle.id ? " selected" : ""}`}
           data-relation-point={handle.id}
-          x={handle.point[0] - 6 * px}
-          y={-handle.point[1] - 6 * px}
-          width={12 * px}
-          height={12 * px}
+          x={handle.point[0] - hitSizes.relationPointPx * px}
+          y={-handle.point[1] - hitSizes.relationPointPx * px}
+          width={2 * hitSizes.relationPointPx * px}
+          height={2 * hitSizes.relationPointPx * px}
           role="button"
           aria-label={`${handle.label} (relation point)`}
           onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); pickRelationPoint(handle); }}
         />)}
         {props.dimensionMode && <>
-          {dimensionHandleEntities.flatMap(dimensionHandles).map((point) => <circle key={point.id} className={`dimension-point ${dimensionPoints.some((candidate) => candidate.id === point.id) ? "selected" : ""}`} data-dimension-point={point.id} cx={point.point[0]} cy={-point.point[1]} r={6 * px} role="button" aria-label={`${point.label} dimension point`} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); selectDimensionPoint(point); }} />)}
+          {dimensionHandleEntities.flatMap(dimensionHandles).map((point) => <circle key={point.id} className={`dimension-point ${dimensionPoints.some((candidate) => candidate.id === point.id) ? "selected" : ""}`} data-dimension-point={point.id} cx={point.point[0]} cy={-point.point[1]} r={hitSizes.dimensionPointPx * px} role="button" aria-label={`${point.label} dimension point`} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); selectDimensionPoint(point); }} />)}
           {directDimension !== undefined && <DirectDimensionPreview dimension={directDimension} px={px} />}
         </>}
         {selectionBox !== undefined && <rect
-          className={`selection-box ${props.editTool === "stretch" ? "stretch-draw" : selectionBoxMode(selectionBox.start, selectionBox.end)}`}
+          className={`selection-box ${zoomWindowMode ? "zoom-draw" : props.editTool === "stretch" ? "stretch-draw" : selectionBoxMode(selectionBox.start, selectionBox.end)}`}
           x={Math.min(selectionBox.start[0], selectionBox.end[0])}
           y={-Math.max(selectionBox.start[1], selectionBox.end[1])}
           width={Math.abs(selectionBox.end[0] - selectionBox.start[0])}
@@ -1677,7 +1977,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
       {dimensionEdit !== undefined && <DimensionEditor
         label={dimensionEdit.label}
-        unitSymbol={dimensionEdit.dimension === "angle" ? "°" : unit}
+        unitLabel={dimensionEdit.dimension === "angle" ? "°" : dimensionDisplay.unit}
+        reference={dimensionReference}
+        onReferenceChange={setDimensionReference}
         unitName={dimensionEdit.dimension === "angle" ? "degrees" : unitWord(unit)}
         text={dimensionText}
         position={(() => {
@@ -1711,6 +2013,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         }}
       />}
 
+      <div id="sketch-canvas-help" className="sketch-sr-only">Sketch canvas. Use the arrow keys to move between curves, Enter or Space to select the focused curve, Shift plus Enter to add it to the selection, Delete to remove the selection, and Escape to step back.</div>
+      <div className="sketch-sr-only" role="status" aria-live="polite">{announcement}</div>
+      {zoomWindowMode && <div className="dimension-mode-banner"><CommandIcon name="view" /><span><strong>Zoom window</strong>Drag a rectangle on the canvas. Esc cancels.</span></div>}
+      {measureMode && <div className="dimension-mode-banner"><CommandIcon name="dimension" /><span><strong>Measure</strong>{measureState.result !== undefined ? describeMeasurement(measureState.result) : measureState.picks.length === 1 ? "Pick a second point for a distance, or a second line for an angle." : "Click a point, or a line. Nothing is added to the sketch. Esc finishes."}</span></div>}
       {props.dimensionMode && <div className="dimension-mode-banner"><CommandIcon name="dimension" /><span><strong>Sketch Dimension</strong>Select a curve, or pick two blue definition points. Esc to finish.</span></div>}
 
       {selectOther !== undefined && props.tool === "select" && <SelectOtherPopup
@@ -1731,6 +2037,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           <button onClick={() => setPaletteLayout((current) => ({ ...current, collapsed: !current.collapsed }))} aria-expanded={!paletteLayout.collapsed} title={paletteLayout.collapsed ? "Expand the palette" : "Fold the palette up"} aria-label={paletteLayout.collapsed ? "Expand the palette" : "Fold the palette up"}>{paletteLayout.collapsed ? "+" : "−"}</button>
         </div></header>
         <label className="palette-select"><span>Units</span><select aria-label="Sketch display units" value={props.displayUnit} onChange={(event) => props.onDisplayUnit(event.target.value === "in" ? "in" : "mm")}><option value="mm">Millimetres</option><option value="in">Inches</option></select></label>
+
+        {!paletteLayout.collapsed && <>
         <PaletteToggle label="Sketch grid" active={props.viewportState.gridVisible} onToggle={props.onGrid} />
         <PaletteToggle label={`Snap${keyLabelForCommand("toggle-snap", sketchKeymap) === undefined ? "" : ` (${keyLabelForCommand("toggle-snap", sketchKeymap)})`}`} active={snapEnabled} onToggle={setSnapEnabled} />
         <SketchInputPalette settings={assist} gridMm={grid.minorMm} onChange={updateAssist} onOpenShortcuts={() => setShortcutEditorOpen(true)} />
@@ -1742,9 +2050,21 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
         <PaletteToggle label="Constraints" active={showConstraints} onToggle={setShowConstraints} />
+        {showConstraints && <ConstraintDisplayPanel settings={constraintDisplay} present={constraintKinds} onChange={setConstraintDisplay} />}
+        {showDimensions && <details className="palette-dimension-display">
+          <summary>Dimension display</summary>
+          <label className="palette-number"><span>Decimals</span><input type="number" min={0} max={6} step={1} aria-label="Dimension decimals" value={dimensionDisplay.precision} onChange={(event) => setDimensionDisplay((current) => ({ ...current, precision: clampPrecision(Number(event.target.value)) }))} /></label>
+          <PaletteToggle label="Show unit" active={dimensionDisplay.showUnit} onToggle={(showUnit) => setDimensionDisplay((current) => ({ ...current, showUnit }))} />
+          <small>Display only: the model keeps millimetres. Drag a dimension's text to move it; it is remembered in this browser.</small>
+        </details>}
+        <div className="palette-view-tools" role="group" aria-label="View and measure">
+          <button type="button" className={zoomWindowMode ? "active" : ""} aria-pressed={zoomWindowMode} title="Zoom window (Z): drag a rectangle to zoom to it" onClick={() => zoomWindowMode ? setZoomWindowMode(false) : startZoomWindow()}><CommandIcon name="view" />Zoom window</button>
+          <button type="button" title="Zoom to the selected curves (Shift+F)" disabled={selectionIds.length === 0} onClick={frameSelection}><CommandIcon name="view" />Zoom selection</button>
+          <button type="button" className={measureMode ? "active" : ""} aria-pressed={measureMode} title="Measure (I): two points for a distance, two lines for an angle. Nothing is added to the sketch." onClick={() => { if (measureMode) { setMeasureMode(false); setMeasureState(EMPTY_MEASURE); } else startMeasure(); }}><CommandIcon name="dimension" />Measure</button>
+        </div>
         <PaletteToggle label="Curvature comb" active={showComb} onToggle={setShowComb} />
         {showComb && <label><span>Comb scale</span><input type="range" aria-label="Curvature comb scale" min={0.2} max={3} step={0.1} value={combScale} onChange={(event) => setCombScale(Number(event.target.value))} /></label>}
-        <button className="palette-action" disabled={selectedEntity === undefined} onClick={() => selectedEntity !== undefined && props.onToggleConstruction(selectedEntity.id)}><CommandIcon name={selectedEntity?.construction === true ? "rectangle" : "construction"} />{selectedEntity?.construction === true ? "Profile geometry" : "Construction"}</button>
+        <button className="palette-action" disabled={selectedEntities.length === 0} onClick={() => { runSelectionAction(constructionSelectionPlan(selectedEntities)); }}><CommandIcon name={selectedEntities.length > 0 && selectedEntities.every((entity) => entity.construction) ? "rectangle" : "construction"} />{selectedEntities.length > 0 && selectedEntities.every((entity) => entity.construction) ? "Profile geometry" : "Construction"}{selectedEntities.length > 1 ? ` (${selectedEntities.length})` : ""}</button>
         <div className="sketch-make-solid" aria-label="Create a solid from a profile">
           <span className="make-solid-title">Create solid</span>
           <div className="make-solid-row">
@@ -2007,12 +2327,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           <summary>Shortcuts</summary>
           <dl>{sketchHotkeyHelp(sketchKeymap).map((entry) => <div key={entry.keys}><dt>{entry.keys}</dt><dd>{entry.action}</dd></div>)}</dl>
         </details>
+        </>}
       </div>
 
       <div className="canvas-hud"><span>{planePlacement} · {planeInfo.horizontalLabel} → · {planeInfo.verticalLabel} ↑</span><span>{props.dimensionMode ? "Dimension" : sketchToolLabel(props.tool)}</span><span>Grid {props.viewportState.gridVisible ? fmtLen(grid.minorMm) : "off"}</span><span>Snap {snapEnabled ? `${SNAP_PIXELS} px` : "off"}</span><span>{pointerInside ? `${planeInfo.horizontalLabel} ${formatLength(cursor[0], unit)}  ${planeInfo.verticalLabel} ${fmtLen(cursor[1])}` : "Cursor outside the sketch"}</span><span>{visibleEntities.length}/{props.sketch.entities.length} entities visible</span><strong>{analysis.classification.replace("-", " ")}</strong></div>
       <div className="confirmation-corner" role="group" aria-label="Sketch confirmation corner">
         <small>Sketch</small>
-        <button type="button" onClick={props.onCancelSketch} title="Cancel the sketch and return to Design. Pending points are dropped."><CommandIcon name="cancel" />Cancel</button>
+        <button type="button" onClick={props.onCancelSketch} title="Discard the changes made in this sketch session and return to Design. Ctrl+Z brings them back."><CommandIcon name="cancel" />Cancel</button>
         <button type="button" className="primary" onClick={props.onFinishSketch} title="Finish the sketch and commit it to the timeline."><CommandIcon name="save" />OK</button>
       </div>
     </section>
@@ -2049,8 +2370,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           <dl className="compact-facts"><div><dt>Primary</dt><dd>{selectedEntity.kind}</dd></div><div><dt>Freedom</dt><dd>{analysis.entityFreedom[selectedEntity.id] ?? 0}</dd></div><div><dt>Stable ID</dt><dd>{shortId(selectedEntity.id)}</dd></div><div><dt>Constraints</dt><dd>{selectedConstraints.length}</dd></div></dl>
           <div className="selection-chips">{selectedEntities.map((entity, index) => <span key={entity.id}><b>{index + 1}</b>{entityNames.get(entity.id) ?? entity.kind}</span>)}</div>
           <div className="constraint-buttons">
-            <button disabled={!horizontalFit.ok} title={hint(horizontalFit, "Make the line horizontal.")} onClick={() => constrain("horizontal")}><CommandIcon name="horizontal" />Horizontal</button>
-            <button disabled={!verticalFit.ok} title={hint(verticalFit, "Make the line vertical.")} onClick={() => constrain("vertical")}><CommandIcon name="vertical" />Vertical</button>
+            <button disabled={!horizontalFit.ok} title={hint(horizontalFit, "Make every selected line horizontal.")} onClick={() => { runSelectionAction(constrainEachPlan(props.sketch, "horizontal", selectedEntities, newConstraintId)); }}><CommandIcon name="horizontal" />Horizontal{scopeSuffix}</button>
+            <button disabled={!verticalFit.ok} title={hint(verticalFit, "Make every selected line vertical.")} onClick={() => { runSelectionAction(constrainEachPlan(props.sketch, "vertical", selectedEntities, newConstraintId)); }}><CommandIcon name="vertical" />Vertical{scopeSuffix}</button>
             <button disabled={!parallelFit.ok} title={hint(parallelFit, "Make two lines parallel.")} onClick={() => constrain("parallel")}><CommandIcon name="parallel" />Parallel</button>
             <button disabled={!perpendicularFit.ok} title={hint(perpendicularFit, "Make two lines perpendicular.")} onClick={() => constrain("perpendicular")}><CommandIcon name="perpendicular" />Perpendicular</button>
             <button disabled={!collinearFit.ok} title={hint(collinearFit, "Put two lines on one line.")} onClick={() => constrain("collinear")}><CommandIcon name="collinear" />Collinear</button>
@@ -2058,12 +2379,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             <button disabled={!equalFit.ok} title={hint(equalFit, "Make two lines equal in length, or two circles or arcs equal in radius.")} onClick={() => constrain("equal")}><CommandIcon name="equal" />Equal</button>
             <button disabled={!tangentFit.ok} title={hint(tangentFit, "Line and circle/arc, or two circles/arcs. The second selection is adjusted.")} onClick={() => constrain("tangent")}><CommandIcon name="tangent" />Tangent</button>
             <button disabled={!symmetricFit.ok} title={hint(symmetricFit, "Select two lines or two circles, then the axis line last. The second is mirrored onto the first.")} onClick={() => constrain("symmetry")}><CommandIcon name="mirror" />Symmetric</button>
-            {fixedIds.length === 0
-              ? <button onClick={() => constrain("fixed")}><CommandIcon name="fixed" />Fix primary</button>
-              : <button title="Remove the Fixed relation so the curve can move again." onClick={() => fixedIds.forEach((id) => props.onDeleteConstraint(id))}><CommandIcon name="unfixed" />Unfix primary</button>}
-            <button onClick={() => props.onToggleConstruction(selectedEntity.id)}><CommandIcon name={selectedEntity.construction ? "rectangle" : "construction"} />{selectedEntity.construction ? "Profile" : "Construction"}</button>
-            <button onClick={() => props.onToggleVisibility(selectedEntity.id)}><CommandIcon name={selectedEntity.visible === false ? "eye" : "eye-off"} />{selectedEntity.visible === false ? "Show entity" : "Hide entity"}</button>
-            <button className="danger" onClick={() => props.onDeleteEntity(selectedEntity.id)}><CommandIcon name="trash" />Delete primary</button>
+            {!selectionFixed
+              ? <button title="Fix every selected curve in place." onClick={() => { runSelectionAction(fixSelectionPlan(props.sketch, selectedEntities, newConstraintId)); }}><CommandIcon name="fixed" />Fix{selectionCount > 1 ? ` selection (${selectionCount})` : " curve"}</button>
+              : <button title="Remove the Fixed relation from every selected curve so they can move again." onClick={() => { runSelectionAction(unfixSelectionPlan(props.sketch, selectionIds)); }}><CommandIcon name="unfixed" />Unfix{selectionCount > 1 ? ` selection (${selectionCount})` : " curve"}</button>}
+            <button title="Turn every selected curve into construction geometry, or back (X)." onClick={() => { runSelectionAction(constructionSelectionPlan(selectedEntities)); }}><CommandIcon name={selectedEntities.every((entity) => entity.construction) ? "rectangle" : "construction"} />{selectedEntities.every((entity) => entity.construction) ? "Profile" : "Construction"}{scopeSuffix}</button>
+            <button title="Hide every selected curve." onClick={() => { runSelectionAction(visibilitySelectionPlan(selectedEntities)); }}><CommandIcon name="eye-off" />Hide{selectionCount > 1 ? ` selection (${selectionCount})` : " curve"}</button>
+            <button className="danger" title="Delete every selected curve (Delete)." onClick={() => { if (runSelectionAction(deleteSelectionPlan(props.sketch, selectionIds))) { setSelectionIds([]); props.onSelect(null); } }}><CommandIcon name="trash" />Delete{selectionCount > 1 ? ` selection (${selectionCount})` : " curve"}</button>
           </div>
         </>}
       </section>
@@ -2091,52 +2412,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <div className="profile-list">{profiles.map((profile, index) => <button key={profile.id} className={selectedProfileIds.includes(profile.id) ? "selected" : ""} onClick={(event) => selectProfile(profile, event.shiftKey || event.ctrlKey || event.metaKey)}><span><b>P{index + 1}</b>{profileLabel(profile)}</span><small>{format(profile.areaMm2)} mm²</small></button>)}</div>
       </section>
 
-      <section className="inspector-section"><header><strong>Constraint records</strong><span>{props.sketch.constraints.length}</span></header>
-        <div className="record-list">{props.sketch.constraints.slice(-10).reverse().map((constraint) => <button key={constraint.id} onClick={() => props.onDeleteConstraint(constraint.id)} title="Delete this constraint"><CommandIcon name={constraint.dimension === undefined ? constraint.kind : "dimension"} /><span>{constraint.kind}{constraint.dimension === undefined ? "" : ` · ${constraint.dimension}`}{constraint.driven === true ? " · reference" : ""}{constraint.suppressed === true ? " · relaxed" : ""}</span><small>{constraint.valueDeg !== undefined ? `${format(constraint.valueDeg)}°` : constraint.valueMm === undefined ? shortId(constraint.id) : `${format(constraint.valueMm)} mm`}</small></button>)}</div>
+      <section className="inspector-section constraint-records"><header><strong>Constraint records</strong><span>{props.sketch.constraints.length}{redundantIds.size > 0 ? ` · ${redundantIds.size} redundant` : ""}</span></header>
+        <ConstraintRecordList rows={recordRows} selectedIds={selectedConstraintIds} redundantIds={redundantIds} onHover={setHoverConstraintId} onSelect={selectConstraint} onDelete={deleteSelectedConstraints} onToggleRelaxed={(id, relaxed) => { props.onSetSuppressed([id], relaxed); }} />
       </section>
       <div className="scope-note"><strong>Preview solver boundary</strong><p>A small analytic solver enforces horizontal, vertical, parallel, perpendicular, collinear, tangent, concentric, equal, symmetric and fixed relations plus radius and length dimensions on lines, circles and arcs; a conflict is refused with the reason. Rectangles are rigid, point-on-curve and endpoint relations are recorded but not solved, and there is no general nonlinear solver. Degrees of freedom are an estimate.</p></div>
     </aside>
   </SketchUnitContext.Provider>;
-}
-
-/** A driving dimension drawn like a drawing dimension: extension lines, a dimension line with arrowheads, and editable text. */
-function DimensionMarks({ entity, dimension, valueMm, relaxed, px, onEdit }: { readonly entity: SketchEntity; readonly dimension: DrivingDimension; readonly valueMm: number; readonly relaxed: boolean; readonly px: number; readonly onEdit?: () => void }): React.JSX.Element {
-  const markUnit = useSketchUnit();
-  const layout = dimensionLayout(entity, dimension, markUnit === "in" && dimension !== "angle" ? valueMm / 25.4 : valueMm, px);
-  if (layout === undefined) return <></>;
-  const flip = (point: Vec2): string => `${point[0]},${-point[1]}`;
-  const textWidth = (layout.label.length * 7.4 + 12) * px;
-  return <g className={`driving-dimension${relaxed ? " relaxed" : ""}`} data-dimension-for={entity.id} pointerEvents={onEdit === undefined ? "none" : undefined}>
-    {layout.extensionLines.map((segment, index) => <line key={index} x1={segment.from[0]} y1={-segment.from[1]} x2={segment.to[0]} y2={-segment.to[1]} />)}
-    <line x1={layout.dimensionLine.from[0]} y1={-layout.dimensionLine.from[1]} x2={layout.dimensionLine.to[0]} y2={-layout.dimensionLine.to[1]} />
-    {layout.arrows.map((arrow, index) => <polygon key={index} className="arrow" points={arrowHead(arrow, px).map(flip).join(" ")} />)}
-    <rect className="driving-dimension-hit" x={layout.textAt[0] - textWidth / 2} y={-layout.textAt[1] - 11 * px} width={textWidth} height={20 * px} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onEdit?.(); }} />
-    <text className="driving-dimension-text" x={layout.textAt[0]} y={-layout.textAt[1] + 4 * px} style={{ fontSize: 12.5 * px, strokeWidth: 3.5 * px }} pointerEvents="none">{layout.label}</text>
-  </g>;
-}
-
-/** Type a new value for a driving dimension next to it: Enter applies, Esc closes. */
-function DimensionEditor(props: { readonly label: string; /** "°" for an angle, otherwise the display unit; names the field for assistive technology as well. */ readonly unitSymbol: string; readonly unitName: string; readonly text: string; readonly position: readonly [number, number]; readonly onChange: (text: string) => void; readonly onCommit: () => void; readonly onCancel: () => void }): React.JSX.Element {
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
-  return <div className="dimension-editor" style={{ left: props.position[0], top: props.position[1] }} role="group" aria-label={`Edit ${props.label.toLowerCase()}`}>
-    <label><span>{props.label}</span>
-      <input
-        ref={inputRef}
-        inputMode="decimal"
-        aria-label={`${props.label} in ${props.unitName}`}
-        value={props.text}
-        onChange={(event) => props.onChange(event.target.value)}
-        onBlur={props.onCancel}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") { event.preventDefault(); props.onCommit(); }
-          else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel(); }
-        }}
-      />
-      <small>{props.unitSymbol}</small>
-    </label>
-    <em>Enter applies a driving value · Esc closes</em>
-  </div>;
 }
 
 /** The editable length, angle, width, height or radius next to the cursor while a shape is being placed. */
@@ -2324,9 +2605,9 @@ function DirectDimensionPreview({ dimension, px }: { readonly dimension: DirectS
   </g>;
 }
 
-function SketchEntityShape({ entity, name, px, selected, hovered, onSelect, onHover, onGrab, handles, preview = false, movable = false, constrained = false }: { readonly entity: SketchEntity; /** "Line 3": shown as the tooltip. */ readonly name?: string | undefined; readonly px: number; readonly selected: boolean; readonly hovered: boolean; readonly onSelect?: (additive: boolean) => void; readonly onHover?: (inside: boolean) => void; readonly onGrab?: (event: React.PointerEvent, handle: DragHandle) => void; readonly handles?: readonly SketchGrabHandle[]; readonly preview?: boolean; readonly movable?: boolean; readonly constrained?: boolean }): React.JSX.Element {
+function SketchEntityShape({ entity, name, px, selected, hovered, related = false, focused = false, handleRadiusPx = 5, hitRadiusPx = 10, onSelect, onHover, onGrab, onHandlePick, handles, preview = false, movable = false, constrained = false }: { readonly entity: SketchEntity; /** "Line 3": shown as the tooltip. */ readonly name?: string | undefined; readonly px: number; readonly selected: boolean; readonly hovered: boolean; readonly related?: boolean; readonly focused?: boolean; readonly handleRadiusPx?: number; readonly hitRadiusPx?: number; readonly onSelect?: (additive: boolean) => void; readonly onHover?: (inside: boolean) => void; readonly onGrab?: (event: React.PointerEvent, handle: DragHandle) => void; readonly onHandlePick?: (handle: SketchGrabHandle) => void; readonly handles?: readonly SketchGrabHandle[]; readonly preview?: boolean; readonly movable?: boolean; readonly constrained?: boolean }): React.JSX.Element {
   // Fully constrained curves are drawn in a neutral tone and under-constrained ones in the working colour, so what can still move is visible at a glance.
-  const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""} ${hovered && !selected ? "hover" : ""} ${preview ? "tool-preview" : ""} ${movable && !selected ? "movable" : ""} ${constrained && !preview && entity.kind !== "point" ? "constrained" : ""}`;
+  const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""} ${hovered && !selected ? "hover" : ""} ${related ? "related" : ""} ${focused ? "kb-focus" : ""} ${preview ? "tool-preview" : ""} ${movable && !selected ? "movable" : ""} ${constrained && !preview && entity.kind !== "point" ? "constrained" : ""}`;
   const geometry = (cls: string, hit: boolean): React.JSX.Element => {
     if (entity.kind === "line") return <line className={cls} x1={entity.start[0]} y1={-entity.start[1]} x2={entity.end[0]} y2={-entity.end[1]} />;
     if (entity.kind === "rectangle") return <rect className={cls} x={entity.center[0] - entity.widthMm / 2} y={-entity.center[1] - entity.heightMm / 2} width={entity.widthMm} height={entity.heightMm} transform={`rotate(${-entity.rotationDeg} ${entity.center[0]} ${-entity.center[1]})`} />;
@@ -2347,17 +2628,19 @@ function SketchEntityShape({ entity, name, px, selected, hovered, onSelect, onHo
     {name !== undefined && <title>{name}</title>}
     {geometry("sketch-hit", true)}
     {geometry(className, false)}
-    {(selected || hovered) && handles?.map((handle) => <circle
-      key={handle.id}
-      className={`grab-handle ${handle.handle.kind}`}
-      data-grab-handle={handle.id}
-      cx={handle.point[0]}
-      cy={-handle.point[1]}
-      r={5 * px}
-      role="button"
-      aria-label={`Drag ${handle.label}`}
-      onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onSelect(false); onGrab?.(event, handle.handle); }}
-    />)}
+    {(selected || hovered) && handles?.map((handle) => <g key={handle.id}>
+      <circle className="grab-hit" cx={handle.point[0]} cy={-handle.point[1]} r={hitRadiusPx * px} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onSelect(false); onHandlePick?.(handle); onGrab?.(event, handle.handle); }} />
+      <circle
+        className={`grab-handle ${handle.handle.kind}`}
+        data-grab-handle={handle.id}
+        cx={handle.point[0]}
+        cy={-handle.point[1]}
+        r={handleRadiusPx * px}
+        role="button"
+        aria-label={`Drag ${handle.label}`}
+        onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onSelect(false); onHandlePick?.(handle); onGrab?.(event, handle.handle); }}
+      />
+    </g>)}
   </g>;
 }
 
@@ -2416,29 +2699,16 @@ function SketchProfileShape({ profile, selected, onSelect }: { readonly profile:
   return <path {...common} d={`${path} Z`} />;
 }
 
-function SketchDimensionGlyph({ entity, px }: { readonly entity: SketchEntity; readonly px: number }): React.JSX.Element {
+function SketchDimensionGlyph({ entity, px, label }: { readonly entity: SketchEntity; readonly px: number; readonly label: (valueMm: number) => string }): React.JSX.Element {
   const style = { fontSize: 12 * px, strokeWidth: 3 * px };
   if (entity.kind === "line") {
     const x = (entity.start[0] + entity.end[0]) / 2;
     const y = -(entity.start[1] + entity.end[1]) / 2 - 8 * px;
-    return <text x={x} y={y} style={style} className="sketch-dimension-glyph">{fmtNum(Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]))}</text>;
+    return <text x={x} y={y} style={style} className="sketch-dimension-glyph">{label(Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]))}</text>;
   }
-  if (entity.kind === "rectangle") return <><text x={entity.center[0]} y={-entity.center[1] + entity.heightMm / 2 + 16 * px} style={style} className="sketch-dimension-glyph">{fmtNum(entity.widthMm)}</text><text x={entity.center[0] + entity.widthMm / 2 + 12 * px} y={-entity.center[1]} style={style} className="sketch-dimension-glyph vertical">{fmtNum(entity.heightMm)}</text></>;
-  if (entity.kind === "circle") return <text x={entity.center[0] + entity.radiusMm * 0.35} y={-entity.center[1] - 8 * px} style={style} className="sketch-dimension-glyph">R {fmtNum(entity.radiusMm)}</text>;
+  if (entity.kind === "rectangle") return <><text x={entity.center[0]} y={-entity.center[1] + entity.heightMm / 2 + 16 * px} style={style} className="sketch-dimension-glyph">{label(entity.widthMm)}</text><text x={entity.center[0] + entity.widthMm / 2 + 12 * px} y={-entity.center[1]} style={style} className="sketch-dimension-glyph vertical">{label(entity.heightMm)}</text></>;
+  if (entity.kind === "circle") return <text x={entity.center[0] + entity.radiusMm * 0.35} y={-entity.center[1] - 8 * px} style={style} className="sketch-dimension-glyph">R {label(entity.radiusMm)}</text>;
   return <></>;
-}
-
-function ConstraintGlyph({ constraint, entities, px, slot }: { readonly constraint: WorkbenchSketchConstraint; readonly entities: readonly SketchEntity[]; readonly px: number; readonly slot: number }): React.JSX.Element {
-  const entity = entities.find((candidate) => candidate.id === constraint.entityIds[0]);
-  if (entity === undefined) return <></>;
-  // A point-level relation is drawn at the point it joins; every other relation at the middle of its curve.
-  const joined = constraint.points?.[0] === undefined ? undefined : relationPoints(entity).find((candidate) => candidate.ref === constraint.points?.[0]);
-  const point = constraint.kind === "midpoint" || constraint.kind === "coincident" ? (joined?.point ?? entityAnchor(entity)) : entityAnchor(entity);
-  const label = constraint.kind === "horizontal" ? "H" : constraint.kind === "vertical" ? "V" : constraint.kind === "parallel" ? "∥" : constraint.kind === "perpendicular" ? "⊥" : constraint.kind === "fixed" ? "F" : constraint.kind === "concentric" ? "◎" : constraint.kind === "equal" ? "=" : constraint.kind === "coincident" ? "•" : constraint.kind === "midpoint" ? "M" : constraint.kind === "angle" ? "∠" : constraint.kind === "arc-length" ? "⌒" : constraint.kind === "perimeter" ? "P" : constraint.kind === "smooth" ? "G2" : constraint.kind === "pierce" ? "⊙" : constraint.kind === "refraction" ? "n" : constraint.kind.slice(0, 1).toUpperCase();
-  // Several relations on one curve fan out sideways instead of stacking on the same spot.
-  const x = point[0] + (12 + slot * 19) * px;
-  const y = -point[1] - 12 * px;
-  return <g className={`constraint-glyph${constraint.suppressed === true ? " relaxed" : ""}`}><circle cx={x} cy={y} r={8 * px} /><text x={x} y={y + 4 * px} style={{ fontSize: 11 * px }}>{label}</text></g>;
 }
 
 function entityAnchor(entity: SketchEntity): Vec2 {

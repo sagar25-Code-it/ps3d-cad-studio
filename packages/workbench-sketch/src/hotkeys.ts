@@ -32,6 +32,13 @@ export type SketchHotkeyAction =
   | { readonly kind: "exit-edit-tool" }
   | { readonly kind: "clear-selection" }
   | { readonly kind: "delete-selection" }
+  /** Delete or Backspace with relations selected on the canvas (and no curves): remove just those relations. */
+  | { readonly kind: "delete-constraints" }
+  /** Z: drag a window on the canvas to zoom to it. Shift+F: zoom to the selected curves. */
+  | { readonly kind: "zoom-window" }
+  | { readonly kind: "zoom-selection" }
+  /** I: the Measure tool (distance between two points, angle between two lines). It never adds a relation. */
+  | { readonly kind: "measure" }
   | { readonly kind: "finish" }
   | { readonly kind: "select-all" }
   /** Ctrl/Cmd+C, X and V: the sketch clipboard. Copy and cut need a curve selection; paste is always offered and says if the clipboard is empty. */
@@ -82,6 +89,8 @@ export interface SketchHotkeyContext {
   readonly dynamicTyped?: boolean;
   /** How many curves overlap under the pointer (Tab cycles through them when this is 2 or more). */
   readonly overlapUnderCursor?: number;
+  /** Relations (glyphs or dimension labels) selected on the canvas. Delete removes them when no curve is selected. */
+  readonly constraintSelectionCount?: number;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -91,7 +100,7 @@ export interface SketchHotkeyContext {
 export type SketchCommandId =
   | `tool:${Exclude<SketchTool, "select">}`
   | `edit:${SketchEditHotkeyTool}`
-  | "dimension" | "toggle-construction" | "toggle-draw-construction" | "fit" | "pan-mode" | "select-tool"
+  | "dimension" | "toggle-construction" | "toggle-draw-construction" | "fit" | "zoom-selection" | "zoom-window" | "measure" | "pan-mode" | "select-tool"
   | "toggle-snap" | "toggle-ortho" | "toggle-polar";
 
 export type SketchCommandGroup = "Draw" | "Modify" | "Dimension and view" | "Input assistance";
@@ -142,7 +151,7 @@ export const SKETCH_KEYMAP_COMMANDS: readonly SketchCommandInfo[] = [
   c("edit:trim", "Trim", "Modify", "T"),
   c("edit:extend", "Extend", "Modify", "Shift+T"),
   c("edit:offset", "Offset", "Modify", "O"),
-  c("edit:fillet", "Fillet", "Modify", "Shift+F"),
+  c("edit:fillet", "Fillet", "Modify", "Shift+O"),
   c("edit:chamfer", "Chamfer", "Modify"),
   c("edit:move", "Move / Copy", "Modify", "M"),
   c("edit:mirror", "Mirror", "Modify", "Shift+M"),
@@ -158,6 +167,9 @@ export const SKETCH_KEYMAP_COMMANDS: readonly SketchCommandInfo[] = [
   c("select-tool", "Select tool", "Dimension and view", "V"),
   c("pan-mode", "Pan navigation", "Dimension and view", "P"),
   c("fit", "Fit the sketch to the window", "Dimension and view", "F"),
+  c("zoom-selection", "Zoom to the selected curves", "Dimension and view", "Shift+F"),
+  c("zoom-window", "Zoom window: drag a rectangle to zoom to it", "Dimension and view", "Z"),
+  c("measure", "Measure: two points for a distance, two lines for an angle", "Dimension and view", "I"),
   c("toggle-snap", "Snap on / off", "Input assistance", "F9"),
   c("toggle-ortho", "Ortho lock on / off", "Input assistance", "F8"),
   c("toggle-polar", "Polar tracking on / off", "Input assistance", "F10")
@@ -416,6 +428,9 @@ function actionForCommand(id: SketchCommandId): SketchHotkeyAction | undefined {
     case "toggle-construction": return { kind: "toggle-construction" };
     case "toggle-draw-construction": return { kind: "toggle-draw-construction" };
     case "fit": return { kind: "fit" };
+    case "zoom-selection": return { kind: "zoom-selection" };
+    case "zoom-window": return { kind: "zoom-window" };
+    case "measure": return { kind: "measure" };
     case "pan-mode": return { kind: "pan-mode" };
     case "select-tool": return { kind: "select-tool" };
     case "toggle-snap": return { kind: "toggle-snap" };
@@ -460,11 +475,11 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
   }
   if (key === "Backspace") {
     if (context.pendingPoints > 0) return { kind: "undo-point" };
-    return context.curveSelectionCount > 0 ? { kind: "delete-selection" } : undefined;
+    return context.curveSelectionCount > 0 ? { kind: "delete-selection" } : (context.constraintSelectionCount ?? 0) > 0 ? { kind: "delete-constraints" } : undefined;
   }
   if (key === "Delete") {
     if (context.pendingPoints > 0) return { kind: "cancel-points" };
-    return context.curveSelectionCount > 0 ? { kind: "delete-selection" } : undefined;
+    return context.curveSelectionCount > 0 ? { kind: "delete-selection" } : (context.constraintSelectionCount ?? 0) > 0 ? { kind: "delete-constraints" } : undefined;
   }
   if (key === "Enter") {
     if (context.dynamicFieldCount > 0 && context.dynamicTyped === true) return { kind: "commit-dynamic" };
@@ -506,7 +521,7 @@ export function sketchHotkeyHelp(keymap: SketchKeymap = activeKeymap): readonly 
     { keys: "Enter", action: "Place the typed point; end a line chain, finish a spline or profile" },
     { keys: "Esc", action: "Backs out one level: a drag, the points being placed, a pick mode, the dimension or edit tool, the drawing tool, then the selection" },
     { keys: "Backspace", action: "Remove the last placed point; with no points pending, delete the selected curves" },
-    { keys: "Delete", action: "Drop the points being placed (a line chain keeps its finished segments); with no points pending, delete the selected curves" },
+    { keys: "Delete", action: "Drop the points being placed (a line chain keeps its finished segments); with no points pending, delete the selected curves, or the selected relation" },
     { keys: "Press a tool's key again", action: "Step through its variants: R for 2-point, centre, 3-point rectangle; C for circles; A for arcs" },
     { keys: "Hold Ctrl", action: "Snapping off while held" },
     { keys: "Hold Shift", action: "Constrain to horizontal / vertical (square for rectangles)" },
