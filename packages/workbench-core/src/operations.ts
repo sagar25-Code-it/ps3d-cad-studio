@@ -58,6 +58,7 @@ import {
   type PartFeatureResult
 } from "./part-features.js";
 import { setDesignParameters, settleDesignExpressions } from "./design-parameters.js";
+import { applySketchObjectsEdit, explicitObjectIds, reconcileSketchObjects, validSketchObjectsEdit } from "./sketch-objects.js";
 import { failure, validateWorkbenchProject, validSketchPlaneFrame, validSketchPlaneTilt, WORKBENCH_LIMITS } from "./validation.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
@@ -113,7 +114,8 @@ export function applyWorkbenchOperation(
     return failure("RESOURCE_LIMIT", "The preview audit reached its 500-entry limit.", [current.value.id], "Export the project and start a compacted revision lineage.");
   }
 
-  const changed = settleDesignExpressions(current.value, operation, applyIntent(current.value, operation), resizeSketchEntity);
+  const settled = settleDesignExpressions(current.value, operation, applyIntent(current.value, operation), resizeSketchEntity);
+  const changed = settled.ok ? reconcileOperationSketch(current.value, settled.value, operation) : settled;
   if (!changed.ok) return changed;
   const nextRevision = current.value.revision + 1;
   const next: WorkbenchProject = {
@@ -211,8 +213,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       if (!keys(input, [...common, "entityId"]) || !stableId(input.entityId)) return invalidOperation("The sketch entity ID is invalid.");
       break;
     case "apply-sketch-edit":
-      if (!keys(input, [...common, "removeEntityIds", "updateEntities", "addEntities", "addConstraints", "label", ...(Object.hasOwn(input, "removeConstraintIds") ? ["removeConstraintIds"] : [])])
+      if (!keys(input, [...common, "removeEntityIds", "updateEntities", "addEntities", "addConstraints", "label", ...(Object.hasOwn(input, "removeConstraintIds") ? ["removeConstraintIds"] : []), ...(Object.hasOwn(input, "objects") ? ["objects"] : [])])
         || (Object.hasOwn(input, "removeConstraintIds") && !boundedList(input.removeConstraintIds, 400, stableId))
+        || (Object.hasOwn(input, "objects") && !validSketchObjectsEdit(input.objects))
         || !boundedList(input.removeEntityIds, 200, stableId) || !boundedList(input.updateEntities, 200, isRecord)
         || !boundedList(input.addEntities, 200, isRecord) || !boundedList(input.addConstraints, 400, isRecord)
         || typeof input.label !== "string" || input.label.length < 1 || input.label.length > 80) return invalidOperation("The sketch edit payload is invalid.");
@@ -1306,7 +1309,7 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   const constraints = [...sketch.constraints.filter((constraint) => !constraint.entityIds.some((id) => removed.has(id)) && !removedConstraints.has(constraint.id)), ...operation.addConstraints];
   if (constraints.length > WORKBENCH_LIMITS.maxConstraints) return failure("RESOURCE_LIMIT", "The sketch reached its constraint record limit.", [sketch.id], "Delete a constraint before applying this edit.");
   if (new Set(constraints.map((constraint) => constraint.id)).size !== constraints.length) return invalidOperation("A new constraint reuses an existing ID.");
-  const next = { ...sketch, entities, constraints };
+  const next = applySketchObjectsEdit({ ...sketch, entities, constraints }, operation.objects);
   const focus = [...updates.keys(), ...addedIds, ...operation.addConstraints.flatMap((constraint) => constraint.entityIds)];
   const solved = solveLiveSketch(next, focus);
   if (!solved.ok) return solveFailure(solved);
@@ -1326,6 +1329,22 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
     [...removed, ...updates.keys(), ...addedIds, ...operation.addConstraints.map((constraint) => constraint.id)],
     `${operation.label}.${droppedNote}${unsolvedNote}`
   );
+}
+
+/**
+ * After an operation that changed the sketch: keeps text objects and associative patterns in step with their curves (a pattern
+ * re-generates its instances from its sources), and says in the summary what was reset or let go.
+ */
+function reconcileOperationSketch(
+  before: WorkbenchProject,
+  result: { readonly project: WorkbenchProject; readonly changedIds: readonly string[]; readonly summary: string },
+  operation: WorkbenchOperation
+): WorkbenchResult<{ readonly project: WorkbenchProject; readonly changedIds: readonly string[]; readonly summary: string }> {
+  if (result.project.sketch === before.sketch) return { ok: true, value: result };
+  const outcome = reconcileSketchObjects(before.sketch, result.project.sketch, explicitObjectIds(operation.kind === "apply-sketch-edit" ? operation.objects : undefined));
+  if (!outcome.ok) return failure("RESOURCE_LIMIT", outcome.message, outcome.relatedIds, "Change the pattern, or remove curves from the sketch, and try again.");
+  if (outcome.sketch === result.project.sketch) return { ok: true, value: result };
+  return { ok: true, value: { ...result, project: { ...result.project, sketch: outcome.sketch }, summary: outcome.notes.length === 0 ? result.summary : `${result.summary} ${outcome.notes.join(" ")}` } };
 }
 
 /** Rejects an operation whose sketch constraints cannot all hold, leaving the sketch untouched. */

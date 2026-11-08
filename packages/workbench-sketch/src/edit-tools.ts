@@ -1,6 +1,7 @@
 import {
   failure,
   type SketchEntity,
+  type SketchObjectsEdit,
   type Vec2,
   type WorkbenchResult,
   type WorkbenchSketch,
@@ -19,6 +20,8 @@ export interface SketchEditPlan {
   readonly addConstraints: readonly WorkbenchSketchConstraint[];
   /** Relations to delete by ID (re-pointed or no longer true after the edit). Absent means none. */
   readonly removeConstraintIds?: readonly string[];
+  /** Text, pattern and underlay records to set or remove together with the curves. Absent means none. */
+  readonly objects?: SketchObjectsEdit;
 }
 
 export type SketchEditResult = WorkbenchResult<SketchEditPlan>;

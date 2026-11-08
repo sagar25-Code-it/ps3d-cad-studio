@@ -102,6 +102,7 @@ import { parameterDialogTests } from "./parameter-dialogs.test.js";
 import { edgeBlendKernelTests, edgeBlendRimTests } from "./edge-blend.test.js";
 import { edgeBlendStepTests } from "./edge-blend-steps.test.js";
 import { limitsSurfaceTests } from "./limits-surface-suite.test.js";
+import { sketchTextObjectTests } from "./sketch-text-objects.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -213,7 +214,8 @@ const tests: readonly TestCase[] = [
   ...edgeBlendKernelTests,
   ...edgeBlendRimTests,
   ...edgeBlendStepTests,
-  ...limitsSurfaceTests
+  ...limitsSurfaceTests,
+  ...sketchTextObjectTests
 ];
 let failures = 0;
 

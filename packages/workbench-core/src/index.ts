@@ -31,3 +31,4 @@ export * from "./planar-faces.js";
 export { dragLiveSketch, solveLiveSketch, type LiveDragTarget, type LiveSketchSolveReport } from "./sketch-solve.js";
 export * from "./engineering-intent.js";
 export * from "./subd-cage.js";
+export * from "./sketch-objects.js";

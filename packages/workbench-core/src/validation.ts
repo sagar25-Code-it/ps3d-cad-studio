@@ -32,6 +32,7 @@ import {
   type WorkspaceId
 } from "./types.js";
 import { validSubdCageData } from "./subd-cage.js";
+import { validSketchObjectFields } from "./sketch-objects.js";
 import { createElectricalTemplate } from "./templates.js";
 import { validateDesignHistory } from "./design.js";
 import { MAX_EXPRESSION_LENGTH, parseExpression } from "./expressions.js";
@@ -223,7 +224,8 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   const optionalOffset = isRecord(value) && Object.hasOwn(value, "planeOffsetMm") ? ["planeOffsetMm"] : [];
   const optionalTilt = isRecord(value) && Object.hasOwn(value, "planeTilt") ? ["planeTilt"] : [];
   const optionalFrame = isRecord(value) && Object.hasOwn(value, "planeFrame") ? ["planeFrame"] : [];
-  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame])
+  const optionalObjects = isRecord(value) ? ["texts", "patterns", "underlay"].filter((key) => Object.hasOwn(value, key)) : [];
+  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame, ...optionalObjects])
     || (optionalTilt.length > 0 && !validSketchPlaneTilt(value.planeTilt))
     || (optionalFrame.length > 0 && (!validSketchPlaneFrame(value.planeFrame) || value.plane !== "datum:xy" || optionalOffset.length > 0 || optionalTilt.length > 0))
     || value.id !== "sketch:primary-profile" || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(value.plane) || !shortText(value.name, 1, 120)
@@ -245,6 +247,7 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
     }
     constraintIds.add(constraint.id);
   }
+  if (!validSketchObjectFields(value, entityIds)) return invalid("A sketch text, pattern or underlay record is invalid or refers to a missing curve.");
   return { ok: true, value: value as unknown as WorkbenchSketch };
 }
 

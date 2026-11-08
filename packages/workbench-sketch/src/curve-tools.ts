@@ -119,6 +119,8 @@ export interface CurveToolOptions {
   readonly text: string;
   readonly textHeightMm: number;
   readonly textRotationDeg: number;
+  /** Sketch text layout beyond size and angle; absent means the defaults (normal width, normal spacing, left aligned, profile geometry). */
+  readonly textLayout?: { readonly widthFactor: number; readonly spacing: number; readonly align: "left" | "center" | "right"; readonly construction: boolean };
   /** How far a centerline reaches on each side of its first point. */
   readonly centerlineReachMm: number;
   /** The existing curves, so a blend can find the ends that were clicked. */
@@ -168,7 +170,7 @@ export function buildCurveTool(tool: FixedCurveToolId, points: readonly Vec2[], 
     case "conic-five": return buildConicFromFivePoints(points, ids);
     case "blend": return buildBlendCurve(options.entities, p(0), p(1), options.blendTension, options.pickReachMm, ids);
     case "block": return options.block === undefined ? badShape("There is no block to insert: select curves, save them as a block, then choose it in the Sketch palette.", "Save a block first.") : insertSketchBlock(options.block, p(0), { rotationDeg: options.blockRotationDeg, scale: options.blockScale }, ids);
-    case "text": return buildSketchText(p(0), options.text, { heightMm: options.textHeightMm, rotationDeg: options.textRotationDeg }, ids);
+    case "text": return buildSketchText(p(0), options.text, { heightMm: options.textHeightMm, rotationDeg: options.textRotationDeg, ...(options.textLayout ?? {}) }, ids);
   }
 }
 
