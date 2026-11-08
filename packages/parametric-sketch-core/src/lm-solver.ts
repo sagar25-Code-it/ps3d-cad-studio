@@ -1,4 +1,4 @@
-import type { Equation, SolverModel } from "./equation-model.js";
+import { differenceStep, type Equation, type SolverModel } from "./equation-model.js";
 import { solveSymmetric } from "./linear-algebra.js";
 
 /**
@@ -79,19 +79,25 @@ function maxHard(parts: readonly Part[], residual: Float64Array): number {
   return worst;
 }
 
+/** Angles and sizes are differentiated with a step of their own scale; coordinates with the equation's. */
+function model_role_step(role: Uint8Array, variable: number, baseStep: number, original: number): number {
+  return role[variable] === 0 ? baseStep : 1e-4 * Math.max(1, Math.abs(original));
+}
+
 /**
  * Five-point (fourth-order) central-difference Jacobian of the parts' residuals with respect to the component's active variables.
  * The step is wide enough that round-off stays near 1e-12 and the formula is exact for anything polynomial up to degree four, so a
  * relation that is linear in the coordinates (a joint, a midpoint) has a Jacobian that is exact to round-off.
  */
-function jacobian(parts: readonly Part[], x: Float64Array, rowCount: number, scratch: readonly Float64Array[]): Row[] {
+function jacobian(parts: readonly Part[], x: Float64Array, rowCount: number, scratch: readonly Float64Array[], role: Uint8Array): Row[] {
   const rows: Row[] = Array.from({ length: rowCount }, () => ({ cols: [], vals: [] }));
   const [plus, minus, plusTwo, minusTwo] = scratch as readonly [Float64Array, Float64Array, Float64Array, Float64Array];
   for (const part of parts) {
     const size = part.equation.size;
+    const baseStep = differenceStep(role, x, part.equation.vars);
     for (const variable of part.active) {
       const original = x[variable]!;
-      const step = 1e-4 * Math.max(1, Math.abs(original));
+      const step = model_role_step(role, variable, baseStep, original);
       x[variable] = original + step;
       part.equation.eval(x, plus, 0);
       x[variable] = original - step;
@@ -231,7 +237,7 @@ function levenbergMarquardt(model: SolverModel, component: Component, frozen: Ui
     const hardNow = maxHard(parts, residual);
     if (!includeSoft && hardNow <= CONVERGED) break;
     if (!Number.isFinite(cost)) break;
-    const rows = jacobian(parts, x, rowCount, scratch);
+    const rows = jacobian(parts, x, rowCount, scratch, model.role);
     // Each residual row, with its columns mapped to the component's unknowns and scaled by the weights.
     const prepared: { readonly columns: Int32Array; readonly scaled: Float64Array; readonly value: number }[] = [];
     for (const part of parts) {

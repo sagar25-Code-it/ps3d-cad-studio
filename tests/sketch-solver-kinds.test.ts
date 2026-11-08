@@ -6,7 +6,7 @@ import { buildRoundedRectangle } from "../packages/workbench-sketch/src/basic-cu
 import { detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import {
-  AXIS_X, AXIS_Y, ORIGIN, addConstraint, analysis, apply, arc, circle, dof, ellipse, get, line, lengthDim, lengthOf, lineRing, point, projectWith, rect, refuse, refuseDimension, rel, run, setDimension,
+  AXIS_X, AXIS_Y, ORIGIN, addConstraint, analysis, apply, arc, circle, dof, ellipse, get, line, lengthDim, lengthOf, lineRing, point, projectWith, rect, refuse, refuseDimension, rel, ringIsClosedRectangle, run, setDimension,
   type Arc, type Circle, type Line, type Point
 } from "./sketch-solver-kit.js";
 
@@ -463,6 +463,23 @@ export const sketchSolverKindsTests: readonly TestCase[] = [
       const editMs = performance.now() - started;
       near(lengthOf(get(edited, "s0", "line")), 8, 1e-9, "the first link took its length");
       assert(editMs < 2000, `a connected 300-link chain edits in ${editMs.toFixed(0)} ms`);
+    }
+  },
+  {
+    name: "Precision: geometry thousands of millimetres from the origin solves and edits as exactly as geometry at the origin",
+    run: () => {
+      let project = projectWith([line("a", [9000, 9000], [9010, 9000.5]), line("b", [9000, 9010], [9010, 9012])]);
+      project = addConstraint(project, rel("horizontal", ["a"]));
+      project = addConstraint(project, rel("parallel", ["a", "b"]));
+      project = setDimension(project, "a", "length", 123.456789);
+      near(lengthOf(get(project, "a", "line")), 123.456789, 1e-8, "the length is exact");
+      near(get(project, "a", "line").end[1] - get(project, "a", "line").start[1], 0, 1e-9, "and the line is level");
+      near(get(project, "b", "line").end[1] - get(project, "b", "line").start[1], 0, 1e-9, "its parallel partner follows");
+      near(get(project, "a", "line").start[0], 9000, 0, "the start did not move");
+      const ring = lineRing(9000, 9000, 52, 30);
+      project = projectWith(ring.entities, ring.constraints);
+      project = setDimension(project, "b", "length", 60);
+      assert(ringIsClosedRectangle(project, 1e-6), "a far-away rectangle stays closed and level after an edit");
     }
   },
   {

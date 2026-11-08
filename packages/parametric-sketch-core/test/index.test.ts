@@ -552,3 +552,87 @@ function baseDocument(overrides: Partial<ParametricSketchDocument> = {}): Parame
     ...overrides
   };
 }
+
+test("degrees of freedom come from the rank of the relations: a duplicate relation removes nothing and is reported as redundant", () => {
+  const document = baseDocument({
+    geometry: [line("line:a", [0, 0], [10, 0]), line("line:b", [0, 5], [10, 5])],
+    constraints: [
+      { id: "constraint:parallel-1", kind: "parallel", first: { entityId: "line:a", selector: "curve" }, second: { entityId: "line:b", selector: "curve" }, suppressed: false },
+      { id: "constraint:parallel-2", kind: "parallel", first: { entityId: "line:a", selector: "curve" }, second: { entityId: "line:b", selector: "curve" }, suppressed: false }
+    ]
+  });
+  const result = solveAnalyticSketch({ document, mode: "validate" });
+  assert.equal(result.dof.method, "jacobian-rank-v2");
+  assert.equal(result.dof.total, 7);
+  assert.equal(result.dof.rank, 1);
+  assert.equal(result.dof.relationSets?.length, 1);
+  assert.equal(result.dof.relationSets?.[0]?.kind, "redundant");
+  assert.deepEqual(result.dof.redundantIds, ["constraint:parallel-1", "constraint:parallel-2"]);
+});
+
+test("contradicting relations are reported by name, with their IDs, and leave the document unchanged", () => {
+  const document = baseDocument({
+    geometry: [line("line:a", [0, 0], [10, 0]), line("line:b", [0, 5], [10, 5])],
+    constraints: [{ id: "constraint:equal", kind: "equal", first: { entityId: "line:a", selector: "curve" }, second: { entityId: "line:b", selector: "curve" }, suppressed: false }],
+    dimensions: [
+      { id: "dimension:a", kind: "length", target: { entityId: "line:a", selector: "curve" }, unit: "mm", mode: "driving", suppressed: false, value: { value: 20 } },
+      { id: "dimension:b", kind: "length", target: { entityId: "line:b", selector: "curve" }, unit: "mm", mode: "driving", suppressed: false, value: { value: 30 } }
+    ]
+  });
+  const labels = { "constraint:equal": "Equal between Line 1 and Line 2", "dimension:a": "Length 20 on Line 1", "dimension:b": "Length 30 on Line 2" };
+  const result = solveAnalyticSketch({ document, mode: "regenerate", labels });
+  assert.equal(result.status, "failed");
+  const conflict = result.diagnostics.find((diagnostic) => diagnostic.code === "CONSTRAINT_CONFLICT" || diagnostic.code === "DIMENSION_CONFLICT");
+  assert.ok(conflict !== undefined);
+  assert.match(conflict.message, /Length 20 on Line 1/);
+  assert.match(conflict.message, /Length 30 on Line 2/);
+  assert.match(conflict.message, /Equal between Line 1 and Line 2/);
+  assert.deepEqual([...conflict.relatedIds].sort(), ["constraint:equal", "dimension:a", "dimension:b"]);
+  assert.deepEqual(result.document.geometry, document.geometry);
+});
+
+test("the sketch origin and axes are referenceable geometry, and a point can sit on a curve", () => {
+  const document = baseDocument({
+    geometry: [createPointGeometry("point:p", [3, 4]), createPointGeometry("point:q", [8, 6]), createCircleGeometry("circle:c", [0, 0], 5)],
+    constraints: [
+      { id: "constraint:origin", kind: "coincident", first: { entityId: "sketch:origin", selector: "point" }, second: { entityId: "point:p", selector: "point" }, suppressed: false },
+      { id: "constraint:on-axis", kind: "on-curve", point: { entityId: "point:q", selector: "point" }, curve: { entityId: "sketch:axis-x", selector: "curve" }, suppressed: false }
+    ]
+  });
+  const result = solveAnalyticSketch({ document, mode: "regenerate" });
+  assert.equal(result.status, "solved");
+  assert.deepEqual(result.document.geometry[0], createPointGeometry("point:p", [0, 0]));
+  assert.deepEqual(result.document.geometry[1], createPointGeometry("point:q", [8, 0]));
+  assert.equal(result.dof.byEntity["point:p"], 0);
+  assert.equal(result.dof.byEntity["point:q"], 1);
+
+  const onCircle = baseDocument({
+    geometry: [createPointGeometry("point:r", [10, 3]), createCircleGeometry("circle:c", [0, 0], 5)],
+    constraints: [{ id: "constraint:on-circle", kind: "on-curve", point: { entityId: "point:r", selector: "point" }, curve: { entityId: "circle:c", selector: "curve" }, suppressed: false }]
+  });
+  const placed = solveAnalyticSketch({ document: onCircle, mode: "regenerate" });
+  const r = placed.document.geometry[0];
+  assert.equal(r?.kind, "point");
+  if (r?.kind === "point") assert.ok(Math.abs(Math.hypot(r.point[0], r.point[1]) - 5) < 1e-9);
+});
+
+test("a rectangle is solver geometry: corners join, width and height hold, and the position stays free", () => {
+  const document = baseDocument({
+    geometry: [{ id: "rect:1", kind: "rectangle", center: [0, 0], widthMm: 10, heightMm: 6, rotationRad: 0, construction: false, suppressed: false }, createPointGeometry("point:p", [20, 20])],
+    constraints: [{ id: "constraint:corner", kind: "coincident", first: { entityId: "rect:1", selector: "corner-2" }, second: { entityId: "point:p", selector: "point" }, suppressed: false }],
+    dimensions: [{ id: "dimension:width", kind: "width", target: { entityId: "rect:1", selector: "self" }, unit: "mm", mode: "driving", suppressed: false, value: { value: 12 } }]
+  });
+  const result = solveAnalyticSketch({ document, mode: "regenerate" });
+  assert.equal(result.status, "solved");
+  const rectangle = result.document.geometry[0];
+  assert.equal(rectangle?.kind, "rectangle");
+  if (rectangle?.kind === "rectangle") {
+    assert.equal(rectangle.widthMm, 12);
+    const corner = [rectangle.center[0] + (Math.cos(rectangle.rotationRad) * rectangle.widthMm - Math.sin(rectangle.rotationRad) * rectangle.heightMm) / 2, rectangle.center[1] + (Math.sin(rectangle.rotationRad) * rectangle.widthMm + Math.cos(rectangle.rotationRad) * rectangle.heightMm) / 2];
+    const joined = result.document.geometry[1];
+    assert.equal(joined?.kind, "point");
+    // The rectangle is named first, so it is the reference and the point comes to its corner.
+    if (joined?.kind === "point") assert.ok(Math.hypot(corner[0]! - joined.point[0], corner[1]! - joined.point[1]) < 1e-9);
+    assert.deepEqual(rectangle.center, [0, 0]);
+  }
+});

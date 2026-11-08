@@ -843,6 +843,22 @@ class ModelBuilder {
   }
 }
 
+/**
+ * The finite-difference step for a variable of an equation: small next to how far apart the equation's own coordinates are, never
+ * tied to how far they sit from the origin, so geometry thousands of millimetres out differentiates as well as geometry at the origin.
+ */
+export function differenceStep(role: Uint8Array, x: Float64Array, vars: readonly number[]): number {
+  let low = Infinity;
+  let high = -Infinity;
+  for (const variable of vars) {
+    if (role[variable] !== 0) continue;
+    low = Math.min(low, x[variable]!);
+    high = Math.max(high, x[variable]!);
+  }
+  const extent = Number.isFinite(low) && Number.isFinite(high) ? high - low : 0;
+  return 1e-4 * Math.max(1, extent);
+}
+
 export function wrapPi(angle: number): number {
   let wrapped = angle % TWO_PI;
   if (wrapped > Math.PI) wrapped -= TWO_PI;

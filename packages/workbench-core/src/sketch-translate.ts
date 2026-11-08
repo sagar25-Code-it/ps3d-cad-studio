@@ -46,7 +46,8 @@ export interface Translation {
   readonly present: ReadonlySet<string>;
 }
 
-const MOVE_TOLERANCE_MM = 1e-9;
+/** A move smaller than this (a tenth of a micrometre) is round-off from a solve, not a move. */
+const MOVE_TOLERANCE_MM = 1e-7;
 const DEGREES = Math.PI / 180;
 
 /** The solver names a line's middle "midpoint" and a point entity's location "self"; everything else matches. */
@@ -136,8 +137,12 @@ export function fromSolverGeometry(entity: SketchEntity, solved: SketchGeometry,
     return near2(entity.point, solved.point) ? undefined : { ...entity, point: solved.point };
   }
   if (entity.kind === "rectangle" && solved.kind === "rectangle") {
-    const rotationDeg = solved.rotationRad / DEGREES;
-    return near2(entity.center, solved.center) && Math.abs(entity.widthMm - solved.widthMm) <= MOVE_TOLERANCE_MM && Math.abs(entity.heightMm - solved.heightMm) <= MOVE_TOLERANCE_MM && Math.abs(entity.rotationDeg - rotationDeg) <= 1e-8
+    const turned = solved.rotationRad / DEGREES;
+    // Turns that differ by whole revolutions are the same turn: an untouched rectangle keeps the angle it was stored with.
+    const apart = ((((turned - entity.rotationDeg) % 360) + 540) % 360) - 180;
+    const normalised = turned > 180 || turned <= -180 ? ((((turned + 180) % 360) + 360) % 360) - 180 : turned;
+    const rotationDeg = Math.abs(apart) <= 1e-8 ? entity.rotationDeg : normalised;
+    return near2(entity.center, solved.center) && Math.abs(entity.widthMm - solved.widthMm) <= MOVE_TOLERANCE_MM && Math.abs(entity.heightMm - solved.heightMm) <= MOVE_TOLERANCE_MM && rotationDeg === entity.rotationDeg
       ? undefined
       : { ...entity, center: solved.center, widthMm: solved.widthMm, heightMm: solved.heightMm, rotationDeg };
   }

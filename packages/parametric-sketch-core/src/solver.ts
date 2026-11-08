@@ -317,7 +317,9 @@ function collapseReason(geometry: SketchGeometry): string | undefined {
     case "circle": return geometry.radiusMm <= COLLAPSE_MM ? "shrink to nothing" : undefined;
     case "arc": return geometry.radiusMm <= COLLAPSE_MM ? "shrink to nothing" : undefined;
     case "rectangle": return geometry.widthMm <= COLLAPSE_MM || geometry.heightMm <= COLLAPSE_MM ? "collapse to a line" : undefined;
-    case "ellipse": return Math.hypot(geometry.majorAxis[0], geometry.majorAxis[1]) <= COLLAPSE_MM || geometry.minorToMajorRatio <= 1e-9 ? "collapse to a line" : undefined;
+    case "ellipse":
+      if (geometry.minorToMajorRatio > 1 + 1e-9) return "get a minor radius larger than its major radius";
+      return Math.hypot(geometry.majorAxis[0], geometry.majorAxis[1]) <= COLLAPSE_MM || geometry.minorToMajorRatio <= 1e-9 ? "collapse to a line" : undefined;
     default: return undefined;
   }
 }

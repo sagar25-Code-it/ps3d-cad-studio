@@ -27,7 +27,19 @@ export function defaultAnchors(document: ParametricSketchDocument): readonly Sol
   const geometryKind = new Map(document.geometry.map((geometry) => [geometry.id, geometry.kind] as const));
   const holds: SolveAnchor[] = [];
   const releases: SolveAnchor[] = [];
-  const self = (reference: GeometryReference): GeometryReference => ({ entityId: reference.entityId, selector: "self" });
+  // A curve that carries a driving dimension has to be free to change that size, so it is held by its anchor point only.
+  const dimensioned = new Set<string>();
+  for (const dimension of document.dimensions) {
+    if (dimension.suppressed || dimension.mode !== "driving") continue;
+    if (dimension.kind === "linear" || dimension.kind === "angle" || dimension.kind === "line-line-distance") dimensioned.add(dimension.first.entityId).add(dimension.second.entityId);
+    else if (dimension.kind === "point-line-distance") dimensioned.add(dimension.point.entityId).add(dimension.line.entityId);
+    else dimensioned.add(dimension.target.entityId);
+  }
+  const anchorPoint = (reference: GeometryReference): GeometryReference => {
+    const kind = geometryKind.get(reference.entityId);
+    return { entityId: reference.entityId, selector: kind === "line" || kind === "slot" ? "start" : kind === "point" ? "point" : "center" };
+  };
+  const self = (reference: GeometryReference): GeometryReference => (dimensioned.has(reference.entityId) && geometryKind.get(reference.entityId) !== "point" ? anchorPoint(reference) : { entityId: reference.entityId, selector: "self" });
   const hold = (reference: GeometryReference, priority: 1 | 2 = 2): void => { if (geometryKind.has(reference.entityId)) holds.push({ reference, priority }); };
   const release = (reference: GeometryReference): void => { if (geometryKind.has(reference.entityId)) releases.push({ reference, priority: 0 }); };
   const isLine = (reference: GeometryReference): boolean => geometryKind.get(reference.entityId) === "line";
@@ -112,7 +124,8 @@ export function defaultAnchors(document: ParametricSketchDocument): readonly Sol
         release(dimension.second);
         break;
       case "angle": {
-        hold(self(dimension.first));
+        // The first line is the reference the angle is measured from: held whole.
+        hold({ entityId: dimension.first.entityId, selector: "self" });
         // The second line turns about the end it shares with the first, or about the end that is Fixed, otherwise about its start.
         const first = lineGeometry(dimension.first.entityId);
         const second = lineGeometry(dimension.second.entityId);

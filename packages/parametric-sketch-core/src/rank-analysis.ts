@@ -1,4 +1,4 @@
-import type { Equation, SolverModel } from "./equation-model.js";
+import { differenceStep, type Equation, type SolverModel } from "./equation-model.js";
 import { eliminateRows, independentCount, type SparseRow } from "./linear-algebra.js";
 import type { SketchDofState, SketchRelationSet } from "./types.js";
 
@@ -31,20 +31,27 @@ export function jacobianRows(model: SolverModel, equations: readonly Equation[],
   const base = new Float64Array(8);
   const plus = new Float64Array(8);
   const minus = new Float64Array(8);
+  const plusTwo = new Float64Array(8);
+  const minusTwo = new Float64Array(8);
   for (const equation of equations) {
     equation.eval(x, base, 0);
+    const baseStep = differenceStep(model.role, x, equation.vars);
     const cols: number[][] = Array.from({ length: equation.size }, () => []);
     const vals: number[][] = Array.from({ length: equation.size }, () => []);
     for (const variable of equation.vars) {
       const original = x[variable]!;
-      const step = 1e-6 * Math.max(1, Math.abs(original));
+      const step = model.role[variable] === 0 ? baseStep : 1e-4 * Math.max(1, Math.abs(original));
       x[variable] = original + step;
       equation.eval(x, plus, 0);
       x[variable] = original - step;
       equation.eval(x, minus, 0);
+      x[variable] = original + 2 * step;
+      equation.eval(x, plusTwo, 0);
+      x[variable] = original - 2 * step;
+      equation.eval(x, minusTwo, 0);
       x[variable] = original;
       for (let row = 0; row < equation.size; row += 1) {
-        const derivative = (plus[row]! - minus[row]!) / (2 * step);
+        const derivative = (8 * (plus[row]! - minus[row]!) - (plusTwo[row]! - minusTwo[row]!)) / (12 * step);
         if (Number.isFinite(derivative) && Math.abs(derivative) > 1e-10) {
           cols[row]!.push(variable);
           vals[row]!.push(derivative);
