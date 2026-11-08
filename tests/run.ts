@@ -9,6 +9,7 @@ import { sketchInteractionTests } from "./sketch-interaction.test.js";
 import { sketchConstraintFitTests } from "./sketch-constraint-fit.test.js";
 import { sketchInferenceTests } from "./sketch-inference.test.js";
 import { sketchDynamicInputTests } from "./sketch-dynamic-input.test.js";
+import { sketchInputExtrasTests } from "./sketch-input-extras.test.js";
 import { sketchPointConstraintTests } from "./sketch-point-constraints.test.js";
 import { sketchAutoConstraintTests } from "./sketch-auto-constraints.test.js";
 import { sketchDragTests } from "./sketch-drag.test.js";
@@ -113,6 +114,7 @@ const tests: readonly TestCase[] = [
   ...sketchConstraintFitTests,
   ...sketchInferenceTests,
   ...sketchDynamicInputTests,
+  ...sketchInputExtrasTests,
   ...sketchPointConstraintTests,
   ...sketchAutoConstraintTests,
   ...sketchDragTests,

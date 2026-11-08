@@ -7,7 +7,7 @@ export const sketchDynamicInputTests: readonly TestCase[] = [
   {
     name: "each drawing tool offers the typed fields that fit its next point, and none before its first point",
     run: () => {
-      equal(dynamicFieldsFor("line", 0).length, 0, "nothing to type before the first click");
+      equal(dynamicFieldsFor("line", 0).map((field) => field.id).join(","), "x,y", "before the first click the fields are the absolute X and Y of the first point");
       equal(dynamicFieldsFor("line", 1).map((field) => field.id).join(","), "length,angle", "a line takes length and angle");
       equal(dynamicFieldsFor("rectangle", 1).map((field) => field.id).join(","), "width,height", "a rectangle takes width and height");
       equal(dynamicFieldsFor("rectangle-center", 1).map((field) => field.id).join(","), "width,height", "so does a centre rectangle");
@@ -15,7 +15,7 @@ export const sketchDynamicInputTests: readonly TestCase[] = [
       equal(dynamicFieldsFor("circle-two-point", 1).map((field) => field.id).join(","), "diameter", "a two-point circle takes a diameter");
       equal(dynamicFieldsFor("rectangle-three-point", 1).map((field) => field.id).join(","), "length,angle", "a 3-point rectangle starts with an edge");
       equal(dynamicFieldsFor("rectangle-three-point", 2).map((field) => field.id).join(","), "height", "then asks for the height");
-      equal(dynamicFieldsFor("spline", 2).length, 0, "a spline has no typed fields");
+      equal(dynamicFieldsFor("spline", 2).map((field) => field.id).join(","), "length,angle", "a spline point is typed relative to the previous one");
       equal(dynamicFieldsFor("select", 1).length, 0, "the select tool has none");
     }
   },
@@ -82,7 +82,7 @@ export const sketchDynamicInputTests: readonly TestCase[] = [
     run: () => {
       equal(parseDynamicNumber("12.5"), 12.5, "a plain decimal");
       equal(parseDynamicNumber(" 7,25 "), 7.25, "a decimal comma and spaces");
-      equal(parseDynamicNumber("-3"), -3, "a negative number parses (the tools take the magnitude)");
+      equal(parseDynamicNumber("-3"), -3, "a negative number parses (the tools honour the sign)");
       equal(parseDynamicNumber(""), undefined, "empty text is not a number");
       equal(parseDynamicNumber("-"), undefined, "a lone minus is not a number yet");
       equal(parseDynamicNumber("abc"), undefined, "words are not numbers");
