@@ -429,7 +429,9 @@ export interface PartPreviewBody {
 /** Every operation that can build a general solid body from a sketch profile; the body validators accept exactly these. */
 export const GENERAL_BODY_OPERATIONS = [
   "extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft",
-  "helix", "thread", "rib", "dome", "sheet-base", "sheet-flange", "sheet-hem"
+  "helix", "thread", "rib", "dome", "sheet-base", "sheet-flange", "sheet-hem",
+  // Surface workspace and SubD forms: an open mesh surface, a solid sewn from surfaces, an editable SubD form and a finished one.
+  "surface", "stitched-solid", "subd-form", "subd-solid"
 ] as const;
 
 export interface GeneralSolidBody {
@@ -441,6 +443,8 @@ export interface GeneralSolidBody {
   readonly positionsMm: readonly number[];
   /** Flat triangle vertex indices; length is a multiple of 3. */
   readonly indices: readonly number[];
+  /** SubD form bodies only: the control cage the mesh was subdivided from. Absent once the form is finished. */
+  readonly subd?: import("./subd-cage.js").SubdCageData;
   readonly feature?: {
     readonly operation: (typeof GENERAL_BODY_OPERATIONS)[number];
     readonly plane: "xy" | "xz" | "yz";
@@ -1323,7 +1327,7 @@ export type WorkbenchOperation = OperationEnvelope & (
       /** Replaces the target body with the result of a mesh-level modify operation computed by the caller. */
       readonly kind: "modify-general-body";
       readonly targetBodyId: string;
-      readonly modifier: "hole" | "shell" | "chamfer" | "fillet" | "counterbore" | "countersink" | "tapped-hole";
+      readonly modifier: "hole" | "shell" | "chamfer" | "fillet" | "counterbore" | "countersink" | "tapped-hole" | "surface-edit" | "stitch" | "form-edit" | "form-finish";
       readonly label: string;
       readonly body: GeneralSolidBody;
     }

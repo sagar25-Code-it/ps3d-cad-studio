@@ -17,6 +17,7 @@ import type {
   WorkbenchResult,
   WorkspaceId
 } from "./types.js";
+import { validSubdCageData } from "./subd-cage.js";
 import { ELECTRICAL_SHEET_BOUNDS, ELECTROMECHANICAL_CATALOG_REVISION, GENERAL_BODY_OPERATIONS, SKETCH_DATUM_PLANES } from "./types.js";
 import { createBessContainerAssembly, createCargoContainerAssembly, createElectricalTemplate } from "./templates.js";
 import { createElectromechanicalAssembly, electricalSignature } from "./electromechanical.js";
@@ -276,7 +277,7 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "modify-general-body":
       if (!keys(input, [...common, "targetBodyId", "modifier", "label", "body"]) || !stableId(input.targetBodyId)
-        || !["hole", "shell", "chamfer", "fillet", "counterbore", "countersink", "tapped-hole"].includes(String(input.modifier)) || !shortText(input.label, 1, 120)
+        || !["hole", "shell", "chamfer", "fillet", "counterbore", "countersink", "tapped-hole", "surface-edit", "stitch", "form-edit", "form-finish"].includes(String(input.modifier)) || !shortText(input.label, 1, 120)
         || !validGeneralSolidBodyPayload(input.body)) return invalidOperation("The modify-general-body payload is invalid.");
       break;
     case "add-construction-plane":
@@ -1530,7 +1531,7 @@ function validConstructionPlanePayload(value: unknown): value is import("./types
 
 function validGeneralSolidBodyPayload(value: unknown): value is GeneralSolidBody {
   const required = ["id", "name", "visible", "color", "positionsMm", "indices"];
-  const optional = ["feature", "brep"];
+  const optional = ["feature", "brep", "subd"];
   if (!isRecord(value)
     || !required.every((key) => Object.hasOwn(value, key)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || !stableId(value.id) || !shortText(value.name, 1, 120)
@@ -1547,6 +1548,7 @@ function validGeneralSolidBodyPayload(value: unknown): value is GeneralSolidBody
     if (!isRecord(feature) || !(GENERAL_BODY_OPERATIONS as readonly string[]).includes(String(feature.operation)) || !["xy", "xz", "yz"].includes(String(feature.plane))
       || typeof feature.valueMm !== "number" || !Number.isFinite(feature.valueMm)) return false;
   }
+  if (Object.hasOwn(value, "subd") && !validSubdCageData(value.subd)) return false;
   if (Object.hasOwn(value, "brep")) {
     const brep = value.brep;
     if (!isRecord(brep) || !isRecord(brep.topology) || !Array.isArray(brep.faces) || brep.faces.length > 4_096 || !Array.isArray(brep.faceTriangles)) return false;
