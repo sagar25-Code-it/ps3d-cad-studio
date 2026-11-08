@@ -302,7 +302,9 @@ export const workbenchCoreTests: readonly TestCase[] = [
   {
     name: "driving sketch dimensions update bounded geometry and records atomically",
     run: () => {
-      const project = createWorkbenchProject("project:test-driving-dimension");
+      const seeded = createWorkbenchProject("project:test-driving-dimension");
+      // The seeded outline and bore are Fixed, which keeps their size; this test dimensions them, so it starts without those two relations.
+      const project = { ...seeded, sketch: { ...seeded.sketch, constraints: seeded.sketch.constraints.filter((constraint) => constraint.id !== "constraint:outline-fixed") } };
       const dimensioned = applyWorkbenchOperation(project, {
         kind: "set-sketch-dimension",
         operationId: "operation:test-outline-width",

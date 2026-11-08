@@ -326,6 +326,22 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
     }
   }
 
+  // Relations the Jacobian rank shows to be implied by others (loops of dimensions that close, duplicates the pairwise rules cannot see).
+  const rankReport = analyzeWorkbenchSketch(sketch);
+  for (const set of rankReport.redundant) {
+    const implied = sketch.constraints.find((candidate) => candidate.id === (set.impliedConstraintId ?? set.constraintIds[set.constraintIds.length - 1]));
+    if (implied === undefined || known.has(implied.id)) continue;
+    known.add(implied.id);
+    const plan = editPlan(`Deleted a redundant ${implied.kind} relation`, { removeConstraintIds: [implied.id] });
+    issues.push({
+      id: `redundant:${implied.id}`, category: "redundant", severity: "warning", title: `Over-defined: ${describeConstraint(implied)} is redundant`, detail: set.message,
+      entityIds: implied.entityIds.filter((id) => entityIds.has(id)), constraintIds: [...set.constraintIds],
+      fixes: plan.ok && verified(plan.value)
+        ? [{ kind: "edit", label: `Delete the redundant ${implied.kind}`, plan: plan.value }, { kind: "relax", label: "Relax it instead (keep, but ignore)", constraintIds: [implied.id] }]
+        : [{ kind: "relax", label: "Relax it (keep, but ignore)", constraintIds: [implied.id] }]
+    });
+  }
+
   // The solver's own verdict: relations that cannot be satisfied together, or geometry that does not satisfy them yet.
   const solved = solveLiveSketch(sketch);
   let solves = true;
@@ -334,7 +350,7 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
     const alreadyExplained = [...known].length > 0 && issues.some((issue) => issue.category === "conflict");
     if (!alreadyExplained) {
       const live = sketch.constraints.filter((constraint) => constraint.suppressed !== true);
-      const touching = solved.relatedIds.length === 0 ? live : live.filter((constraint) => constraint.entityIds.some((id) => solved.relatedIds.includes(id)));
+      const touching = solved.relatedIds.length === 0 ? live : live.filter((constraint) => solved.relatedIds.includes(constraint.id) || constraint.entityIds.some((id) => solved.relatedIds.includes(id)));
       const suspects = (touching.length === 0 ? live : touching).slice(0, MAX_CULPRIT_TRIALS);
       const culprits = suspects.filter((candidate) => {
         const trial = { ...sketch, constraints: sketch.constraints.map((constraint) => (constraint.id === candidate.id ? { ...constraint, suppressed: true } : constraint)) };
@@ -342,7 +358,7 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
       });
       issues.push({
         id: "conflict:solver", category: "conflict", severity: "error", title: "The relations cannot all be satisfied", detail: solved.message,
-        entityIds: solved.relatedIds, constraintIds: culprits.map((constraint) => constraint.id),
+        entityIds: [...new Set([...solved.relatedIds.filter((id) => entityIds.has(id)), ...live.filter((constraint) => solved.relatedIds.includes(constraint.id)).flatMap((constraint) => constraint.entityIds.filter((id) => entityIds.has(id)))])], constraintIds: culprits.map((constraint) => constraint.id),
         fixes: culprits.slice(0, 4).map((constraint): RepairFix => ({ kind: "relax", label: `Relax ${describeConstraint(constraint)}`, constraintIds: [constraint.id] })),
         ...(culprits.length === 0 ? { noFixReason: "No single relation fixes it; relax several of the ones on the highlighted curves." } : {})
       });
@@ -503,7 +519,7 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
   const warnings = issues.filter((issue) => issue.severity === "warning").length;
   const fixable = issues.filter((issue) => issue.fixes.length > 0).length;
   const profiles = detectSketchProfiles(sketch);
-  const analysis = analyzeWorkbenchSketch(sketch);
+  const analysis = rankReport;
   const valid = errors === 0;
   const usableForSolid = valid && profiles.length > 0;
   const summary = [

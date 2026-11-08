@@ -112,6 +112,19 @@ export function dimensionLayout(entity: SketchEntity, dimension: DrivingDimensio
       label: `Ø${formatValue(valueMm * 2)}`
     };
   }
+  if (entity.kind === "arc" && dimension === "radius") {
+    const shape = arcShape(entity.start, entity.mid, entity.end);
+    if (shape === undefined) return undefined;
+    const direction = unit(shape.center, entity.mid);
+    return {
+      extensionLines: [],
+      dimensionLine: { from: shape.center, to: entity.mid },
+      // The arrow touches the arc from inside, pointing outward.
+      arrows: [{ tip: entity.mid, direction }],
+      textAt: [entity.mid[0] + direction[0] * 16 * pxMm, entity.mid[1] + direction[1] * 16 * pxMm],
+      label: `R${formatValue(valueMm)}`
+    };
+  }
   if (entity.kind === "arc" && dimension === "arc-length") return arcLengthDimensionLayout(entity, valueMm, pxMm);
   if (dimension === "perimeter") return perimeterDimensionLayout(entity, valueMm, pxMm);
   return undefined;

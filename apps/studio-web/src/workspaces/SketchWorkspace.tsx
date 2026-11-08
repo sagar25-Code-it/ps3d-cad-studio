@@ -41,7 +41,7 @@ import { DEFAULT_REACH, buildReach, isReachTarget, type ReachSettings } from "..
 import { SketchGrid } from "./sketch/SketchGrid.js";
 import { ConstraintExtras, ExtraDimensionMarks, type ConstraintExtrasBridge, type SetDimensionRequest } from "./sketch/ConstraintExtras.js";
 import { angleDimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
-import { angleBetweenLinesDeg, entityLengthMm } from "../../../../packages/workbench-core/src/sketch-measure.js";
+import { angleBetweenLinesDeg, arcShape, entityLengthMm } from "../../../../packages/workbench-core/src/sketch-measure.js";
 import { useSketchCamera } from "./sketch/useSketchCamera.js";
 import { useSketchHotkeys } from "./sketch/useSketchHotkeys.js";
 import {
@@ -55,8 +55,9 @@ import { halvedExpression, unhalvedExpression } from "../dimension-expression.js
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 import { ViewportChrome } from "../ui/ViewportChrome.js";
+import { PointDistanceField } from "./sketch/SolverRelations.js";
 
-type DrivingDimension = SketchDimensionName;
+type DrivingDimension = "length" | "width" | "height" | "radius" | "angle" | "arc-length" | "perimeter";
 type SketchDimensionHandle = "start" | "mid" | "end" | "left" | "right" | "top" | "bottom" | "center" | "radius";
 
 interface SketchDimensionPoint {
@@ -75,6 +76,8 @@ interface DirectSketchDimension {
   readonly first: SketchDimensionPoint;
   readonly second: SketchDimensionPoint;
   readonly driving?: { readonly entityId: string; readonly dimension: DrivingDimension };
+  /** Two defining points of the solver's curves: a distance between them can be driven (aligned, horizontal or vertical). */
+  readonly between?: { readonly entityId: string; readonly secondEntityId: string; readonly points: readonly [SketchPointRef, SketchPointRef] };
 }
 
 type PlaneKey = "xy" | "xz" | "yz";
@@ -407,7 +410,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // Driving dimensions are drawn as real dimensions (extension lines, arrows, editable text); curves without one keep a quiet reference value.
   const drivingDimensions = useMemo(() => visibleSketch.constraints.flatMap((constraint) => {
     if ((constraint.kind !== "distance" && constraint.kind !== "radius") || constraint.valueMm === undefined || constraint.entityIds.length !== 1) return [];
-    const dimension: DrivingDimension | undefined = constraint.dimension ?? (constraint.kind === "radius" ? "radius" : undefined);
+    const named = constraint.dimension ?? (constraint.kind === "radius" ? "radius" : undefined);
+    // A diameter dimension is drawn as the circle's Ø: the mark takes the radius.
+    const dimension: DrivingDimension | undefined = named === "length" || named === "width" || named === "height" || named === "radius" ? named : named === "diameter" ? "radius" : undefined;
     const entity = visibleEntities.find((candidate) => candidate.id === constraint.entityIds[0]);
     if (dimension === undefined || entity === undefined) return [];
     return [{ constraint, entity, dimension }];
@@ -780,12 +785,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   /** Opens the value editor next to a curve's dimension: the length of a line, the diameter of a circle, the width or height of a rectangle. */
   const openDimensionEditor = (entity: SketchEntity, requested: DrivingDimension): void => {
-    // An arc is dimensioned by its length and an ellipse by its perimeter.
-    const dimension: DrivingDimension = entity.kind === "arc" ? "arc-length" : entity.kind === "ellipse" ? "perimeter" : requested;
+    // An arc is dimensioned by its radius (its length is in the inspector) and an ellipse by its perimeter (its axes are in the inspector).
+    const dimension: DrivingDimension = entity.kind === "arc" ? "radius" : entity.kind === "ellipse" ? "perimeter" : requested;
+    const arcRadius = entity.kind === "arc" ? arcShape(entity.start, entity.mid, entity.end)?.radiusMm : undefined;
     const current = entity.kind === "line" ? Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1])
       : entity.kind === "circle" ? entity.radiusMm * 2
         : entity.kind === "rectangle" ? (dimension === "height" ? entity.heightMm : entity.widthMm)
-          : entity.kind === "arc" || entity.kind === "ellipse" ? entityLengthMm(entity) : undefined;
+          : entity.kind === "arc" ? arcRadius
+            : entity.kind === "ellipse" ? entityLengthMm(entity) : undefined;
     if (current === undefined) { props.onMessage("Only lines, circles, rectangles, arcs and ellipses take a driving dimension here; splines are reference only (see Angle, arc length, perimeter)."); return; }
     const existing = props.sketch.constraints.find((constraint) => constraint.entityIds.length === 1 && constraint.entityIds[0] === entity.id && constraint.valueMm !== undefined && constraint.driven !== true
       && (dimension === "arc-length" ? constraint.kind === "arc-length" : dimension === "perimeter" ? constraint.kind === "perimeter" : constraint.dimension === dimension));
@@ -795,7 +802,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       entityId: entity.id,
       dimension,
       anchor: layout?.textAt ?? entityAnchor(entity),
-      label: dimension === "arc-length" ? "Arc length" : dimension === "perimeter" ? "Perimeter" : entity.kind === "circle" ? "Diameter" : dimension === "width" ? "Width" : dimension === "height" ? "Height" : "Length"
+      label: dimension === "arc-length" ? "Arc length" : dimension === "perimeter" ? "Perimeter" : entity.kind === "arc" ? "Radius" : entity.kind === "circle" ? "Diameter" : dimension === "width" ? "Width" : dimension === "height" ? "Height" : "Length"
     };
     // Opened after the press has finished: the browser moves focus off the editor on mouse-down, which would close it again at once.
     window.setTimeout(() => {
@@ -1337,7 +1344,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {previewEntity !== undefined && <SketchEntityShape entity={previewEntity} px={px} selected={false} hovered={false} preview />}
         {previewShape?.entities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
         {mirrorGhosts.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
-        {showDimensions && drivingDimensions.map((view) => <DimensionMarks key={view.constraint.id} entity={view.entity} dimension={view.dimension} valueMm={view.constraint.valueMm ?? 0} relaxed={view.constraint.suppressed === true} px={px} {...(interactive ? { onEdit: () => openDimensionEditor(view.entity, view.dimension) } : {})} />)}
+        {showDimensions && drivingDimensions.map((view) => <DimensionMarks key={view.constraint.id} entity={view.entity} dimension={view.dimension} valueMm={view.constraint.dimension === "diameter" ? (view.constraint.valueMm ?? 0) / 2 : view.constraint.valueMm ?? 0} relaxed={view.constraint.suppressed === true} px={px} {...(interactive ? { onEdit: () => openDimensionEditor(view.entity, view.dimension) } : {})} />)}
         {showDimensions && <ExtraDimensionMarks sketch={visibleSketch} px={px} {...(interactive ? { onEdit: openExtraDimensionEditor } : {})} />}
         {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r={4 * px} className="pending-point" />)}
         {props.tool !== "select" && pointerInside && !camera.panning && inference !== undefined && <InferenceMarks inference={inference} px={px} />}
@@ -1696,9 +1703,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       <div className="inspector-title"><div><p>Sketch intelligence</p><h2>{props.sketch.name}</h2></div><CapabilityBadge level="preview" /></div>
       <section className={`solver-card ${analysis.classification}`}>
         <span className="solver-number">{analysis.degreesOfFreedom}</span>
-        <div><strong>{analysis.classification === "fully-constrained" ? "Fully constrained" : analysis.classification === "conflict" ? "Constraint conflict" : "Degrees of freedom"}</strong><small>{analysis.appliedConstraints} supported constraints evaluated</small></div>
+        <div><strong>{analysis.classification === "fully-constrained" ? "Fully constrained" : analysis.classification === "conflict" ? "Constraint conflict" : "Degrees of freedom"}</strong><small>{analysis.appliedConstraints} constraints enforced, rank {analysis.rank}{analysis.redundant.length > 0 ? `, ${analysis.redundant.length} redundant` : ""}</small></div>
       </section>
       {analysis.conflicts.length > 0 && <div className="inline-warning">{analysis.conflicts[0]}</div>}
+      {analysis.redundant.length > 0 && analysis.conflicts.length === 0 && <div className="inline-warning" title={analysis.redundant.map((set) => set.message).join(" ")}>{analysis.redundant[0]!.message}</div>}
 
       {dynamicMirrorEntity !== undefined && props.editTool !== "dynamic-mirror" && <div className="inline-warning movable-note" role="status" aria-label="Dynamic mirror active">
         Dynamic mirror is on: what you draw is mirrored about {dynamicMirrorEntity.id.replace(/^entity:/u, "")}. <button className="palette-action" onClick={() => { setDynamicMirrorAxis(null); props.onMessage("Dynamic mirror stopped."); }}><CommandIcon name="cancel" />Stop</button>
@@ -1743,8 +1751,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {dimensionPoints.length === 1 && <div className="dimension-pick-state"><b>1</b><span>{dimensionPoints[0]!.label}</span><small>Pick the second point.</small></div>}
         {directDimension !== undefined && <>
           <dl className="compact-facts"><div><dt>Selection</dt><dd>{directDimension.first.label} → {directDimension.second.label}</dd></div><div><dt>Distance</dt><dd>{format(directDimension.valueMm)} mm</dd></div><div><dt>ΔX</dt><dd>{format(directDimension.delta[0])} mm</dd></div><div><dt>ΔY</dt><dd>{format(directDimension.delta[1])} mm</dd></div></dl>
-          {directDimension.driving === undefined
-            ? <div className="inline-warning">This is a reference measurement. Editing arbitrary cross-entity point pairs requires the nonlinear constraint solver.</div>
+          {directDimension.driving === undefined && directDimension.between !== undefined
+            ? <PointDistanceField key={directDimension.first.id + directDimension.second.id} between={directDimension.between} measured={directDimension.valueMm} delta={directDimension.delta} onSetDimension={props.onSetDimension} onMessage={props.onMessage} />
+            : directDimension.driving === undefined
+            ? <div className="inline-warning">This is a reference measurement: the solver cannot move one of these points (a rectangle's edge middle, a circle's rim). Pick line ends, centres, points or arc ends to drive a distance.</div>
             : <DimensionField label={directDimension.label} dimension={directDimension.driving.dimension} value={directDimension.valueMm} onApply={(dimension, value) => props.onSetDimension(directDimension.driving!.entityId, dimension, value)} onMessage={props.onMessage} />}
         </>}
       </section>}
@@ -1887,7 +1897,11 @@ function EntityDimensions({ entity, onApply, onMessage }: { readonly entity: Ske
   if (entity.kind === "rectangle") return <div className="dimension-stack"><DimensionField label="Width" dimension="width" value={entity.widthMm} onApply={onApply} onMessage={onMessage} /><DimensionField label="Height" dimension="height" value={entity.heightMm} onApply={onApply} onMessage={onMessage} /></div>;
   if (entity.kind === "circle") return <><DimensionField label="Radius" dimension="radius" value={entity.radiusMm} onApply={onApply} onMessage={onMessage} /><div className="derived-dimension"><span>Diameter</span><strong>{format(entity.radiusMm * 2)} mm</strong></div></>;
   if (entity.kind === "ellipse") return <div className="dimension-stack"><div className="derived-dimension"><span>Major radius</span><strong>{format(entity.majorRadiusMm)} mm</strong></div><div className="derived-dimension"><span>Minor radius</span><strong>{format(entity.minorRadiusMm)} mm</strong></div></div>;
-  return <div className="derived-dimension"><span>{entity.kind === "arc" ? "Three-point arc" : entity.kind === "spline" ? "Fit-point spline" : "Sketch point"}</span><strong>reference only</strong></div>;
+  if (entity.kind === "arc") {
+    const radius = arcShape(entity.start, entity.mid, entity.end)?.radiusMm;
+    return radius === undefined ? <div className="derived-dimension"><span>Three-point arc</span><strong>reference only</strong></div> : <DimensionField label="Radius" dimension="radius" value={radius} onApply={onApply} onMessage={onMessage} />;
+  }
+  return <div className="derived-dimension"><span>{entity.kind === "spline" ? "Fit-point spline" : "Sketch point"}</span><strong>reference only</strong></div>;
 }
 
 function DimensionField({ label, dimension, value, onApply, onMessage }: { readonly label: string; readonly dimension: DrivingDimension; readonly value: number; readonly onApply: (dimension: DrivingDimension, value: number) => void; readonly onMessage: (message: string) => void }): React.JSX.Element {
@@ -1948,7 +1962,23 @@ function resolveDirectSketchDimension(points: readonly SketchDimensionPoint[]): 
     else if (first.entityKind === "rectangle" && handles.has("top") && handles.has("bottom")) { driving = { entityId: first.entityId, dimension: "height" }; label = "Rectangle height"; }
     else if (first.entityKind === "circle" && handles.has("center") && handles.has("radius")) { driving = { entityId: first.entityId, dimension: "radius" }; label = "Circle radius"; }
   }
-  return { label, valueMm, delta, first, second, ...(driving === undefined ? {} : { driving }) };
+  // Any two defining points the solver can move: the distance between them can be driven.
+  const firstRef = driving === undefined ? solverPointRef(first) : undefined;
+  const secondRef = driving === undefined ? solverPointRef(second) : undefined;
+  const between = firstRef !== undefined && secondRef !== undefined ? { entityId: first.entityId, secondEntityId: second.entityId, points: [firstRef, secondRef] as const } : undefined;
+  return { label, valueMm, delta, first, second, ...(driving === undefined ? {} : { driving }), ...(between === undefined ? {} : { between }) };
+}
+
+/** The solver's name for a canvas dimension point, or undefined when the solver cannot move that point (a rectangle's edge middle, a circle's rim). */
+function solverPointRef(point: SketchDimensionPoint): SketchPointRef | undefined {
+  switch (point.entityKind) {
+    case "line": return point.handle === "start" || point.handle === "end" ? point.handle : point.handle === "mid" ? "mid" : undefined;
+    case "arc": return point.handle === "start" || point.handle === "end" ? point.handle : point.handle === "mid" ? "mid" : undefined;
+    case "circle":
+    case "ellipse": return point.handle === "center" ? "center" : undefined;
+    case "point": return "self";
+    default: return undefined;
+  }
 }
 
 function DirectDimensionPreview({ dimension, px }: { readonly dimension: DirectSketchDimension; readonly px: number }): React.JSX.Element {

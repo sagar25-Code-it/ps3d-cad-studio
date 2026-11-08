@@ -17,8 +17,9 @@ import {
   SKETCH_DIMENSION_RANGE_MM,
   type BindingResult
 } from "./parameter-graph.js";
-import { solveLiveSketch } from "./sketch-solve.js";
-import type { DesignFeature, DesignHistory, DesignParameter, DesignSolidFeature, SketchEntity, WorkbenchOperation, WorkbenchProject, WorkbenchSketch } from "./types.js";
+import { locateDimensionConstraint, redriveDimension } from "./sketch-dimension-edit.js";
+import type { DesignFeature, DesignHistory, DesignParameter, DesignSolidFeature, SketchEntity, WorkbenchOperation, WorkbenchProject, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
+import { isSketchDatumEntityId } from "./types.js";
 import { failure } from "./validation.js";
 
 /**
@@ -64,27 +65,30 @@ function applySketchBindings(sketch: WorkbenchSketch, results: readonly BindingR
   const issues: BindingResult[] = [];
   for (const result of results) {
     if (!result.ok || result.value === undefined) continue;
+    void resize;
     const constraint = current.constraints.find((candidate) => candidate.id === result.fieldId);
-    if (constraint === undefined || constraint.valueMm === undefined || !differs(constraint.valueMm, result.value)) continue;
-    const dimension = constraint.dimension ?? (constraint.kind === "radius" ? "radius" as const : undefined);
-    const entity = current.entities.find((candidate) => candidate.id === constraint.entityIds[0]);
-    const resized = entity === undefined || dimension === undefined ? undefined : resize(entity, dimension, result.value);
-    if (entity === undefined || resized === undefined) {
-      issues.push({ ...result, ok: false, message: `The ${dimension ?? "dimension"} of ${constraint.entityIds[0] ?? "this entity"} can no longer be driven (the entity is gone or changed kind).` });
+    const currentValue = constraint === undefined ? undefined : constraint.kind === "angle" ? constraint.valueDeg : constraint.valueMm;
+    if (constraint === undefined || currentValue === undefined || !differs(currentValue, result.value)) continue;
+    const gone = constraint.entityIds.find((id) => !isSketchDatumEntityId(id) && !current.entities.some((candidate) => candidate.id === id));
+    if (gone !== undefined) {
+      issues.push({ ...result, ok: false, message: `The dimension of ${gone} can no longer be driven (the entity is gone or changed kind).` });
       continue;
     }
-    const moved: WorkbenchSketch = {
-      ...current,
-      entities: current.entities.map((candidate) => candidate.id === entity.id ? resized : candidate),
-      constraints: current.constraints.map((candidate) => candidate.id === constraint.id ? { ...candidate, valueMm: result.value! } : candidate)
-    };
-    // Relations that touch the resized entity are enforced again, so connected geometry follows (a joint, a tangent circle).
-    const solved = solveLiveSketch(moved, [entity.id]);
-    if (!solved.ok) {
-      issues.push({ ...result, ok: false, message: `The sketch could not follow this value: ${solved.message}` });
+    const revalued: WorkbenchSketchConstraint = constraint.kind === "angle" ? { ...constraint, valueDeg: result.value } : { ...constraint, valueMm: result.value };
+    const withValue: WorkbenchSketch = { ...current, constraints: current.constraints.map((candidate) => candidate.id === constraint.id ? revalued : candidate) };
+    if (constraint.suppressed === true) {
+      // A relaxed dimension takes the new number but is not enforced.
+      current = withValue;
+      updated += 1;
       continue;
     }
-    current = { ...moved, entities: solved.entities };
+    // The dimension's geometry follows the new value and the relations around it are enforced again, so connected geometry follows (a joint, a tangent circle).
+    const redriven = redriveDimension(withValue, revalued);
+    if (!redriven.ok) {
+      issues.push({ ...result, ok: false, message: `The sketch could not follow this value: ${redriven.applied.diagnostics[0]?.message ?? "the relations cannot all hold"}` });
+      continue;
+    }
+    current = redriven.sketch;
     updated += 1;
   }
   return { sketch: current, updated, issues };
@@ -356,8 +360,7 @@ export function settleDesignExpressions(before: WorkbenchProject, operation: Wor
 
   if (operation.kind === "set-sketch-dimension" && operation.expression !== undefined) {
     const dimension = operation.dimension;
-    const target = project.sketch.constraints.find((constraint) => constraint.entityIds.length === 1 && constraint.entityIds[0] === operation.entityId
-      && (constraint.dimension === dimension || (constraint.dimension === undefined && constraint.kind === "radius" && dimension === "radius")));
+    const target = locateDimensionConstraint(project.sketch, { entityId: operation.entityId, dimension, ...(operation.secondEntityId === undefined ? {} : { secondEntityId: operation.secondEntityId }), ...(operation.points === undefined ? {} : { points: operation.points }) });
     if (target === undefined) return result;
     const parsed = parseExpression(operation.expression);
     if (!parsed.ok) return denied(`${parsed.error.message} (character ${parsed.error.position + 1})`, [operation.entityId]);

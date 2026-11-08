@@ -1,4 +1,4 @@
-import { arcShape, ellipsePerimeterMm } from "./sketch-measure.js";
+import { arcShape } from "./sketch-measure.js";
 import { adaptSplineEnd, splineEndFrame, type SplinePoint } from "./spline-curvature.js";
 import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 
@@ -6,7 +6,6 @@ import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSket
  * The relations the live sketch solves after the analytic pass, because they act on entities the analytic backend does not
  * model (rectangles, ellipses, fit-point splines) or need a closed-form step of their own:
  *
- *  - Perimeter of a rectangle or ellipse (a circle's perimeter is a radius, solved by the backend).
  *  - Smooth (G2): a spline end that continues a line, arc or spline with matching position, tangent and curvature.
  *  - Refraction: a line bent at an interface line by Snell's law.
  *
@@ -46,23 +45,6 @@ export function applyExtraConstraints(sketch: Pick<WorkbenchSketch, "entities" |
   };
 
   for (const constraint of active) {
-    if (constraint.kind === "perimeter" && constraint.driven !== true) {
-      const entity = entities.get(constraint.entityIds[0] ?? "");
-      if (entity === undefined || constraint.valueMm === undefined) continue;
-      if (entity.kind === "rectangle") {
-        const result = resizeRectangleToPerimeter(entity, constraint, active, entities);
-        if (typeof result === "string") return fail(result, [constraint.id, entity.id], "Remove one of the width, height and perimeter dimensions, or make them agree.");
-        if (result !== entity) { put(result); notes.push(`Resized rectangle ${label(entity.id)} to a perimeter of ${format(constraint.valueMm)} mm`); }
-      } else if (entity.kind === "ellipse") {
-        const current = ellipsePerimeterMm(entity.majorRadiusMm, entity.minorRadiusMm);
-        const scale = constraint.valueMm / current;
-        if (Math.abs(scale - 1) > EPS) {
-          put({ ...entity, majorRadiusMm: entity.majorRadiusMm * scale, minorRadiusMm: entity.minorRadiusMm * scale });
-          notes.push(`Scaled ellipse ${label(entity.id)} to a perimeter of ${format(constraint.valueMm)} mm`);
-        }
-      }
-      continue;
-    }
     if (constraint.kind === "smooth") {
       const outcome = applySmooth(constraint, entities, active);
       if (typeof outcome === "string") unsolved.push({ constraintId: constraint.id, reason: outcome });
@@ -84,32 +66,6 @@ function label(id: string): string {
 
 function format(value: number): string {
   return String(Math.round(value * 1000) / 1000);
-}
-
-function resizeRectangleToPerimeter(
-  rectangle: Extract<SketchEntity, { kind: "rectangle" }>,
-  perimeter: WorkbenchSketchConstraint,
-  constraints: readonly WorkbenchSketchConstraint[],
-  _entities: ReadonlyMap<string, SketchEntity>
-): SketchEntity | string {
-  const half = perimeter.valueMm! / 2;
-  const held = (dimension: "width" | "height"): boolean => constraints.some((candidate) => candidate.kind === "distance" && candidate.driven !== true && candidate.dimension === dimension && candidate.entityIds[0] === rectangle.id);
-  const widthHeld = held("width");
-  const heightHeld = held("height");
-  let width = rectangle.widthMm;
-  let height = rectangle.heightMm;
-  if (widthHeld && heightHeld) {
-    return Math.abs(2 * (width + height) - perimeter.valueMm!) <= 1e-6 ? rectangle : "The width, height and perimeter dimensions of this rectangle disagree.";
-  }
-  if (widthHeld) height = half - width;
-  else if (heightHeld) width = half - height;
-  else {
-    const scale = perimeter.valueMm! / (2 * (width + height));
-    width *= scale;
-    height *= scale;
-  }
-  if (width <= 0.01 || height <= 0.01) return "That perimeter is too small for the rectangle's held side.";
-  return Math.abs(width - rectangle.widthMm) <= EPS && Math.abs(height - rectangle.heightMm) <= EPS ? rectangle : { ...rectangle, widthMm: width, heightMm: height };
 }
 
 // ---------------------------------------------------------------------------------------------

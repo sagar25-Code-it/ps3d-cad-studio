@@ -1,6 +1,11 @@
 import {
+  analyzeLiveSketch,
   constraintFit,
+  describeConstraint,
+  entityKindOf,
+  entityNames,
   failure,
+  type LiveRelationSet,
   type SketchEntity,
   type Vec2,
   type WorkbenchResult,
@@ -103,10 +108,19 @@ export interface QualifiedExtrusionCandidate {
 
 export interface SketchAnalysis {
   readonly classification: "fully-constrained" | "underconstrained" | "conflict";
+  /** Free variables minus the rank of the relations' Jacobian: what the sketch can still do, not a count of relations. */
   readonly degreesOfFreedom: number;
+  /** Per entity: how many independent ways it can still move or change shape (the others being free to follow). */
   readonly entityFreedom: Readonly<Record<string, number>>;
   readonly appliedConstraints: number;
+  /** Human-readable problems: contradicting relations (named), relations that cannot apply to their curves. */
   readonly conflicts: readonly string[];
+  /** Relations that overlap: each set names the constraints, one of which adds nothing. The sketch is still solvable. */
+  readonly redundant: readonly LiveRelationSet[];
+  /** Relations that contradict each other at the stored geometry, with names. */
+  readonly conflictSets: readonly LiveRelationSet[];
+  /** Rank of the relations' Jacobian. */
+  readonly rank: number;
   readonly boundsMm: { readonly min: Vec2; readonly max: Vec2; readonly size: Vec2 };
 }
 
@@ -117,118 +131,62 @@ export interface SnapResult {
   readonly targetId?: string;
 }
 
+/** The relation kinds whose misuse (a horizontal circle, a radius on a line) is reported as a conflict in the analysis. */
+const FIT_CHECKED_KINDS = new Set(["horizontal", "vertical", "parallel", "perpendicular", "collinear", "concentric", "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"]);
+
+/**
+ * Degrees of freedom and conflicts of the working sketch. The degrees of freedom come from the rank of the relations' Jacobian (see
+ * analyzeLiveSketch): a duplicate relation removes nothing, a relation the solver does not enforce removes nothing, and a sketch is
+ * "fully constrained" only when nothing is left to move. Relations that overlap are listed in `redundant` and relations that contradict in
+ * `conflictSets`, both by the names of the constraints.
+ */
 export function analyzeWorkbenchSketch(sketch: WorkbenchSketch): SketchAnalysis {
-  const freedom = new Map(sketch.entities.map((entity) => [entity.id, baseFreedom(entity)]));
+  const rank = analyzeLiveSketch(sketch);
+  const names = entityNames(sketch);
   const conflicts: string[] = [];
   const orientations = new Map<string, Set<string>>();
   const scalarValues = new Map<string, number>();
-  let applied = 0;
 
   for (const constraint of sketch.constraints) {
     // A relaxed relation stays recorded but takes no freedom away.
     if (constraint.suppressed === true) continue;
-    if (constraint.kind === "fixed") {
-      for (const id of constraint.entityIds) freedom.set(id, 0);
-      applied += 1;
-      continue;
+    const kinds = constraint.entityIds.map((id) => entityKindOf(sketch, id));
+    if (FIT_CHECKED_KINDS.has(constraint.kind)) {
+      const fit = constraintFit(constraint.kind, kinds, constraint.points, { driven: constraint.driven === true, ...(constraint.dimension === undefined ? {} : { dimension: constraint.dimension }) });
+      if (!fit.ok) conflicts.push(`${describeConstraint(constraint, names)} cannot apply: ${fit.reason}`);
     }
     if (constraint.kind === "horizontal" || constraint.kind === "vertical") {
       const id = constraint.entityIds[0]!;
-      const entity = sketch.entities.find((candidate) => candidate.id === id);
-      if (entity?.kind !== "line") conflicts.push(`${constraint.id} requires a line.`);
       const set = orientations.get(id) ?? new Set<string>();
       set.add(constraint.kind);
       orientations.set(id, set);
-      reduce(freedom, [id], 1);
-      applied += 1;
-      continue;
     }
-    if (constraint.kind === "concentric") {
-      const entities = constraint.entityIds.map((id) => sketch.entities.find((candidate) => candidate.id === id));
-      if (!constraintFit("concentric", entities.map((entity) => entity?.kind)).ok) conflicts.push(`${constraint.id} requires two circles or arcs.`);
-      reduce(freedom, constraint.entityIds, 2);
-      applied += 1;
-      continue;
-    }
-    if (constraint.kind === "parallel" || constraint.kind === "perpendicular" || constraint.kind === "collinear") {
-      const entities = constraint.entityIds.map((id) => sketch.entities.find((candidate) => candidate.id === id));
-      if (entities.length !== 2 || entities.some((entity) => entity?.kind !== "line")) conflicts.push(`${constraint.id} requires two lines.`);
-      reduce(freedom, constraint.entityIds, constraint.kind === "collinear" ? 2 : 1);
-      applied += 1;
-      continue;
-    }
-    if (constraint.kind === "tangent") {
-      if (constraint.entityIds.length !== 2) conflicts.push(`${constraint.id} requires two entities.`);
-      reduce(freedom, constraint.entityIds, 1);
-      applied += 1;
-      continue;
-    }
-    // A driven (reference) dimension is measured from the geometry; it takes no freedom and can conflict with nothing.
+    // A driven (reference) dimension is measured from the geometry; it can conflict with nothing.
     if (constraint.driven === true) continue;
-    if (constraint.kind === "angle" || constraint.kind === "arc-length" || constraint.kind === "perimeter") {
-      const entities = constraint.entityIds.map((id) => sketch.entities.find((candidate) => candidate.id === id));
-      if (!constraintFit(constraint.kind, entities.map((entity) => entity?.kind), constraint.points).ok) conflicts.push(`${constraint.id} does not apply to these curves.`);
+    if (constraint.kind === "angle" || constraint.kind === "arc-length" || constraint.kind === "perimeter" || constraint.kind === "radius" || constraint.kind === "distance") {
       const value = constraint.kind === "angle" ? constraint.valueDeg : constraint.valueMm;
-      if (value === undefined) conflicts.push(`${constraint.id} requires a numeric value.`);
+      if (value === undefined) conflicts.push(`${describeConstraint(constraint, names)} requires a numeric value.`);
       else {
-        const key = `${constraint.kind}:${constraint.entityIds.join("|")}`;
+        const key = `${constraint.kind}:${constraint.dimension ?? "generic"}:${constraint.entityIds.join("|")}:${(constraint.points ?? []).join("|")}`;
         const prior = scalarValues.get(key);
-        if (prior !== undefined && Math.abs(prior - value) > 1e-9) conflicts.push(`${constraint.id} conflicts with another ${constraint.kind} value.`);
+        if (prior !== undefined && Math.abs(prior - value) > 1e-9) conflicts.push(`${describeConstraint(constraint, names)} conflicts with another ${constraint.kind} value on the same curves.`);
         scalarValues.set(key, value);
       }
-      reduce(freedom, constraint.entityIds, 1);
-      applied += 1;
-      continue;
     }
-    if (constraint.kind === "smooth") {
-      const entities = constraint.entityIds.map((id) => sketch.entities.find((candidate) => candidate.id === id));
-      if (!constraintFit("smooth", entities.map((entity) => entity?.kind), constraint.points).ok) conflicts.push(`${constraint.id} needs a spline end meeting a line, arc or spline end.`);
-      // Joining the ends (2), matching the tangent (1) and matching the curvature (1) all act on the spline.
-      const splineId = constraint.entityIds.find((id) => sketch.entities.find((candidate) => candidate.id === id)?.kind === "spline") ?? constraint.entityIds[0]!;
-      reduce(freedom, [splineId], 4);
-      applied += 1;
-      continue;
-    }
-    if (constraint.kind === "pierce") {
-      if (constraint.entityIds.length !== 1 || sketch.entities.find((candidate) => candidate.id === constraint.entityIds[0])?.kind !== "point") conflicts.push(`${constraint.id} requires a sketch point.`);
-      reduce(freedom, constraint.entityIds, 2);
-      applied += 1;
-      continue;
-    }
-    if (constraint.kind === "refraction") {
-      const entities = constraint.entityIds.map((id) => sketch.entities.find((candidate) => candidate.id === id));
-      if (!constraintFit("refraction", entities.map((entity) => entity?.kind)).ok) conflicts.push(`${constraint.id} requires three lines.`);
-      reduce(freedom, [constraint.entityIds[1]!], 1);
-      applied += 1;
-      continue;
-    }
-    if (constraint.kind === "radius" || constraint.kind === "distance") {
-      if (constraint.valueMm === undefined) conflicts.push(`${constraint.id} requires a numeric value.`);
-      const key = `${constraint.kind}:${constraint.dimension ?? "generic"}:${constraint.entityIds.join("|")}`;
-      if (constraint.valueMm !== undefined) {
-        const prior = scalarValues.get(key);
-        if (prior !== undefined && Math.abs(prior - constraint.valueMm) > 1e-9) conflicts.push(`${constraint.id} conflicts with another ${constraint.kind} value.`);
-        scalarValues.set(key, constraint.valueMm);
-      }
-      reduce(freedom, constraint.entityIds, 1);
-      applied += 1;
-      continue;
-    }
-    const reduction = constraint.kind === "coincident" ? 2 : 1;
-    reduce(freedom, constraint.entityIds, reduction);
-    applied += 1;
   }
-
   for (const [id, kinds] of orientations) {
-    if (kinds.has("horizontal") && kinds.has("vertical")) conflicts.push(`${id} cannot be both horizontal and vertical unless degenerate.`);
+    if (kinds.has("horizontal") && kinds.has("vertical")) conflicts.push(`${names.get(id) ?? id} cannot be both horizontal and vertical unless degenerate.`);
   }
-  const degreesOfFreedom = [...freedom.values()].reduce((sum, value) => sum + value, 0);
+  for (const set of rank.conflicting) conflicts.push(set.message);
   return {
-    classification: conflicts.length > 0 ? "conflict" : degreesOfFreedom === 0 ? "fully-constrained" : "underconstrained",
-    degreesOfFreedom,
-    entityFreedom: Object.fromEntries([...freedom.entries()].sort(([left], [right]) => left.localeCompare(right))),
-    appliedConstraints: applied,
+    classification: conflicts.length > 0 ? "conflict" : rank.degreesOfFreedom === 0 && sketch.entities.length > 0 ? "fully-constrained" : "underconstrained",
+    degreesOfFreedom: rank.degreesOfFreedom,
+    entityFreedom: rank.entityFreedom,
+    appliedConstraints: rank.enforced,
     conflicts,
+    redundant: rank.redundant,
+    conflictSets: rank.conflicting,
+    rank: rank.rank,
     boundsMm: sketchBounds(sketch.entities)
   };
 }
@@ -776,15 +734,6 @@ export function sketchChainBranchCount(sketch: WorkbenchSketch, entityIds: reado
   return endpoints.filter((point, index) => endpoints.filter((candidate, candidateIndex) => candidateIndex !== index && distance(point, candidate) <= toleranceMm).length >= 2).length;
 }
 
-function baseFreedom(entity: SketchEntity): number {
-  if (entity.kind === "line") return 4;
-  if (entity.kind === "rectangle") return 5;
-  if (entity.kind === "circle") return 3;
-  if (entity.kind === "ellipse") return 5; // centre (2), two radii (2) and orientation (1)
-  if (entity.kind === "point") return 2;
-  if (entity.kind === "spline") return entity.fitPoints.length * 2;
-  return 6;
-}
 
 function curveEndpoints(entity: SketchEntity): readonly Vec2[] {
   if (entity.kind === "line" || entity.kind === "arc") return [entity.start, entity.end];
@@ -836,29 +785,6 @@ function normalize2(value: Vec2): Vec2 {
  * passes its share on to its partner. The total is unchanged; only who is blamed for it is fairer, which is what
  * "fully constrained" colouring and Show Movable read.
  */
-function reduce(freedom: Map<string, number>, ids: readonly string[], amount: number): void {
-  const unique = [...new Set(ids)];
-  let remaining = amount;
-  let progress = true;
-  while (remaining > 0 && progress) {
-    progress = false;
-    const active = unique.filter((id) => (freedom.get(id) ?? 0) > 0);
-    if (active.length === 0) return;
-    const base = Math.floor(remaining / active.length);
-    let extra = remaining % active.length;
-    for (const id of active) {
-      const want = base + (extra > 0 ? 1 : 0);
-      if (extra > 0) extra -= 1;
-      const current = freedom.get(id) ?? 0;
-      const take = Math.min(current, want);
-      if (take > 0) {
-        freedom.set(id, current - take);
-        remaining -= take;
-        progress = true;
-      }
-    }
-  }
-}
 
 function roundTo(value: number, increment: number): number {
   return Math.round(value / increment) * increment;

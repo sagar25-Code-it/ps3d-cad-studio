@@ -26,6 +26,9 @@ import { menuModelTests } from "./menu-model.test.js";
 import { mcpRecipeTests } from "./mcp-recipes.test.js";
 import { selectionMetricTests } from "./selection-metrics.test.js";
 import { sketchSolverTests } from "./sketch-solver.test.js";
+import { sketchSolverSimultaneousTests } from "./sketch-solver-simultaneous.test.js";
+import { sketchSolverDofTests } from "./sketch-solver-dof.test.js";
+import { sketchSolverKindsTests } from "./sketch-solver-kinds.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
 import { meshModifyTests } from "./mesh-modify.test.js";
@@ -130,6 +133,9 @@ const tests: readonly TestCase[] = [
   ...mcpRecipeTests,
   ...selectionMetricTests,
   ...sketchSolverTests,
+  ...sketchSolverSimultaneousTests,
+  ...sketchSolverDofTests,
+  ...sketchSolverKindsTests,
   ...sketchEditToolTests,
   ...sketchSplitJogTests,
   ...sketchPathMirrorMoveTests,

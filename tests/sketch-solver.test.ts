@@ -151,17 +151,15 @@ export const sketchSolverTests: readonly TestCase[] = [
     }
   },
   {
-    name: "tangent on pairs the solver cannot handle is recorded with a reason, not faked",
+    name: "tangent on pairs that cannot be tangent is refused with the reason, not stored as a dead relation",
     run: () => {
       const twoLines = constrain(projectWith([line("a", [0, 0], [10, 0]), line("b", [0, 5], [10, 6])]), "tangent", ["a", "b"]);
-      assert(twoLines.ok, "the relation is still recorded");
-      assert(twoLines.value.summary.includes("Recorded, not solved"), `the status says it was not solved: ${twoLines.value.summary}`);
-      equal(twoLines.value.project.sketch.constraints.length, 1, "the constraint is kept as design intent");
-      near(lineOf(twoLines.value.project, "b").end[1], 6, 1e-12, "no geometry was changed");
+      assert(!twoLines.ok, "two lines cannot be tangent");
+      assert(/Tangent solves a line against a circle or arc/u.test(twoLines.diagnostics[0]?.message ?? ""), `the refusal says what tangent needs: ${twoLines.diagnostics[0]?.message ?? ""}`);
 
       const rectangle: SketchEntity = { id: "entity:plate", kind: "rectangle", center: [0, 0], widthMm: 20, heightMm: 10, rotationDeg: 0, construction: false };
       const withRectangle = constrain(projectWith([rectangle, circle("c", [30, 0], 4)]), "tangent", ["plate", "c"]);
-      assert(withRectangle.ok && withRectangle.value.summary.includes("Rectangles are rigid"), "rectangles are rigid in the solver");
+      assert(!withRectangle.ok, "a rectangle is not tangent to a circle");
       const fixedRectangle = constrain(projectWith([rectangle]), "fixed", ["plate"]);
       assert(fixedRectangle.ok, "Fixed is always accepted on a rectangle");
     }
@@ -184,7 +182,7 @@ export const sketchSolverTests: readonly TestCase[] = [
       near(circleOf(circles.value.project, "b").radiusMm, 3, 1e-9, "the radius matches");
 
       const missingAxis = constrain(projectWith([line("a", [3, 1], [8, 4]), line("b", [-2, 0], [-9, 3]), circle("c", [0, 0], 2)]), "symmetry", ["a", "b", "c"]);
-      assert(missingAxis.ok && missingAxis.value.summary.includes("Recorded, not solved"), "a non-line axis is recorded, not solved");
+      assert(!missingAxis.ok && /axis line/u.test(missingAxis.diagnostics[0]?.message ?? ""), "a circle is not an axis: the mirror is refused with the reason");
     }
   },
   {

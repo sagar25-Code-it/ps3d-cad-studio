@@ -7,6 +7,8 @@ import {
   GENERAL_BODY_OPERATIONS,
   SKETCH_DATUM_PLANES,
   SKETCH_POINT_REFS,
+  SKETCH_RELATIVE_DISTANCE_NAMES,
+  isSketchDatumEntityId,
   isElectricalSheetPositionAvailable,
   type AssemblyIntent,
   type AssemblyMate,
@@ -235,7 +237,8 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   }
   const entityIds = new Set<string>();
   for (const entity of value.entities) {
-    if (!validateEntity(entity) || entityIds.has(entity.id)) return invalid("A sketch entity is invalid or has a duplicate ID.");
+    if (!validateEntity(entity)) return invalid(entityProblem(entity));
+    if (entityIds.has(entity.id)) return invalid(`The sketch entity ID ${entity.id} is used twice.`);
     entityIds.add(entity.id);
   }
   const constraintIds = new Set<string>();
@@ -246,6 +249,32 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
     constraintIds.add(constraint.id);
   }
   return { ok: true, value: value as unknown as WorkbenchSketch };
+}
+
+/** Says why a sketch entity was refused, so an edit that pushes geometry past a limit explains which limit instead of a bare "invalid". */
+function entityProblem(value: unknown): string {
+  if (!isRecord(value) || typeof value.kind !== "string") return "A sketch entity is malformed (it needs an ID, a kind and its geometry).";
+  const kind = value.kind;
+  const limit = WORKBENCH_LIMITS.maxCoordinateMm.toLocaleString("en-US");
+  const minimum = WORKBENCH_LIMITS.minGeometryMm;
+  const numbers: number[] = [];
+  const collect = (item: unknown): void => {
+    if (typeof item === "number") numbers.push(item);
+    else if (Array.isArray(item)) item.forEach(collect);
+  };
+  for (const [key, item] of Object.entries(value)) if (key !== "id" && key !== "kind") collect(item);
+  if (numbers.some((item) => !Number.isFinite(item))) return `A ${kind} contains a number that is not finite (NaN or Infinity).`;
+  if (kind === "line" && vec2(value.start) && vec2(value.end) && distance(value.start, value.end) < minimum) return `A line must be at least ${minimum} mm long; this edit would leave it shorter.`;
+  if (kind === "circle" && typeof value.radiusMm === "number" && !(value.radiusMm >= minimum && value.radiusMm <= 10_000)) return `A circle radius must be between ${minimum} and 10,000 mm; this edit would give ${Number(value.radiusMm.toFixed(4))} mm.`;
+  if (kind === "rectangle" && typeof value.widthMm === "number" && typeof value.heightMm === "number" && !(value.widthMm >= minimum && value.heightMm >= minimum && value.widthMm <= 20_000 && value.heightMm <= 20_000)) {
+    return `A rectangle's sides must be between ${minimum} and 20,000 mm; this edit would give ${Number(value.widthMm.toFixed(4))} by ${Number(value.heightMm.toFixed(4))} mm.`;
+  }
+  if (kind === "ellipse" && typeof value.majorRadiusMm === "number" && typeof value.minorRadiusMm === "number" && (value.minorRadiusMm > value.majorRadiusMm + 1e-9)) return "An ellipse's minor radius cannot be larger than its major radius.";
+  if (numbers.some((item) => Math.abs(item) > WORKBENCH_LIMITS.maxCoordinateMm) && (kind === "line" || kind === "arc" || kind === "point" || kind === "spline" || kind === "circle" || kind === "ellipse" || kind === "rectangle")) {
+    return `A ${kind} would reach beyond the ±${limit} mm coordinate limit of the sketch; keep it within ${limit} mm of the origin.`;
+  }
+  if (kind === "arc") return "An arc's three points must not be in a line, and must stay within the coordinate limit.";
+  return `A ${kind} in the sketch is invalid.`;
 }
 
 function validateEntity(value: unknown): value is SketchEntity {
@@ -294,7 +323,7 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   // A reference perimeter may sum a whole chain of curves; a refraction names three lines and a symmetry three curves.
   const maxEntities = !isRecord(value) ? 0 : value.kind === "perimeter" ? 64 : value.kind === "symmetry" || value.kind === "refraction" ? 3 : 2;
   if (!isRecord(value) || !stableId(value.id) || !Array.isArray(value.entityIds) || value.entityIds.length < 1 || value.entityIds.length > maxEntities
-    || value.entityIds.some((id) => typeof id !== "string" || !entityIds.has(id))) return false;
+    || value.entityIds.some((id) => typeof id !== "string" || !(entityIds.has(id) || isSketchDatumEntityId(id)))) return false;
   if (!CONSTRAINT_KINDS.includes(String(value.kind))) return false;
   const hasValue = Object.hasOwn(value, "valueMm");
   const hasDimension = Object.hasOwn(value, "dimension");
@@ -309,20 +338,21 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
     ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : []), ...(hasExpression ? ["expression"] : [])];
   if (!exactKeys(value, expectedKeys) || (hasSuppressed && typeof value.suppressed !== "boolean")) return false;
   // An expression only drives a dimension, and must be short, parseable text.
-  if (hasExpression && (!hasValue || typeof value.expression !== "string" || value.expression.length < 1 || value.expression.length > MAX_EXPRESSION_LENGTH || !parseExpression(value.expression).ok)) return false;
+  if (hasExpression && (!(hasValue || hasValueDeg) || typeof value.expression !== "string" || value.expression.length < 1 || value.expression.length > MAX_EXPRESSION_LENGTH || !parseExpression(value.expression).ok)) return false;
   if (hasDriven && typeof value.driven !== "boolean") return false;
   const driven = value.driven === true;
   // A driven (reference) dimension is measured: it carries no value of its own, and only dimension kinds can be driven.
   if (driven && (hasValue || hasValueDeg || !["radius", "distance", "angle", "arc-length", "perimeter"].includes(String(value.kind)))) return false;
   if (hasDimension && (!hasValue && !driven)) return false;
-  if (hasDimension && !["length", "width", "height", "radius"].includes(String(value.dimension))) return false;
+  if (hasDimension && !["length", "width", "height", "radius", "diameter", "aligned", "horizontal", "vertical", "point-line", "line-line", "major-radius", "minor-radius"].includes(String(value.dimension))) return false;
   if (hasValueDeg && (value.kind !== "angle" || !(typeof value.valueDeg === "number" && Number.isFinite(value.valueDeg) && value.valueDeg >= 0 && value.valueDeg < 360))) return false;
   if (value.kind === "angle" && !driven && !hasValueDeg) return false;
-  if (value.kind === "angle" && (value.entityIds.length !== 2 || hasValue)) return false;
+  // An angle is between two lines (or a line and an axis); an ellipse alone gives the turn of its major axis.
+  if (value.kind === "angle" && (value.entityIds.length < 1 || value.entityIds.length > 2 || hasValue)) return false;
   if (hasPoints) {
     // Only point-level relations name defining points, and each name must be a known point reference.
     const points = value.points;
-    if ((value.kind !== "coincident" && value.kind !== "midpoint" && value.kind !== "smooth") || !Array.isArray(points) || points.length < 1 || points.length > value.entityIds.length
+    if ((value.kind !== "coincident" && value.kind !== "midpoint" && value.kind !== "smooth" && value.kind !== "fixed" && value.kind !== "distance") || !Array.isArray(points) || points.length < 1 || points.length > value.entityIds.length
       || points.some((point) => !(SKETCH_POINT_REFS as readonly unknown[]).includes(point))) return false;
     if (value.kind === "smooth" && (points.length !== 2 || points.some((point) => point !== "start" && point !== "end"))) return false;
   }
@@ -339,6 +369,8 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   if (hasRatio && (value.kind !== "refraction" || !finiteRange(value.ratio, 0.05, 20))) return false;
   if (value.kind === "refraction" && (!hasRatio || value.entityIds.length !== 3)) return false;
   if (hasValue && value.kind === "arc-length" || hasValue && value.kind === "perimeter") return finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, 40_000);
+  // A distance between points may be zero (two points level with each other).
+  if (hasValue && value.kind === "distance" && (SKETCH_RELATIVE_DISTANCE_NAMES as readonly unknown[]).includes(value.dimension)) return finiteRange(value.valueMm, 0, 20_000);
   return !hasValue || finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, 20_000);
 }
 

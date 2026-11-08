@@ -341,7 +341,8 @@ export const sketchDimensionWpTests: readonly TestCase[] = [
       project = run(project, { kind: "set-sketch-dimension", entityId: "entity:r", dimension: "width", valueMm: 10 });
       project = run(project, { kind: "set-sketch-dimension", entityId: "entity:r", dimension: "height", valueMm: 20 });
       const message = refused(project, { kind: "set-sketch-dimension", entityId: "entity:r", dimension: "perimeter", valueMm: 70 });
-      assert(/disagree|perimeter/u.test(message), `explains the disagreement: ${message}`);
+      // The solver now names the relations that contradict each other instead of describing a pass count.
+      assert(/contradict/u.test(message) && /Perimeter 70/u.test(message) && /Width 10/u.test(message) && /Height 20/u.test(message), `names the three dimensions that disagree: ${message}`);
       const consistent = run(project, { kind: "set-sketch-dimension", entityId: "entity:r", dimension: "perimeter", valueMm: 60 });
       near(2 * (get(consistent, "r", "rectangle").widthMm + get(consistent, "r", "rectangle").heightMm), 60, 1e-9, "a consistent perimeter is accepted");
     }
@@ -355,7 +356,11 @@ export const sketchDimensionWpTests: readonly TestCase[] = [
       assert(withConstraint({ id: "constraint:ok", kind: "angle", entityIds: ["entity:a", "entity:b"], driven: true }), "a driven angle validates");
       assert(!withConstraint({ id: "constraint:bad", kind: "angle", entityIds: ["entity:a", "entity:b"] }), "a driving angle needs its value");
       assert(!withConstraint({ id: "constraint:bad", kind: "angle", entityIds: ["entity:a", "entity:b"], valueDeg: 400 }), "an angle of 400 degrees is out of range");
-      assert(!withConstraint({ id: "constraint:bad", kind: "angle", entityIds: ["entity:a"], valueDeg: 20 }), "an angle needs two lines");
+      // One entity is a valid angle record (an ellipse's rotation); whether it fits its curve is the operation's rule, not the schema's.
+      assert(withConstraint({ id: "constraint:ok-one", kind: "angle", entityIds: ["entity:a"], valueDeg: 20 }), "a single-entity angle record is well formed");
+      assert(!withConstraint({ id: "constraint:bad", kind: "angle", entityIds: ["entity:a", "entity:b", "entity:a"], valueDeg: 20 }), "an angle names at most two entities");
+      const oneLine = applyWorkbenchOperation(base, { kind: "add-sketch-constraint", operationId: "operation:test-angle-one-line", expectedRevision: base.revision, constraint: { id: "constraint:angle-one", kind: "angle", entityIds: ["entity:a"], valueDeg: 20 } });
+      assert(!oneLine.ok && /two lines/u.test(oneLine.diagnostics[0]?.message ?? ""), "an angle on one line is refused with the reason");
       assert(!withConstraint({ id: "constraint:bad", kind: "angle", entityIds: ["entity:a", "entity:b"], valueDeg: 20, driven: true }), "a driven dimension carries no value");
       assert(!withConstraint({ id: "constraint:bad", kind: "horizontal", entityIds: ["entity:a"], driven: true }), "only dimensions can be driven");
       assert(!withConstraint({ id: "constraint:bad", kind: "arc-length", entityIds: ["entity:a"], valueMm: -4 }), "a negative arc length is rejected");

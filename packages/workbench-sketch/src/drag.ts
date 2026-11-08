@@ -114,6 +114,10 @@ export function dragSketchHandle(sketch: WorkbenchSketch, entityId: string, hand
     if (isFixed(sketch, entityId)) return fail(fixedNote);
     if (handle.kind === "body") return settle(sketch, { ...entity, center: [entity.center[0] + delta[0], entity.center[1] + delta[1]] });
     if (handle.kind === "corner") {
+      // A rectangle with a driving width or height keeps its size: the corner is pinned under the pointer and the rectangle follows it.
+      const dimensioned = sketch.constraints.some((constraint) => constraint.kind === "distance" && constraint.driven !== true && constraint.suppressed !== true
+        && (constraint.dimension === "width" || constraint.dimension === "height") && constraint.entityIds[0] === entityId);
+      if (dimensioned) return liveDrag(sketch, entityId, `corner-${handle.index}` as SketchPointRef, pointerMm);
       // Resize about the opposite corner, in the rectangle's own (possibly rotated) frame.
       const radians = (entity.rotationDeg * Math.PI) / 180;
       const axisX: Vec2 = [Math.cos(radians), Math.sin(radians)];

@@ -74,7 +74,7 @@ export const sketchConstraintFitTests: readonly TestCase[] = [
     name: "disabled Constrain buttons carry a human reason from the rule table",
     run: () => {
       const rigid = constraintFit("parallel", ["rectangle", "line"]);
-      assert(!rigid.ok && /Rectangles are rigid/.test(rigid.reason), "a rectangle explains that it is rigid");
+      assert(!rigid.ok && /needs two lines/.test(rigid.reason), "a rectangle is not a line, and the reason says what Parallel needs");
       const needTwo = constraintFit("equal", ["line", "circle"]);
       assert(!needTwo.ok && /Equal needs/.test(needTwo.reason), "a mismatched equal pair says what it needs");
       const symmetric = constraintFit("symmetry", ["line", "line"]);

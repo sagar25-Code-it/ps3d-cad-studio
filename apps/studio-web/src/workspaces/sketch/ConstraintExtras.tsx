@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { SketchDimensionName, SketchEntity, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "../../../../../packages/workbench-core/src/index.js";
+import type { SketchDimensionName, SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "../../../../../packages/workbench-core/src/index.js";
+import { SolverRelations } from "./SolverRelations.js";
 import { measureDimensionConstraint } from "../../../../../packages/workbench-core/src/sketch-measure.js";
 import { splineEndFrame, type SplinePoint } from "../../../../../packages/workbench-core/src/spline-curvature.js";
 import type { SketchEditPlan } from "../../../../../packages/workbench-sketch/src/edit-tools.js";
@@ -26,7 +27,7 @@ export interface ConstraintExtrasBridge {
   readonly pierceUnresolved: () => readonly { readonly constraintId: string; readonly message: string }[];
 }
 
-export type SetDimensionRequest = (entityId: string, dimension: SketchDimensionName, value: number, extra?: { readonly secondEntityId?: string; readonly driven?: boolean; readonly expression?: string }) => void;
+export type SetDimensionRequest = (entityId: string, dimension: SketchDimensionName, value: number, extra?: { readonly secondEntityId?: string; readonly driven?: boolean; readonly expression?: string; readonly points?: readonly SketchPointRef[] }) => void;
 
 const format = (value: number): string => String(Number(value.toFixed(3)));
 
@@ -121,6 +122,7 @@ function dimensionTarget(selected: readonly SketchEntity[]): { readonly name: Sk
 export function ConstraintExtras(props: ExtrasProps): React.JSX.Element {
   return <>
     <ExtraDimensionSection {...props} />
+    <SolverRelations sketch={props.sketch} selected={props.selected} onSetDimension={props.onSetDimension} onAddConstraint={props.onAddConstraint} onMessage={props.onMessage} />
     <SmoothSection {...props} />
     <RefractionSection {...props} />
     <SplineHelperSection {...props} />

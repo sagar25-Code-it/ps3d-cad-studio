@@ -94,6 +94,8 @@ export const designRegenerationTests: readonly TestCase[] = [
       project = run(project, { kind: "add-design-solid", feature: feature(), body: first.body });
       const before = volume(first.body.positionsMm, first.body.indices);
       // Widen the plate in the working sketch and finish the sketch again: its snapshot is updated in place.
+      // The seeded plate outline is Fixed, and fixed geometry cannot be dimensioned (Unfix it first): relax that one relation.
+      project = run(project, { kind: "set-sketch-constraints-suppressed", constraintIds: ["constraint:outline-fixed"], suppressed: true });
       project = run(project, { kind: "set-sketch-dimension", entityId: "entity:mounting-outline", dimension: "width", valueMm: 90 });
       project = run(project, { kind: "commit-design-sketch", featureId: "feature:sketch-9", name: "Sketch 9" });
       equal(designOf(project).features.length, 2, "the sketch was updated, not duplicated");

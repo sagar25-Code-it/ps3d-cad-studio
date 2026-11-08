@@ -199,7 +199,9 @@ export const sketchCameraTests: readonly TestCase[] = [
     run: () => {
       for (const plane of ["datum:xy", "datum:xz", "datum:yz"] as const) {
         const slug = plane.replace(":", "-");
-        const base = createWorkbenchProject(`project:test-solve-${slug}`);
+        const seeded = createWorkbenchProject(`project:test-solve-${slug}`);
+        // The seeded plate outline is Fixed, which keeps its size; drop that one relation so the width can be dimensioned.
+        const base = { ...seeded, sketch: { ...seeded.sketch, constraints: seeded.sketch.constraints.filter((constraint) => constraint.id !== "constraint:outline-fixed") } };
         const moved = applyWorkbenchOperation(base, { kind: "set-sketch-plane", operationId: `operation:test-solve-plane-${slug}`, expectedRevision: 0, plane });
         assert(moved.ok, `the sketch moves to ${plane}`);
         const resized = applyWorkbenchOperation(moved.value.project, {

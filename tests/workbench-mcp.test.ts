@@ -181,7 +181,9 @@ export const workbenchMcpTests: readonly TestCase[] = [
     name: "MCP previews direct sketch dimensions, mates, and grouped components with typed correction",
     run: async () => {
       const guideAcknowledgement = await currentGuideAcknowledgement();
-      const project = createWorkbenchProject("project:test-mcp-cad-authoring");
+      const seeded = createWorkbenchProject("project:test-mcp-cad-authoring");
+      // The seeded bore profile is Fixed, which keeps its size; the dimension below resizes it, so it starts without that relation.
+      const project = { ...seeded, sketch: { ...seeded.sketch, constraints: seeded.sketch.constraints.filter((constraint) => constraint.id !== "constraint:centered-bore-fixed") } };
       const dimension: WorkbenchOperation = {
         kind: "set-sketch-dimension",
         operationId: "operation:test-sketch-radius",
