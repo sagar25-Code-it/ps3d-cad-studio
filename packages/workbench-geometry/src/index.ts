@@ -7,6 +7,8 @@ export * from "./tessellate.js";
 export * from "./mesh-boolean.js";
 export * from "./mesh-modify.js";
 export * from "./construction-geometry.js";
+export * from "./construction-binders.js";
+export * from "./construction-planes-extra.js";
 export * from "./sheet-metal.js";
 export * from "./sheet-edge-flange.js";
 export * from "./hole.js";

@@ -6,7 +6,8 @@
  * and by the browser tree / inspector to describe the plane.
  */
 
-import type { ConstructionAxis, ConstructionAxisDefinition, ConstructionPlane, ConstructionPlaneDefinition, ConstructionPoint, ConstructionPointDefinition, GeneralSolidBody, SketchDatumPlane, Vec3 } from "../../workbench-core/src/index.js";
+import { planeFromDefinition, type PlaneContext } from "./construction-planes-extra.js";
+import type { ConstructionAxis, ConstructionAxisDefinition, ConstructionBinder, ConstructionPlane, ConstructionPlaneDefinition, ConstructionPoint, ConstructionPointDefinition, GeneralSolidBody, SketchDatumPlane, Vec3 } from "../../workbench-core/src/index.js";
 
 export interface ConstructionPlaneFrame {
   readonly origin: Vec3;
@@ -26,11 +27,11 @@ const DATUM_FRAMES: Readonly<Record<SketchDatumPlane, { readonly normal: Vec3; r
 
 const DEFAULT_HALF_SIZE_MM = 60;
 
-export function evaluateConstructionPlane(plane: ConstructionPlane, bodies: readonly GeneralSolidBody[] = [], axes: readonly ConstructionAxis[] = []): ConstructionPlaneFrame | { readonly error: string } {
-  return evaluateConstructionPlaneDefinition(plane.definition, bodies, axes);
+export function evaluateConstructionPlane(plane: ConstructionPlane, bodies: readonly GeneralSolidBody[] = [], axes: readonly ConstructionAxis[] = [], binders: readonly ConstructionBinder[] = []): ConstructionPlaneFrame | { readonly error: string } {
+  return evaluateConstructionPlaneDefinition(plane.definition, bodies, axes, binders);
 }
 
-export function evaluateConstructionPlaneDefinition(definition: ConstructionPlaneDefinition, bodies: readonly GeneralSolidBody[] = [], axes: readonly ConstructionAxis[] = []): ConstructionPlaneFrame | { readonly error: string } {
+export function evaluateConstructionPlaneDefinition(definition: ConstructionPlaneDefinition, bodies: readonly GeneralSolidBody[] = [], axes: readonly ConstructionAxis[] = [], binders: readonly ConstructionBinder[] = []): ConstructionPlaneFrame | { readonly error: string } {
   if (definition.kind === "offset") {
     const base = DATUM_FRAMES[definition.basePlane];
     const origin: Vec3 = [base.normal[0] * definition.offsetMm, base.normal[1] * definition.offsetMm, base.normal[2] * definition.offsetMm];
@@ -75,6 +76,21 @@ export function evaluateConstructionPlaneDefinition(definition: ConstructionPlan
     const vAxis = normalize(cross(normal, uAxis)) ?? [0, 0, 1];
     return { origin: definition.point, normal, uAxis, vAxis, sizeMm: [DEFAULT_HALF_SIZE_MM, DEFAULT_HALF_SIZE_MM], description: `Perpendicular to ${axis.name}` };
   }
+  if (definition.kind === "through-two-edges" || definition.kind === "along-path") {
+    const context: PlaneContext = {
+      bodies,
+      binders,
+      axisSegment: (axisId) => {
+        const axis = axes.find((candidate) => candidate.id === axisId);
+        if (axis === undefined) return { error: "The axis this plane is built on is no longer in the part." };
+        const frame = evaluateConstructionAxis(axis, bodies);
+        if ("error" in frame) return { error: `The axis ${axis.name} cannot be evaluated: ${frame.error}` };
+        const [a, b] = frame.endpoints ?? [sub(frame.origin, scaleVec(frame.direction, frame.halfLengthMm)), add(frame.origin, scaleVec(frame.direction, frame.halfLengthMm))];
+        return { a, b, name: axis.name };
+      }
+    };
+    return planeFromDefinition(definition, context);
+  }
   // tangent-to-cylinder: a plane tangent to a revolve / extrude body at a given angle around its axis
   const body = bodies.find((candidate) => candidate.id === definition.bodyId);
   if (body === undefined) return { error: "The body this tangent plane is built on is no longer in the part." };
@@ -118,6 +134,8 @@ export interface ConstructionAxisFrame {
   readonly direction: Vec3;
   /** Half-length of the rendered segment in millimetres. */
   readonly halfLengthMm: number;
+  /** The two points an axis was defined through, when it has them; a path along the axis runs between these. */
+  readonly endpoints?: readonly [Vec3, Vec3];
   readonly description: string;
 }
 
@@ -138,7 +156,7 @@ export function evaluateConstructionAxisDefinition(definition: ConstructionAxisD
     if (direction === undefined) return { error: "The two axis points coincide." };
     const length = Math.hypot(definition.b[0] - definition.a[0], definition.b[1] - definition.a[1], definition.b[2] - definition.a[2]);
     const origin: Vec3 = [(definition.a[0] + definition.b[0]) / 2, (definition.a[1] + definition.b[1]) / 2, (definition.a[2] + definition.b[2]) / 2];
-    return { origin, direction, halfLengthMm: Math.max(DEFAULT_AXIS_HALF_LENGTH_MM, length / 2), description: "Through two points" };
+    return { origin, direction, halfLengthMm: Math.max(DEFAULT_AXIS_HALF_LENGTH_MM, length / 2), endpoints: [definition.a, definition.b], description: "Through two points" };
   }
   if (definition.kind === "point-and-direction") {
     const direction = normalize(definition.direction);
@@ -224,6 +242,14 @@ function axisVector(axis: "x" | "y" | "z"): Vec3 {
 
 function cross(a: Vec3, b: Vec3): Vec3 {
   return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+
+function add(a: Vec3, b: Vec3): Vec3 {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+
+function scaleVec(a: Vec3, factor: number): Vec3 {
+  return [a[0] * factor, a[1] * factor, a[2] * factor];
 }
 
 function sub(a: Vec3, b: Vec3): Vec3 {

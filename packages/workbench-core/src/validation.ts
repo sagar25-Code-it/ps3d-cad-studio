@@ -1,4 +1,5 @@
 import { NEW_PRIMITIVE_SHAPES, validPrimitiveBody } from "./primitive-bodies.js";
+import { validConstructionBinder, validNewPlaneDefinition } from "./construction-refs.js";
 import {
   WORKBENCH_FORMAT,
   WORKBENCH_SCHEMA_VERSION,
@@ -308,7 +309,7 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
 
 function validatePart(value: unknown): WorkbenchResult<PartIntent> {
   const required = ["id", "name", "widthMm", "heightMm", "thicknessMm", "holeDiameterMm", "edgeTreatmentMm", "patternCount", "revolveAngleDeg"];
-  const optional = ["previewBodies", "modelUpdateSerial", "generalBodies", "construction", "constructionAxes", "constructionPoints", "constructionUcses"];
+  const optional = ["previewBodies", "modelUpdateSerial", "generalBodies", "construction", "constructionAxes", "constructionPoints", "constructionUcses", "constructionBinders"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key))
     || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || value.id !== "part:mounting-plate" || !shortText(value.name, 1, 120)
@@ -347,6 +348,14 @@ function validatePart(value: unknown): WorkbenchResult<PartIntent> {
     for (const axis of value.constructionAxes) {
       if (!validateConstructionAxis(axis) || axisIds.has(axis.id)) return invalid("A construction axis is invalid or duplicated.");
       axisIds.add(axis.id);
+    }
+  }
+  if (Object.hasOwn(value, "constructionBinders") && (!Array.isArray(value.constructionBinders) || value.constructionBinders.length > 128)) return invalid("The construction-binder collection is invalid.");
+  if (Array.isArray(value.constructionBinders)) {
+    const binderIds = new Set<string>();
+    for (const binder of value.constructionBinders) {
+      if (!validConstructionBinder(binder) || binderIds.has(binder.id)) return invalid("A construction binder is invalid or duplicated.");
+      binderIds.add(binder.id);
     }
   }
   if (Object.hasOwn(value, "constructionPoints") && (!Array.isArray(value.constructionPoints) || value.constructionPoints.length > 128)) return invalid("The construction-point collection is invalid.");
@@ -475,7 +484,7 @@ function validateConstructionPlane(value: unknown): value is import("./types.js"
   if (def.kind === "perpendicular-to-axis") {
     return stableId(def.axisId) && validateVec3Mm(def.point) && Object.keys(def).every((key) => ["kind", "axisId", "point"].includes(key));
   }
-  return false;
+  return validNewPlaneDefinition(def) ?? false;
 }
 
 function validateConstructionUcs(value: unknown): value is import("./types.js").ConstructionUcs {

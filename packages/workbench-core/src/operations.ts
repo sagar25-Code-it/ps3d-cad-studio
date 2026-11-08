@@ -1,4 +1,5 @@
 import { isNewPrimitiveShape, NEW_PRIMITIVE_SHAPES, normalizePrimitiveSize, validPrimitiveBody } from "./primitive-bodies.js";
+import { planeDependencies, validConstructionBinder, validNewPlaneDefinition } from "./construction-refs.js";
 import type {
   AppliedWorkbenchOperation,
   AssemblyMate,
@@ -287,6 +288,13 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "rename-construction-plane":
       if (!keys(input, [...common, "planeId", "name"]) || !stableId(input.planeId) || !shortText(input.name, 1, 120)) return invalidOperation("The construction-plane rename is invalid.");
+      break;
+    case "add-construction-binder":
+      if (!keys(input, [...common, "binder"]) || !validConstructionBinder(input.binder)) return invalidOperation("The construction-binder insertion is invalid.");
+      break;
+    case "delete-construction-binder":
+    case "toggle-construction-binder-visibility":
+      if (!keys(input, [...common, "binderId"]) || !stableId(input.binderId)) return invalidOperation("The construction-binder ID is invalid.");
       break;
     case "add-construction-axis":
       if (!keys(input, [...common, "axis"]) || !validConstructionAxisPayload(input.axis)) return invalidOperation("The construction-axis insertion is invalid.");
@@ -741,6 +749,13 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const current = project.part.construction ?? [];
       if (current.length >= 64) return failure("RESOURCE_LIMIT", "The part reached its construction-plane limit.", [project.part.id], "Delete a construction plane before adding another.");
       if (current.some((plane) => plane.id === operation.plane.id)) return invalidOperation("The construction-plane ID already exists.");
+      const needs = planeDependencies(operation.plane.definition);
+      const missingAxis = needs.axisIds.find((id) => !(project.part.constructionAxes ?? []).some((axis) => axis.id === id));
+      if (missingAxis !== undefined) return broken(operation.plane.id, "The construction axis this plane is built on does not exist.");
+      const missingBinder = needs.binderIds.find((id) => !(project.part.constructionBinders ?? []).some((binder) => binder.id === id));
+      if (missingBinder !== undefined) return broken(operation.plane.id, "The binder this plane is built on does not exist.");
+      const missingBody = needs.bodyIds.find((id) => !(project.part.generalBodies ?? []).some((body) => body.id === id));
+      if (missingBody !== undefined) return broken(operation.plane.id, "The body this plane's edge was picked on does not exist.");
       return changed({ ...project, part: { ...project.part, construction: [...current, operation.plane] } }, [operation.plane.id], `Created ${operation.plane.name}.`);
     }
     case "delete-construction-plane": {
@@ -760,6 +775,27 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const target = current.find((plane) => plane.id === operation.planeId);
       if (target === undefined) return broken(operation.planeId, "The construction plane does not exist.");
       return changed({ ...project, part: { ...project.part, construction: current.map((plane) => plane.id === target.id ? { ...plane, name: operation.name } : plane) } }, [target.id], `Renamed ${target.name} to ${operation.name}.`);
+    }
+    case "add-construction-binder": {
+      const current = project.part.constructionBinders ?? [];
+      if (current.length >= 128) return failure("RESOURCE_LIMIT", "The part reached its construction-binder limit.", [project.part.id], "Delete a binder before adding another.");
+      if (current.some((binder) => binder.id === operation.binder.id)) return invalidOperation("The construction-binder ID already exists.");
+      if (![...(project.part.generalBodies ?? []), ...(project.part.previewBodies ?? [])].some((body) => body.id === operation.binder.target.bodyId)) return broken(operation.binder.id, "The body this binder points at does not exist.");
+      return changed({ ...project, part: { ...project.part, constructionBinders: [...current, operation.binder] } }, [operation.binder.id], `Created ${operation.binder.name}.`);
+    }
+    case "delete-construction-binder": {
+      const current = project.part.constructionBinders ?? [];
+      const target = current.find((binder) => binder.id === operation.binderId);
+      if (target === undefined) return broken(operation.binderId, "The construction binder does not exist.");
+      const stillUsed = (project.part.construction ?? []).some((plane) => planeDependencies(plane.definition).binderIds.includes(target.id));
+      if (stillUsed) return failure("BROKEN_REFERENCE", `${target.name} is used by a construction plane.`, [target.id], "Delete the construction plane that uses this binder first.");
+      return changed({ ...project, part: { ...project.part, constructionBinders: current.filter((binder) => binder.id !== target.id) } }, [target.id], `Deleted ${target.name}.`);
+    }
+    case "toggle-construction-binder-visibility": {
+      const current = project.part.constructionBinders ?? [];
+      const target = current.find((binder) => binder.id === operation.binderId);
+      if (target === undefined) return broken(operation.binderId, "The construction binder does not exist.");
+      return changed({ ...project, part: { ...project.part, constructionBinders: current.map((binder) => binder.id === target.id ? { ...binder, visible: !binder.visible } : binder) } }, [target.id], `${target.visible ? "Hid" : "Showed"} ${target.name}.`);
     }
     case "add-construction-axis": {
       const current = project.part.constructionAxes ?? [];
@@ -1534,7 +1570,7 @@ function validConstructionPlanePayload(value: unknown): value is import("./types
   if (def.kind === "perpendicular-to-axis") {
     return stableId(def.axisId) && vec3Mm(def.point) && Object.keys(def).every((key) => ["kind", "axisId", "point"].includes(key));
   }
-  return false;
+  return validNewPlaneDefinition(def) ?? false;
 }
 
 function validGeneralSolidBodyPayload(value: unknown): value is GeneralSolidBody {

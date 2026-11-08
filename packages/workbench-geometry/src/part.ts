@@ -2,6 +2,7 @@ import type { ConstructionAxis, ConstructionPlane, ConstructionPoint, PartIntent
 import { boundsFromPoints } from "./assembly.js";
 import { constructionPlaneCorners, evaluateConstructionAxis, evaluateConstructionPlane, evaluateConstructionPoint } from "./construction-geometry.js";
 import { newPrimitiveMesh } from "./primitive-bodies.js";
+import { binderPrimitives } from "./binder-preview.js";
 import type { PreviewPrimitive, PreviewScene } from "./types.js";
 
 const RADIAL_SEGMENTS = 64;
@@ -47,7 +48,7 @@ export function buildPartPreview(part: PartIntent): PreviewScene {
     points.push(...generalBodyBounds(body.positionsMm));
   }
   for (const plane of (part.construction ?? []).filter((candidate) => candidate.visible)) {
-    const primitive = constructionPlanePrimitives(plane, generalBodies, part.constructionAxes ?? []);
+    const primitive = constructionPlanePrimitives(plane, generalBodies, part.constructionAxes ?? [], part.constructionBinders ?? []);
     if (primitive !== undefined) {
       primitives.push(...primitive.primitives);
       points.push(...primitive.bounds);
@@ -68,6 +69,11 @@ export function buildPartPreview(part: PartIntent): PreviewScene {
       points.push(primitive.position);
     }
   }
+  for (const binder of (part.constructionBinders ?? []).filter((candidate) => candidate.visible)) {
+    const drawn = binderPrimitives(binder, generalBodies);
+    primitives.push(...drawn.primitives);
+    points.push(...drawn.bounds);
+  }
   return {
     id: "part-scene:native-with-analytic-bodies",
     kind: "part",
@@ -76,8 +82,8 @@ export function buildPartPreview(part: PartIntent): PreviewScene {
   };
 }
 
-function constructionPlanePrimitives(plane: ConstructionPlane, bodies: readonly import("../../workbench-core/src/index.js").GeneralSolidBody[], axes: readonly import("../../workbench-core/src/index.js").ConstructionAxis[]): { readonly primitives: readonly PreviewPrimitive[]; readonly bounds: readonly Vec3[] } | undefined {
-  const frame = evaluateConstructionPlane(plane, bodies, axes);
+function constructionPlanePrimitives(plane: ConstructionPlane, bodies: readonly import("../../workbench-core/src/index.js").GeneralSolidBody[], axes: readonly import("../../workbench-core/src/index.js").ConstructionAxis[], binders: readonly import("../../workbench-core/src/index.js").ConstructionBinder[]): { readonly primitives: readonly PreviewPrimitive[]; readonly bounds: readonly Vec3[] } | undefined {
+  const frame = evaluateConstructionPlane(plane, bodies, axes, binders);
   if ("error" in frame) return undefined;
   const corners = constructionPlaneCorners(frame);
   const positionsMm = corners.flatMap((corner) => [corner[0], corner[1], corner[2]]);

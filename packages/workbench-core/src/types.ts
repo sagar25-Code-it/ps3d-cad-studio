@@ -282,6 +282,8 @@ export interface PartIntent {
    * can refer to. Rendered as a small tri-axis gizmo in the 3D viewport. Optional for backward compatibility.
    */
   readonly constructionUcses?: readonly ConstructionUcs[];
+  /** Shape and sub-shape binders: references to a body, a face or an edge that re-resolve when the body is rebuilt. */
+  readonly constructionBinders?: readonly ConstructionBinder[];
 }
 
 export type PartPreviewBodyShape = "block" | "cylinder" | "cone" | "sphere" | "torus" | "ellipsoid" | "prism" | "wedge" | "spiral" | "tube";
@@ -318,7 +320,52 @@ export type ConstructionPlaneDefinition =
    * direction; its in-plane axes line up with two orthonormal vectors in the plane (one chosen along world +X when that
    * is not parallel to the normal, else world +Y).
    */
-  | { readonly kind: "perpendicular-to-axis"; readonly axisId: string; readonly point: Vec3 };
+  | { readonly kind: "perpendicular-to-axis"; readonly axisId: string; readonly point: Vec3 }
+  /**
+   * The plane that contains two straight edges. The edges must be parallel (and distinct) or cross each other; skew
+   * edges, and two edges on the same line, have no such plane. Each edge may be a construction axis, a typed segment,
+   * a straight edge picked on a body (re-matched to the rebuilt body by its end points) or an edge binder.
+   */
+  | { readonly kind: "through-two-edges"; readonly edgeA: ConstructionEdgeRef; readonly edgeB: ConstructionEdgeRef }
+  /**
+   * A plane at fraction `t` (0 to 1, by arc length) along a path. "perpendicular" puts the path's tangent along the plane's
+   * normal (the plane cuts the path at a right angle); "tangent" makes the plane contain the tangent and the path's
+   * bending direction (its osculating plane), or a world-aligned direction when the path is straight there.
+   */
+  | { readonly kind: "along-path"; readonly path: ConstructionPathRef; readonly t: number; readonly orientation: "perpendicular" | "tangent" };
+
+/** A straight edge a construction plane can be built from. */
+export type ConstructionEdgeRef =
+  | { readonly kind: "axis"; readonly axisId: string }
+  | { readonly kind: "segment"; readonly a: Vec3; readonly b: Vec3 }
+  | { readonly kind: "body-edge"; readonly bodyId: string; readonly a: Vec3; readonly b: Vec3 }
+  | { readonly kind: "binder"; readonly binderId: string };
+
+/**
+ * A path a construction plane can ride along: a construction axis (its drawn segment), or a polyline of world-space
+ * points. A polyline taken from a sketch curve records where it came from and is a snapshot of the curve when it was picked.
+ */
+export type ConstructionPathRef =
+  | { readonly kind: "axis"; readonly axisId: string }
+  | { readonly kind: "polyline"; readonly pointsMm: readonly Vec3[]; readonly sketchFeatureId?: string; readonly entityId?: string };
+
+/**
+ * What a binder points at. A body binder follows a whole body by id; a face binder follows one face by the body's stable face
+ * key (falling back to the recorded normal, centre and area when the key is gone); an edge binder follows a straight edge by
+ * its end points. All of them re-resolve against the current mesh each time they are evaluated.
+ */
+export type ConstructionBinderTarget =
+  | { readonly kind: "body"; readonly bodyId: string }
+  | { readonly kind: "face"; readonly bodyId: string; readonly faceKey: string; readonly normal: Vec3; readonly centroidMm: Vec3; readonly areaMm2: number }
+  | { readonly kind: "edge"; readonly bodyId: string; readonly a: Vec3; readonly b: Vec3 };
+
+/** A Shape binder (whole body) or Sub-shape binder (face or edge): a named construction reference to part of a body. */
+export interface ConstructionBinder {
+  readonly id: string;
+  readonly name: string;
+  readonly visible: boolean;
+  readonly target: ConstructionBinderTarget;
+}
 
 export interface ConstructionPlane {
   readonly id: string;
@@ -1309,6 +1356,9 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "delete-construction-plane"; readonly planeId: string }
   | { readonly kind: "toggle-construction-plane-visibility"; readonly planeId: string }
   | { readonly kind: "rename-construction-plane"; readonly planeId: string; readonly name: string }
+  | { readonly kind: "add-construction-binder"; readonly binder: ConstructionBinder }
+  | { readonly kind: "delete-construction-binder"; readonly binderId: string }
+  | { readonly kind: "toggle-construction-binder-visibility"; readonly binderId: string }
   | { readonly kind: "add-construction-axis"; readonly axis: ConstructionAxis }
   | { readonly kind: "delete-construction-axis"; readonly axisId: string }
   | { readonly kind: "toggle-construction-axis-visibility"; readonly axisId: string }
@@ -1431,6 +1481,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
   "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility", "modify-general-body",
   "add-construction-plane", "delete-construction-plane", "toggle-construction-plane-visibility", "rename-construction-plane",
+  "add-construction-binder", "delete-construction-binder", "toggle-construction-binder-visibility",
   "add-construction-axis", "delete-construction-axis", "toggle-construction-axis-visibility", "rename-construction-axis",
   "add-construction-point", "delete-construction-point", "toggle-construction-point-visibility", "rename-construction-point",
   "add-construction-ucs", "delete-construction-ucs", "toggle-construction-ucs-visibility", "rename-construction-ucs",
