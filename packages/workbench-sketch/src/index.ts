@@ -112,7 +112,7 @@ export interface SketchProfile {
   readonly boundary: SketchProfileBoundary;
   readonly areaMm2: number;
   readonly centroid: Vec2;
-  /** The id plus a geometric signature (area, centroid, holes). A feature stores this so it finds its region again after the sketch is edited. */
+  /** The id marked exact: it names just this region (what a click on a region in the sketch stores in a feature), with the holes it has. */
   readonly ref?: string;
   /** Islands inside the region, largest first. Each is a loop of its own, with its own id (the id of the region it bounds). */
   readonly holes?: readonly SketchProfile[];

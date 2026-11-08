@@ -70,7 +70,7 @@ export function SketchRepairPanel(props: SketchRepairPanelProps): React.JSX.Elem
       <span>{report.errors} error{report.errors === 1 ? "" : "s"} · {report.warnings} warning{report.warnings === 1 ? "" : "s"}</span>
     </header>
     <div role="status" aria-label="Validate sketch" style={{ display: "grid", gap: "0.2rem", fontSize: "0.78rem", marginBottom: "0.5rem" }}>
-      <strong>{report.usableForSolid ? "Valid: ready for a solid feature" : report.valid ? "Valid, but there is no closed profile yet" : "Needs repair"}</strong>
+      <strong>{report.usableForSolid ? "Valid: ready for a solid feature" : report.valid ? "Not ready for a solid: no closed profile yet (the reason is listed below)" : "Needs repair"}</strong>
       {report.summary.map((line, index) => <span key={index}>{line}</span>)}
     </div>
     {report.fixable > 0 && <button className="palette-action primary" disabled={fixingAll} onClick={startFixAll}>

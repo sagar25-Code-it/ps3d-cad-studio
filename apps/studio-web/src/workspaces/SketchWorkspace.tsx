@@ -2051,6 +2051,11 @@ function SketchProfileShape({ profile, selected, onSelect }: { readonly profile:
     style: onSelect === undefined ? { pointerEvents: "none" as const } : undefined,
     "aria-label": `${profileLabel(profile)} closed profile`
   };
+  if (profile.holes !== undefined && profile.holes.length > 0) {
+    // A region with islands in it is drawn with the islands cut out, so a click in a hole falls through to the region inside it.
+    const ring = (points: readonly Vec2[]): string => `${points.map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${-point[1]}`).join(" ")} Z`;
+    return <path {...common} fillRule="evenodd" d={[profileOutlineMm(profile.boundary), ...profile.holes.map((hole) => profileOutlineMm(hole.boundary))].map(ring).join(" ")} />;
+  }
   if (profile.boundary.kind === "rectangle") return <rect {...common} x={profile.boundary.center[0] - profile.boundary.widthMm / 2} y={-profile.boundary.center[1] - profile.boundary.heightMm / 2} width={profile.boundary.widthMm} height={profile.boundary.heightMm} transform={`rotate(${-profile.boundary.rotationDeg} ${profile.boundary.center[0]} ${-profile.boundary.center[1]})`} />;
   if (profile.boundary.kind === "circle") return <circle {...common} cx={profile.boundary.center[0]} cy={-profile.boundary.center[1]} r={profile.boundary.radiusMm} />;
   if (profile.boundary.kind === "ellipse") return <ellipse {...common} cx={profile.boundary.center[0]} cy={-profile.boundary.center[1]} rx={profile.boundary.majorRadiusMm} ry={profile.boundary.minorRadiusMm} transform={`rotate(${-profile.boundary.rotationDeg} ${profile.boundary.center[0]} ${-profile.boundary.center[1]})`} />;
@@ -2092,7 +2097,9 @@ function entityAnchor(entity: SketchEntity): Vec2 {
 }
 
 function profileLabel(profile: SketchProfile): string {
-  return profile.boundary.kind === "rectangle" ? "Rectangle region" : profile.boundary.kind === "circle" ? "Circle region" : profile.boundary.kind === "ellipse" ? "Ellipse region" : profile.boundary.kind === "curve-loop" ? "Closed curve loop" : "Closed line loop";
+  const holes = profile.holes?.length ?? 0;
+  const base = profile.boundary.kind === "rectangle" ? "Rectangle region" : profile.boundary.kind === "circle" ? "Circle region" : profile.boundary.kind === "ellipse" ? "Ellipse region" : profile.boundary.kind === "curve-loop" ? "Closed curve loop" : "Closed line loop";
+  return holes === 0 ? base : `${base} with ${holes} hole${holes === 1 ? "" : "s"}`;
 }
 
 function shortId(id: string): string {

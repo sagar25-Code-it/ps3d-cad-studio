@@ -220,6 +220,19 @@ export const sketchArrangementTests: readonly TestCase[] = [
     }
   },
   {
+    name: "Profile identity: an id or reference stays inside the 160 characters a stored profile id may have, whatever the entity names and the number of holes",
+    run: () => {
+      const uuid = "entity:user-3f2a9c1e-7b4d-4e5f-8a6b-1c2d3e4f5a6b";
+      const holes = Array.from({ length: 12 }, (_, index) => ({ ...circle(`h${index}`, [index * 6 - 33, 0], 2), id: `entity:user-3f2a9c1e-7b4d-4e5f-8a6b-1c2d3e4f5a${String(index).padStart(2, "0")}` } as SketchEntity));
+      const profiles = detect([{ ...rect("p", [0, 0], 100, 30), id: uuid } as SketchEntity, ...holes]);
+      const plate = profiles.find((profile) => profile.holes !== undefined)!;
+      assert(plate.id.length <= 160 && plate.ref!.length <= 160, `a plate with 12 holes: ${plate.id.length} / ${plate.ref!.length} characters`);
+      equal(plate.holes!.length, 12, "the twelve holes are all holes of the one region");
+      const region = resolveProfileRegion(profiles, [plate.ref!], { includeIslands: true });
+      assert(region.ok && region.value.holes.length === 12, "and the reference resolves them all");
+    }
+  },
+  {
     name: "Profile identity P-05/P06/P07: a feature built on a region survives a fillet, a chamfer, a split and unrelated geometry",
     run: async () => {
       const rectangle = rect("r", [0, 0], 20, 10);
@@ -234,6 +247,8 @@ export const sketchArrangementTests: readonly TestCase[] = [
       const after = await volumeOf(filleted.sketch.entities, [original.ref!]);
       assert(!Number.isNaN(after.volume), `the feature still builds: ${after.message}`);
       near(after.volume, (200 - (4 - Math.PI) * 4) * 10, 5, "and follows the rounded outline");
+      const byId = await volumeOf(filleted.sketch.entities, [original.id]);
+      near(byId.volume, after.volume, 1e-6, "the plain profile id (from detectSketchProfiles) follows the fillet just the same");
       const chamfered = commitOk(project, chamferCorners(context(project), ["entity:r"], 2));
       const afterChamfer = await volumeOf(chamfered.sketch.entities, [original.ref!]);
       near(afterChamfer.volume, (200 - 8) * 10, 1, "a chamfer is followed too");
@@ -287,6 +302,7 @@ export const sketchArrangementTests: readonly TestCase[] = [
       const withCircle = [plate, circle("boss", [0, 0], 10)];
       const after = await volumeOf(withCircle, [profile.ref!]);
       near(after.volume, 36000, 1e-6, "adding a circle inside keeps the stored region solid: no hole appears");
+      near((await volumeOf(withCircle, [profile.id])).volume, 36000, 1e-6, "and so does the plain profile id: it pins the holes the region had");
       // Choosing the ring on purpose still gives the hole, and the disc is its own region.
       const ring = detect(withCircle).find((candidate) => candidate.holes !== undefined)!;
       const holed = await volumeOf(withCircle, [ring.ref!]);

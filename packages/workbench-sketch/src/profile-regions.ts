@@ -5,11 +5,11 @@ import type { SketchProfile, SketchProfileBoundary, SketchProfileSegment } from 
 /**
  * Turns the faces of the planar arrangement into selectable profiles ("regions").
  *
- * A profile is one enclosed region: its outer boundary plus the boundaries of any islands inside it (`holes`). Profile ids
- * keep the old scheme wherever it still names the region (`profile:<entity>` for a whole primitive, `profile:loop-<hash>` for a
- * loop of whole curves) and use `profile:rg-<hash>` of the boundary pieces for regions cut out by splitting. Every profile also
- * carries a `ref`: its id plus a geometric signature (area, centroid, which holes it had), which is what a feature stores so it can
- * find its region again after the sketch is edited.
+ * A profile is one enclosed region: its outer boundary plus the boundaries of any islands inside it (`holes`). A profile id is the old
+ * entity-based name of the loop (`profile:<entity>` for a whole primitive, `profile:loop-<hash>` for a loop of whole curves, `profile:rg-<hash>`
+ * of the boundary pieces for a region cut out by splitting) plus the geometric signature of its outline and the holes it has. The name
+ * follows the curves when they are moved or resized, the signature finds the region again when they are replaced (fillet, chamfer, split,
+ * trim). A profile's `ref` is its id marked exact, which names just that region (what a region click in the sketch stores).
  */
 
 const bare = (entityId: string): string => (entityId.startsWith("entity:") ? entityId.slice("entity:".length) : entityId);
@@ -139,7 +139,8 @@ const num = (value: number): string => {
   return Number(text) === 0 ? "0" : String(Number(text));
 };
 
-const MAX_ID_HOLES = 16;
+/** More holes than this are stored as "all" so an id stays inside the 160 characters a stored profile id may have. */
+const MAX_ID_HOLES = 8;
 const SIGNATURE = /^(.*?)_a(-?\d+(?:\.\d+)?)_x(-?\d+(?:\.\d+)?)_y(-?\d+(?:\.\d+)?)(?:_h([0-9a-f.]*|all))?(_e)?$/u;
 
 /**
