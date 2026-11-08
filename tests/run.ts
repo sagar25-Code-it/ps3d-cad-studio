@@ -31,6 +31,7 @@ import { sketchSolverSimultaneousTests } from "./sketch-solver-simultaneous.test
 import { sketchSolverDofTests } from "./sketch-solver-dof.test.js";
 import { sketchSolverKindsTests } from "./sketch-solver-kinds.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
+import { sketchEditSuiteTests } from "./sketch-edit-suite.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
 import { meshModifyTests } from "./mesh-modify.test.js";
 import { meshCheckTests } from "./mesh-check.test.js";
@@ -140,6 +141,7 @@ const tests: readonly TestCase[] = [
   ...sketchSolverDofTests,
   ...sketchSolverKindsTests,
   ...sketchEditToolTests,
+  ...sketchEditSuiteTests,
   ...sketchSplitJogTests,
   ...sketchPathMirrorMoveTests,
   ...sketchClipboardTests,

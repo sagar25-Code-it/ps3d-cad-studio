@@ -469,6 +469,7 @@ export function translateSketch(sketch: WorkbenchSketch, options: TranslateOptio
       labels[item.id] = label;
     }
   }
+  const reversedArcs = new Set([...arcFrames].filter(([, frame]) => frame.reversed).map(([id]) => id));
   const document: ParametricSketchDocument = {
     schemaVersion: "1.0",
     id: sketch.id,
@@ -476,8 +477,24 @@ export function translateSketch(sketch: WorkbenchSketch, options: TranslateOptio
     plane: { kind: "principal", referenceId: sketch.plane, originMm: [0, 0, 0], xAxis: [1, 0, 0], yAxis: [0, 1, 0], normal: [0, 0, 1] },
     parameters: {},
     geometry,
-    constraints,
-    dimensions
+    constraints: reversedArcs.size === 0 ? constraints : constraints.map((item) => swapReversedArcEnds(item, reversedArcs)),
+    dimensions: reversedArcs.size === 0 ? dimensions : dimensions.map((item) => swapReversedArcEnds(item, reversedArcs))
   };
   return { document, arcFrames, labels, unsolved, present };
+}
+
+/**
+ * A live arc runs start, middle, end in the order it was drawn; the solver's arc always runs counter-clockwise. For an arc drawn
+ * clockwise the solver's start is the live end, so a reference to one of its ends has to name the other one.
+ */
+function swapReversedArcEnds<T>(value: T, reversedArcs: ReadonlySet<string>): T {
+  if (Array.isArray(value)) return value.map((item) => swapReversedArcEnds(item, reversedArcs)) as unknown as T;
+  if (typeof value !== "object" || value === null) return value;
+  const record = value as Record<string, unknown>;
+  const swapped: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(record)) swapped[key] = swapReversedArcEnds(item, reversedArcs);
+  if (typeof record.entityId === "string" && reversedArcs.has(record.entityId) && (record.selector === "start" || record.selector === "end")) {
+    swapped.selector = record.selector === "start" ? "end" : "start";
+  }
+  return swapped as T;
 }

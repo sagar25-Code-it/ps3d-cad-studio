@@ -64,52 +64,8 @@ function plan(label: string, parts: Partial<Omit<SketchEditPlan, "label">>): Ske
 // Offset
 // ---------------------------------------------------------------------------------------------
 
-/**
- * Offsets the selected curves by `distanceMm`. For a circle, arc or rectangle a positive distance
- * moves outward; for a line (or a connected chain of lines) it moves to the left of the line's
- * direction, except that a closed loop of lines offsets outward. Connected lines are re-joined with
- * mitred corners. Each result is a new, unconstrained entity; the originals stay.
- */
-export function offsetEntities(context: SketchEditContext, ids: readonly string[], distanceMm: number): SketchEditResult {
-  if (!Number.isFinite(distanceMm) || Math.abs(distanceMm) < 0.01 || Math.abs(distanceMm) > 5000) return reject("Enter an offset distance between 0.01 mm and 5000 mm (negative offsets to the other side).");
-  const entities = ids.map((id) => find(context.sketch, id));
-  if (entities.length === 0 || entities.some((entity) => entity === undefined)) return reject("Select the curves to offset.");
-  const selected = entities as SketchEntity[];
-  const added: SketchEntity[] = [];
-  const lines = selected.filter((entity): entity is Line => entity.kind === "line");
-  for (const entity of selected) {
-    if (entity.kind === "line") continue;
-    if (entity.kind === "circle") {
-      const radiusMm = entity.radiusMm + distanceMm;
-      if (radiusMm < 0.01) return reject("The inward offset is larger than the circle's radius.", [entity.id]);
-      added.push({ ...entity, id: context.newId("entity"), radiusMm });
-    } else if (entity.kind === "arc") {
-      const circle = circumcircle(entity.start, entity.mid, entity.end);
-      if (circle === undefined) return reject("The arc is degenerate.", [entity.id]);
-      const radiusMm = circle.radiusMm + distanceMm;
-      if (radiusMm < 0.01) return reject("The inward offset is larger than the arc's radius.", [entity.id]);
-      const scale = radiusMm / circle.radiusMm;
-      const about = (point: Vec2): Vec2 => [circle.center[0] + (point[0] - circle.center[0]) * scale, circle.center[1] + (point[1] - circle.center[1]) * scale];
-      added.push({ ...entity, id: context.newId("entity"), start: about(entity.start), mid: about(entity.mid), end: about(entity.end) });
-    } else if (entity.kind === "rectangle") {
-      const widthMm = entity.widthMm + 2 * distanceMm;
-      const heightMm = entity.heightMm + 2 * distanceMm;
-      if (widthMm < 0.01 || heightMm < 0.01) return reject("The inward offset is larger than the rectangle.", [entity.id]);
-      added.push({ ...entity, id: context.newId("entity"), widthMm, heightMm });
-    } else {
-      return reject(`Offset applies to lines, arcs, circles and rectangles; a ${entity.kind} cannot be offset.`, [entity.id]);
-    }
-  }
-  if (lines.length > 0) {
-    const chains = buildLineChains(lines, context.sketch.snapToleranceMm);
-    for (const chain of chains) {
-      const result = offsetChain(chain, distanceMm, context);
-      if (typeof result === "string") return reject(result, chain.lines.map((line) => line.id));
-      added.push(...result);
-    }
-  }
-  return plan(`Offset ${selected.length} curve${selected.length === 1 ? "" : "s"} by ${format(distanceMm)} mm`, { addEntities: added });
-}
+export { expandOffsetSelection, offsetEntities } from "./offset-tools.js";
+export type { OffsetChainMode, OffsetCorner, OffsetOptions } from "./offset-tools.js";
 
 interface LineChain {
   /** Vertices in traversal order; a closed chain repeats no vertex. */
@@ -211,7 +167,26 @@ function offsetChain(chain: LineChain, distanceMm: number, context: SketchEditCo
     if (distance(from, to) < 0.01 || flipped) return "The offset distance collapses part of the shape; use a smaller distance.";
     created.push({ id: context.newId("entity"), kind: "line", start: from, end: to, construction: chain.lines[index]?.construction ?? false });
   }
+  // Two edges that are not neighbours must not cross: a neck narrower than twice the distance makes its two sides swap and cross.
+  for (let i = 0; i < created.length; i += 1) {
+    for (let j = i + 2; j < created.length; j += 1) {
+      if (chain.closed && i === 0 && j === created.length - 1) continue;
+      const a = created[i] as Line;
+      const b = created[j] as Line;
+      if (segmentsProperlyCross(a.start, a.end, b.start, b.end)) return "The offset overlaps itself: some part of the shape is narrower than twice the distance. Use a smaller distance.";
+    }
+  }
   return created;
+}
+
+function segmentsProperlyCross(a: Vec2, b: Vec2, c: Vec2, d: Vec2): boolean {
+  const orient = (p: Vec2, q: Vec2, r: Vec2): number => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  const d1 = orient(c, d, a);
+  const d2 = orient(c, d, b);
+  const d3 = orient(a, b, c);
+  const d4 = orient(a, b, d);
+  const eps = 1e-9;
+  return ((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) && ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -229,401 +204,17 @@ function mapEntity(entity: SketchEntity, id: string, point: (value: Vec2) => Vec
   return { ...entity, id, fitPoints: entity.fitPoints.map(point) };
 }
 
-/** Mirrors the selected entities about the axis line (the last id) and records symmetric relations. */
-export function mirrorEntities(context: SketchEditContext, ids: readonly string[]): SketchEditResult {
-  const axis = ids.length >= 2 ? find(context.sketch, ids[ids.length - 1]!) : undefined;
-  if (axis?.kind !== "line") return reject("Select the entities to mirror, then the mirror line last.");
-  const sources = ids.slice(0, -1).map((id) => find(context.sketch, id));
-  if (sources.some((entity) => entity === undefined || entity.id === axis.id)) return reject("Select the entities to mirror before the mirror line.");
-  const axisAngle = Math.atan2(axis.end[1] - axis.start[1], axis.end[0] - axis.start[0]);
-  const reflect = (value: Vec2): Vec2 => reflectAcross(value, axis);
-  const added: SketchEntity[] = [];
-  const constraints: WorkbenchSketchConstraint[] = [];
-  for (const source of sources as SketchEntity[]) {
-    const copy = mapEntity(source, context.newId("entity"), reflect, (degrees) => 2 * (axisAngle * 180 / Math.PI) - degrees);
-    added.push(copy);
-    const symmetric = (source.kind === "line" && copy.kind === "line") || (source.kind === "circle" && copy.kind === "circle");
-    if (symmetric) constraints.push({ id: context.newId("constraint"), kind: "symmetry", entityIds: [source.id, copy.id, axis.id] });
-  }
-  return plan(`Mirrored ${added.length} entit${added.length === 1 ? "y" : "ies"} about ${axis.id.replace(/^entity:/u, "")}`, { addEntities: added, addConstraints: constraints });
-}
+export { MIRROR_AXIS_X, MIRROR_AXIS_Y, mirrorEntities, patternEntities, selectionBounds, stretchEntities, transformEntities } from "./transform-tools.js";
+export type { PatternSpec, StretchWindow, TransformSpec } from "./transform-tools.js";
 
-export type PatternSpec =
-  | { readonly kind: "rectangular"; readonly countX: number; readonly countY: number; readonly dxMm: number; readonly dyMm: number }
-  | { readonly kind: "circular"; readonly count: number; readonly angleDeg: number; readonly center: Vec2 };
-
-/** Copies the selected entities in a rectangular grid or around a centre. The original stays as the first instance. */
-export function patternEntities(context: SketchEditContext, ids: readonly string[], spec: PatternSpec): SketchEditResult {
-  const sources = ids.map((id) => find(context.sketch, id));
-  if (sources.length === 0 || sources.some((entity) => entity === undefined)) return reject("Select the entities to pattern.");
-  const entities = sources as SketchEntity[];
-  const added: SketchEntity[] = [];
-  if (spec.kind === "rectangular") {
-    const { countX, countY, dxMm, dyMm } = spec;
-    if (![countX, countY].every((count) => Number.isInteger(count) && count >= 1) || countX * countY < 2) return reject("Enter whole-number counts of at least 1, with at least 2 instances in total.");
-    if (countX * countY - 1 > MAX_COPIES) return reject(`A pattern is limited to ${MAX_COPIES + 1} instances.`);
-    if (!Number.isFinite(dxMm) || !Number.isFinite(dyMm) || (countX > 1 && Math.abs(dxMm) < 0.01) || (countY > 1 && Math.abs(dyMm) < 0.01)) return reject("Enter a spacing of at least 0.01 mm in each direction that has more than one instance.");
-    for (let row = 0; row < countY; row += 1) {
-      for (let column = 0; column < countX; column += 1) {
-        if (row === 0 && column === 0) continue;
-        const offset: Vec2 = [column * dxMm, row * dyMm];
-        for (const entity of entities) added.push(mapEntity(entity, context.newId("entity"), (point) => [point[0] + offset[0], point[1] + offset[1]], (degrees) => degrees));
-      }
-    }
-    return plan(`Rectangular pattern ${countX} × ${countY}`, { addEntities: added });
-  }
-  const { count, angleDeg, center } = spec;
-  if (!Number.isInteger(count) || count < 2 || count - 1 > MAX_COPIES) return reject(`Enter a count from 2 to ${MAX_COPIES + 1}.`);
-  if (!Number.isFinite(angleDeg) || Math.abs(angleDeg) < 0.01 || Math.abs(angleDeg) > 360) return reject("Enter a total angle between 0.01 and 360 degrees.");
-  // A full turn spaces the instances evenly around the circle; a partial angle puts the last instance at that angle.
-  const step = Math.abs(angleDeg) >= 360 - EPSILON ? angleDeg / count : angleDeg / (count - 1);
-  for (let index = 1; index < count; index += 1) {
-    const radians = (step * index * Math.PI) / 180;
-    const cos = Math.cos(radians);
-    const sin = Math.sin(radians);
-    const rotate = (point: Vec2): Vec2 => [center[0] + (point[0] - center[0]) * cos - (point[1] - center[1]) * sin, center[1] + (point[0] - center[0]) * sin + (point[1] - center[1]) * cos];
-    for (const entity of entities) added.push(mapEntity(entity, context.newId("entity"), rotate, (degrees) => degrees + step * index));
-  }
-  return plan(`Circular pattern of ${count}`, { addEntities: added });
-}
-
-// ---------------------------------------------------------------------------------------------
-// Move, rotate and scale
-// ---------------------------------------------------------------------------------------------
-
-export type TransformSpec =
-  | { readonly kind: "move"; readonly dxMm: number; readonly dyMm: number }
-  | { readonly kind: "rotate"; readonly angleDeg: number; readonly center: Vec2 }
-  | { readonly kind: "scale"; readonly factor: number; readonly center: Vec2 };
-
-/** Scales every defining point about `center` and the size fields by `factor`, giving the entity `id`. */
-function scaleEntity(entity: SketchEntity, id: string, center: Vec2, factor: number): SketchEntity {
-  const point = (value: Vec2): Vec2 => [center[0] + (value[0] - center[0]) * factor, center[1] + (value[1] - center[1]) * factor];
-  if (entity.kind === "circle") return { ...entity, id, center: point(entity.center), radiusMm: entity.radiusMm * factor };
-  if (entity.kind === "rectangle") return { ...entity, id, center: point(entity.center), widthMm: entity.widthMm * factor, heightMm: entity.heightMm * factor };
-  if (entity.kind === "ellipse") return { ...entity, id, center: point(entity.center), majorRadiusMm: entity.majorRadiusMm * factor, minorRadiusMm: entity.minorRadiusMm * factor };
-  return mapEntity(entity, id, point, (degrees) => degrees);
-}
-
-/**
- * Moves, rotates or scales the selected entities. With `copy` the originals stay and transformed copies with fresh IDs are
- * added; otherwise the entities are updated in place, and the solver rejects the edit if a relation outside the selection
- * would be broken (Relax Relations first).
- */
-export function transformEntities(context: SketchEditContext, ids: readonly string[], spec: TransformSpec, copy: boolean): SketchEditResult {
-  const sources = ids.map((id) => find(context.sketch, id));
-  if (sources.length === 0 || sources.some((entity) => entity === undefined)) return reject("Select the entities to transform.");
-  const entities = sources as SketchEntity[];
-  if (copy && entities.length > MAX_COPIES) return reject(`A copy is limited to ${MAX_COPIES} entities.`);
-  let apply: (entity: SketchEntity, id: string) => SketchEntity;
-  let label: string;
-  if (spec.kind === "move") {
-    if (!Number.isFinite(spec.dxMm) || !Number.isFinite(spec.dyMm) || Math.hypot(spec.dxMm, spec.dyMm) < 0.001 || Math.abs(spec.dxMm) > 100_000 || Math.abs(spec.dyMm) > 100_000) return reject("Enter a move distance of at least 0.001 mm.");
-    apply = (entity, id) => mapEntity(entity, id, (point) => [point[0] + spec.dxMm, point[1] + spec.dyMm], (degrees) => degrees);
-    label = `${copy ? "Copied" : "Moved"} ${entities.length} entit${entities.length === 1 ? "y" : "ies"} by (${format(spec.dxMm)}, ${format(spec.dyMm)}) mm`;
-  } else if (spec.kind === "rotate") {
-    if (!Number.isFinite(spec.angleDeg) || Math.abs(spec.angleDeg) < 0.001 || Math.abs(spec.angleDeg) > 360) return reject("Enter a rotation angle between 0.001 and 360 degrees.");
-    const radians = (spec.angleDeg * Math.PI) / 180;
-    const cos = Math.cos(radians);
-    const sin = Math.sin(radians);
-    const [cx, cy] = spec.center;
-    apply = (entity, id) => mapEntity(entity, id, (point) => [cx + (point[0] - cx) * cos - (point[1] - cy) * sin, cy + (point[0] - cx) * sin + (point[1] - cy) * cos], (degrees) => degrees + spec.angleDeg);
-    label = `${copy ? "Copied" : "Rotated"} ${entities.length} entit${entities.length === 1 ? "y" : "ies"} ${format(spec.angleDeg)}°`;
-  } else {
-    if (!Number.isFinite(spec.factor) || spec.factor < 0.01 || spec.factor > 100 || Math.abs(spec.factor - 1) < 1e-6) return reject("Enter a scale factor between 0.01 and 100 (other than 1).");
-    apply = (entity, id) => scaleEntity(entity, id, spec.center, spec.factor);
-    label = `${copy ? "Copied" : "Scaled"} ${entities.length} entit${entities.length === 1 ? "y" : "ies"} by ${format(spec.factor)}x`;
-  }
-  return copy
-    ? plan(label, { addEntities: entities.map((entity) => apply(entity, context.newId("entity"))) })
-    : plan(label, { updateEntities: entities.map((entity) => apply(entity, entity.id)) });
-}
-
-// ---------------------------------------------------------------------------------------------
-// Stretch
-// ---------------------------------------------------------------------------------------------
-
-export interface StretchWindow {
-  readonly x1: number;
-  readonly y1: number;
-  readonly x2: number;
-  readonly y2: number;
-}
-
-/** The smallest box that holds the selected entities (circles and ellipses by their extent), for seeding a stretch window. */
-export function selectionBounds(sketch: WorkbenchSketch, ids: readonly string[]): StretchWindow | undefined {
-  const points: Vec2[] = [];
-  for (const id of ids) {
-    const entity = find(sketch, id);
-    if (entity === undefined) continue;
-    if (entity.kind === "circle") points.push([entity.center[0] - entity.radiusMm, entity.center[1] - entity.radiusMm], [entity.center[0] + entity.radiusMm, entity.center[1] + entity.radiusMm]);
-    else if (entity.kind === "ellipse") points.push([entity.center[0] - entity.majorRadiusMm, entity.center[1] - entity.majorRadiusMm], [entity.center[0] + entity.majorRadiusMm, entity.center[1] + entity.majorRadiusMm]);
-    else if (entity.kind === "spline") points.push(...entity.fitPoints);
-    else points.push(...entityPoints(entity));
-  }
-  if (points.length === 0) return undefined;
-  return { x1: Math.min(...points.map((point) => point[0])), y1: Math.min(...points.map((point) => point[1])), x2: Math.max(...points.map((point) => point[0])), y2: Math.max(...points.map((point) => point[1])) };
-}
-
-/**
- * Moves only the points of the selected entities that lie inside the window, by (dx, dy), so the rest of each entity stays put
- * and it stretches. A line end, arc point or spline fit point inside the window moves; a circle, ellipse or point moves whole when
- * its centre is inside; a rectangle moves whole when all four corners are inside, and otherwise each side that lies fully inside
- * moves, which changes its width or height. A rectangle with only a corner inside is left alone.
- */
-export function stretchEntities(context: SketchEditContext, ids: readonly string[], window: StretchWindow, dxMm: number, dyMm: number): SketchEditResult {
-  if (![window.x1, window.y1, window.x2, window.y2, dxMm, dyMm].every(Number.isFinite)) return reject("Enter numbers for the window and the distance.");
-  if (Math.hypot(dxMm, dyMm) < 0.001 || Math.abs(dxMm) > 100_000 || Math.abs(dyMm) > 100_000) return reject("Enter a stretch distance of at least 0.001 mm.");
-  const low: Vec2 = [Math.min(window.x1, window.x2), Math.min(window.y1, window.y2)];
-  const high: Vec2 = [Math.max(window.x1, window.x2), Math.max(window.y1, window.y2)];
-  if (high[0] - low[0] < 1e-6 || high[1] - low[1] < 1e-6) return reject("The window needs a width and a height.");
-  const inside = (point: Vec2): boolean => point[0] >= low[0] - 1e-9 && point[0] <= high[0] + 1e-9 && point[1] >= low[1] - 1e-9 && point[1] <= high[1] + 1e-9;
-  const shift = (point: Vec2): Vec2 => (inside(point) ? [point[0] + dxMm, point[1] + dyMm] : point);
-  const sources = ids.map((id) => find(context.sketch, id));
-  if (sources.length === 0 || sources.some((entity) => entity === undefined)) return reject("Select the entities to stretch, then set the window over the part to move.");
-  const updated: SketchEntity[] = [];
-  for (const entity of sources as SketchEntity[]) {
-    if (entity.kind === "line") {
-      if (inside(entity.start) || inside(entity.end)) updated.push({ ...entity, start: shift(entity.start), end: shift(entity.end) });
-    } else if (entity.kind === "arc") {
-      if (inside(entity.start) || inside(entity.mid) || inside(entity.end)) updated.push({ ...entity, start: shift(entity.start), mid: shift(entity.mid), end: shift(entity.end) });
-    } else if (entity.kind === "spline") {
-      if (entity.fitPoints.some(inside)) updated.push({ ...entity, fitPoints: entity.fitPoints.map(shift) });
-    } else if (entity.kind === "circle" || entity.kind === "ellipse") {
-      if (inside(entity.center)) updated.push({ ...entity, center: shift(entity.center) });
-    } else if (entity.kind === "point") {
-      if (inside(entity.point)) updated.push({ ...entity, point: shift(entity.point) });
-    } else {
-      const corners = entityPoints(entity);
-      const hit = corners.map(inside);
-      if (hit.every(Boolean)) { updated.push({ ...entity, center: [entity.center[0] + dxMm, entity.center[1] + dyMm] }); continue; }
-      // Corners run (-w,-h), (w,-h), (w,h), (-w,h): a side is a pair of neighbouring corners.
-      const left = hit[0]! && hit[3]!;
-      const right = hit[1]! && hit[2]!;
-      const bottom = hit[0]! && hit[1]!;
-      const top = hit[2]! && hit[3]!;
-      if (!left && !right && !bottom && !top) continue;
-      const radians = (entity.rotationDeg * Math.PI) / 180;
-      const cos = Math.cos(radians);
-      const sin = Math.sin(radians);
-      const localDx = dxMm * cos + dyMm * sin;
-      const localDy = -dxMm * sin + dyMm * cos;
-      const halfW = entity.widthMm / 2;
-      const halfH = entity.heightMm / 2;
-      const newLeft = -halfW + (left ? localDx : 0);
-      const newRight = halfW + (right ? localDx : 0);
-      const newBottom = -halfH + (bottom ? localDy : 0);
-      const newTop = halfH + (top ? localDy : 0);
-      const width = newRight - newLeft;
-      const height = newTop - newBottom;
-      if (width < 0.01 || height < 0.01) return reject(`The stretch would collapse ${shortId(entity.id)}; use a smaller distance.`, [entity.id]);
-      const centerX = (newLeft + newRight) / 2;
-      const centerY = (newBottom + newTop) / 2;
-      updated.push({ ...entity, widthMm: width, heightMm: height, center: [entity.center[0] + centerX * cos - centerY * sin, entity.center[1] + centerX * sin + centerY * cos] });
-    }
-  }
-  if (updated.length === 0) return reject("Nothing in the selection lies inside the window. Move the window over the points or sides you want to stretch.");
-  return plan(`Stretched ${updated.length} entit${updated.length === 1 ? "y" : "ies"} by (${format(dxMm)}, ${format(dyMm)}) mm`, { updateEntities: updated });
-}
 
 // ---------------------------------------------------------------------------------------------
 // Corner, fillet, chamfer
 // ---------------------------------------------------------------------------------------------
 
-/** Extends or trims two lines so they meet exactly at their intersection. */
-export function cornerLines(context: SketchEditContext, ids: readonly string[]): SketchEditResult {
-  const pair = twoLines(context, ids);
-  if (typeof pair === "string") return reject(pair);
-  const [first, second] = pair;
-  const hit = intersectInfinite(first.start, first.end, second.start, second.end);
-  if (hit === undefined) return reject("The two lines are parallel, so they never meet.", [first.id, second.id]);
-  const moved = [moveNearEnd(first, hit), moveNearEnd(second, hit)];
-  if (moved.every((line, index) => line === [first, second][index])) return reject("The two lines already meet at that corner.", [first.id, second.id]);
-  if (moved.some((line) => distance(line.start, line.end) < 0.01)) return reject("The corner would collapse a line.", [first.id, second.id]);
-  return plan("Corner", { updateEntities: moved });
-}
+export { chamferCorners, chamferCornersAngle, chamferCornersAsymmetric, cornerLines, filletCorners } from "./corner-tools.js";
+export type { CornerOptions, CornerPicks, CornerSpec } from "./corner-tools.js";
 
-/** Rounds the corner between two lines, or all four corners of a rectangle, with a tangent arc of the given radius. */
-export function filletCorners(context: SketchEditContext, ids: readonly string[], radiusMm: number): SketchEditResult {
-  if (!Number.isFinite(radiusMm) || radiusMm < 0.01 || radiusMm > 5000) return reject("Enter a fillet radius between 0.01 mm and 5000 mm.");
-  const rectangle = singleRectangle(context, ids);
-  if (rectangle !== undefined) return roundRectangle(context, rectangle, radiusMm, "fillet");
-  const pair = twoLines(context, ids);
-  if (typeof pair === "string") return reject(pair);
-  const geometry = cornerGeometry(pair[0], pair[1]);
-  if (typeof geometry === "string") return reject(geometry, [pair[0].id, pair[1].id]);
-  const tangent = radiusMm / Math.tan(geometry.angle / 2);
-  if (tangent >= geometry.firstLength - 1e-6 || tangent >= geometry.secondLength - 1e-6) return reject("The fillet radius is too large for these lines.", [pair[0].id, pair[1].id], "Use a smaller radius or lengthen the lines.");
-  const first = pointAlong(geometry.corner, geometry.firstDirection, tangent);
-  const second = pointAlong(geometry.corner, geometry.secondDirection, tangent);
-  const centerDistance = radiusMm / Math.sin(geometry.angle / 2);
-  const center = pointAlong(geometry.corner, geometry.bisector, centerDistance);
-  const mid = pointAlong(center, geometry.bisector, -radiusMm);
-  return plan(`Fillet R${format(radiusMm)}`, {
-    updateEntities: [replaceNearEnd(pair[0], geometry.firstFar, first), replaceNearEnd(pair[1], geometry.secondFar, second)],
-    addEntities: [{ id: context.newId("entity"), kind: "arc", start: first, mid, end: second, construction: false }]
-  });
-}
-
-/** Cuts the corner between two lines, or all four corners of a rectangle, with a straight chamfer of the given distance. */
-export function chamferCorners(context: SketchEditContext, ids: readonly string[], distanceMm: number): SketchEditResult {
-  if (!Number.isFinite(distanceMm) || distanceMm < 0.01 || distanceMm > 5000) return reject("Enter a chamfer distance between 0.01 mm and 5000 mm.");
-  const rectangle = singleRectangle(context, ids);
-  if (rectangle !== undefined) return roundRectangle(context, rectangle, distanceMm, "chamfer");
-  const pair = twoLines(context, ids);
-  if (typeof pair === "string") return reject(pair);
-  const geometry = cornerGeometry(pair[0], pair[1]);
-  if (typeof geometry === "string") return reject(geometry, [pair[0].id, pair[1].id]);
-  if (distanceMm >= geometry.firstLength - 1e-6 || distanceMm >= geometry.secondLength - 1e-6) return reject("The chamfer distance is too large for these lines.", [pair[0].id, pair[1].id], "Use a smaller distance or lengthen the lines.");
-  const first = pointAlong(geometry.corner, geometry.firstDirection, distanceMm);
-  const second = pointAlong(geometry.corner, geometry.secondDirection, distanceMm);
-  return plan(`Chamfer ${format(distanceMm)} mm`, {
-    updateEntities: [replaceNearEnd(pair[0], geometry.firstFar, first), replaceNearEnd(pair[1], geometry.secondFar, second)],
-    addEntities: [{ id: context.newId("entity"), kind: "line", start: first, end: second, construction: false }]
-  });
-}
-
-/**
- * Asymmetric chamfer: a different cut distance on each of the two selected lines. The first distance
- * is measured along the first selected line, the second along the second — the chamfer becomes a
- * straight edge between the two tangent points.
- */
-export function chamferCornersAsymmetric(context: SketchEditContext, ids: readonly string[], firstDistanceMm: number, secondDistanceMm: number): SketchEditResult {
-  if (!Number.isFinite(firstDistanceMm) || firstDistanceMm < 0.01 || firstDistanceMm > 5000) return reject("Enter a first chamfer distance between 0.01 mm and 5000 mm.");
-  if (!Number.isFinite(secondDistanceMm) || secondDistanceMm < 0.01 || secondDistanceMm > 5000) return reject("Enter a second chamfer distance between 0.01 mm and 5000 mm.");
-  const pair = twoLines(context, ids);
-  if (typeof pair === "string") return reject(pair);
-  const geometry = cornerGeometry(pair[0], pair[1]);
-  if (typeof geometry === "string") return reject(geometry, [pair[0].id, pair[1].id]);
-  if (firstDistanceMm >= geometry.firstLength - 1e-6) return reject("The first chamfer distance is too large for the first line.", [pair[0].id, pair[1].id], "Use a smaller first distance or lengthen the line.");
-  if (secondDistanceMm >= geometry.secondLength - 1e-6) return reject("The second chamfer distance is too large for the second line.", [pair[0].id, pair[1].id], "Use a smaller second distance or lengthen the line.");
-  const first = pointAlong(geometry.corner, geometry.firstDirection, firstDistanceMm);
-  const second = pointAlong(geometry.corner, geometry.secondDirection, secondDistanceMm);
-  return plan(`Chamfer ${format(firstDistanceMm)} × ${format(secondDistanceMm)} mm`, {
-    updateEntities: [replaceNearEnd(pair[0], geometry.firstFar, first), replaceNearEnd(pair[1], geometry.secondFar, second)],
-    addEntities: [{ id: context.newId("entity"), kind: "line", start: first, end: second, construction: false }]
-  });
-}
-
-/**
- * Distance-and-angle chamfer: cut a given distance along the first line, then run the chamfer edge
- * off at `angleDeg` measured from the first line into the corner. The second line is trimmed to
- * the chamfer edge's other end. 0° and the corner's own dihedral are refused.
- */
-export function chamferCornersAngle(context: SketchEditContext, ids: readonly string[], distanceMm: number, angleDeg: number): SketchEditResult {
-  if (!Number.isFinite(distanceMm) || distanceMm < 0.01 || distanceMm > 5000) return reject("Enter a chamfer distance between 0.01 mm and 5000 mm.");
-  if (!Number.isFinite(angleDeg) || angleDeg <= 0.5 || angleDeg >= 179.5) return reject("Enter an angle between 0.5° and 179.5°.");
-  const pair = twoLines(context, ids);
-  if (typeof pair === "string") return reject(pair);
-  const geometry = cornerGeometry(pair[0], pair[1]);
-  if (typeof geometry === "string") return reject(geometry, [pair[0].id, pair[1].id]);
-  if (distanceMm >= geometry.firstLength - 1e-6) return reject("The chamfer distance is too large for the first line.", [pair[0].id, pair[1].id], "Use a smaller distance or lengthen the line.");
-  const dihedralDeg = geometry.angle * 180 / Math.PI;
-  if (Math.abs(angleDeg - dihedralDeg) < 0.5) return reject("The chamfer angle is the same as the corner's own angle; the cut would be parallel to the second line.", [pair[0].id, pair[1].id]);
-
-  // Place a point A on the first line at `distanceMm` from the corner.
-  const pointA = pointAlong(geometry.corner, geometry.firstDirection, distanceMm);
-  // Build a ray from A whose direction makes angle `angleDeg` with the first line's direction,
-  // rotated inside the corner (toward the second line). The chamfer edge is a segment along this ray.
-  // For a CCW corner (cross > 0) we need CW rotation of the back-pointing vector so the ray goes
-  // into the +side half-plane; for a CW corner, CCW.
-  const sign = (geometry.firstDirection[0] * geometry.secondDirection[1] - geometry.firstDirection[1] * geometry.secondDirection[0]) >= 0 ? -1 : 1;
-  const outward: Vec2 = [-geometry.firstDirection[0], -geometry.firstDirection[1]];
-  const theta = angleDeg * Math.PI / 180;
-  const chamferDirection: Vec2 = [outward[0] * Math.cos(theta) - sign * outward[1] * Math.sin(theta), outward[0] * Math.sin(theta) * sign + outward[1] * Math.cos(theta)];
-  // Intersect the chamfer ray with the second line (as an infinite line).
-  const other = intersectInfinite(pointA, [pointA[0] + chamferDirection[0], pointA[1] + chamferDirection[1]], geometry.corner, [geometry.corner[0] + geometry.secondDirection[0], geometry.corner[1] + geometry.secondDirection[1]]);
-  if (other === undefined) return reject("The chamfer ray does not reach the second line; try a different angle.", [pair[0].id, pair[1].id]);
-  const pointB = other;
-  const secondDistance = Math.hypot(pointB[0] - geometry.corner[0], pointB[1] - geometry.corner[1]);
-  if (secondDistance < 0.01) return reject("The chamfer collapses the corner; try a larger angle.", [pair[0].id, pair[1].id]);
-  if (secondDistance >= geometry.secondLength - 1e-6) return reject("The chamfer reaches past the second line's far end.", [pair[0].id, pair[1].id], "Use a smaller angle or shorter first distance.");
-  return plan(`Chamfer ${format(distanceMm)} mm @ ${format(angleDeg)}°`, {
-    updateEntities: [replaceNearEnd(pair[0], geometry.firstFar, pointA), replaceNearEnd(pair[1], geometry.secondFar, pointB)],
-    addEntities: [{ id: context.newId("entity"), kind: "line", start: pointA, end: pointB, construction: false }]
-  });
-}
-
-function twoLines(context: SketchEditContext, ids: readonly string[]): readonly [Line, Line] | string {
-  const lines = ids.map((id) => find(context.sketch, id));
-  if (lines.length !== 2 || lines.some((entity) => entity?.kind !== "line")) return "Select exactly two lines.";
-  return [lines[0] as Line, lines[1] as Line];
-}
-
-function singleRectangle(context: SketchEditContext, ids: readonly string[]): Rectangle | undefined {
-  if (ids.length !== 1) return undefined;
-  const entity = find(context.sketch, ids[0]!);
-  return entity?.kind === "rectangle" ? entity : undefined;
-}
-
-interface CornerGeometry {
-  readonly corner: Vec2;
-  readonly firstDirection: Vec2;
-  readonly secondDirection: Vec2;
-  readonly bisector: Vec2;
-  readonly angle: number;
-  readonly firstFar: Vec2;
-  readonly secondFar: Vec2;
-  readonly firstLength: number;
-  readonly secondLength: number;
-}
-
-/** The meeting point of two lines and the directions leading away from it along the longer side of each. */
-function cornerGeometry(first: Line, second: Line): CornerGeometry | string {
-  const corner = intersectInfinite(first.start, first.end, second.start, second.end);
-  if (corner === undefined) return "The two lines are parallel, so they have no corner.";
-  const farEnd = (line: Line): Vec2 => (distance(line.start, corner) >= distance(line.end, corner) ? line.start : line.end);
-  const firstFar = farEnd(first);
-  const secondFar = farEnd(second);
-  const firstLength = distance(firstFar, corner);
-  const secondLength = distance(secondFar, corner);
-  if (firstLength < 0.01 || secondLength < 0.01) return "A line has no length beyond the corner.";
-  const firstDirection: Vec2 = [(firstFar[0] - corner[0]) / firstLength, (firstFar[1] - corner[1]) / firstLength];
-  const secondDirection: Vec2 = [(secondFar[0] - corner[0]) / secondLength, (secondFar[1] - corner[1]) / secondLength];
-  const cosine = Math.max(-1, Math.min(1, firstDirection[0] * secondDirection[0] + firstDirection[1] * secondDirection[1]));
-  const angle = Math.acos(cosine);
-  if (angle < 0.01 || angle > Math.PI - 0.01) return "The lines are almost parallel, so the corner cannot be rounded.";
-  const sum: Vec2 = [firstDirection[0] + secondDirection[0], firstDirection[1] + secondDirection[1]];
-  const sumLength = Math.hypot(sum[0], sum[1]);
-  return { corner, firstDirection, secondDirection, bisector: [sum[0] / sumLength, sum[1] / sumLength], angle, firstFar, secondFar, firstLength, secondLength };
-}
-
-/** Moves whichever end of the line is nearer the target onto it. */
-function moveNearEnd(line: Line, target: Vec2): Line {
-  if (distance(line.start, target) <= EPSILON || distance(line.end, target) <= EPSILON) return line;
-  return distance(line.start, target) <= distance(line.end, target) ? { ...line, start: target } : { ...line, end: target };
-}
-
-/** Replaces the end of the line that is not `far` with `point`. */
-function replaceNearEnd(line: Line, far: Vec2, point: Vec2): Line {
-  return distance(line.start, far) <= EPSILON ? { ...line, end: point } : { ...line, start: point };
-}
-
-function roundRectangle(context: SketchEditContext, rectangle: Rectangle, size: number, mode: "fillet" | "chamfer"): SketchEditResult {
-  if (size >= Math.min(rectangle.widthMm, rectangle.heightMm) / 2 - 1e-6) return reject(`The ${mode === "fillet" ? "fillet radius" : "chamfer distance"} is too large for this rectangle (at most half of its shorter side).`, [rectangle.id]);
-  const corners = entityPoints(rectangle);
-  const added: SketchEntity[] = [];
-  const entry: Vec2[] = [];
-  const exit: Vec2[] = [];
-  corners.forEach((corner, index) => {
-    const previous = corners[(index + corners.length - 1) % corners.length]!;
-    const following = corners[(index + 1) % corners.length]!;
-    entry.push(pointAlong(corner, unitVector(corner, previous), size));
-    exit.push(pointAlong(corner, unitVector(corner, following), size));
-  });
-  corners.forEach((corner, index) => {
-    const nextIndex = (index + 1) % corners.length;
-    added.push({ id: context.newId("entity"), kind: "line", start: exit[index]!, end: entry[nextIndex]!, construction: rectangle.construction });
-    if (mode === "chamfer") {
-      added.push({ id: context.newId("entity"), kind: "line", start: entry[index]!, end: exit[index]!, construction: rectangle.construction });
-      return;
-    }
-    const center: Vec2 = [entry[index]![0] + exit[index]![0] - corner[0], entry[index]![1] + exit[index]![1] - corner[1]];
-    const mid = pointAlong(center, unitVector(center, corner), size);
-    added.push({ id: context.newId("entity"), kind: "arc", start: entry[index]!, mid, end: exit[index]!, construction: rectangle.construction });
-  });
-  return plan(`${mode === "fillet" ? "Fillet" : "Chamfer"} all corners of the rectangle (now ${added.length} lines and arcs)`, { removeEntityIds: [rectangle.id], addEntities: added });
-}
 
 // ---------------------------------------------------------------------------------------------
 // Trim and extend
@@ -649,7 +240,25 @@ function curvesOf(entity: SketchEntity): readonly Curve[] {
     const samples = sampleSpline(entity.fitPoints);
     return samples.slice(0, -1).map((sample, index): Curve => ({ kind: "line", a: sample, b: samples[index + 1]! }));
   }
+  if (entity.kind === "ellipse") {
+    // A closed polyline of short chords (within 0.01 mm of the true ellipse up to 100 mm), so Trim and Extend can use it as a boundary.
+    const samples = ellipseSamples(entity, 256);
+    return samples.map((sample, index): Curve => ({ kind: "line", a: sample, b: samples[(index + 1) % samples.length]! }));
+  }
   return [];
+}
+
+/** Points on an ellipse at evenly spaced parameter values, counter-clockwise from the major axis end. */
+export function ellipseSamples(entity: Extract<SketchEntity, { kind: "ellipse" }>, count: number): readonly Vec2[] {
+  const radians = (entity.rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return Array.from({ length: count }, (_, index): Vec2 => {
+    const t = (index / count) * TWO_PI;
+    const x = entity.majorRadiusMm * Math.cos(t);
+    const y = entity.minorRadiusMm * Math.sin(t);
+    return [entity.center[0] + x * cos - y * sin, entity.center[1] + x * sin + y * cos];
+  });
 }
 
 interface ArcFrame {
@@ -679,71 +288,7 @@ function arcEntity(template: SketchEntity, id: string, center: Vec2, radius: num
   return { id, kind: "arc", start: clockwise ? last : first, mid, end: clockwise ? first : last, construction: template.construction, ...(template.visible === undefined ? {} : { visible: template.visible }) };
 }
 
-/** Removes the part of a curve between its neighbouring intersections that is nearest the pick point. */
-export function trimAt(context: SketchEditContext, targetId: string, pick: Vec2): SketchEditResult {
-  const target = find(context.sketch, targetId);
-  if (target === undefined) return reject("Pick a curve to trim.");
-  const others = context.sketch.entities.filter((entity) => entity.id !== targetId && entity.visible !== false && entity.kind !== "point");
-  const boundaries = others.flatMap(curvesOf);
-  if (target.kind === "line") {
-    const direction: Vec2 = [target.end[0] - target.start[0], target.end[1] - target.start[1]];
-    const length = Math.hypot(direction[0], direction[1]);
-    const hits = boundaries.flatMap((curve) => lineHits(target.start, target.end, curve)).filter((t) => t > 1e-6 && t < 1 - 1e-6).sort((a, b) => a - b);
-    const pickT = clamp(((pick[0] - target.start[0]) * direction[0] + (pick[1] - target.start[1]) * direction[1]) / (length * length), 0, 1);
-    const lower = [...hits].reverse().find((t) => t <= pickT) ?? 0;
-    const upper = hits.find((t) => t >= pickT) ?? 1;
-    const at = (t: number): Vec2 => [target.start[0] + direction[0] * t, target.start[1] + direction[1] * t];
-    if (lower === 0 && upper === 1) return plan("Trim (deleted the whole line: nothing crosses it)", { removeEntityIds: [target.id] });
-    const pieces: Line[] = [];
-    if (lower > 0) pieces.push({ ...target, end: at(lower) });
-    if (upper < 1) pieces.push(lower > 0 ? { ...target, id: context.newId("entity"), start: at(upper) } : { ...target, start: at(upper) });
-    return plan("Trim line", { updateEntities: pieces.filter((piece) => piece.id === target.id), addEntities: pieces.filter((piece) => piece.id !== target.id) });
-  }
-  if (target.kind === "circle") {
-    const angles = boundaries.flatMap((curve) => circleHits(target.center, target.radiusMm, curve)).map(wrapTwoPi).sort((a, b) => a - b);
-    const unique = angles.filter((angle, index) => index === 0 || angle - angles[index - 1]! > 1e-6);
-    if (unique.length < 2) return reject(unique.length === 0 ? "Nothing crosses this circle, so there is nothing to trim against." : "A circle needs at least two crossings to trim an arc out of it.", [target.id]);
-    const pickAngle = wrapTwoPi(Math.atan2(pick[1] - target.center[1], pick[0] - target.center[0]));
-    const before = [...unique].reverse().find((angle) => angle <= pickAngle) ?? unique[unique.length - 1]!;
-    const after = unique.find((angle) => angle > pickAngle) ?? unique[0]!;
-    // Keep the arc from `after` counter-clockwise round to `before`.
-    const kept = arcEntity(target, context.newId("entity"), target.center, target.radiusMm, after, wrapTwoPi(before - after), false);
-    return plan("Trim circle into an arc", { removeEntityIds: [target.id], addEntities: [kept] });
-  }
-  if (target.kind === "arc") {
-    const frame = arcFrame(target);
-    if (frame === undefined) return reject("The arc is degenerate.", [target.id]);
-    const offsets = boundaries.flatMap((curve) => circleHits(frame.center, frame.radius, curve)).map((angle) => wrapTwoPi(angle - frame.startAngle)).filter((offset) => offset > 1e-6 && offset < frame.sweep - 1e-6).sort((a, b) => a - b);
-    const pickOffset = wrapTwoPi(Math.atan2(pick[1] - frame.center[1], pick[0] - frame.center[0]) - frame.startAngle);
-    const pickClamped = pickOffset > frame.sweep ? (pickOffset - frame.sweep < TWO_PI - pickOffset ? frame.sweep : 0) : pickOffset;
-    const lower = [...offsets].reverse().find((offset) => offset <= pickClamped) ?? 0;
-    const upper = offsets.find((offset) => offset >= pickClamped) ?? frame.sweep;
-    if (lower === 0 && upper === frame.sweep) return plan("Trim (deleted the whole arc: nothing crosses it)", { removeEntityIds: [target.id] });
-    const added: Arc[] = [];
-    const updated: Arc[] = [];
-    if (lower > 0) updated.push(arcEntity(target, target.id, frame.center, frame.radius, frame.startAngle, lower, frame.clockwise));
-    if (upper < frame.sweep) (lower > 0 ? added : updated).push(arcEntity(target, lower > 0 ? context.newId("entity") : target.id, frame.center, frame.radius, frame.startAngle + upper, frame.sweep - upper, frame.clockwise));
-    return plan("Trim arc", { updateEntities: updated, addEntities: added });
-  }
-  return reject(`Trim applies to lines, arcs and circles; a ${target.kind} is a single entity.`, [target.id], "Fillet or Chamfer a rectangle first, which turns it into separate lines and arcs.");
-}
-
-/** Extends the end of a line nearest the pick point to the first curve it reaches. */
-export function extendAt(context: SketchEditContext, targetId: string, pick: Vec2): SketchEditResult {
-  const target = find(context.sketch, targetId);
-  if (target?.kind !== "line") return reject("Extend applies to lines. Pick near the end of a line.");
-  const nearStart = distance(pick, target.start) <= distance(pick, target.end);
-  const from = nearStart ? target.start : target.end;
-  const away: Vec2 = nearStart ? [target.start[0] - target.end[0], target.start[1] - target.end[1]] : [target.end[0] - target.start[0], target.end[1] - target.start[1]];
-  const length = Math.hypot(away[0], away[1]);
-  const ray: Vec2 = [from[0] + away[0] / length, from[1] + away[1] / length];
-  const others = context.sketch.entities.filter((entity) => entity.id !== targetId && entity.visible !== false && entity.kind !== "point");
-  // Parameters along the ray from `from`: positive values lie beyond the end.
-  const hits = others.flatMap(curvesOf).flatMap((curve) => lineHits(from, ray, curve)).filter((t) => t > 1e-6).sort((a, b) => a - b);
-  if (hits.length === 0) return reject("Nothing lies beyond that end of the line, so it cannot be extended.", [target.id]);
-  const reach: Vec2 = [from[0] + (ray[0] - from[0]) * hits[0]!, from[1] + (ray[1] - from[1]) * hits[0]!];
-  return plan("Extend line", { updateEntities: [nearStart ? { ...target, start: reach } : { ...target, end: reach }] });
-}
+export { breakAtCrossings, extendAt, powerTrim, trimAt, trimToClosest } from "./trim-extend.js";
 
 /** Parameters t (0 at a, 1 at b, extended beyond) where the infinite line a-b meets a bounded curve. */
 function lineHits(a: Vec2, b: Vec2, curve: Curve): number[] {

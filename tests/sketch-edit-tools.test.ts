@@ -51,7 +51,8 @@ function commit(project: WorkbenchProject, result: SketchEditResult) {
     removeEntityIds: result.value.removeEntityIds,
     updateEntities: result.value.updateEntities,
     addEntities: result.value.addEntities,
-    addConstraints: result.value.addConstraints
+    addConstraints: result.value.addConstraints,
+    ...(result.value.removeConstraintIds === undefined ? {} : { removeConstraintIds: result.value.removeConstraintIds })
   });
 }
 
@@ -132,14 +133,14 @@ export const sketchEditToolTests: readonly TestCase[] = [
     }
   },
   {
-    name: "mirror copies entities across a line and records symmetric relations that hold",
+    name: "mirror copies entities across a line and records symmetric relations (now for every kind) that hold",
     run: () => {
       const rectangle: SketchEntity = { id: "entity:r", kind: "rectangle", center: [5, 2], widthMm: 4, heightMm: 2, rotationDeg: 30, construction: false };
       const project = projectWith([line("a", [2, 1], [5, 3]), circle("c", [4, 6], 1.5), rectangle, line("axis", [0, -10], [0, 10])]);
       const planned = mirrorEntities(context(project), ids("a", "c", "r", "axis"));
       assert(planned.ok, "mirror plans");
       equal(planned.value.addEntities.length, 3, "one copy per mirrored entity");
-      equal(planned.value.addConstraints.length, 2, "line and circle get symmetric relations; the rectangle does not");
+      equal(planned.value.addConstraints.length, 3, "line, circle and rectangle all get a symmetric relation about the axis (the rectangle one is recorded, not solved)");
       const committed = commit(project, planned);
       assert(committed.ok, "the mirrored sketch passes the solver without moving anything");
       const copyLine = linesOf(committed.value.project).find((candidate) => candidate.id !== "entity:a" && candidate.id !== "entity:axis")!;
@@ -292,16 +293,23 @@ export const sketchEditToolTests: readonly TestCase[] = [
     }
   },
   {
-    name: "an edit that would break a recorded relation is refused until the relation is relaxed",
+    name: "an edit whose raw plan would break a recorded relation is refused by the operation; the planner removes that relation itself, and a relaxed one stays recorded",
     run: () => {
       const project = projectWith(
         [line("a", [0, 0], [10, 0]), line("b", [10, 0], [10, 10]), line("c", [20, 0], [20, 10])],
         [{ id: "constraint:equal-bc", kind: "equal", entityIds: ["entity:b", "entity:c"] }]
       );
-      const blocked = commit(project, filletCorners(context(project), ids("a", "b"), 2));
-      assert(!blocked.ok, "the fillet shortens b, which would break equal(b, c)");
+      const planned = filletCorners(context(project), ids("a", "b"), 2);
+      assert(planned.ok, "the fillet plans");
+      assert(planned.value.removeConstraintIds?.includes("constraint:equal-bc") === true, "the plan removes equal(b, c), which the shortened b no longer satisfies");
+      const { removeConstraintIds: _dropped, ...stripped } = planned.value;
+      const blocked = commit(project, { ok: true, value: stripped });
+      assert(!blocked.ok, "the operation still refuses a plan that leaves the broken relation in place");
       equal(blocked.diagnostics[0]?.code, "CONSTRAINT_CONFLICT", "typed as a conflict");
       assert(blocked.diagnostics[0]!.recovery.includes("Relax Relations"), "and points at the fix");
+      const applied = commit(project, planned);
+      assert(applied.ok, "with the relation removed by the planner the fillet applies");
+      equal(applied.value.project.sketch.constraints.some((constraint) => constraint.id === "constraint:equal-bc"), false, "and the equal relation is gone");
 
       const relaxIds = constraintsOnEntities(project.sketch, ["entity:b"], "relations", false);
       equal(relaxIds.length, 1, "the relation is found on the selected entity");
@@ -309,7 +317,11 @@ export const sketchEditToolTests: readonly TestCase[] = [
       assert(relaxed.ok, "relaxing applies");
       const retry = commit(relaxed.value.project, filletCorners(context(relaxed.value.project), ids("a", "b"), 2));
       assert(retry.ok, "with the relation relaxed the fillet goes through");
-      equal(constraintsOnEntities(retry.value.project.sketch, ["entity:b"], "relations", true).length, 1, "and the relation stays recorded as relaxed");
+      equal(constraintsOnEntities(retry.value.project.sketch, ["entity:b"], "relations", true).length, 0, "and the relaxed equal(b, c), which the shortened b makes untrue, is removed instead of being left stale");
+      const spare = projectWith([line("a", [0, 0], [10, 0]), line("b", [10, 0], [10, 10]), line("c", [20, 0], [20, 10]), line("d", [20, 10], [30, 10])], [{ id: "constraint:equal-cd", kind: "equal", entityIds: ["entity:c", "entity:d"], suppressed: true }]);
+      const untouched = commit(spare, filletCorners(context(spare), ids("a", "b"), 2));
+      assert(untouched.ok, "a fillet elsewhere applies");
+      equal(constraintsOnEntities(untouched.value.project.sketch, ["entity:c"], "relations", true).length, 1, "and a relaxed relation the edit does not touch stays recorded as relaxed");
     }
   },
   {

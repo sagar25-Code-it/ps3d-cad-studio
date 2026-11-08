@@ -336,12 +336,13 @@ function cumulative(points: readonly Vec2[]): number[] {
 }
 
 /**
- * A spline is split by re-fitting each half through the points of the original curve on its side of the split. The halves pass
- * through the same fit points and the split point, but their curvature between those points is a fresh Catmull-Rom fit, so the
- * shape matches closely rather than exactly.
+ * A spline is split by re-fitting each half through points of the original curve on its side of the split. A half is a fresh
+ * Catmull-Rom fit, so it cannot reproduce the original exactly with its old fit points alone; instead each half is fitted through as
+ * many evenly spaced points of the original curve as it needs (up to the 24 a spline takes) until it follows the original within
+ * 0.01 mm. The deviation that is left is reported in the label.
  */
 function splitSpline(context: SketchEditContext, spline: Spline, pick: Vec2): SketchEditResult {
-  const samplesPerSpan = 8;
+  const samplesPerSpan = 32;
   const samples = sampleSpline(spline.fitPoints, samplesPerSpan);
   const lengths = cumulative(samples);
   let bestIndex = 0;
@@ -359,31 +360,56 @@ function splitSpline(context: SketchEditContext, spline: Spline, pick: Vec2): Sk
   const total = lengths[lengths.length - 1]!;
   const position = lengths[bestIndex]! + dist(samples[bestIndex]!, bestAt);
   if (position < 2 * MIN_PIECE_MM || total - position < 2 * MIN_PIECE_MM) return reject("Pick a point between the ends of the spline.", [spline.id]);
-  const fits = spline.fitPoints;
-  const fitPosition = (index: number): number => lengths[index * samplesPerSpan]!;
-  const before = fits.filter((_, index) => fitPosition(index) < position - MIN_PIECE_MM);
-  const after = fits.filter((_, index) => fitPosition(index) > position + MIN_PIECE_MM);
-  const refine = (points: Vec2[], from: number, to: number): Vec2[] => {
-    // Pad a half with samples from its own part of the original curve until it has the three fit points a spline needs.
-    const result = points;
-    let gaps = 1;
-    while (result.length < 3 && gaps < 8) {
-      gaps += 1;
-      const wanted = from + (to - from) * ((gaps - 1) / gaps);
-      let index = 0;
-      while (index < samples.length - 1 && lengths[index + 1]! < wanted) index += 1;
-      const candidate = samples[index]!;
-      if (!result.some((point) => dist(point, candidate) < MIN_PIECE_MM)) result.push(candidate);
-    }
-    return result;
+
+  const pointAt = (s: number): Vec2 => {
+    if (s <= 0) return samples[0]!;
+    if (s >= total) return samples[samples.length - 1]!;
+    let index = 1;
+    while (index < lengths.length - 1 && lengths[index]! < s) index += 1;
+    const span = lengths[index]! - lengths[index - 1]!;
+    const t = span < 1e-12 ? 0 : (s - lengths[index - 1]!) / span;
+    const a = samples[index - 1]!;
+    const b = samples[index]!;
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
   };
-  const alongOrder = (points: Vec2[], origin: Vec2): Vec2[] => [...points].sort((p, q) => lengths[nearestSample(samples, p)]! - lengths[nearestSample(samples, q)]! || dist(p, origin) - dist(q, origin));
-  const firstPoints = alongOrder(refine([...before, bestAt], 0, position), samples[0]!);
-  const secondPoints = alongOrder(refine([bestAt, ...after], position, total), bestAt);
-  if (firstPoints.length < 3 || secondPoints.length < 3 || firstPoints.length > 24 || secondPoints.length > 24) return reject("The spline cannot be split there into two valid splines.", [spline.id]);
-  const first: Spline = { ...spline, fitPoints: firstPoints };
-  const second: Spline = { ...spline, id: context.newId("entity"), fitPoints: secondPoints };
-  return editPlan(`Split spline at (${fmt(bestAt[0])}, ${fmt(bestAt[1])}) (each half re-fitted through its own points)`, { updateEntities: [first], addEntities: [second] });
+  const originalRun = (from: number, to: number): Vec2[] => {
+    const run: Vec2[] = [pointAt(from)];
+    for (let index = 0; index < samples.length; index += 1) if (lengths[index]! > from + 1e-9 && lengths[index]! < to - 1e-9) run.push(samples[index]!);
+    run.push(pointAt(to));
+    return run;
+  };
+  const gapToRun = (point: Vec2, run: readonly Vec2[]): number => {
+    let best = Infinity;
+    for (let index = 0; index < run.length - 1; index += 1) {
+      const a = run[index]!;
+      const b = run[index + 1]!;
+      const span = dist(a, b);
+      const t = span < 1e-12 ? 0 : Math.max(0, Math.min(1, ((point[0] - a[0]) * (b[0] - a[0]) + (point[1] - a[1]) * (b[1] - a[1])) / (span * span)));
+      best = Math.min(best, dist(point, [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]));
+    }
+    return best;
+  };
+  const fitHalf = (from: number, to: number): { readonly points: Vec2[]; readonly deviation: number } | undefined => {
+    if (to - from < 2 * MIN_PIECE_MM) return undefined;
+    const run = originalRun(from, to);
+    let best: { points: Vec2[]; deviation: number } | undefined;
+    for (let count = 3; count <= 24; count += 1) {
+      const points = Array.from({ length: count }, (_, index) => pointAt(from + ((to - from) * index) / (count - 1)));
+      if (points.some((point, index) => index > 0 && dist(points[index - 1]!, point) < MIN_PIECE_MM)) break;
+      const fitted = sampleSpline(points, 12);
+      const deviation = Math.max(...fitted.map((point) => gapToRun(point, run)));
+      if (best === undefined || deviation < best.deviation) best = { points, deviation };
+      if (deviation <= 0.01) break;
+    }
+    return best;
+  };
+  const firstHalf = fitHalf(0, position);
+  const secondHalf = fitHalf(position, total);
+  if (firstHalf === undefined || secondHalf === undefined) return reject("The spline cannot be split there into two valid splines.", [spline.id]);
+  const first: Spline = { ...spline, fitPoints: firstHalf.points };
+  const second: Spline = { ...spline, id: context.newId("entity"), fitPoints: secondHalf.points };
+  const worst = Math.max(firstHalf.deviation, secondHalf.deviation);
+  return editPlan(`Split spline at (${fmt(bestAt[0])}, ${fmt(bestAt[1])}) (halves follow the curve within ${worst < 0.001 ? "0.001" : fmt(Math.ceil(worst * 1000) / 1000)} mm)`, { updateEntities: [first], addEntities: [second] });
 }
 
 function nearestSample(samples: readonly Vec2[], point: Vec2): number {
