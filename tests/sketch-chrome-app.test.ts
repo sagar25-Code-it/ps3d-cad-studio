@@ -390,7 +390,7 @@ export const sketchChromeAppTests: TestCase[] = [
     name: "Sketch plane chrome (a)(b)(d)(e)(f): the ribbon starts with a primary New Sketch and the plane chip, and the same plane dialog serves Create > New Sketch, the Part ribbon and the chip",
     run: () => {
       const ribbon = repoFile("apps/studio-web/src/ui/WorkbenchRibbon.tsx");
-      const newSketch = ribbon.indexOf('label="New Sketch" hint="choose plane" primary');
+      const newSketch = ribbon.indexOf('label="New Sketch" hint="pick plane" primary');
       const createGeometry = ribbon.indexOf('RibbonGroup label="Create geometry"');
       assert(newSketch > 0 && createGeometry > 0 && newSketch < createGeometry, "the primary New Sketch button is the first control of the Sketch ribbon, before the drawing tools");
       assert(ribbon.indexOf("<SketchPlaneChip", newSketch) < createGeometry, "the plane chip sits next to it");
@@ -400,6 +400,7 @@ export const sketchChromeAppTests: TestCase[] = [
       assert(app.includes('onNewSketch: () => openSketchPlaneDialog("new")'), "Create > New Sketch opens the same dialog in new-sketch mode");
       assert(app.includes("decidePlaneOffer(") && app.includes("planeOfferAfterFinish("), "entering Sketch and Finish Sketch go through the offer rules");
       assert(app.includes("describeSketchPlane(projectRef.current.sketch).status"), "the status line states the plane after choosing");
+      assert(app.includes('workspace === "sketch" ? ` ${describeSketchPlane(current.sketch).status}` : ""'), "and when the Sketch workspace is entered without choosing (Continue with the current sketch)");
       const dialog = repoFile("apps/studio-web/src/ui/SketchPlaneDialog.tsx");
       assert(dialog.includes("PlaneDiagram") && dialog.includes("Continue with the current sketch") && dialog.includes("existingPlanes"), "the dialog has the datum-plane diagram, the Continue option and the earlier-sketch planes");
       const workspace = repoFile("apps/studio-web/src/workspaces/SketchWorkspace.tsx");

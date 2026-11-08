@@ -2089,10 +2089,10 @@ function SketchDimensionGlyph({ entity, px }: { readonly entity: SketchEntity; r
   if (entity.kind === "line") {
     const x = (entity.start[0] + entity.end[0]) / 2;
     const y = -(entity.start[1] + entity.end[1]) / 2 - 8 * px;
-    return <text x={x} y={y} style={style} className="sketch-dimension-glyph">{format(Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]))}</text>;
+    return <text x={x} y={y} style={style} className="sketch-dimension-glyph">{fmtNum(Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]))}</text>;
   }
-  if (entity.kind === "rectangle") return <><text x={entity.center[0]} y={-entity.center[1] + entity.heightMm / 2 + 16 * px} style={style} className="sketch-dimension-glyph">{format(entity.widthMm)}</text><text x={entity.center[0] + entity.widthMm / 2 + 12 * px} y={-entity.center[1]} style={style} className="sketch-dimension-glyph vertical">{format(entity.heightMm)}</text></>;
-  if (entity.kind === "circle") return <text x={entity.center[0] + entity.radiusMm * 0.35} y={-entity.center[1] - 8 * px} style={style} className="sketch-dimension-glyph">R {format(entity.radiusMm)}</text>;
+  if (entity.kind === "rectangle") return <><text x={entity.center[0]} y={-entity.center[1] + entity.heightMm / 2 + 16 * px} style={style} className="sketch-dimension-glyph">{fmtNum(entity.widthMm)}</text><text x={entity.center[0] + entity.widthMm / 2 + 12 * px} y={-entity.center[1]} style={style} className="sketch-dimension-glyph vertical">{fmtNum(entity.heightMm)}</text></>;
+  if (entity.kind === "circle") return <text x={entity.center[0] + entity.radiusMm * 0.35} y={-entity.center[1] - 8 * px} style={style} className="sketch-dimension-glyph">R {fmtNum(entity.radiusMm)}</text>;
   return <></>;
 }
 
@@ -2134,4 +2134,8 @@ let lengthUnit: SketchLengthUnit = "mm";
 /** A length in millimetres as text with the display unit: "12.7 mm" or "0.5 in". */
 function fmtLen(valueMm: number): string {
   return formatLengthWithUnit(valueMm, lengthUnit);
+}
+/** The same without the symbol, for the reference values drawn on the canvas. */
+function fmtNum(valueMm: number): string {
+  return formatLength(valueMm, lengthUnit);
 }

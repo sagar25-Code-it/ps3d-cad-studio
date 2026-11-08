@@ -55,7 +55,8 @@
 .studio-app .sketch-palette .palette-header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.25rem; }
 .studio-app .sketch-stage .sketch-palette .palette-header-actions button { padding: 0.25rem 0.45rem; font-size: 0.74rem; }
 .studio-app .sketch-stage .sketch-palette.docked {
-  top: 0;
+  /* Below the Cancel / OK confirmation corner, which sits in the top-right of the canvas. */
+  top: 3.6rem;
   right: 0;
   bottom: 0;
   max-height: none;
@@ -69,7 +70,7 @@
 .studio-app .sketch-stage.palette-docked .canvas-hud,
 .studio-app .sketch-stage.palette-docked .viewport-controller { right: calc(var(--sketch-palette-width) + 0.72rem); }
 .studio-app .sketch-stage .sketch-palette.collapsed {
-  top: 0.72rem;
+  top: 3.6rem;
   right: 0.72rem;
   bottom: auto;
   width: auto;

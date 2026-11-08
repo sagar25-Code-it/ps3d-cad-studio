@@ -1,7 +1,7 @@
 import type { DisplayUnit } from "../../../../packages/model-schema/src/index.js";
 import type { AssemblyTemplateId, DrawingDatumScheme, DrawingDisplayStyle, DrawingDraftingStandard, DrawingSettings, ElectricalComponentKind, ElectricalStandard, ElectricalTemplateId, PartPreviewBodyShape, SurfaceIntent, VehicleLayerId, VehicleSimulationState, VehicleTemplateId, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { SketchTool } from "../../../../packages/workbench-sketch/src/index.js";
-import { SKETCH_LETTER_FAMILIES, sketchToolHotkeyChip } from "../../../../packages/workbench-sketch/src/hotkeys.js";
+import { sketchToolHotkeyChip } from "../../../../packages/workbench-sketch/src/hotkeys.js";
 import { describeSketchPlane } from "../sketch-plane-ui.js";
 import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/index.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
@@ -117,12 +117,9 @@ const SKETCH_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; r
   { id: "arc-tangent", icon: "arc", label: "Tangent arc" }
 ];
 
-/** What the chip tooltip says about how to reach a tool from the keyboard. */
+/** The chip under a tool button: the key, or "R ×2" when R is pressed twice in a row. The tooltip spells it out. */
 function hotkeyHint(tool: SketchTool): string {
-  const chip = sketchToolHotkeyChip(tool) ?? "";
-  const family = Object.entries(SKETCH_LETTER_FAMILIES).find(([, tools]) => tools.includes(tool as never));
-  const index = family === undefined ? 0 : family[1].indexOf(tool as never);
-  return index > 0 && family !== undefined ? `${chip} (press ${family[0].toUpperCase()} ${index + 1} times)` : chip;
+  return sketchToolHotkeyChip(tool) ?? "";
 }
 
 /** The extra sketch curve tools, grouped under "More curves" (their geometry lives in packages/workbench-sketch/src/curve-tools.ts). */
@@ -179,7 +176,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
     </>}
     {!props.masterCartOpen && props.project.activeWorkspace === "sketch" && <>
       <RibbonGroup label="Sketch plane">
-        <RibbonButton icon="sketch" label="New Sketch" hint="choose plane" primary onClick={props.onNewSketch} />
+        <RibbonButton icon="sketch" label="New Sketch" hint="pick plane" primary onClick={props.onNewSketch} />
         <SketchPlaneChip sketch={props.project.sketch} onClick={props.onChangeSketchPlane} />
       </RibbonGroup>
       <RibbonGroup label="Create geometry">

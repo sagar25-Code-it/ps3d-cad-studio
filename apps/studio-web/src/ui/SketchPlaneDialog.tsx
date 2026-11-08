@@ -89,9 +89,9 @@ function PlaneDiagram(props: { readonly plane: SketchPlane; readonly onPick: (pl
   const faces: readonly { readonly plane: SketchPlane; readonly points: string; readonly label: string; readonly labelAt: readonly [number, number] }[] = [
     { plane: "yz", points: [at(0, 0, 0), at(0, 1, 0), at(0, 1, 1), at(0, 0, 1)].join(" "), label: "Right (YZ)", labelAt: [168, 62] },
     { plane: "xz", points: [at(0, 0, 0), at(1, 0, 0), at(1, 0, 1), at(0, 0, 1)].join(" "), label: "Front (XZ)", labelAt: [12, 62] },
-    { plane: "xy", points: [at(0, 0, 0), at(1, 0, 0), at(1, 1, 0), at(0, 1, 0)].join(" "), label: "Top (XY)", labelAt: [92, 176] }
+    { plane: "xy", points: [at(0, 0, 0), at(1, 0, 0), at(1, 1, 0), at(0, 1, 0)].join(" "), label: "Top (XY)", labelAt: [92, 188] }
   ];
-  return <svg className="sketch-plane-diagram" viewBox="0 0 240 190" role="group" aria-label="The three datum planes">
+  return <svg className="sketch-plane-diagram" viewBox="0 0 240 198" role="group" aria-label="The three datum planes">
     {faces.map((face) => <g key={face.plane} className={props.plane === face.plane ? "chosen" : ""} onClick={() => props.onPick(face.plane)}>
       <polygon points={face.points} />
       <text x={face.labelAt[0]} y={face.labelAt[1]}>{face.label}</text>

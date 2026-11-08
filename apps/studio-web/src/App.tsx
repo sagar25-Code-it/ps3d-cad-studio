@@ -863,7 +863,7 @@ export function App(): React.JSX.Element {
     projectHistoryRef.current[projectHistoryIndexRef.current] = next;
     void persistBroadProject(next).catch(() => undefined);
     setStatus("ready");
-    setStatusText(`Opened ${workspace === "automate" ? "Automate" : `${workspace[0]!.toUpperCase()}${workspace.slice(1)}`} workspace without changing engineering revision ${current.revision}.`);
+    setStatusText(`Opened ${workspace === "automate" ? "Automate" : `${workspace[0]!.toUpperCase()}${workspace.slice(1)}`} workspace without changing engineering revision ${current.revision}.${workspace === "sketch" ? ` ${describeSketchPlane(current.sketch).status}` : ""}`);
   };
 
   // Fusion-style sketch entry: starting a sketch that has no geometry yet asks which datum plane to use.
