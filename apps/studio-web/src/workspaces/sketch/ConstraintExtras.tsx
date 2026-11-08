@@ -136,7 +136,7 @@ function ExtraDimensionSection(props: ExtrasProps): React.JSX.Element {
     driven: true
   };
   const measured = probe === undefined ? undefined : measureDimensionConstraint(props.sketch, probe);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => (measured === undefined ? "" : format(measured)));
   const key = target === undefined ? "" : `${target.name}:${probe!.entityIds.join("|")}`;
   useEffect(() => { setText(measured === undefined ? "" : format(measured)); }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const existing = props.sketch.constraints.filter((constraint) => (constraint.kind === "angle" || constraint.kind === "arc-length" || constraint.kind === "perimeter") && constraint.entityIds.some((id) => props.selected.some((entity) => entity.id === id)));
