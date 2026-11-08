@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SOLVABLE_POINT_REFS, constraintFit, planeWorldCoordinate, type DesignExtentTarget, type GeneralSolidBody, type ConstraintFit, type SketchDatumPlane, type SketchDimensionName, type SketchEntity, type SketchConstraintKind, type SketchPointRef, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
+import { SOLVABLE_POINT_REFS, SPLINE_MAX_FIT_POINTS, constraintFit, planeWorldCoordinate, type DesignExtentTarget, type GeneralSolidBody, type ConstraintFit, type SketchDatumPlane, type SketchDimensionName, type SketchEntity, type SketchConstraintKind, type SketchPointRef, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
 import {
   analyzeWorkbenchSketch,
   buildSketchEntity,
@@ -17,6 +17,8 @@ import {
   type SketchTool
 } from "../../../../packages/workbench-sketch/src/index.js";
 import { gridSteps, sketchToScreen } from "../../../../packages/workbench-sketch/src/camera.js";
+import { advanceArcSweepTrack, arcSweepDirection, startArcSweepTrack, type ArcSweepTrack } from "../../../../packages/workbench-sketch/src/arc-sweep.js";
+import { mergeTyped, typedIntentConstraints } from "../../../../packages/workbench-sketch/src/typed-intent.js";
 import { dynamicFieldsFor, measureFromCursor, parseDynamicNumber, pointFromDynamicInput, type DynamicFieldId, type DynamicValues } from "../../../../packages/workbench-sketch/src/dynamic-input.js";
 import { sketchCurvatureCombs } from "../../../../packages/workbench-sketch/src/curvature-comb.js";
 import { constraintsOnEntities, extendAt, nearestEntityId, trimAt, type SketchEditPlan } from "../../../../packages/workbench-sketch/src/edit-tools.js";
@@ -282,6 +284,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // The first point of the line chain being drawn and how many segments it has, so a line that ends where it began closes the loop.
   const chainStart = useRef<Vec2 | undefined>(undefined);
   const chainSegments = useRef(0);
+  /** Centerpoint arc: how far the pointer has travelled round the centre since the start click, which fixes the arc's direction (it may pass 180 degrees). */
+  const arcTrack = useRef<ArcSweepTrack | undefined>(undefined);
+  /** Dynamic-input fields typed so far in the shape being drawn, so the finished shape can keep them as dimensions and relations. */
+  const typedTrail = useRef<DynamicValues>({});
+  const arcBuildOptions = (): { readonly sweepDirection?: 1 | -1 } => {
+    const direction = props.tool === "arc-center" ? arcSweepDirection(arcTrack.current) : undefined;
+    return direction === undefined ? {} : { sweepDirection: direction };
+  };
   const [pointerInside, setPointerInside] = useState(false);
   const [selectionIds, setSelectionIds] = useState<readonly string[]>(props.selectedId === null ? [] : [props.selectedId]);
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -433,7 +443,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         : undefined;
     }
     if (pending.length === required - 1) {
-      const preview = buildSketchEntity(props.tool, [...pending, cursor], "entity:tool-preview");
+      const preview = buildSketchEntity(props.tool, [...pending, cursor], "entity:tool-preview", arcBuildOptions());
       return preview.ok ? preview.value : undefined;
     }
     // Before the last point of a three-point tool, show the first edge as a rubber band so the next click is predictable.
@@ -538,7 +548,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [props.sketch, props.tool, props.cancelVersion]);
   useEffect(() => setPending([]), [props.tool, props.cancelVersion]);
   useEffect(() => {
-    if (pending.length === 0) { chainStart.current = undefined; chainSegments.current = 0; profileChain.current = undefined; setPendingInference([]); }
+    if (pending.length === 0) { chainStart.current = undefined; chainSegments.current = 0; profileChain.current = undefined; arcTrack.current = undefined; typedTrail.current = {}; setPendingInference([]); }
   }, [pending.length]);
   // Starting a drawing tool, Sketch Dimension or an edit tool ends relation picking; switching to Select (which picking itself does) does not.
   useEffect(() => {
@@ -585,6 +595,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       : { point, snapped: false, guides: [] };
     const snapped = { point: result.point, snapped: result.snapped, label: result.primary === undefined ? "" : INFERENCE_LABELS[result.primary.kind].toLowerCase() };
     setCursor(snapped.point);
+    if (props.tool === "arc-center" && pending.length === 2) arcTrack.current = advanceArcSweepTrack(arcTrack.current ?? startArcSweepTrack(pending[0]!, pending[1]!), pending[0]!, snapped.point);
     setInference(placing ? result : undefined);
     if (!commit) return;
     if (isClickEditTool(props.editTool) && props.tool === "select") {
@@ -619,7 +630,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       const gap = last === undefined ? Infinity : Math.hypot(snapped.point[0] - last[0], snapped.point[1] - last[1]);
       if (pending.length >= 3 && gap <= PICK_PIXELS * px) { finishSpline(pending); return; }
       if (gap < 0.01) return;
-      if (pending.length >= 24) { props.onMessage("A spline takes at most 24 fit points. Click the last point again or press Enter to finish."); return; }
+      if (pending.length >= SPLINE_MAX_FIT_POINTS) { props.onMessage(`A spline takes at most ${SPLINE_MAX_FIT_POINTS} fit points. Click the last point again or press Enter to finish.`); return; }
       const next = [...pending, snapped.point];
       setPending(next);
       props.onMessage(`Fit-point spline: point ${next.length} accepted.${next.length >= 3 ? " Click the last point again or press Enter to finish." : ""}`);
@@ -638,9 +649,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
 
   /** Places one point of the active tool: a click, or Enter on typed values. A finished shape is added to the sketch. */
-  const placePoint = (point: Vec2, label: string, found?: InferenceResult): void => {
+  const placePoint = (point: Vec2, label: string, found?: InferenceResult, typed?: DynamicValues): void => {
     if (props.tool === "select" || props.tool === "spline" || props.tool === "spline-control") return;
     setFieldText({});
+    if (typed !== undefined) typedTrail.current = mergeTyped(typedTrail.current, typed);
     if (props.tool === "profile") { placeProfilePoint(point); return; }
     const points = [...pending, point];
     const previous = pending.at(-1);
@@ -649,6 +661,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       { point, ...(found?.primary === undefined ? {} : { primary: found.primary }), ...(found === undefined ? {} : { guides: found.guides }), ...(previous === undefined ? {} : { anchor: previous }) }
     ];
     if (points.length === 1 && props.tool === "line") { chainStart.current = point; chainSegments.current = 0; }
+    if (props.tool === "arc-center" && points.length === 2) arcTrack.current = startArcSweepTrack(points[0]!, points[1]!);
     if (points.length < requiredSketchPoints(props.tool)) {
       setPending(points);
       setPendingInference(placed);
@@ -668,14 +681,20 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       props.onMessage(`Added ${sketchToolLabel(props.tool).toLowerCase()} with ${shape.value.entities.length} curve${shape.value.entities.length === 1 ? "" : "s"} and ${shape.value.constraints.length} relation${shape.value.constraints.length === 1 ? "" : "s"}.`);
       return;
     }
-    const built = buildSketchEntity(props.tool, points, `entity:user-${crypto.randomUUID()}`);
+    if (props.tool === "arc-center" && arcTrack.current !== undefined) arcTrack.current = advanceArcSweepTrack(arcTrack.current, points[0]!, point);
+    const built = buildSketchEntity(props.tool, points, `entity:user-${crypto.randomUUID()}`, arcBuildOptions());
     if (!built.ok) {
       // Keep the points already placed so one bad click does not throw the whole gesture away.
       props.onMessage(`${built.diagnostics[0]?.message ?? "Sketch entity rejected."} Place the last point somewhere else, or press Esc to start over.`);
       return;
     }
     // A shape whose points snapped to other geometry is added together with the relations that implies, in one undoable edit.
-    const relations = autoConstrain ? autoConstraintsFor({ tool: props.tool, entity: built.value, placed, sketch: props.sketch, newId: () => `constraint:auto-${crypto.randomUUID()}` }) : [];
+    const snappedRelations = autoConstrain ? autoConstraintsFor({ tool: props.tool, entity: built.value, placed, sketch: props.sketch, newId: () => `constraint:auto-${crypto.randomUUID()}` }) : [];
+    // A value the user typed is design intent: it becomes a driving dimension, and a typed 0 or 90 degrees becomes Horizontal or Vertical.
+    const typedRelations = typedIntentConstraints({ tool: props.tool, entity: built.value, typed: typedTrail.current, newId: () => `constraint:typed-${crypto.randomUUID()}` })
+      .filter((relation) => !snappedRelations.some((existing) => existing.kind === relation.kind && relation.dimension === undefined));
+    typedTrail.current = {};
+    const relations = [...snappedRelations, ...typedRelations];
     let accepted: boolean | void = undefined;
     if (relations.length > 0) {
       accepted = applyDrawn({ label: `Added ${sketchToolLabel(props.tool)} with ${relations.length} relation${relations.length === 1 ? "" : "s"}`, removeEntityIds: [], updateEntities: [], addEntities: [built.value], addConstraints: relations });
@@ -720,7 +739,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const target = pointFromDynamicInput(props.tool, pending, cursor, typed);
     if (target === undefined) { props.onMessage("Type a size greater than zero, or click to place the point."); return; }
     setDynamicFocused(false);
-    placePoint(target, "typed");
+    placePoint(target, "typed", undefined, typed);
   };
 
   const finishSpline = (points: readonly Vec2[]): void => {
