@@ -96,6 +96,8 @@ export interface CreateGeneralSolidRequest {
   readonly sweepPathSamplesMm?: readonly (readonly [number, number])[];
   /** Sweep only: twist in degrees across the whole sweep. */
   readonly sweepTwistDeg?: number;
+  /** Sweep-along-path only: when true, each ring is reoriented perpendicular to the path's local tangent. */
+  readonly sweepFrameTransport?: boolean;
   /** Loft only: top scale factor (>0). */
   readonly loftTopScale?: number;
   /** Loft only: an explicit top profile (same sketch). When set, `loftTopScale` is ignored and two-profile loft is used. */
@@ -104,6 +106,8 @@ export interface CreateGeneralSolidRequest {
   readonly loftContinuity?: "position" | "tangent" | "curvature";
   /** Loft only: already-sampled rail path in local 2D mm (one sample per ring). */
   readonly loftRailSamplesMm?: readonly (readonly [number, number])[];
+  /** Loft two-profile only: strength of the G1/G2 ease curve (0 reverts to linear, 1 is the plain ease, up to 2 over-applies it). */
+  readonly loftTangencyWeight?: number;
   /** Shell only: wall thickness in mm (the inset the inner cavity is offset by). */
   readonly shellThicknessMm?: number;
   /** Shell only: which cap face to leave open. */
@@ -214,8 +218,9 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
   }
   if (request.operation === "sweep") {
     const twist = request.sweepTwistDeg ?? 0;
+    const frameTransport = request.sweepFrameTransport ?? false;
     if (request.sweepPathSamplesMm !== undefined && request.sweepPathSamplesMm.length >= 2) {
-      const mesh = tessellateSweepPath(polygonMm, request.sweepPathSamplesMm, request.valueMm, request.plane, twist);
+      const mesh = tessellateSweepPath(polygonMm, request.sweepPathSamplesMm, request.valueMm, request.plane, twist, frameTransport);
       if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be swept along the path." };
       return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
     }
@@ -234,7 +239,8 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
       const topPolygon = profilePolygonMm(request.loftSecondaryProfile.boundary);
       if (topPolygon.length < 3) return { ok: false, message: "The top profile does not form a closed polygon." };
       const continuity = request.loftContinuity ?? "position";
-      const mesh = tessellateLoftTwoProfiles(polygonMm, topPolygon, request.valueMm, continuity, request.plane, 12, request.loftRailSamplesMm);
+      const tangencyWeight = request.loftTangencyWeight ?? 1;
+      const mesh = tessellateLoftTwoProfiles(polygonMm, topPolygon, request.valueMm, continuity, request.plane, 12, request.loftRailSamplesMm, tangencyWeight);
       if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profiles could not be lofted. Check both have at least three points and a non-zero height." };
       return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
     }

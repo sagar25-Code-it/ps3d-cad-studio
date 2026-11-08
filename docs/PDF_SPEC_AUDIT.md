@@ -90,8 +90,8 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 |---|---|---|
 | Extrude (Boss / Cut, Pad / Pocket, One-side, Symmetric, Through-all, To-face) | Partial | One-side, Symmetric, Flipped and Through-all for a cut shipped. To-face and To-vertex missing. |
 | Revolve (One / Two / Symmetric / Thin, To-first / To-last) | Partial | Base revolve shipped; thin wall and "to" terminations missing |
-| Sweep (section along path with twist control) | Partial | Linear sweep (`sweepDirectionMm`), path-guided sweep along a sketch line/arc/spline (`sweepPathEntityId`) and twist control (`sweepTwistDeg`, degrees across the whole sweep about the profile centroid) are all shipped; perpendicular-to-tangent frame transport is still out — the profile stays in its sketch-plane orientation at every sample |
-| Loft / Boundary (G0/G1/G2 continuity, rails, tangency weight) | Partial | Scaled-top loft (`loftTopScale`) and two-profile loft (`loftSecondaryProfileIds`) are shipped with G0 / G1 / G2 continuity (linear / smoothstep / smootherstep), auto-resampling across mismatched vertex counts, and an optional guide-curve rail (`loftRailEntityId`) that bends ring centroids away from the straight interpolation; tangency-weight control is still out |
+| Sweep (section along path with twist control) | Shipped | Linear sweep (`sweepDirectionMm`), path-guided sweep along a sketch line/arc/spline (`sweepPathEntityId`), twist control (`sweepTwistDeg`, degrees across the whole sweep about the profile centroid) and perpendicular-to-tangent frame transport (`sweepFrameTransport`, central-differenced tangent per sample so the profile sits ⟂ to the path) are all shipped |
+| Loft / Boundary (G0/G1/G2 continuity, rails, tangency weight) | Shipped | Scaled-top loft (`loftTopScale`) and two-profile loft (`loftSecondaryProfileIds`) are shipped with G0 / G1 / G2 continuity (linear / smoothstep / smootherstep), auto-resampling across mismatched vertex counts, an optional guide-curve rail (`loftRailEntityId`) that bends ring centroids away from the straight interpolation, and tangency-weight control (`loftTangencyWeight`, 0 → linear / 1 → full G1/G2 / 2 → punchy middle) |
 | Helix / Coil / Thread | Missing | |
 | Rib, Web, Emboss, Wrap | Missing | |
 | Solid primitives (Box, Cylinder, Sphere, Cone, Torus, Ellipsoid, Prism, Wedge, Spiral, Tube) | Partial | Box, Cylinder, Sphere, Cone and Torus shipped (see `PartPreviewBodyShape` and `torusMesh`); Ellipsoid / Prism / Wedge / Spiral / Tube still missing |
@@ -104,7 +104,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Draft | Partial | `DesignSolidFeature.kind: "draft"` produces a tapered prism with `draftAngleDeg` and `draftNeutralFace`; per-face selection is still out — the taper applies uniformly to every side face |
 | Linear / Circular / Mirror pattern | Partial | `pattern-part-feature` and `mirror-part-feature` on the template plate; no general-body pattern |
 | Surface / Patch tools, T-Splines | Missing | Surface workspace is a bezier preview, not a full surfacing layer |
-| Synchronous direct editing (Move / Pull / Offset region / Replace face) | Missing | |
+| Synchronous direct editing (Move / Pull / Offset region / Replace face) | Partial | Move Body and Scale Body direct-edit feature kinds (`kind: "move-body"` / `"scale-body"`, `operation: "direct-edit"`) are shipped as first-class timeline steps that replay in order against the current body — Move translates every vertex by a stored (dx, dy, dz) delta, Scale uniformly scales about the body's current centroid. Pull/Offset face and Replace face still need a face picker and face-normal propagation |
 
 ## 6. Construction geometry (datums)
 

@@ -1,5 +1,5 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
-import { dependentsOf, designOf, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
+import { dependentsOf, designOf, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 
@@ -38,6 +38,9 @@ function shifted(body: GeneralSolidBody, normal: readonly [number, number, numbe
 
 /** Builds the solid a feature describes from the sketch snapshot it is based on. For a join or cut this is the tool solid. */
 export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature, color = "#b9c2c8"): Promise<SolidRebuild> {
+  if (feature.kind === "move-body" || feature.kind === "scale-body") {
+    return { ok: false, message: "A direct-edit step (move-body / scale-body) is applied during timeline replay, not through the sketch-driven builder." };
+  }
   const sketch = sketchFeature.sketch;
   const profiles = detectSketchProfiles(sketch);
   const missing = feature.profileIds.find((id) => !profiles.some((profile) => profile.id === id));
@@ -81,6 +84,8 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
       return samples.length >= 2 ? { loftRailSamplesMm: samples } : {};
     })() : {}),
     ...(feature.kind === "sweep" && feature.sweepTwistDeg !== undefined ? { sweepTwistDeg: feature.sweepTwistDeg } : {}),
+    ...(feature.kind === "sweep" && feature.sweepFrameTransport !== undefined ? { sweepFrameTransport: feature.sweepFrameTransport } : {}),
+    ...(feature.kind === "loft" && feature.loftTangencyWeight !== undefined ? { loftTangencyWeight: feature.loftTangencyWeight } : {}),
     ...(feature.kind === "shell" && feature.shellThicknessMm !== undefined ? { shellThicknessMm: feature.shellThicknessMm } : {}),
     ...(feature.kind === "shell" && feature.shellOpenFace !== undefined ? { shellOpenFace: feature.shellOpenFace } : {}),
     ...(feature.kind === "draft" && feature.draftAngleDeg !== undefined ? { draftAngleDeg: feature.draftAngleDeg } : {}),
@@ -137,6 +142,13 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
   for (const step of steps) {
     // A lone body is rebuilt whatever its state; the steps of a chain only while they are live.
     if (chained && !isFeatureActive(history, step.id)) continue;
+    // Direct-edit steps (move-body / scale-body) transform the current body in place instead of rebuilding from a sketch.
+    if (isDirectEditFeature(step)) {
+      if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this step changes could not be built, so there is nothing to modify." }); continue; }
+      current = applyDirectEdit(step, current);
+      outcomes.set(step.id, { featureId: step.id });
+      continue;
+    }
     const sketchFeature = history.features.find((candidate): candidate is DesignSketchFeature => candidate.id === step.sketchFeatureId && candidate.kind === "sketch");
     if (sketchFeature === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sketch this feature was built on is no longer in the timeline." }); continue; }
     const modifies = modifiesBody(step);
@@ -145,6 +157,7 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
     if (!built.ok) { outcomes.set(step.id, { featureId: step.id, message: built.message }); continue; }
     if (!modifies) { current = built.body; outcomes.set(step.id, { featureId: step.id }); continue; }
     if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this step changes could not be built, so there is nothing to modify." }); continue; }
+    if (step.operation !== "join" && step.operation !== "cut") { outcomes.set(step.id, { featureId: step.id, message: "The modifier step has no boolean operation set." }); continue; }
     const combined = await combineGeneralBodies({ target: current, tool: built.body, mode: step.operation, bodyId, name: current.name });
     if (!combined.ok) { outcomes.set(step.id, { featureId: step.id, message: combined.message }); continue; }
     current = { ...combined.body, color: current.color };
@@ -177,4 +190,39 @@ export async function rebuildDependents(project: WorkbenchProject, sketchFeature
 /** Whether any step of the design joins or cuts, which is when a change to the timeline has to be replayed rather than just shown or hidden. */
 export function hasModifiers(project: WorkbenchProject): boolean {
   return designOf(project).features.some((feature: DesignFeature) => modifiesBody(feature));
+}
+
+/**
+ * Apply a direct-edit step (move-body or scale-body) to the current body of a timeline replay. The operation runs in
+ * place on the mesh positions: move translates every vertex by a world-space delta, scale shrinks or grows every vertex
+ * about the body's current centroid. Both operations leave the index buffer and face names untouched, so the step is
+ * reversible: deleting the step rolls the body back to its previous shape.
+ */
+export function applyDirectEdit(feature: DesignSolidFeature & { readonly kind: "move-body" | "scale-body" }, body: GeneralSolidBody): GeneralSolidBody {
+  if (feature.kind === "move-body") {
+    const delta = feature.moveDeltaMm ?? [0, 0, 0];
+    if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) return body;
+    const positionsMm = body.positionsMm.map((value, index) => value + delta[index % 3]!);
+    return { ...body, positionsMm };
+  }
+  const scale = feature.scaleFactor ?? 1;
+  if (scale === 1) return body;
+  // Centroid of all vertices (not area-weighted — a direct edit is a user action, not a solid-manifold operation).
+  let cx = 0;
+  let cy = 0;
+  let cz = 0;
+  const count = body.positionsMm.length / 3;
+  if (count === 0) return body;
+  for (let index = 0; index < body.positionsMm.length; index += 3) {
+    cx += body.positionsMm[index]!;
+    cy += body.positionsMm[index + 1]!;
+    cz += body.positionsMm[index + 2]!;
+  }
+  cx /= count; cy /= count; cz /= count;
+  const positionsMm = body.positionsMm.map((value, index) => {
+    const axis = index % 3;
+    const center = axis === 0 ? cx : axis === 1 ? cy : cz;
+    return center + (value - center) * scale;
+  });
+  return { ...body, positionsMm };
 }

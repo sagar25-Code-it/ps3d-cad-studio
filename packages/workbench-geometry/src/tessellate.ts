@@ -192,7 +192,7 @@ export function tessellateLoft(polygonMm: readonly Point2[], topScale: number, t
  * For a line path this reproduces a slanted prism; for an arc or spline path it traces the curvature. The caller
  * samples the path entity into at least two points; three or more give a visible curve.
  */
-export function tessellateSweepPath(polygonMm: readonly Point2[], pathSamples: readonly Point2[], heightMm: number, plane: TessellatePlane, twistDeg = 0): TessellatedMesh {
+export function tessellateSweepPath(polygonMm: readonly Point2[], pathSamples: readonly Point2[], heightMm: number, plane: TessellatePlane, twistDeg = 0, frameTransport = false): TessellatedMesh {
   const polygon = sanitizePolygon(polygonMm);
   if (polygon.length < 3 || pathSamples.length < 2) return { positionsMm: [], indices: [] };
   if (!Number.isFinite(heightMm) || heightMm === 0) return { positionsMm: [], indices: [] };
@@ -201,20 +201,46 @@ export function tessellateSweepPath(polygonMm: readonly Point2[], pathSamples: r
   const count = polygon.length;
   const centroid = polygonCentroid(polygon);
   const twistRad = (Number.isFinite(twistDeg) ? twistDeg : 0) * Math.PI / 180;
+  // Frenet transport: local tangent per sample, central differences inside, one-sided at the endpoints.
+  const tangents: Point2[] = frameTransport
+    ? pathSamples.map((_, i) => {
+      const previous = pathSamples[Math.max(0, i - 1)]!;
+      const next = pathSamples[Math.min(pathSamples.length - 1, i + 1)]!;
+      const dx = next[0] - previous[0];
+      const dy = next[1] - previous[1];
+      const length = Math.hypot(dx, dy);
+      return (length < 1e-9 ? [1, 0] : [dx / length, dy / length]) as Point2;
+    })
+    : [];
   const positions: number[] = [];
   for (let s = 0; s < pathSamples.length; s += 1) {
     const sample = pathSamples[s]!;
-    const dx = sample[0] - start[0];
-    const dy = sample[1] - start[1];
-    const z = height * (s / (pathSamples.length - 1));
     const t = s / (pathSamples.length - 1);
     const theta = twistRad * t;
     const sinT = Math.sin(theta);
     const cosT = Math.cos(theta);
-    for (const [px, py] of polygon) {
-      const rx = px - centroid[0];
-      const ry = py - centroid[1];
-      positions.push(centroid[0] + rx * cosT - ry * sinT + dx, centroid[1] + rx * sinT + ry * cosT + dy, z);
+    if (frameTransport) {
+      const tangent = tangents[s]!;
+      // In-plane perpendicular (profile X → this axis) and out-of-plane (profile Y → sketch-plane +Z).
+      const perpendX = -tangent[1];
+      const perpendY = tangent[0];
+      for (const [px, py] of polygon) {
+        // Twist is applied in the profile-local frame about the centroid before placement.
+        const dx = px - centroid[0];
+        const dy = py - centroid[1];
+        const tdx = dx * cosT - dy * sinT;
+        const tdy = dx * sinT + dy * cosT;
+        positions.push(sample[0] + tdx * perpendX, sample[1] + tdx * perpendY, tdy);
+      }
+    } else {
+      const dx = sample[0] - start[0];
+      const dy = sample[1] - start[1];
+      const z = height * t;
+      for (const [px, py] of polygon) {
+        const rx = px - centroid[0];
+        const ry = py - centroid[1];
+        positions.push(centroid[0] + rx * cosT - ry * sinT + dx, centroid[1] + rx * sinT + ry * cosT + dy, z);
+      }
     }
   }
   const capTriangles = triangulatePolygon(polygon);
@@ -322,7 +348,7 @@ export function resampleClosedPolygon(polygon: readonly Point2[], targetCount: n
  * tangentially (G1), and "curvature" eases with smootherstep `6t⁵−15t⁴+10t³` so the second derivative is also zero at
  * each cap (G2). The Z coordinate stays linear with t so the caps keep their intended heights.
  */
-export function tessellateLoftTwoProfiles(bottom: readonly Point2[], top: readonly Point2[], heightMm: number, continuity: "position" | "tangent" | "curvature", plane: TessellatePlane, rings = 12, railSamples?: readonly Point2[]): TessellatedMesh {
+export function tessellateLoftTwoProfiles(bottom: readonly Point2[], top: readonly Point2[], heightMm: number, continuity: "position" | "tangent" | "curvature", plane: TessellatePlane, rings = 12, railSamples?: readonly Point2[], tangencyWeight = 1): TessellatedMesh {
   let bottomClean = sanitizePolygon(bottom);
   let topClean = sanitizePolygon(top);
   if (bottomClean.length < 3 || topClean.length < 3) return { positionsMm: [], indices: [] };
@@ -339,11 +365,12 @@ export function tessellateLoftTwoProfiles(bottom: readonly Point2[], top: readon
   const sampleCount = (continuity === "position" && railSamples === undefined) ? 2 : Math.max(2, rings);
   const count = bottomClean.length;
   const positions: number[] = [];
-  const ease = continuity === "position"
-    ? (t: number): number => t
-    : continuity === "tangent"
-      ? (t: number): number => t * t * (3 - 2 * t)
-      : (t: number): number => t * t * t * (t * (t * 6 - 15) + 10);
+  // Tangency weight: 0 falls back to linear, 1 is the plain G1/G2 ease, up to 2 over-applies it for a punchier middle.
+  const weight = continuity === "position" ? 0 : Math.max(0, Math.min(2, Number.isFinite(tangencyWeight) ? tangencyWeight : 1));
+  const smoothstep = (t: number): number => t * t * (3 - 2 * t);
+  const smootherstep = (t: number): number => t * t * t * (t * (t * 6 - 15) + 10);
+  const target = continuity === "curvature" ? smootherstep : smoothstep;
+  const ease = (t: number): number => t + weight * (target(t) - t);
   // The straight-line centroid interpolation is what the rail bends away from.
   const bottomCentroid = polygonCentroid(bottomClean);
   const topCentroid = polygonCentroid(topClean);

@@ -970,7 +970,7 @@ export interface DesignSketchFeature extends DesignFeatureBase {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
@@ -982,9 +982,11 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   /**
    * What the feature does with the solid it builds. Absent (or "new-body") makes a body of its own. A "join" or "cut"
    * adds to or removes from the body named by `bodyId`, which an earlier new-body step made, and replays in timeline order.
-   * Modifier kinds (edge-fillet/chamfer/shell/draft) always modify the target body in place; this field is left absent for them.
+   * "direct-edit" is for the synchronous direct-edit kinds (move-body, scale-body) which transform the target body in
+   * place without building a tool solid. Modifier kinds (edge-fillet/chamfer/shell/draft) always modify the target body in
+   * place; this field is left absent for them.
    */
-  readonly operation?: "new-body" | "join" | "cut";
+  readonly operation?: "new-body" | "join" | "cut" | "direct-edit";
   /**
    * How far an extruded cut reaches. Absent (or "distance") uses `valueMm`; "through-all" ignores the distance and
    * cuts through the whole body on both sides of the sketch plane, however the body later changes size.
@@ -1026,6 +1028,23 @@ export interface DesignSolidFeature extends DesignFeatureBase {
    * t along the sweep each ring is rotated by `t * twistDeg` before placement; 0 keeps the un-twisted behaviour.
    */
   readonly sweepTwistDeg?: number;
+  /**
+   * Sweep-along-path only: when true, each ring is reoriented so the profile sits perpendicular to the path's local
+   * tangent (a Frenet-like frame). The profile's local X axis follows the path's in-plane perpendicular, the local Y
+   * axis follows the plane's out-of-plane direction, and the ring normal is the path tangent. Omitted or false keeps
+   * the old behaviour (every ring stays parallel to the sketch plane).
+   */
+  readonly sweepFrameTransport?: boolean;
+  /**
+   * Loft two-profile only: how strongly the G1/G2 ease curve pulls the ribbon away from the straight line. 0 reverts
+   * to linear (G0) regardless of continuity, 1 (the default) is the plain G1/G2 ease, and values up to 2 over-apply
+   * the ease for a punchier middle bulge. For the G0 "position" continuity this field has no effect.
+   */
+  readonly loftTangencyWeight?: number;
+  /** Direct-edit (move-body) only: translation vector in millimetres applied to every vertex of the target body. */
+  readonly moveDeltaMm?: readonly [number, number, number];
+  /** Direct-edit (scale-body) only: uniform scale factor about the target body's centroid. 1 is a no-op; 0 or negative are refused. */
+  readonly scaleFactor?: number;
   /** Shell only: which cap face to leave open. */
   readonly shellOpenFace?: "top" | "bottom" | "none";
   /** Shell only: the wall thickness in mm (the inset the inner cavity is offset by). */

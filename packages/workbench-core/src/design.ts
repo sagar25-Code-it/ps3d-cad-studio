@@ -47,9 +47,16 @@ export function isSolidFeature(feature: DesignFeature): feature is DesignSolidFe
   return feature.kind !== "sketch";
 }
 
-/** A join or cut changes a body that an earlier step made; every other solid step makes a body of its own. */
-export function modifiesBody(feature: DesignFeature): feature is DesignSolidFeature & { readonly operation: "join" | "cut" } {
-  return feature.kind !== "sketch" && (feature.operation === "join" || feature.operation === "cut");
+/** A join, cut, or direct-edit changes a body that an earlier step made; every other solid step makes a body of its own. */
+export function modifiesBody(feature: DesignFeature): feature is DesignSolidFeature & { readonly operation: "join" | "cut" | "direct-edit" } {
+  if (feature.kind === "sketch") return false;
+  if (feature.kind === "move-body" || feature.kind === "scale-body") return true;
+  return feature.operation === "join" || feature.operation === "cut";
+}
+
+/** Direct-edit feature kinds that transform a body in place (not a sketch-driven rebuild). */
+export function isDirectEditFeature(feature: DesignFeature): feature is DesignSolidFeature & { readonly kind: "move-body" | "scale-body" } {
+  return feature.kind !== "sketch" && (feature.kind === "move-body" || feature.kind === "scale-body");
 }
 
 /** The step that made a body (its new-body step), if that step is still in the timeline. */
@@ -285,14 +292,14 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
-  if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut"].includes(String(value.operation))) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
+  if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
   if (Object.hasOwn(value, "extent")) {
     // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
     if (!["distance", "through-all"].includes(String(value.extent))) return false;
     if (value.extent === "through-all" && (value.kind !== "extrude" || value.operation !== "cut")) return false;
   }
-  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
+  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
   if (typeof value.valueMm !== "number" || !Number.isFinite(value.valueMm) || value.valueMm === 0 || Math.abs(value.valueMm) > 100_000) return false;
@@ -317,6 +324,28 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (Object.hasOwn(value, "sweepTwistDeg")) {
     if (value.kind !== "sweep" || typeof value.sweepTwistDeg !== "number" || !Number.isFinite(value.sweepTwistDeg) || Math.abs(value.sweepTwistDeg) > 3600) return false;
   }
+  if (Object.hasOwn(value, "sweepFrameTransport")) {
+    if (value.kind !== "sweep" || typeof value.sweepFrameTransport !== "boolean") return false;
+  }
+  if (Object.hasOwn(value, "loftTangencyWeight")) {
+    if (value.kind !== "loft" || typeof value.loftTangencyWeight !== "number" || !Number.isFinite(value.loftTangencyWeight) || value.loftTangencyWeight < 0 || value.loftTangencyWeight > 2) return false;
+  }
+  if (Object.hasOwn(value, "moveDeltaMm")) {
+    if (value.kind !== "move-body") return false;
+    const delta = value.moveDeltaMm;
+    if (!Array.isArray(delta) || delta.length !== 3 || delta.some((component) => typeof component !== "number" || !Number.isFinite(component) || Math.abs(component) > 100_000)) return false;
+  }
+  if (Object.hasOwn(value, "scaleFactor")) {
+    if (value.kind !== "scale-body" || typeof value.scaleFactor !== "number" || !Number.isFinite(value.scaleFactor) || value.scaleFactor <= 0 || value.scaleFactor > 100) return false;
+  }
+  // Direct-edit kinds carry operation "direct-edit" and act on an existing body.
+  if (value.kind === "move-body") {
+    if (value.operation !== "direct-edit" || !Object.hasOwn(value, "moveDeltaMm")) return false;
+  }
+  if (value.kind === "scale-body") {
+    if (value.operation !== "direct-edit" || !Object.hasOwn(value, "scaleFactor")) return false;
+  }
+  if (value.operation === "direct-edit" && value.kind !== "move-body" && value.kind !== "scale-body") return false;
   if (Object.hasOwn(value, "loftRailEntityId")) {
     if (value.kind !== "loft" || typeof value.loftRailEntityId !== "string" || value.loftRailEntityId.length === 0 || value.loftRailEntityId.length > 160) return false;
   }

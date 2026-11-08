@@ -150,10 +150,12 @@ interface SketchWorkspaceProps {
       readonly sweepDirectionMm?: readonly [number, number, number];
       readonly sweepPathEntityId?: string;
       readonly sweepTwistDeg?: number;
+      readonly sweepFrameTransport?: boolean;
       readonly loftTopScale?: number;
       readonly loftSecondaryProfileIds?: readonly string[];
       readonly loftContinuity?: "position" | "tangent" | "curvature";
       readonly loftRailEntityId?: string;
+      readonly loftTangencyWeight?: number;
       readonly shellThicknessMm?: number;
       readonly shellOpenFace?: "top" | "bottom" | "none";
       readonly draftAngleDeg?: number;
@@ -250,7 +252,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [loftMode, setLoftMode] = useState<"scaled" | "two-profile">("scaled");
   const [loftContinuity, setLoftContinuity] = useState<"position" | "tangent" | "curvature">("position");
   const [loftRailEntityId, setLoftRailEntityId] = useState<string>("");
+  const [loftTangencyWeight, setLoftTangencyWeight] = useState("1");
   const [sweepTwist, setSweepTwist] = useState("0");
+  const [sweepFrameTransport, setSweepFrameTransport] = useState(false);
   const [modifierEdgeSize, setModifierEdgeSize] = useState("1");
   const [shellThickness, setShellThickness] = useState("2");
   const [shellOpenFace, setShellOpenFace] = useState<"top" | "bottom" | "none">("top");
@@ -1230,6 +1234,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             <input aria-label="Sweep twist in degrees" type="number" min={-3600} max={3600} step={5} value={sweepTwist} onChange={(event) => setSweepTwist(event.target.value)} />
             <small>°</small>
           </div>}
+          {solidOp === "sweep" && sweepMode === "path" && <div className="make-solid-row" aria-label="Sweep frame transport">
+            <label>
+              <input aria-label="Sweep frame transport (perpendicular to tangent)" type="checkbox" checked={sweepFrameTransport} onChange={(event) => setSweepFrameTransport(event.target.checked)} />
+              <small> ⟂ tangent (Frenet transport)</small>
+            </label>
+          </div>}
+          {solidOp === "loft" && loftMode === "two-profile" && loftContinuity !== "position" && <div className="make-solid-row" aria-label="Loft tangency weight">
+            <small>Tangency</small>
+            <input aria-label="Loft tangency weight" type="number" min={0} max={2} step={0.1} value={loftTangencyWeight} onChange={(event) => setLoftTangencyWeight(event.target.value)} />
+            <small>0 → linear · 1 → full G1/G2 · 2 → punchy</small>
+          </div>}
           {(solidOp === "edge-fillet" || solidOp === "edge-chamfer") && <div className="make-solid-row" aria-label="Edge treatment size">
             <small>{solidOp === "edge-fillet" ? "Radius" : "Distance"}</small>
             <input aria-label={solidOp === "edge-fillet" ? "Fillet radius in millimetres" : "Chamfer distance in millimetres"} type="number" min={0.1} step={0.5} value={modifierEdgeSize} onChange={(event) => setModifierEdgeSize(event.target.value)} />
@@ -1265,16 +1280,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           </div>}
           <button className="palette-action primary" disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying) || (solidOp !== "extrude" && solidOp !== "revolve" && solidResult !== "new-body")} onClick={() => {
             const sweepTwistValue = Number(sweepTwist);
+            const loftTangencyWeightValue = Number(loftTangencyWeight);
             const advanced = solidOp === "sweep"
               ? {
                 ...(sweepMode === "path" && sweepPathEntityId !== ""
-                  ? { sweepPathEntityId }
+                  ? { sweepPathEntityId, ...(sweepFrameTransport ? { sweepFrameTransport: true } : {}) }
                   : { sweepDirectionMm: [Number(sweepDx), Number(sweepDy), Number(sweepDz)] as const }),
                 ...(Number.isFinite(sweepTwistValue) && sweepTwistValue !== 0 ? { sweepTwistDeg: sweepTwistValue } : {})
               }
               : solidOp === "loft"
                 ? (loftMode === "two-profile" && selectedProfileIds.length >= 2
-                  ? { loftSecondaryProfileIds: selectedProfileIds.slice(1), loftContinuity, ...(loftRailEntityId !== "" ? { loftRailEntityId } : {}) }
+                  ? { loftSecondaryProfileIds: selectedProfileIds.slice(1), loftContinuity, ...(loftRailEntityId !== "" ? { loftRailEntityId } : {}), ...(loftContinuity !== "position" && Number.isFinite(loftTangencyWeightValue) && loftTangencyWeightValue !== 1 ? { loftTangencyWeight: loftTangencyWeightValue } : {}) }
                   : { loftTopScale: Number(loftTopScale) })
                 : solidOp === "shell"
                   ? { shellThicknessMm: Number(shellThickness), shellOpenFace }

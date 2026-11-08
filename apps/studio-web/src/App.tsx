@@ -28,6 +28,7 @@ import {
   validateWorkbenchProject,
   type AssemblyTemplateId,
   type CadCommandRecord,
+  baseFeatureOf,
   designOf,
   type ComponentInstance,
   type DesignFeature,
@@ -1101,6 +1102,57 @@ export function App(): React.JSX.Element {
     setStatusText(`Created ${point.name} (point ${ordinal}).`);
   };
 
+  const handleDirectEdit = (mode: "move-body" | "scale-body"): void => {
+    const current = projectRef.current;
+    const bodies = current.part.generalBodies ?? [];
+    const body = bodies.find((candidate) => candidate.id === selectedId) ?? bodies[0];
+    if (body === undefined) { setStatus("ready"); setStatusText(`${mode === "move-body" ? "Move body" : "Scale body"}: create or select a solid body first.`); return; }
+    const history = designOf(current);
+    const base = baseFeatureOf(history, body.id);
+    if (base === undefined) { setStatus("ready"); setStatusText(`${mode === "move-body" ? "Move body" : "Scale body"}: this body is not in the timeline, so a direct edit cannot be recorded.`); return; }
+    const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
+    if (mode === "move-body") {
+      const raw = ask("Translation (dx, dy, dz in mm):", "10, 0, 0");
+      if (raw === null) return;
+      const parts = raw.split(/[,\s]+/).map((part) => Number.parseFloat(part.trim())).filter((value) => Number.isFinite(value));
+      if (parts.length !== 3) { setStatus("ready"); setStatusText("Move body: enter three numbers in millimetres."); return; }
+      const delta: [number, number, number] = [parts[0]!, parts[1]!, parts[2]!];
+      if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) { setStatus("ready"); setStatusText("Move body: delta is zero, nothing to do."); return; }
+      const feature: DesignSolidFeature = {
+        id: `feature:move-body-${crypto.randomUUID()}`,
+        name: `Move ${body.name} (${delta.map((value) => value.toFixed(1)).join(", ")} mm)`,
+        kind: "move-body",
+        suppressed: false,
+        sketchFeatureId: base.sketchFeatureId,
+        profileIds: [],
+        valueMm: Math.max(0.01, Math.hypot(delta[0], delta[1], delta[2])),
+        bodyId: body.id,
+        operation: "direct-edit",
+        moveDeltaMm: delta
+      };
+      void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
+      return;
+    }
+    const raw = ask("Scale factor (e.g. 1.25 for 125%):", "1.25");
+    if (raw === null) return;
+    const factor = Number.parseFloat(raw);
+    if (!Number.isFinite(factor) || factor <= 0 || factor > 100) { setStatus("ready"); setStatusText("Scale body: enter a positive scale factor."); return; }
+    if (factor === 1) { setStatus("ready"); setStatusText("Scale body: factor is 1, nothing to do."); return; }
+    const feature: DesignSolidFeature = {
+      id: `feature:scale-body-${crypto.randomUUID()}`,
+      name: `Scale ${body.name} ×${factor.toFixed(3)}`,
+      kind: "scale-body",
+      suppressed: false,
+      sketchFeatureId: base.sketchFeatureId,
+      profileIds: [],
+      valueMm: Math.max(0.01, factor),
+      bodyId: body.id,
+      operation: "direct-edit",
+      scaleFactor: factor
+    };
+    void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
+  };
+
   const handleModifyGeneralBody = (modifier: "hole" | "fillet" | "chamfer" | "shell"): void => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
@@ -1754,10 +1806,12 @@ export function App(): React.JSX.Element {
       readonly sweepDirectionMm?: readonly [number, number, number];
       readonly sweepPathEntityId?: string;
       readonly sweepTwistDeg?: number;
+      readonly sweepFrameTransport?: boolean;
       readonly loftTopScale?: number;
       readonly loftSecondaryProfileIds?: readonly string[];
       readonly loftContinuity?: "position" | "tangent" | "curvature";
       readonly loftRailEntityId?: string;
+      readonly loftTangencyWeight?: number;
       readonly shellThicknessMm?: number;
       readonly shellOpenFace?: "top" | "bottom" | "none";
       readonly draftAngleDeg?: number;
@@ -1830,7 +1884,9 @@ export function App(): React.JSX.Element {
       ...(operation === "sweep" && advancedParams?.sweepDirectionMm !== undefined && (advancedParams.sweepPathEntityId === undefined || advancedParams.sweepPathEntityId === "") ? { sweepDirectionMm: advancedParams.sweepDirectionMm } : {}),
       ...(operation === "sweep" && advancedParams?.sweepPathEntityId !== undefined && advancedParams.sweepPathEntityId !== "" ? { sweepPathEntityId: advancedParams.sweepPathEntityId } : {}),
       ...(operation === "sweep" && advancedParams?.sweepTwistDeg !== undefined ? { sweepTwistDeg: advancedParams.sweepTwistDeg } : {}),
+      ...(operation === "sweep" && advancedParams?.sweepFrameTransport === true ? { sweepFrameTransport: true } : {}),
       ...(operation === "loft" && advancedParams?.loftRailEntityId !== undefined && advancedParams.loftRailEntityId !== "" ? { loftRailEntityId: advancedParams.loftRailEntityId } : {}),
+      ...(operation === "loft" && advancedParams?.loftTangencyWeight !== undefined ? { loftTangencyWeight: advancedParams.loftTangencyWeight } : {}),
       ...(operation === "loft" && advancedParams?.loftTopScale !== undefined ? { loftTopScale: advancedParams.loftTopScale } : {}),
       ...(operation === "loft" && advancedParams?.loftSecondaryProfileIds !== undefined && advancedParams.loftSecondaryProfileIds.length > 0 ? { loftSecondaryProfileIds: advancedParams.loftSecondaryProfileIds } : {}),
       ...(operation === "loft" && advancedParams?.loftContinuity !== undefined ? { loftContinuity: advancedParams.loftContinuity } : {}),
@@ -2929,6 +2985,7 @@ export function App(): React.JSX.Element {
       onAddConstructionPlane={handleAddConstructionPlane}
       onAddConstructionAxis={handleAddConstructionAxis}
       onAddConstructionPoint={handleAddConstructionPoint}
+      onDirectEdit={handleDirectEdit}
       onHoleWizard={handleHoleWizard}
       onFit={fitViewport}
       onMeasure={() => setViewportNavigation("measure")}
