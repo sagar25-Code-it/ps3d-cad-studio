@@ -103,6 +103,13 @@ function isChained(id: string, constraints: readonly WorkbenchSketchConstraint[]
   return refs.has("start") && refs.has("end");
 }
 
+/** Circles and arcs held tangent to the given circle or arc. */
+function tangentCircles(circleId: string, entities: ReadonlyMap<string, SketchEntity>, constraints: readonly WorkbenchSketchConstraint[]): readonly string[] {
+  return constraints
+    .filter((candidate) => candidate.kind === "tangent" && candidate.suppressed !== true && candidate.entityIds.includes(circleId))
+    .flatMap((candidate) => candidate.entityIds.filter((id) => id !== circleId && (entities.get(id)?.kind === "circle" || entities.get(id)?.kind === "arc")));
+}
+
 /** Lines held tangent to a circle or arc: when the circle is resized they stay put and the circle's centre gives way. */
 function tangentLines(circleId: string, entities: ReadonlyMap<string, SketchEntity>, constraints: readonly WorkbenchSketchConstraint[]): readonly string[] {
   const lines = constraints
@@ -126,7 +133,8 @@ export function anchorsForDimension(constraint: WorkbenchSketchConstraint, entit
           ? [keep(first!, "center"), keep(first!, "major-axis")]
           : [keep(first!, "center"), keep(first!, "minor-axis")];
       }
-      return [keep(first!, "center", 1), ...tangentLines(first!, entities, siblings).map((line) => hold(line))];
+      // A line tangent to the circle stays put and so does the size of a circle tangent to it: the circle's centre (and the partner's centre) give way.
+      return [keep(first!, "center", 1), ...tangentLines(first!, entities, siblings).map((line) => hold(line)), ...tangentCircles(first!, entities, siblings).map((other) => keep(other, "radius", 1))];
     case "distance": {
       switch (constraint.dimension) {
         case "aligned":
