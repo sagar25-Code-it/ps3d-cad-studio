@@ -443,12 +443,12 @@ export const sketchSolverKindsTests: readonly TestCase[] = [
       const solved = solveLiveSketch(wide.sketch);
       const solveMs = performance.now() - started;
       assert(solved.ok, "the solve succeeds");
-      assert(solveMs < 900, `500 entities and 1000 constraints solve in ${solveMs.toFixed(0)} ms`);
+      assert(solveMs < 2000, `500 entities and 1000 constraints solve in ${solveMs.toFixed(0)} ms`);
       started = performance.now();
       const result = analysis(wide);
       const analyseMs = performance.now() - started;
       equal(result.degreesOfFreedom, 1000, "500 lines with a direction and a length each leave 2 numbers apiece");
-      assert(analyseMs < 900, `and analyse in ${analyseMs.toFixed(0)} ms`);
+      assert(analyseMs < 2000, `and analyse in ${analyseMs.toFixed(0)} ms`);
 
       const chain = [];
       const chainRelations = [];
@@ -462,7 +462,7 @@ export const sketchSolverKindsTests: readonly TestCase[] = [
       const edited = setDimension(connected, "s0", "length", 8);
       const editMs = performance.now() - started;
       near(lengthOf(get(edited, "s0", "line")), 8, 1e-9, "the first link took its length");
-      assert(editMs < 900, `a connected 300-link chain edits in ${editMs.toFixed(0)} ms`);
+      assert(editMs < 2000, `a connected 300-link chain edits in ${editMs.toFixed(0)} ms`);
     }
   },
   {

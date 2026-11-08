@@ -14,6 +14,8 @@ export interface LiveRelationSet {
   readonly constraintIds: readonly string[];
   readonly labels: readonly string[];
   readonly message: string;
+  /** For a redundant set: the constraint, made last, that the others already imply. */
+  readonly impliedConstraintId?: string;
 }
 
 export type LiveSketchSolveReport =
@@ -166,7 +168,7 @@ export function toLiveSets(sets: readonly SketchRelationSet[], kind: "redundant"
     seen.add(key);
     // Several parts of one relation (the two joints of a mirror pair) collapse to one name.
     const labels = [...new Set(set.labels)];
-    result.push({ kind, constraintIds: ids, labels, message: set.message });
+    result.push({ kind, constraintIds: ids, labels, message: set.message, ...(set.implied === undefined ? {} : { impliedConstraintId: liveConstraintId(set.implied) }) });
   }
   return result;
 }

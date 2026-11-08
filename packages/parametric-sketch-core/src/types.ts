@@ -253,6 +253,8 @@ export interface SketchRelationSet {
   readonly ids: readonly string[];
   readonly labels: readonly string[];
   readonly message: string;
+  /** For a redundant set: the relation, made last, that the others already imply (the one to delete). */
+  readonly implied?: string;
 }
 
 export interface SketchDofState {

@@ -243,6 +243,7 @@ export function describeSets(raw: RankAnalysis["sets"], labelOf: (id: string) =>
       kind: set.kind,
       ids: set.ids,
       labels,
+      ...(set.kind === "redundant" ? { implied: set.implied } : {}),
       message: set.kind === "conflicting"
         ? `These relations contradict each other: ${list}. Remove or relax one of them.`
         : set.ids.length === 1
