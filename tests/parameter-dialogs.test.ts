@@ -1,5 +1,5 @@
 import { designOf, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
-import { applyParameterValues, parameterFieldsOf, parameterValuesOf } from "../apps/studio-web/src/feature-parameters.js";
+import { applyParameterValues, applyPlainSize, parameterFieldsOf, parameterValuesOf } from "../apps/studio-web/src/feature-parameters.js";
 import { halvedExpression, unhalvedExpression } from "../apps/studio-web/src/dimension-expression.js";
 import { analyseParameterRows, boundValuesOf, nextParameterName, parameterOperationOf, parameterRowsOf, type ParameterRow } from "../apps/studio-web/src/parameter-rows.js";
 import { buildWorkbenchMenus, type WorkbenchMenuActions } from "../apps/studio-web/src/ui/menu-model.js";
@@ -134,6 +134,46 @@ export const parameterDialogTests: readonly TestCase[] = [
       const changed = await rebuilt(run(sent, { kind: "set-design-parameters", parameters: [param("pin_r", "5")] }));
       equal(featureById(changed, "feature:hole-1").holeDiameterMm, 11, "changing pin_r moves the hole the dialog bound");
       assert(volume(changed) < volume(sent), "and the rebuilt solid has lost more material");
+    }
+  },
+  {
+    name: "an extrude's own size form binds an expression, keeps its direction, refuses bad text, and a typed number unbinds it",
+    run: async () => {
+      const project = run(await plate(), { kind: "set-design-parameters", parameters: [param("t", "12")] });
+      const extrude = featureById(project, "feature:extrude-1");
+      const bound = applyPlainSize(extrude, { text: "t * 2", direction: "symmetric", throughAll: false }, project);
+      assert(bound.ok, `an expression is accepted: ${bound.ok ? "" : bound.message}`);
+      if (!bound.ok) return;
+      equal(bound.feature.valueMm, 24, "the distance took the evaluated value");
+      equal(bound.feature.direction, "symmetric", "and the direction was kept");
+      equal(JSON.stringify(bound.feature.expressions), JSON.stringify({ distance: "t * 2" }), "the distance is bound");
+      const sent = await rebuilt(run(project, { kind: "update-design-solid", feature: bound.feature, body: body(project) }));
+      near(volume(sent) / volume(project), 2.4, 1e-6, "the rebuilt plate is 2.4 times the 10 mm plate");
+      const moved = await rebuilt(run(sent, { kind: "set-design-parameters", parameters: [param("t", "20")] }));
+      equal(featureById(moved, "feature:extrude-1").valueMm, 40, "changing t re-sizes the extrude");
+      near(volume(moved) / volume(project), 4, 1e-6, "and the solid");
+
+      const syntax = applyPlainSize(extrude, { text: "t *", direction: "one-side", throughAll: false }, project);
+      assert(!syntax.ok && syntax.message.includes("ends too early") && syntax.message.includes("character 4"), `a syntax error is explained: ${syntax.ok ? "" : syntax.message}`);
+      const unknown = applyPlainSize(extrude, { text: "abc", direction: "one-side", throughAll: false }, project);
+      assert(!unknown.ok && unknown.message.includes('Unknown name "abc"'), "an unknown name is explained");
+      const negative = applyPlainSize(extrude, { text: "-3", direction: "one-side", throughAll: false }, project);
+      assert(!negative.ok && negative.message.includes("greater than zero"), "a plain negative number keeps its old message");
+      const tooBig = applyPlainSize(extrude, { text: "t * 100000", direction: "one-side", throughAll: false }, project);
+      assert(!tooBig.ok && tooBig.message.includes("at most 100000"), "an expression over the limit says so");
+
+      const unbound = applyPlainSize(bound.feature, { text: "30", direction: "one-side", throughAll: false }, project);
+      assert(unbound.ok && unbound.feature.expressions === undefined && unbound.feature.valueMm === 30 && unbound.feature.direction === undefined, "a typed number sets the size, drops the binding and the one-side direction");
+      const through = applyPlainSize({ ...extrude, operation: "cut" }, { text: "ignored", direction: "one-side", throughAll: true }, project);
+      assert(through.ok && through.feature.extent === "through-all", "a through-all cut ignores the typed text");
+
+      const revolve = { ...extrude, id: "feature:revolve-x", kind: "revolve" as const };
+      const turned = applyPlainSize(revolve, { text: "1.5 rad", direction: "one-side", throughAll: false }, project);
+      assert(turned.ok && Math.abs(turned.feature.valueMm - 1.5 * 180 / Math.PI) < 1e-9, "a revolve angle takes radians");
+      const wrong = applyPlainSize(revolve, { text: "5 mm", direction: "one-side", throughAll: false }, project);
+      assert(!wrong.ok && wrong.message.includes("angle"), "a length is refused as an angle");
+      const over = applyPlainSize(revolve, { text: "400", direction: "one-side", throughAll: false }, project);
+      assert(!over.ok && over.message.includes("0 and 360"), "a plain angle over 360 keeps its old message");
     }
   },
   {

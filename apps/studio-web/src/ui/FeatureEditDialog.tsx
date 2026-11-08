@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DesignSolidFeature, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
-import { bindFeatureExpressions, designOf, previewFieldExpression } from "../../../../packages/workbench-core/src/index.js";
-import { applyParameterValues, fieldAcceptsExpression, parameterFieldsOf, parameterValuesOf } from "../feature-parameters.js";
+import { designOf, previewFieldExpression } from "../../../../packages/workbench-core/src/index.js";
+import { applyParameterValues, applyPlainSize, fieldAcceptsExpression, parameterFieldsOf, parameterValuesOf } from "../feature-parameters.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { useDialogFocus } from "./useDialogFocus.js";
 
@@ -62,23 +62,9 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
       return;
     }
     if (!plainForm) { props.onClose(); return; }
-    const { direction: _previous, extent: _extent, ...rest } = feature;
-    const placement = { ...(isExtrude && direction !== "one-side" && !throughAll ? { direction } : {}), ...(throughAll ? { extent: "through-all" as const } : {}) };
-    const typed = value.trim();
-    const parsed = throughAll ? Math.abs(feature.valueMm) : Number(typed.replace(",", "."));
-    // Anything that is not a plain number is an expression (pin_r * 2): it is bound to the field and evaluated now.
-    if (!throughAll && typed !== "" && !Number.isFinite(parsed)) {
-      const bound = bindFeatureExpressions(props.project, { ...rest, ...placement }, { [plainFieldId]: typed });
-      if (!bound.ok) { setProblem(`${bound.message}${bound.position === undefined ? "" : ` (character ${bound.position + 1})`}`); return; }
-      props.onApply(bound.feature);
-      return;
-    }
-    if (!Number.isFinite(parsed) || parsed <= 0 || (!isExtrude && parsed > 360)) {
-      setProblem(isExtrude ? "Enter a distance greater than zero." : "Enter an angle between 0 and 360 degrees.");
-      return;
-    }
-    const plain = bindFeatureExpressions(props.project, { ...rest, valueMm: parsed, ...placement }, {});
-    props.onApply(plain.ok ? plain.feature : { ...rest, valueMm: parsed, ...placement });
+    const result = applyPlainSize(feature, { text: value, direction, throughAll }, props.project);
+    if (!result.ok) { setProblem(result.message); return; }
+    props.onApply(result.feature);
   };
 
   return <div className="dialog-backdrop save-project-backdrop" role="presentation" onMouseDown={props.onClose}>

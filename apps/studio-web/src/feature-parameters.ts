@@ -236,3 +236,27 @@ export function refreshedName(feature: DesignSolidFeature): string {
     default: return name;
   }
 }
+
+/**
+ * The size of an extrude (distance) or a revolve (angle), which have their own form instead of a field list. `text` is a plain number
+ * or an expression; `direction` is the extrude's side; `throughAll` keeps a cut's size out of it. A plain number unbinds the size.
+ */
+export function applyPlainSize(feature: DesignSolidFeature, input: { readonly text: string; readonly direction: NonNullable<DesignSolidFeature["direction"]>; readonly throughAll: boolean }, project: WorkbenchProject): ParameterResult {
+  const isExtrude = feature.kind === "extrude";
+  const fieldId = isExtrude ? "distance" : "angle";
+  const { direction: _previous, extent: _extent, ...rest } = feature;
+  const placement = { ...(isExtrude && input.direction !== "one-side" && !input.throughAll ? { direction: input.direction } : {}), ...(input.throughAll ? { extent: "through-all" as const } : {}) };
+  const typed = input.text.trim();
+  const parsed = input.throughAll ? Math.abs(feature.valueMm) : Number(typed.replace(",", "."));
+  // Anything that is not a plain number is an expression (pin_r * 2): it is bound to the size and evaluated now.
+  if (!input.throughAll && typed !== "" && !Number.isFinite(parsed)) {
+    const bound = bindFeatureExpressions(project, { ...rest, ...placement }, { [fieldId]: typed });
+    if (!bound.ok) return { ok: false, fieldId, message: `${bound.message}${bound.position === undefined ? "" : ` (character ${bound.position + 1})`}` };
+    return { ok: true, feature: bound.feature };
+  }
+  if (!Number.isFinite(parsed) || parsed <= 0 || (!isExtrude && parsed > 360)) {
+    return { ok: false, fieldId, message: isExtrude ? "Enter a distance greater than zero." : "Enter an angle between 0 and 360 degrees." };
+  }
+  const plain = bindFeatureExpressions(project, { ...rest, valueMm: parsed, ...placement }, {});
+  return { ok: true, feature: plain.ok ? plain.feature : { ...rest, valueMm: parsed, ...placement } };
+}

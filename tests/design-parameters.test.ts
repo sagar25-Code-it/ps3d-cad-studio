@@ -17,6 +17,7 @@ import {
 } from "../packages/workbench-core/src/index.js";
 import { solidMetrics } from "../packages/workbench-core/src/solid-metrics.js";
 import { replayAllBodies } from "../apps/studio-web/src/design-regeneration.js";
+import { halvedExpression } from "../apps/studio-web/src/dimension-expression.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 let serial = 0;
@@ -377,6 +378,33 @@ export const designParameterTests: readonly TestCase[] = [
       const issues = designExpressionIssues(clash, resizeSketchEntity);
       assert(issues.some((issue) => issue.ownerId === "feature:hole-1" && issue.message?.includes("More than one feature")), `two steps with the same name make the reference ambiguous: ${issues[0]?.message}`);
       equal(featureById(clash, "feature:hole-1").holeDepthMm, 5, "the hole keeps its last good depth");
+    }
+  },
+  {
+    name: "a circle's radius follows a diameter parameter and rebuilds the plate's bore; typing a plain number unbinds the dimension",
+    run: async () => {
+      let project = setParameters(await plate(), [param("bore_d", "10")]);
+      project = run(project, { kind: "edit-design-sketch", featureId: "feature:sketch-1" });
+      project = run(project, { kind: "set-sketch-dimension", entityId: "entity:bore", dimension: "radius", valueMm: 5, expression: halvedExpression("bore_d") });
+      equal(project.sketch.constraints.find((constraint) => constraint.expression !== undefined)?.expression, "(bore_d) / 2", "the radius stores the halved diameter expression");
+      project = run(project, { kind: "commit-design-sketch", featureId: "feature:sketch-9", name: "Sketch 1" });
+      project = await rebuilt(project);
+      const narrow = volume(project);
+
+      project = setParameters(project, [param("bore_d", "20")]);
+      const bore = sketchFeature(project).sketch.entities.find((entity) => entity.id === "entity:bore");
+      assert(bore?.kind === "circle" && bore.radiusMm === 10, "the circle in the timeline sketch grew to radius 10");
+      project = await rebuilt(project);
+      near(narrow - volume(project), Math.PI * (100 - 25) * 10, Math.PI * 75 * 10 * 0.04, "the rebuilt plate lost a ring of material: a 20 mm bore instead of 10 mm");
+
+      // Typing a plain number for the same dimension replaces the binding.
+      project = run(project, { kind: "edit-design-sketch", featureId: "feature:sketch-1" });
+      project = run(project, { kind: "set-sketch-dimension", entityId: "entity:bore", dimension: "radius", valueMm: 7 });
+      assert(project.sketch.constraints.every((constraint) => constraint.expression === undefined), "the dimension is a plain number again");
+      project = run(project, { kind: "commit-design-sketch", featureId: "feature:sketch-9", name: "Sketch 1" });
+      project = setParameters(project, [param("bore_d", "30")]);
+      const kept = sketchFeature(project).sketch.entities.find((entity) => entity.id === "entity:bore");
+      assert(kept?.kind === "circle" && kept.radiusMm === 7, "and no longer follows the parameter");
     }
   },
   {
