@@ -56,6 +56,10 @@ import {
   type ViewProjection
 } from "../../../../packages/viewport-three/src/index.js";
 import { halvedExpression, unhalvedExpression } from "../dimension-expression.js";
+import { SketchUnitContext, readSketchLength, sketchLength, useSketchUnit } from "./sketch-unit.js";
+import { describeSketchAxes } from "../sketch-world.js";
+import { SectionPropertiesPanel } from "./SectionPropertiesPanel.js";
+import type { LengthUnit, RevolveAxisRef } from "../../../../packages/workbench-core/src/index.js";
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 import { ViewportChrome } from "../ui/ViewportChrome.js";
@@ -133,6 +137,8 @@ const SNAP_PIXELS = 9;
 const PICK_PIXELS = 10;
 
 interface SketchWorkspaceProps {
+  /** The unit lengths are shown and typed in; the sketch itself is always in millimetres. Absent means millimetres. */
+  readonly displayUnit?: LengthUnit;
   readonly projectId: string;
   readonly sketch: WorkbenchSketch;
   readonly tool: SketchTool;
@@ -172,6 +178,7 @@ interface SketchWorkspaceProps {
     direction?: "one-side" | "symmetric" | "flipped" | "two-side",
     target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" },
     advancedParams?: {
+      readonly revolveAxis?: RevolveAxisRef;
       readonly secondValueMm?: number;
       readonly extent?: "to-face" | "to-body" | "to-vertex" | "to-first" | "to-last";
       readonly extentTarget?: DesignExtentTarget;
@@ -358,6 +365,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [showComb, setShowComb] = useState(false);
   const [combScale, setCombScale] = useState(1);
   const [selectedProfileIds, setSelectedProfileIds] = useState<readonly string[]>([]);
+  // What a revolve turns about: "" is the sketch Y axis, "x" the sketch X axis, otherwise the ID of a line of this sketch (a centerline or construction line).
+  const [revolveAxisChoice, setRevolveAxisChoice] = useState("");
   const boxGesture = useRef<BoxGesture | undefined>(undefined);
   // Direct manipulation: the gesture, and the live (uncommitted) result shown while it runs.
   const dragGesture = useRef<DragGesture | undefined>(undefined);
@@ -828,7 +837,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       setDimensionEdit(next);
       // A dimension bound to an expression shows the expression, so it can be edited as text; a circle shows its diameter.
       const bound = existing?.expression === undefined ? undefined : entity.kind === "circle" ? unhalvedExpression(existing.expression) : existing.expression;
-      setDimensionText(bound ?? String(Number(shown.toFixed(3))));
+      const inInches = (props.displayUnit ?? "mm") === "in" && dimension !== "angle";
+      setDimensionText(bound ?? (inInches ? String(Number((shown / 25.4).toFixed(4))) : String(Number(shown.toFixed(3)))));
     }, 0);
   };
 
@@ -844,7 +854,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const commitDimensionEdit = (): void => {
     const edit = dimensionEdit;
     if (edit === undefined) return;
-    const typed = parseDynamicNumber(dimensionText);
+    // A length is read with its unit (12 mm, 1/2 in, 3/4"); a bare number takes the display unit. An angle stays a plain number of degrees.
+    const lengthRead = edit.dimension === "angle" ? undefined : readSketchLength(dimensionText, props.displayUnit ?? "mm");
+    const typed = edit.dimension === "angle" ? parseDynamicNumber(dimensionText) : lengthRead?.ok === true ? lengthRead.valueMm : undefined;
     const entity = props.sketch.entities.find((candidate) => candidate.id === edit.entityId);
     // Text that is not a number is an expression (plate_w / 2): the dimension is bound to it. The project checks it and says what is wrong.
     if (typed === undefined && dimensionText.trim() !== "" && dimensionText.trim() !== "-") {
@@ -855,6 +867,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       setDimensionEdit(undefined);
       return;
     }
+    if (typed !== undefined && edit.dimension !== "angle" && typed > 0 && typed < 0.01) { props.onMessage("The smallest size a sketch can hold is 0.01 mm. Type a larger value."); return; }
+    if (typed !== undefined && edit.dimension !== "angle" && typed > 200_000) { props.onMessage("The largest sketch size is 200,000 mm (200 m). Type a smaller value."); return; }
     if (typed === undefined || (edit.dimension === "angle" ? typed < 0 || typed >= 360 : typed <= 0)) { props.onMessage(edit.dimension === "angle" ? "Type an angle from 0 up to 360 degrees." : "Type a size greater than zero."); return; }
     // A circle is dimensioned by its diameter on the canvas; the model stores the radius.
     props.onSetDimension(edit.entityId, edit.dimension, entity?.kind === "circle" && edit.dimension === "radius" ? typed / 2 : typed, edit.secondEntityId === undefined ? undefined : { secondEntityId: edit.secondEntityId });
@@ -1308,7 +1322,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const constraintSlots = new Map<string, number>();
   const curvatureCombs = showComb ? sketchCurvatureCombs(visibleEntities, 60 * px * combScale) : [];
 
-  return <>
+  return <SketchUnitContext.Provider value={props.displayUnit ?? "mm"}>
     <section className="workspace-canvas sketch-stage" aria-label={`Interactive ${planeInfo.name} sketch`}>
       <svg
         ref={camera.svgRef}
@@ -1488,6 +1502,15 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               : <select aria-label="Solid to change" value={effectiveTarget} onChange={(event) => setSolidTarget(event.target.value)}>
                 {props.solidBodies.map((body) => <option key={body.id} value={body.id}>{body.name}</option>)}
               </select>}
+          </div>}
+          {solidOp === "revolve" && <div className="make-solid-row" aria-label="Revolve axis">
+            <small>Axis</small>
+            <select aria-label="Revolve axis" value={props.sketch.entities.some((entity) => entity.id === revolveAxisChoice) || revolveAxisChoice === "x" ? revolveAxisChoice : ""} onChange={(event) => setRevolveAxisChoice(event.target.value)}>
+              <option value="">Sketch Y axis</option>
+              <option value="x">Sketch X axis</option>
+              {props.sketch.entities.filter((entity) => entity.kind === "line").map((entity, index) => <option key={entity.id} value={entity.id}>{entity.construction ? "Construction line" : "Line"} {index + 1} ({shortId(entity.id)})</option>)}
+            </select>
+            <small>{describeSketchAxes(props.sketch)}</small>
           </div>}
           {(solidOp === "extrude" || solidOp === "revolve") && <ReachOptions operation={solidOp} settings={reach} onChange={setReach} bodies={props.targetBodies} selectedId={props.selectedId} cutting={solidResult === "cut" && props.solidBodies.length > 0} />}
           {solidOp === "sweep" && <div className="make-solid-row" aria-label="Sweep mode">
@@ -1672,6 +1695,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
                                 : solidOp === "sheet-hem"
                                   ? { sheetThicknessMm: Number(sheetThickness), sheetBendRadiusMm: Number(sheetBendRadius), flangeLengthMm: Number(flangeLength), hemStyle }
                                   : reachResult?.ok === true ? reachResult.params : undefined;
+            const revolveAxis = solidOp === "revolve" && revolveAxisChoice !== ""
+              ? (revolveAxisChoice === "x" ? { kind: "sketch-axis" as const, axis: "x" as const } : { kind: "sketch-line" as const, entityId: revolveAxisChoice })
+              : undefined;
             const effectiveProfileIds = refsOf(solidOp === "loft" && loftMode === "two-profile" && selectedProfileIds.length >= 2
               ? selectedProfileIds.slice(0, 1)
               : selectedProfileIds);
@@ -1690,7 +1716,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               edgeForOp,
               reachResult?.ok === true ? reachResult.direction : undefined,
               modifying ? { mode: solidResult, bodyId: effectiveTarget, ...(cutThroughAll ? { extent: "through-all" as const } : {}) } : undefined,
-              advanced
+              revolveAxis === undefined ? advanced : { ...(advanced ?? {}), revolveAxis }
             );
           }}><CommandIcon name={solidResult === "cut" ? "subtract" : solidResult === "join" ? "unite" : "box"} />{solidResult === "cut" ? "Cut solid" : solidResult === "join" ? "Join solid" : "Create solid"}</button>
           {profiles.length === 0 && <small className="make-solid-hint make-solid-reason" role="status">No closed region yet. {noProfileReasons.join(" ")} Open Validate Sketch for every open end and gap.</small>}
@@ -1777,6 +1803,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
       <section className="inspector-section profile-controller"><header><strong>Closed profiles</strong><span>{profiles.length} found</span></header>
         <p className="profile-help">Profile selects a shaded region; Curve, Connected and Tangent intents use the shared top selection controller. Use Create solid in the palette to extrude or revolve the selected profiles into a new body.</p>
+        <SectionPropertiesPanel profiles={profiles} selectedProfileIds={selectedProfileIds} />
         <div className="profile-list">{profiles.map((profile, index) => <button key={profile.id} className={selectedProfileIds.includes(profile.id) ? "selected" : ""} onClick={(event) => selectProfile(profile, event.shiftKey || event.ctrlKey || event.metaKey)}><span><b>P{index + 1}</b>{profileLabel(profile)}</span><small>{format(profile.areaMm2)} mm²</small></button>)}</div>
       </section>
 
@@ -1785,12 +1812,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       </section>
       <div className="scope-note"><strong>Preview solver boundary</strong><p>A small analytic solver enforces horizontal, vertical, parallel, perpendicular, collinear, tangent, concentric, equal, symmetric and fixed relations plus radius and length dimensions on lines, circles and arcs; a conflict is refused with the reason. Rectangles are rigid, point-on-curve and endpoint relations are recorded but not solved, and there is no general nonlinear solver. Degrees of freedom are an estimate.</p></div>
     </aside>
-  </>;
+  </SketchUnitContext.Provider>;
 }
 
 /** A driving dimension drawn like a drawing dimension: extension lines, a dimension line with arrowheads, and editable text. */
 function DimensionMarks({ entity, dimension, valueMm, relaxed, px, onEdit }: { readonly entity: SketchEntity; readonly dimension: DrivingDimension; readonly valueMm: number; readonly relaxed: boolean; readonly px: number; readonly onEdit?: () => void }): React.JSX.Element {
-  const layout = dimensionLayout(entity, dimension, valueMm, px);
+  const markUnit = useSketchUnit();
+  const layout = dimensionLayout(entity, dimension, markUnit === "in" && dimension !== "angle" ? valueMm / 25.4 : valueMm, px);
   if (layout === undefined) return <></>;
   const flip = (point: Vec2): string => `${point[0]},${-point[1]}`;
   const textWidth = (layout.label.length * 7.4 + 12) * px;
@@ -1907,8 +1935,8 @@ function PaletteToggle({ label, active, onToggle }: { readonly label: string; re
 function EntityDimensions({ entity, onApply, onMessage }: { readonly entity: SketchEntity; readonly onApply: (dimension: DrivingDimension, value: number) => void; readonly onMessage: (message: string) => void }): React.JSX.Element {
   if (entity.kind === "line") return <DimensionField label="Length" dimension="length" value={Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1])} onApply={onApply} onMessage={onMessage} />;
   if (entity.kind === "rectangle") return <div className="dimension-stack"><DimensionField label="Width" dimension="width" value={entity.widthMm} onApply={onApply} onMessage={onMessage} /><DimensionField label="Height" dimension="height" value={entity.heightMm} onApply={onApply} onMessage={onMessage} /></div>;
-  if (entity.kind === "circle") return <><DimensionField label="Radius" dimension="radius" value={entity.radiusMm} onApply={onApply} onMessage={onMessage} /><div className="derived-dimension"><span>Diameter</span><strong>{format(entity.radiusMm * 2)} mm</strong></div></>;
-  if (entity.kind === "ellipse") return <div className="dimension-stack"><div className="derived-dimension"><span>Major radius</span><strong>{format(entity.majorRadiusMm)} mm</strong></div><div className="derived-dimension"><span>Minor radius</span><strong>{format(entity.minorRadiusMm)} mm</strong></div></div>;
+  if (entity.kind === "circle") return <><DimensionField label="Radius" dimension="radius" value={entity.radiusMm} onApply={onApply} onMessage={onMessage} /><DerivedLength label="Diameter" valueMm={entity.radiusMm * 2} /></>;
+  if (entity.kind === "ellipse") return <div className="dimension-stack"><DerivedLength label="Major radius" valueMm={entity.majorRadiusMm} /><DerivedLength label="Minor radius" valueMm={entity.minorRadiusMm} /></div>;
   if (entity.kind === "arc") {
     const radius = arcShape(entity.start, entity.mid, entity.end)?.radiusMm;
     return radius === undefined ? <div className="derived-dimension"><span>Three-point arc</span><strong>reference only</strong></div> : <DimensionField label="Radius" dimension="radius" value={radius} onApply={onApply} onMessage={onMessage} />;
@@ -1917,10 +1945,13 @@ function EntityDimensions({ entity, onApply, onMessage }: { readonly entity: Ske
 }
 
 function DimensionField({ label, dimension, value, onApply, onMessage }: { readonly label: string; readonly dimension: DrivingDimension; readonly value: number; readonly onApply: (dimension: DrivingDimension, value: number) => void; readonly onMessage: (message: string) => void }): React.JSX.Element {
-  const [draft, setDraft] = useState(String(Number(value.toFixed(3))));
-  useEffect(() => setDraft(String(Number(value.toFixed(3)))), [value]);
-  return <form className="dimension-field" onSubmit={(event) => { event.preventDefault(); const trimmed = draft.trim(); const next = Number(trimmed); if (trimmed !== "" && Number.isFinite(next)) onApply(dimension, next); else onMessage?.(`Enter a numeric ${label.toLowerCase()} value in millimeters.`); }}>
-    <label><span>{label}</span><div><input aria-label={`${label} in millimeters`} inputMode="decimal" value={draft} onChange={(event) => setDraft(event.target.value)} /><small>mm</small><button type="submit"><CommandIcon name="dimension" />Apply</button></div></label>
+  const unit = useSketchUnit();
+  const shown = (valueMm: number): string => String(Number((unit === "in" ? valueMm / 25.4 : valueMm).toFixed(unit === "in" ? 4 : 3)));
+  const [draft, setDraft] = useState(shown(value));
+  useEffect(() => setDraft(shown(value)), [value, unit]);
+  // Fractions and units are read here: 1/2 in, 3/4", 12 mm, 5' 3". A bare number takes the display unit.
+  return <form className="dimension-field" onSubmit={(event) => { event.preventDefault(); const read = readSketchLength(draft, unit); if (read.ok) onApply(dimension, read.valueMm); else onMessage?.(`${label}: ${read.message}`); }}>
+    <label><span>{label}</span><div><input aria-label={`${label} in ${unit === "in" ? "inches" : "millimeters"}`} inputMode="text" value={draft} onChange={(event) => setDraft(event.target.value)} /><small>{unit}</small><button type="submit"><CommandIcon name="dimension" />Apply</button></div></label>
   </form>;
 }
 
@@ -1994,11 +2025,12 @@ function solverPointRef(point: SketchDimensionPoint): SketchPointRef | undefined
 }
 
 function DirectDimensionPreview({ dimension, px }: { readonly dimension: DirectSketchDimension; readonly px: number }): React.JSX.Element {
+  const unit = useSketchUnit();
   const x = (dimension.first.point[0] + dimension.second.point[0]) / 2;
   const y = -(dimension.first.point[1] + dimension.second.point[1]) / 2 - 8 * px;
   return <g className={`direct-dimension-preview ${dimension.driving === undefined ? "reference" : "driving"}`} pointerEvents="none">
     <line x1={dimension.first.point[0]} y1={-dimension.first.point[1]} x2={dimension.second.point[0]} y2={-dimension.second.point[1]} />
-    <text x={x} y={y} style={{ fontSize: 12 * px, strokeWidth: 3 * px }}>{format(dimension.valueMm)} mm</text>
+    <text x={x} y={y} style={{ fontSize: 12 * px, strokeWidth: 3 * px }}>{sketchLength(dimension.valueMm, unit)}</text>
   </g>;
 }
 
@@ -2134,6 +2166,11 @@ function profileLabel(profile: SketchProfile): string {
 
 function shortId(id: string): string {
   return id.length < 28 ? id : `${id.slice(0, 18)}…${id.slice(-7)}`;
+}
+
+function DerivedLength({ label, valueMm }: { readonly label: string; readonly valueMm: number }): React.JSX.Element {
+  const unit = useSketchUnit();
+  return <div className="derived-dimension"><span>{label}</span><strong>{sketchLength(valueMm, unit)}</strong></div>;
 }
 
 function format(value: number): string {

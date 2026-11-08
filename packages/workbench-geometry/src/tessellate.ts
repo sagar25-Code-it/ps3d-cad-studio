@@ -73,13 +73,57 @@ export function tessellateExtrude(polygonMm: readonly Point2[], heightMm: number
   return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };
 }
 
-/** Revolve a closed profile polygon (millimetres) about the plane's in-plane axis by `degrees`. */
+/** The facets a full turn of a revolve of this radius gets: enough that the chord sag stays within the tolerance, never fewer than 64. */
+export function revolveSegmentsForRadius(radiusMm: number, profilePoints = 0): number {
+  const wanted = adaptiveFacetCount(radiusMm, REVOLVE_SEGMENTS, 512);
+  // A body stores at most 100,000 vertices: a finely faceted profile gets fewer turns rather than an unstorable solid.
+  return profilePoints > 0 ? Math.max(16, Math.min(wanted, Math.floor(80_000 / profilePoints))) : wanted;
+}
+
+/**
+ * Facets around a full circle of this radius. The chord may sag at most 0.001 of the radius and never more than 0.05 mm, so small
+ * circles keep the classic 72 facets and large ones get as many as they need (up to 512), rounded up to a multiple of four so the
+ * four quadrant points are always vertices.
+ */
+export function adaptiveFacetCount(radiusMm: number, minimum = 72, maximum = 512): number {
+  if (!Number.isFinite(radiusMm) || radiusMm <= 0) return minimum;
+  const sag = Math.min(0.05, radiusMm * 0.001);
+  const half = Math.acos(Math.max(-1, Math.min(1, 1 - sag / radiusMm)));
+  const count = half > 0 ? Math.ceil(Math.PI / half) : maximum;
+  return Math.min(maximum, Math.max(minimum, Math.ceil(count / 4) * 4));
+}
+
+/** Signed volume of a closed mesh (positive when its triangles face outward). */
+function signedMeshVolume(positions: readonly number[], indices: readonly number[]): number {
+  let total = 0;
+  for (let index = 0; index + 2 < indices.length; index += 3) {
+    const a = indices[index]! * 3; const b = indices[index + 1]! * 3; const c = indices[index + 2]! * 3;
+    total += positions[a]! * (positions[b + 1]! * positions[c + 2]! - positions[b + 2]! * positions[c + 1]!)
+      - positions[a + 1]! * (positions[b]! * positions[c + 2]! - positions[b + 2]! * positions[c]!)
+      + positions[a + 2]! * (positions[b]! * positions[c + 1]! - positions[b + 1]! * positions[c]!);
+  }
+  return total / 6;
+}
+
+/** Turns every triangle inside out when the mesh encloses a negative volume (a profile drawn the other way round, or on the other side of the axis). */
+function outwardIndices(positions: readonly number[], indices: readonly number[]): number[] {
+  const result = [...indices];
+  if (signedMeshVolume(positions, result) >= 0) return result;
+  for (let index = 0; index + 2 < result.length; index += 3) { const swap = result[index + 1]!; result[index + 1] = result[index + 2]!; result[index + 2] = swap; }
+  return result;
+}
+
+/**
+ * Revolve a closed profile polygon (millimetres) about the plane's in-plane axis by `degrees`. The profile may lie on either side of the
+ * axis and be wound either way: the solid always comes out facing outward (a profile left of the axis used to come out inside out).
+ */
 export function tessellateRevolve(polygonMm: readonly Point2[], degrees: number, plane: TessellatePlane): TessellatedMesh {
   const polygon = sanitizePolygon(polygonMm);
   if (polygon.length < 3) return { positionsMm: [], indices: [] };
   const sweep = Math.min(360, Math.max(1, Math.abs(degrees)));
   const full = Math.abs(sweep - 360) < 1e-6;
-  const segments = Math.max(3, Math.round((REVOLVE_SEGMENTS * sweep) / 360));
+  const widest = polygon.reduce((maximum, [radius]) => Math.max(maximum, Math.abs(radius)), 0);
+  const segments = Math.max(3, Math.round((revolveSegmentsForRadius(widest, polygon.length) * sweep) / 360));
   const sampleCount = full ? segments : segments + 1;
   const angle = (sweep * Math.PI) / 180;
   const count = polygon.length;
@@ -107,7 +151,7 @@ export function tessellateRevolve(polygonMm: readonly Point2[], degrees: number,
       indices.push(lastRing + capTriangles[i]!, lastRing + capTriangles[i + 1]!, lastRing + capTriangles[i + 2]!);
     }
   }
-  return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };
+  return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices: outwardIndices(positions, indices) };
 }
 
 /**

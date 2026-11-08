@@ -3,7 +3,8 @@ import type { SketchRelationSet } from "../../parametric-sketch-core/src/types.j
 import { applyExtraConstraints } from "./sketch-solve-extras.js";
 import { toSolverAnchors, type LiveAnchor } from "./sketch-anchors.js";
 import { constraintComponent, fromSolverGeometry, liveConstraintId, solverSelector, translateSketch, type UnsolvedConstraint } from "./sketch-translate.js";
-import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch } from "./types.js";
+import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
+import type { SketchGeometry } from "../../parametric-sketch-core/src/types.js";
 
 export type { UnsolvedConstraint } from "./sketch-translate.js";
 export type { LiveAnchor } from "./sketch-anchors.js";
@@ -129,6 +130,12 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
   }
 
   const solvedById = new Map(result.document.geometry.map((solved) => [solved.id, solved]));
+  if (drag === undefined) {
+    // A tangent relation between geometry that is far apart must not quietly change the size of a hole or boss: report it instead.
+    const active = sketch.constraints.filter((candidate) => candidate.suppressed !== true && candidate.entityIds.some((id) => component.has(id)));
+    const resize = excessiveTangentResize(active, sketch.entities, solvedById, arcFrames);
+    if (resize !== undefined) return { ok: false, message: resize.message, relatedIds: resize.relatedIds, recovery: "Move the circle (or the line) close to where it should touch first, or dimension the radius so it is held and the other geometry moves instead." };
+  }
   const notes: string[] = [];
   const movedIds: string[] = [];
   const nextEntities = sketch.entities.map((entity) => {
@@ -141,6 +148,46 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
     return replacement;
   });
   return { ok: true, entities: nextEntities, movedIds, notes, unsolved: unsolvedList, redundant: toLiveSets(result.dof.relationSets ?? [], "redundant") };
+}
+
+/** A tangent relation may change a circle or arc by this much (the larger of the two limits: 10 mm, or twice its radius) before it counts as a surprise resize. A smaller change is reported in the status line, as before. */
+const TANGENT_RESIZE_ABSOLUTE_MM = 10;
+const TANGENT_RESIZE_RELATIVE = 2;
+
+const lengthText = (valueMm: number): string => String(Number(valueMm.toFixed(3)));
+
+/**
+ * Finds a circle or arc whose radius a tangent relation would change by a lot although nothing holds that radius (no radius dimension,
+ * no equal relation). Small adjustments are the normal way a tangent closes a tiny gap; a jump from 5 mm to 30 mm is the circle being
+ * stretched to reach geometry that was far away, which a designer would never want to happen silently.
+ */
+function excessiveTangentResize(
+  constraints: readonly WorkbenchSketchConstraint[],
+  entities: readonly SketchEntity[],
+  solvedById: ReadonlyMap<string, SketchGeometry>,
+  arcFrames: ReadonlyMap<string, { readonly radiusMm: number }>
+): { readonly message: string; readonly relatedIds: readonly string[] } | undefined {
+  for (const entity of entities) {
+    if (entity.kind !== "circle" && entity.kind !== "arc") continue;
+    const solved = solvedById.get(entity.id);
+    if (solved === undefined || (solved.kind !== "circle" && solved.kind !== "arc")) continue;
+    const before = entity.kind === "circle" ? entity.radiusMm : arcFrames.get(entity.id)?.radiusMm;
+    if (before === undefined) continue;
+    const change = Math.abs(solved.radiusMm - before);
+    if (change <= Math.max(TANGENT_RESIZE_ABSOLUTE_MM, before * TANGENT_RESIZE_RELATIVE)) continue;
+    const mine = constraints.filter((candidate) => candidate.entityIds.includes(entity.id));
+    const tangents = mine.filter((candidate) => candidate.kind === "tangent");
+    if (tangents.length === 0) continue;
+    const holdsRadius = mine.some((candidate) => (candidate.kind === "radius" && candidate.driven !== true) || candidate.kind === "equal");
+    if (holdsRadius) continue;
+    const label = entity.id.replace(/^entity:/u, "");
+    const others = [...new Set(tangents.flatMap((candidate) => candidate.entityIds).filter((id) => id !== entity.id))].map((id) => id.replace(/^entity:/u, ""));
+    return {
+      message: `Making ${label} tangent to ${others.join(" and ")} would resize ${entity.kind} ${label} from radius ${lengthText(before)} mm to ${lengthText(solved.radiusMm)} mm, because they are far apart and nothing holds its radius.`,
+      relatedIds: [entity.id, ...tangents.map((candidate) => candidate.id)]
+    };
+  }
+  return undefined;
 }
 
 /** Lines that have a Coincident joint at their start and another at their end. */

@@ -19,9 +19,15 @@ import {
   defaultElectromechanicalMappings,
   ELECTROMECHANICAL_CATALOG_REVISION,
   axisAlignedPlanarFaces,
+  faceReferenceOf,
+  planarFacesOfBody,
+  planeOffsetForCoordinate,
+  type SketchPlaneFaceRef,
+  type RevolveAxisRef,
   featureOfBody,
   isElectricalSheetPositionAvailable,
   parseWorkbenchProjectText,
+  serializeWorkbenchProject,
   sketchPlaneName,
   preferredElectromechanicalLayout,
   resolveWorkbenchContextCommands,
@@ -34,6 +40,7 @@ import {
   flangeEdgesOf,
   isFeatureActive,
   designOf,
+  nextFeatureName,
   edgeBlendTitle,
   type ComponentInstance,
   type DesignFeature,
@@ -92,7 +99,7 @@ import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
 import { facesOfBody } from "./edge-blend-step.js";
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
-import { flatPatternForBody, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
+import { flatPatternForBody, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
 import { ChangeParametersDialog } from "./ui/ChangeParametersDialog.js";
@@ -116,6 +123,7 @@ import {
 } from "../../../packages/viewport-three/src/index.js";
 import type { ModelSuccessResponse, WorkerResponse } from "../../../packages/worker-protocol/src/index.js";
 import { GeometryWorkerClient } from "./worker-client.js";
+import { createLatestWinsWriter } from "./latest-wins-writer.js";
 import { loadWorkbenchProject, saveWorkbenchProject } from "./workbench-store.js";
 import { createQualifiedPartDocument } from "./project-worker-sync.js";
 import {
@@ -371,7 +379,6 @@ export function App(): React.JSX.Element {
   const nativeInputRef = useRef<HTMLInputElement>(null);
   const engineeringDialogRef = useRef<HTMLElement>(null);
   const projectTransitionQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const projectPersistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const assemblyExplodeMaxMm = useMemo(() => assemblyExplodeLimitMm(project.assembly), [project.assembly]);
   const displayedAssembly = useMemo(() => assemblyExplodePreviewMm === null
@@ -421,7 +428,18 @@ export function App(): React.JSX.Element {
     const options: SketchFaceOption[] = [];
     for (const body of project.part.generalBodies ?? []) {
       if (!body.visible) continue;
-      for (const face of axisAlignedPlanarFaces(body.positionsMm, body.indices, 25).slice(0, 4)) {
+      // Named faces first: a sketch on one follows it when the solid changes. A body without named faces falls back to a fixed offset.
+      for (const named of planarFacesOfBody(body).filter((face) => face.areaMm2 >= 25).sort((a, b) => b.areaMm2 - a.areaMm2).slice(0, 4)) {
+        const plane: SketchPlane = named.axis === "x" ? "yz" : named.axis === "y" ? "xz" : "xy";
+        options.push({
+          plane,
+          offsetMm: planeOffsetForCoordinate(`datum:${plane}`, named.coordinateMm),
+          label: `${body.name} · ${named.axis} = ${Number(named.coordinateMm.toFixed(3))} mm`,
+          hint: `${sketchPlaneName(`datum:${plane}`)}-parallel face · ${Math.round(named.areaMm2).toLocaleString()} mm² · looks ${named.outwardPositive ? "+" : "−"}${named.axis}`,
+          ref: faceReferenceOf(body.id, named)
+        });
+      }
+      if (planarFacesOfBody(body).length === 0) for (const face of axisAlignedPlanarFaces(body.positionsMm, body.indices, 25).slice(0, 4)) {
         options.push({
           plane: planeKeyOf(face.plane),
           offsetMm: face.offsetMm,
@@ -442,11 +460,9 @@ export function App(): React.JSX.Element {
     )
     : { ok: false as const, diagnostics: [] }, [electrical.routing, electromechanicalReviewOpen, project.electrical, project.revision]);
 
-  const persistBroadProject = useCallback((next: WorkbenchProject): Promise<void> => {
-    const queued = projectPersistenceQueueRef.current.then(() => saveWorkbenchProject(next));
-    projectPersistenceQueueRef.current = queued.catch(() => undefined);
-    return queued;
-  }, []);
+  // Autosave coalesces: a burst of edits is one write behind the one in flight, so a large model does not slow every line drawn.
+  const persistWriter = useMemo(() => createLatestWinsWriter<WorkbenchProject>(saveWorkbenchProject, 200), []);
+  const persistBroadProject = useCallback((next: WorkbenchProject): Promise<void> => persistWriter.schedule(next), [persistWriter]);
 
   const syncTimelineState = useCallback((): void => {
     setLaneTimelineIndex(laneTimelineIndexRef.current);
@@ -859,12 +875,12 @@ export function App(): React.JSX.Element {
     switchWorkspace(workspace);
   };
 
-  const confirmSketchPlane = (plane: SketchPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame): void => {
+  const confirmSketchPlane = (plane: SketchPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef): void => {
     setSketchPlaneDialogOpen(false);
     const datum = `datum:${plane}` as const;
     const where = frame !== undefined ? "plane through three points"
       : `${plane.toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
-    const placement = { ...(offsetMm === 0 ? {} : { offsetMm }), ...(tilt === undefined ? {} : { tilt }), ...(frame === undefined ? {} : { frame }) };
+    const placement = { ...(offsetMm === 0 ? {} : { offsetMm }), ...(tilt === undefined ? {} : { tilt }), ...(frame === undefined ? {} : { frame }), ...(face === undefined ? {} : { face }) };
     if (sketchPlaneDialogMode === "new") {
       void (async () => {
         await commitWorkingSketch();
@@ -875,7 +891,8 @@ export function App(): React.JSX.Element {
     const sketch = projectRef.current.sketch;
     const sameTilt = (sketch.planeTilt?.axis ?? null) === (tilt?.axis ?? null) && (sketch.planeTilt?.angleDeg ?? 0) === (tilt?.angleDeg ?? 0);
     const sameFrame = JSON.stringify(sketch.planeFrame ?? null) === JSON.stringify(frame ?? null);
-    if ((sketch.plane !== datum || (sketch.planeOffsetMm ?? 0) !== offsetMm || !sameTilt || !sameFrame)
+    const sameFace = (sketch.planeFace?.faceKey ?? null) === (face?.faceKey ?? null) && (sketch.planeFace?.bodyId ?? null) === (face?.bodyId ?? null);
+    if ((sketch.plane !== datum || (sketch.planeOffsetMm ?? 0) !== offsetMm || !sameTilt || !sameFrame || !sameFace)
       && !applyProjectOperation({ kind: "set-sketch-plane", plane: datum, ...placement })) return;
     if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
     setStatusText(`Sketch on the ${where}, shown face-on. Draw a closed profile, then Create solid extrudes or revolves it from this plane.`);
@@ -1411,7 +1428,7 @@ export function App(): React.JSX.Element {
     const base = baseFeatureOf(history, body.id);
     const sketchFeature = base === undefined ? undefined : history.features.find((candidate) => candidate.id === base.sketchFeatureId && candidate.kind === "sketch");
     if (base === undefined || sketchFeature?.kind !== "sketch") { setStatus("ready"); setStatusText("Edge flange: this body is not in the timeline, so a flange cannot be recorded."); return; }
-    const rebuilt = await rebuildSolidFeature(base, sketchFeature, body.color);
+    const rebuilt = await rebuildSolidFeature(base, sketchFeature, body.color, sketchLookupOf(designOf(projectRef.current)));
     if (!rebuilt.ok) { setStatus("error"); setStatusText(`Edge flange: ${rebuilt.message}`); return; }
     const frame = sheetFrameOf(rebuilt.body, sketchNormal(sketchFeature));
     if (frame === undefined || frame.edges.length === 0) { setStatus("ready"); setStatusText("Edge flange: this body has no flat top face with straight edges to bend from."); return; }
@@ -1669,7 +1686,7 @@ export function App(): React.JSX.Element {
     }
     if (found === undefined) { setStatus("error"); setStatusText(`${lead}: ${failure}`); return; }
     const { feature, reached } = found;
-    const built = await rebuildSolidFeature(targetBody === undefined ? reached.step : { ...reached.step, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color);
+    const built = await rebuildSolidFeature(targetBody === undefined ? reached.step : { ...reached.step, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color, sketchLookupOf(designOf(projectRef.current)));
     const tool = built.ok && reached.trim !== undefined ? await trimToFace(built.body, reached.trim) : built;
     if (!tool.ok) { setStatus("error"); setStatusText(tool.message); return; }
     let resultBody = tool.body;
@@ -2391,8 +2408,7 @@ export function App(): React.JSX.Element {
     const editing = history.features.find((feature) => feature.id === history.editingSketchId && feature.kind === "sketch");
     if (current.sketch.entities.length === 0) return editing?.id;
     if (editing?.kind === "sketch" && JSON.stringify(editing.sketch) === JSON.stringify(current.sketch)) return editing.id;
-    const ordinal = history.features.filter((feature) => feature.kind === "sketch").length + 1;
-    if (!applyProjectOperation({ kind: "commit-design-sketch", featureId: `feature:sketch-${crypto.randomUUID()}`, name: `Sketch ${ordinal}` }, false)) return undefined;
+    if (!applyProjectOperation({ kind: "commit-design-sketch", featureId: `feature:sketch-${crypto.randomUUID()}`, name: nextFeatureName(history, "Sketch") }, false)) return undefined;
     const sketchId = designOf(projectRef.current).editingSketchId ?? undefined;
     if (sketchId !== undefined && editing !== undefined) await rebuildFrom(sketchId);
     return sketchId;
@@ -2424,6 +2440,8 @@ export function App(): React.JSX.Element {
       readonly extentTarget?: DesignExtentTarget;
       readonly thinWallMm?: number;
       readonly thinSide?: "inside" | "outside" | "center";
+      /** Revolve: the axis it turns about (absent: the sketch Y axis). */
+      readonly revolveAxis?: RevolveAxisRef;
       readonly sweepDirectionMm?: readonly [number, number, number];
       readonly sweepPathEntityId?: string;
       readonly sweepTwistDeg?: number;
@@ -2523,6 +2541,7 @@ export function App(): React.JSX.Element {
       bodyId,
       ...((operation === "extrude" || operation === "revolve") && direction !== "one-side" ? { direction } : {}),
       ...((operation === "extrude" || operation === "revolve") && direction === "two-side" && advancedParams?.secondValueMm !== undefined ? { secondValueMm: advancedParams.secondValueMm } : {}),
+      ...(operation === "revolve" && advancedParams?.revolveAxis !== undefined ? { revolveAxis: advancedParams.revolveAxis } : {}),
       ...(operation === "revolve" && advancedParams?.thinWallMm !== undefined ? { thinWallMm: advancedParams.thinWallMm, thinSide: advancedParams.thinSide ?? "inside" } : {}),
       ...((operation === "extrude" || operation === "revolve") && advancedParams?.extent !== undefined && advancedParams.extentTarget !== undefined ? { extent: advancedParams.extent, extentTarget: advancedParams.extentTarget } : {}),
       ...(edge === undefined ? {} : { edge }),
@@ -2567,7 +2586,7 @@ export function App(): React.JSX.Element {
     if (reached !== undefined && !reached.ok) { setStatus("error"); setStatusText(reached.message); return; }
     const sized = reached?.ok === true ? reached.step : feature.extent === "through-all" && targetBody !== undefined ? throughAllOverride(feature, sketchFeature, targetBody) : feature;
     const stored: DesignSolidFeature = reached?.ok === true ? { ...feature, valueMm: reached.step.valueMm } : feature;
-    const built = await rebuildSolidFeature(target === undefined ? sized : { ...sized, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color);
+    const built = await rebuildSolidFeature(target === undefined ? sized : { ...sized, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color, sketchLookupOf(designOf(projectRef.current)));
     const rebuilt = built.ok && reached?.ok === true && reached.trim !== undefined ? await trimToFace(built.body, reached.trim) : built;
     if (!rebuilt.ok) { setStatus("error"); setStatusText(rebuilt.message); return; }
     let resultBody = rebuilt.body;
@@ -2673,7 +2692,7 @@ export function App(): React.JSX.Element {
       if (await commitWithReplay({ kind: "update-design-solid", feature: next, body: existing }, next.id, replayAll)) setFeatureEdit(undefined);
       return;
     }
-    const rebuilt = await rebuildSolidFeature(next, sketchFeature, existing?.color);
+    const rebuilt = await rebuildSolidFeature(next, sketchFeature, existing?.color, sketchLookupOf(designOf(projectRef.current)));
     if (!rebuilt.ok) { setStatus("error"); setStatusText(rebuilt.message); return; }
     if (applyProjectOperation({ kind: "update-design-solid", feature: next, body: rebuilt.body })) setFeatureEdit(undefined);
   };
@@ -2761,7 +2780,7 @@ export function App(): React.JSX.Element {
     return true;
   };
 
-  const serializeProjectText = (): string => `${JSON.stringify(projectRef.current, null, 2)}\n`;
+  const serializeProjectText = (): string => serializeWorkbenchProject(projectRef.current);
 
   const prepareQualifiedWorker = async (next: WorkbenchProject): Promise<PreparedQualifiedWorker | undefined> => {
     let active = false;
@@ -3486,7 +3505,7 @@ export function App(): React.JSX.Element {
     return () => window.removeEventListener("keydown", listener);
   }, [isThreeDimensional, masterCartOpen]);
 
-  const downloadProject = (): void => downloadBlob(new Blob([JSON.stringify(projectRef.current, null, 2)], { type: "application/json" }), exportFileName(projectRef.current.name, "", "workbench.json"));
+  const downloadProject = (): void => downloadBlob(new Blob([serializeWorkbenchProject(projectRef.current)], { type: "application/json" }), exportFileName(projectRef.current.name, "", "workbench.json"));
   const downloadDrawing = (): void => downloadBlob(new Blob([drawing.svg], { type: "image/svg+xml" }), exportFileName(projectRef.current.name, "drawing", "svg"));
   useEffect(() => {
     const listener = (event: KeyboardEvent): void => {
@@ -3856,7 +3875,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams)} onChangePlane={() => setSketchPlaneDialogOpen(true)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={() => { setSketchCancelVersion((version) => version + 1); switchWorkspace("part"); setStatusText("Cancelled the sketch and returned to Design. Pending points were dropped; committed geometry is kept."); }} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace displayUnit={document.displayUnit} projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={setStatusText} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams)} onChangePlane={() => setSketchPlaneDialogOpen(true)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={() => { setSketchCancelVersion((version) => version + 1); switchWorkspace("part"); setStatusText("Cancelled the sketch and returned to Design. Pending points were dropped; committed geometry is kept."); }} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl

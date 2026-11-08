@@ -36,3 +36,9 @@ export { anchorsForConstraint, anchorsForDimension, preserveForConstraint, type 
 export { describeConstraint, entityKindOf, entityNames, liveConstraintId } from "./sketch-translate.js";
 export { redriveDimension, dimensionNameOf, locateDimensionConstraint } from "./sketch-dimension-edit.js";
 export type { LiveRelationSet, LiveSolveOptions } from "./sketch-solve.js";
+export * from "./envelope.js";
+export * from "./audit-archive.js";
+export * from "./project-text.js";
+export * from "./feature-refs.js";
+export * from "./face-sketch.js";
+export * from "./units.js";

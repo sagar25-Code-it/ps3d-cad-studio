@@ -119,9 +119,10 @@ export const sketchSolverKindsTests: readonly TestCase[] = [
   {
     name: "Constraint solver S19: leaving the coordinate limit or the minimum size is explained",
     run: () => {
-      const far = projectWith([line("a", [5000, 0], [5100, 0])]);
+      // The sketch limit is +/-100,000 mm (the model envelope), so the line starts near it and is stretched past it.
+      const far = projectWith([line("a", [95000, 0], [95100, 0])]);
       const message = refuseDimension(far, "a", "length", 9000);
-      assert(/10,000 mm/.test(message), `names the coordinate limit: ${message}`);
+      assert(/100,000 mm/.test(message), `names the coordinate limit: ${message}`);
       const tiny = refuse(projectWith([]), { kind: "add-sketch-entity", entity: line("t", [0, 0], [0.005, 0]) });
       assert(/0\.01 mm/.test(tiny), `names the minimum size: ${tiny}`);
       const duplicate = refuse(projectWith([line("a", [0, 0], [5, 0])]), { kind: "add-sketch-entity", entity: line("a", [0, 1], [5, 1]) });

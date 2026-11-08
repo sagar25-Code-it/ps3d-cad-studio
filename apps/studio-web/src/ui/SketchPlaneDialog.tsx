@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SketchPlaneFrame, SketchPlaneTilt } from "../../../../packages/workbench-core/src/index.js";
+import type { SketchPlaneFaceRef, SketchPlaneFrame, SketchPlaneTilt } from "../../../../packages/workbench-core/src/index.js";
 import { frameThroughPoints } from "../../../../packages/workbench-geometry/src/index.js";
 import type { SketchPlane } from "../general-modeling.js";
 import { CommandIcon } from "./CommandIcon.js";
@@ -17,7 +17,7 @@ interface SketchPlaneOption {
 const SKETCH_PLANES: readonly SketchPlaneOption[] = [
   { plane: "xy", label: "Top (XY)", view: "Top view", icon: "axes", hint: "Floor plane · Z up" },
   { plane: "xz", label: "Front (XZ)", view: "Front view", icon: "axes", hint: "Looking along −Y" },
-  { plane: "yz", label: "Right (YZ)", view: "Right view", icon: "axes", hint: "Looking along +X" }
+  { plane: "yz", label: "Right (YZ)", view: "Right view", icon: "axes", hint: "Looking along +X · sketch X runs along world -Z, Y is up" }
 ];
 
 /** A planar face of a solid the sketch can sit on, already reduced to its plane and offset. */
@@ -28,6 +28,8 @@ export interface SketchFaceOption {
   readonly label: string;
   /** "Top face · 2400 mm²" */
   readonly hint: string;
+  /** Which face of which solid this is, when it has a stable name: the sketch then follows the face when the solid changes. */
+  readonly ref?: SketchPlaneFaceRef;
 }
 
 /** An angle construction plane of the part: a datum plane turned about a world axis. Picking it starts a tilted sketch. */
@@ -62,7 +64,7 @@ interface SketchPlaneDialogProps {
   readonly framePlanes?: readonly SketchFrameOption[];
   /** Axis-aligned planar faces of the shown solids; picking one starts the sketch on that face. */
   readonly faces: readonly SketchFaceOption[];
-  readonly onConfirm: (plane: SketchPlane, offsetMm: number, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame) => void;
+  readonly onConfirm: (plane: SketchPlane, offsetMm: number, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef) => void;
   readonly onClose: () => void;
 }
 
@@ -204,8 +206,8 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
             key={`${face.plane}:${face.offsetMm}:${index}`}
             type="button"
             className="sketch-plane-face"
-            onClick={() => props.onConfirm(face.plane, face.offsetMm)}
-          ><CommandIcon name="face" /><span><strong>{face.label}</strong><small>{face.hint}</small></span></button>)}
+            onClick={() => props.onConfirm(face.plane, face.offsetMm, undefined, undefined, face.ref)}
+          ><CommandIcon name="face" /><span><strong>{face.label}</strong><small>{face.hint}{face.ref !== undefined ? " · follows the face" : ""}</small></span></button>)}
         </div>}
         {problem !== "" && <div className="inline-warning" role="alert">{problem}</div>}
         <div className="save-project-note"><CommandIcon name="shield" /><span>The sketch opens face-on, looking at the {selected.view}. The plane and offset are saved with the sketch, and Create solid builds from it.</span></div>

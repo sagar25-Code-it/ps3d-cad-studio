@@ -6,12 +6,13 @@ import { entityKindOf } from "./sketch-translate.js";
 import type { SketchDimensionName, SketchEntity, SketchPointRef, WorkbenchOperation, WorkbenchProject, WorkbenchResult, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 import { isSketchDatumEntityId, SKETCH_RELATIVE_DISTANCE_NAMES } from "./types.js";
 import { failure, WORKBENCH_LIMITS } from "./validation.js";
+import { MODEL_ENVELOPE } from "./envelope.js";
 
 type SetDimension = Extract<WorkbenchOperation, { readonly kind: "set-sketch-dimension" }>;
 type Applied = WorkbenchResult<{ readonly project: WorkbenchProject; readonly changedIds: readonly string[]; readonly summary: string }>;
 
-const MAX_ENVELOPE_MM = 10_000;
-const MAX_LONG_ENVELOPE_MM = 20_000;
+const MAX_ENVELOPE_MM = MODEL_ENVELOPE.maxSketchSizeMm;
+const MAX_LONG_ENVELOPE_MM = MODEL_ENVELOPE.maxSketchLongMm;
 
 function constraintKindOf(name: SketchDimensionName): WorkbenchSketchConstraint["kind"] {
   if (name === "radius" || name === "diameter" || name === "major-radius" || name === "minor-radius") return "radius";

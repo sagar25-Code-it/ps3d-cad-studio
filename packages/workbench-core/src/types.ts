@@ -272,10 +272,29 @@ export interface SketchPlaneFrame {
   readonly normal: Vec3;
 }
 
+/**
+ * The face a sketch was started on. The sketch's plane offset is only the last known position of that face: on every rebuild the
+ * face is found again by its stable key (then its role, then the nearest face with the same direction) and the sketch follows it, so
+ * features built on the sketch move with the face. When the face is gone the feature says so instead of staying silently stale.
+ */
+export interface SketchPlaneFaceRef {
+  readonly bodyId: string;
+  readonly faceKey: string;
+  readonly faceRole: string;
+  /** The world axis the face is perpendicular to, and whether it looks along its positive direction. */
+  readonly axis: "x" | "y" | "z";
+  readonly outwardPositive: boolean;
+  /** Where the face was when the sketch was started (mm along `axis`), and its area: the fallback that finds it again. */
+  readonly coordinateMm: number;
+  readonly areaMm2: number;
+}
+
 export interface WorkbenchSketch {
   readonly id: "sketch:primary-profile";
   readonly name: string;
   readonly plane: SketchDatumPlane;
+  /** Set when the sketch lies on a face of a solid: the offset below follows that face at every rebuild. */
+  readonly planeFace?: SketchPlaneFaceRef;
   /**
    * How far the sketch plane sits from its datum plane, in mm along the plane's normal (`DATUM_NORMALS`).
    * Absent means 0 (on the datum itself). Sketching on a planar face of a solid stores that face's plane this way.
@@ -1130,10 +1149,18 @@ export interface DrawingSettings {
 export interface OperationAuditEntry {
   readonly revision: number;
   readonly operationId: string;
-  readonly kind: WorkbenchOperation["kind"];
+  /** An operation kind, or "audit-checkpoint" for the entry that stands for the older operations folded out of the audit. */
+  readonly kind: WorkbenchOperation["kind"] | "audit-checkpoint";
   readonly intentKey: string;
   readonly summary: string;
   readonly changedIds: readonly string[];
+  /** Only on an "audit-checkpoint" entry (always the first one): what was folded into it. See audit-archive.ts. */
+  readonly checkpoint?: {
+    readonly firstRevision: number;
+    readonly lastRevision: number;
+    readonly operations: number;
+    readonly digest: string;
+  };
 }
 
 /** What a parametric history step is. Sketches keep a snapshot of the sketch; solids are rebuilt from a sketch feature. */
@@ -1176,6 +1203,20 @@ export interface EdgeBlendGroup {
   readonly faceKeys?: readonly [string, string];
   /** An inside corner: the blend adds material instead of removing it. */
   readonly concave?: boolean;
+}
+
+/** What a revolve turns about. The default (absent) is the sketch Y axis. */
+export type RevolveAxisRef =
+  | { readonly kind: "sketch-axis"; readonly axis: "x" | "y" }
+  /** A line of the same sketch (a centerline, a construction line or any line): the profile turns about the line through it. */
+  | { readonly kind: "sketch-line"; readonly entityId: string }
+  /** A straight model edge as picked (world end points). It must lie in the sketch plane. */
+  | { readonly kind: "model-edge"; readonly bodyId: string; readonly startMm: Vec3; readonly endMm: Vec3 };
+
+/** A sweep path: curves of a sketch, chained end to end (the sketch may be a different one from the profile's, on another plane). */
+export interface SweepPathRef {
+  readonly sketchFeatureId: string;
+  readonly entityIds: readonly string[];
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
@@ -1243,6 +1284,12 @@ export interface DesignSolidFeature extends DesignFeatureBase {
    * controlling how the ribbon leaves each cap. When absent, the loft falls back to the `loftTopScale` form.
    */
   readonly loftSecondaryProfileIds?: readonly string[];
+  /** Revolve only: the axis the profile turns about; absent means the sketch Y axis. */
+  readonly revolveAxis?: RevolveAxisRef;
+  /** Sweep only: a path of chained curves from this or another sketch. Replaces `sweepPathEntityId` and `sweepDirectionMm`. */
+  readonly sweepPath?: SweepPathRef;
+  /** Loft only: the sketch feature that holds `loftSecondaryProfileIds` when it is not the profile's own sketch (it may lie on another plane). */
+  readonly loftSecondarySketchFeatureId?: string;
   /** Loft only: how the ribbon meets the caps — G0 straight, G1 tangent-smooth, G2 curvature-smooth. */
   readonly loftContinuity?: "position" | "tangent" | "curvature";
   /**
@@ -1497,13 +1544,13 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly label: string;
     }
   | { readonly kind: "set-sketch-constraints-suppressed"; readonly constraintIds: readonly string[]; readonly suppressed: boolean }
-  | { readonly kind: "set-sketch-plane"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame }
+  | { readonly kind: "set-sketch-plane"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame; readonly face?: SketchPlaneFaceRef }
   /** Finishes the working sketch into the timeline: a new sketch feature, or an update of the one being edited. */
   | { readonly kind: "commit-design-sketch"; readonly featureId: string; readonly name: string }
   /** Reopens a sketch feature as the working sketch. */
   | { readonly kind: "edit-design-sketch"; readonly featureId: string }
   /** Starts a new, empty working sketch on a plane (the previous one should be finished first), optionally offset along its normal. */
-  | { readonly kind: "new-design-sketch"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame }
+  | { readonly kind: "new-design-sketch"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame; readonly face?: SketchPlaneFaceRef }
   /** Adds an extrude or revolve feature together with the solid the kernel built for it. */
   | { readonly kind: "add-design-solid"; readonly feature: DesignSolidFeature; readonly body: GeneralSolidBody }
   /** Changes a solid feature's parameters and replaces its solid. */
@@ -1515,7 +1562,7 @@ export type WorkbenchOperation = OperationEnvelope & (
    */
   | { readonly kind: "set-design-parameters"; readonly parameters: readonly DesignParameter[]; readonly renames?: readonly { readonly from: string; readonly to: string }[] }
   /** Applies the result of rebuilding features after a sketch changed: new solids, or the reason a feature failed. */
-  | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string }[] }
+  | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number }[] }
   | { readonly kind: "set-design-feature-suppressed"; readonly featureId: string; readonly suppressed: boolean }
   | { readonly kind: "delete-design-feature"; readonly featureId: string }
   | { readonly kind: "set-design-rollback"; readonly index: number }

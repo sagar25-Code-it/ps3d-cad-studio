@@ -6,7 +6,7 @@ export const workbenchMcpTests: readonly TestCase[] = [
   {
     name: "MCP capability surface has truthful safety annotations",
     run: async () => {
-      equal(WORKBENCH_MCP_TOOLS.length, 12, "the bounded server should expose twelve truth-labeled tools");
+      equal(WORKBENCH_MCP_TOOLS.length, 13, "the bounded server should expose thirteen truth-labeled tools");
       assert(WORKBENCH_MCP_TOOLS.every((tool) => tool.annotations.openWorldHint === false), "local tools must not imply open-world access");
       assert(WORKBENCH_MCP_TOOLS.every((tool) => tool.annotations.destructiveHint === false), "tools return data and never destroy external state");
       assert(WORKBENCH_MCP_TOOLS.every((tool) => tool.inputSchema["type"] === "object" && tool.outputSchema["type"] === "object"), "every tool should publish object input and output schemas");

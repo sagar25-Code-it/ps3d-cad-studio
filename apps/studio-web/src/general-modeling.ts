@@ -1,6 +1,6 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
 import { splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
-import { booleanMeshes, splitMeshPieces, revolveAxisRelation, tessellateDome, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateBentStrip, tessellateRevolve, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { adaptiveFacetCount, booleanMeshes, splitMeshPieces, revolveAxisRelation, revolveSegmentsForRadius, tessellateDome, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateBentStrip, tessellateRevolve, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism, evaluateProfileRevolution, stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { profileOutlineMm, stableEntityToken, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
@@ -11,8 +11,30 @@ export type SketchPlane = TessellatePlane;
 type PolygonPoint = readonly [number, number];
 type WorldPoint = readonly [number, number, number];
 
-/** Convert a detected sketch profile boundary into a closed polygon (millimetres). */
-function profilePolygonMm(boundary: SketchProfile["boundary"]): readonly PolygonPoint[] {
+/**
+ * Convert a detected sketch profile boundary into a closed polygon (millimetres). A circle or ellipse is faceted by its size (see
+ * adaptiveFacetCount): 72 facets up to a radius of about 50 mm, more on large ones, so a big round part is not visibly polygonal.
+ */
+export function profilePolygonMm(boundary: SketchProfile["boundary"]): readonly PolygonPoint[] {
+  if (boundary.kind === "circle") {
+    const count = adaptiveFacetCount(boundary.radiusMm);
+    return Array.from({ length: count }, (_, index): PolygonPoint => {
+      const angle = (2 * Math.PI * index) / count;
+      return [boundary.center[0] + boundary.radiusMm * Math.cos(angle), boundary.center[1] + boundary.radiusMm * Math.sin(angle)];
+    });
+  }
+  if (boundary.kind === "ellipse") {
+    const count = adaptiveFacetCount(boundary.majorRadiusMm);
+    const radians = (boundary.rotationDeg * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    return Array.from({ length: count }, (_, index): PolygonPoint => {
+      const theta = (2 * Math.PI * index) / count;
+      const localX = boundary.majorRadiusMm * Math.cos(theta);
+      const localY = boundary.minorRadiusMm * Math.sin(theta);
+      return [boundary.center[0] + localX * cos - localY * sin, boundary.center[1] + localX * sin + localY * cos];
+    });
+  }
   return profileOutlineMm(boundary).map((point) => [point[0], point[1]] as PolygonPoint);
 }
 
@@ -460,7 +482,8 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
         operationId: request.bodyId,
         semanticId: request.bodyId,
         profilePoints,
-        degrees: request.valueMm
+        degrees: request.valueMm,
+        segments: Math.min(256, revolveSegmentsForRadius(Math.max(...polygonMm.map((point) => Math.abs(point[0]))), polygonMm.length))
       });
       if (revolution.indices.length >= 3) {
         const positionsMm: number[] = [];

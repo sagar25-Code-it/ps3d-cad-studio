@@ -1,5 +1,6 @@
 import {
   WORKBENCH_CAPABILITIES,
+  auditCapacity,
   electricalSignature,
   validateWorkbenchProject,
   type CapabilityLevel,
@@ -131,7 +132,8 @@ export function buildDesignHealthReport(project: WorkbenchProject): DesignHealth
   if (vehicle.analysis.warnings.length > 0) add(finding("health:vehicle-review", "vehicle", "warning", "Vehicle calculations require review", `${vehicle.analysis.warnings.length} model warning${vehicle.analysis.warnings.length === 1 ? "" : "s"} remain.`, "Review hardpoints, supplier inputs, assumptions, and state selection with a qualified vehicle engineer.", [project.vehicle.id], vehicle.analysis.warnings.slice(0, 6).join(" | ")));
   if (project.vehicle.inputStatus !== "user-reviewed" || project.vehicle.tireDataStatus !== "supplier-reviewed" || project.vehicle.brakeDataStatus !== "supplier-reviewed") add(finding("health:vehicle-evidence", "vehicle", "warning", "Vehicle evidence is not release-ready", "Geometry inputs, tire data, or brake data have not all been marked reviewed.", "Correlate project inputs to controlled supplier evidence and independent engineering review.", [project.vehicle.id], `${project.vehicle.inputStatus} · ${project.vehicle.tireDataStatus} · ${project.vehicle.brakeDataStatus}`));
 
-  if (project.audit.length >= 450) add(finding("health:automation-audit-capacity", "automate", "warning", "Revision audit is nearing its bounded limit", `${project.audit.length} of 500 audit entries are in use.`, "Export a controlled checkpoint and start a reviewed compacted lineage before reaching the limit.", [project.id], `${project.audit.length}/500 entries`));
+  const auditUse = auditCapacity(project);
+  if (auditUse.used >= auditUse.limit * 0.9) add(finding("health:automation-audit-capacity", "automate", "info", "Revision history will compact soon", `${auditUse.label}. The oldest entries fold into one checkpoint at ${auditUse.limit}; revision numbers and the integrity digest are kept.`, "Nothing to do: editing continues and the oldest entries fold into a checkpoint automatically.", [project.id], `${auditUse.used}/${auditUse.limit} entries`));
   else add(finding("health:automation-contract", "automate", "info", "AI collaboration remains caller-controlled", "AI tools inspect caller-supplied state and return immutable candidates; they do not control the open browser project automatically.", "Continue using inspect, preview, explicit confirmation, and returned-project import boundaries.", [project.id], `${project.audit.length} recorded operations`));
 
   const dependencies = buildDependencies(project);

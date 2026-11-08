@@ -187,7 +187,7 @@ const READ_ONLY_MCP_TOOL_NAMES = new Set([
 
 export function requiredScopeForMcpToolName(name: string): McpScope | undefined {
   if (name === "ps3d_apply_preview") return "mcp:apply";
-  if (name === "ps3d_preview_electromechanical" || name === "ps3d_preview_operation") return "mcp:preview";
+  if (name === "ps3d_preview_electromechanical" || name === "ps3d_preview_operation" || name === "ps3d_prepare_design_solid") return "mcp:preview";
   return READ_ONLY_MCP_TOOL_NAMES.has(name) ? "mcp:read" : undefined;
 }
 

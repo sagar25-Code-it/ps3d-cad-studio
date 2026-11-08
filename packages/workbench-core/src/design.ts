@@ -6,6 +6,7 @@ import type {
   DesignSolidFeature,
   GeneralSolidBody,
   SketchDatumPlane,
+  SketchPlaneFaceRef,
   SketchPlaneFrame,
   SketchPlaneTilt,
   WorkbenchDiagnostic,
@@ -17,6 +18,7 @@ import { validFeatureExpressions } from "./feature-bindings.js";
 import { validParameterTable } from "./parameter-graph.js";
 import { EDGE_BLEND_KEYS, validEdgeBlendFields } from "./edge-blend.js";
 import { BODY_EDIT_KINDS, BODY_EDIT_ONLY_KINDS, validBodyEdit } from "./body-edit.js";
+import { FEATURE_REF_KEYS, validFeatureRefs } from "./feature-refs.js";
 
 /**
  * The parametric history ("timeline"): an ordered list of sketch and solid features with a rollback marker. A sketch
@@ -110,7 +112,9 @@ export function dependentsOf(history: DesignHistory, featureId: string): readonl
     grew = false;
     for (const feature of history.features) {
       if (closure.has(feature.id) || feature.kind === "sketch") continue;
-      const builtOnClosure = closure.has(feature.sketchFeatureId);
+      // A sweep also follows the path of another sketch, and a loft takes its second profile from another sketch.
+      const builtOnClosure = closure.has(feature.sketchFeatureId) || (feature.sweepPath !== undefined && closure.has(feature.sweepPath.sketchFeatureId))
+        || (feature.loftSecondarySketchFeatureId !== undefined && closure.has(feature.loftSecondarySketchFeatureId));
       const copiesClosureBody = feature.kind === "pattern" && feature.pattern !== undefined && history.features.some((other) => closure.has(other.id) && other.kind !== "sketch" && !modifiesBody(other) && other.bodyId === feature.pattern!.sourceBodyId);
       const modifiesClosureBody = modifiesBody(feature) && history.features.some((other) => closure.has(other.id) && other.kind !== "sketch" && !modifiesBody(other) && other.bodyId === feature.bodyId);
       if (builtOnClosure || modifiesClosureBody || copiesClosureBody) { closure.add(feature.id); grew = true; }
@@ -180,8 +184,35 @@ function changed(project: WorkbenchProject, changedIds: readonly string[], summa
 
 const insertAt = <T>(items: readonly T[], index: number, item: T): readonly T[] => [...items.slice(0, index), item, ...items.slice(index)];
 
-export function commitDesignSketch(project: WorkbenchProject, featureId: string, name: string): DesignChange {
+const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** The next free default name for a feature of this kind: "Sketch 3" after "Sketch 1" and "Sketch 2" (and after a deleted "Sketch 2", still 3, never a second "Sketch 3"). */
+export function nextFeatureName(history: DesignHistory, prefix: string): string {
+  const taken = history.features.map((feature) => feature.name);
+  let highest = 0;
+  for (const name of taken) {
+    const match = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")} (\\d+)$`, "iu").exec(name.trim());
+    if (match !== null) highest = Math.max(highest, Number(match[1]));
+  }
+  let candidate = Math.max(highest, history.features.filter((feature) => feature.name.toLowerCase().startsWith(prefix.toLowerCase())).length) + 1;
+  while (taken.some((name) => sameName(name, `${prefix} ${candidate}`))) candidate += 1;
+  return `${prefix} ${candidate}`;
+}
+
+/** `name` if no other feature has it, otherwise the same name with " (2)", " (3)" ... added. */
+export function uniqueFeatureName(history: DesignHistory, name: string, exceptFeatureId?: string): string {
+  const others = history.features.filter((feature) => feature.id !== exceptFeatureId).map((feature) => feature.name);
+  if (!others.some((other) => sameName(other, name))) return name;
+  for (let copy = 2; copy < 1_000; copy += 1) {
+    const candidate = `${name} (${copy})`;
+    if (!others.some((other) => sameName(other, candidate))) return candidate;
+  }
+  return name;
+}
+
+export function commitDesignSketch(project: WorkbenchProject, featureId: string, nameInput: string): DesignChange {
   const history = designOf(project);
+  const name = history.features.some((feature) => feature.id === history.editingSketchId) ? nameInput : uniqueFeatureName(history, nameInput.trim());
   if (project.sketch.entities.length === 0) return fail("INVALID_OPERATION", "The sketch is empty, so there is nothing to finish.", [project.sketch.id], "Draw at least one curve first.");
   const editing = history.features.find((feature): feature is DesignSketchFeature => feature.id === history.editingSketchId && feature.kind === "sketch");
   if (editing !== undefined) {
@@ -204,10 +235,10 @@ export function editDesignSketch(project: WorkbenchProject, featureId: string): 
   return changed({ ...project, sketch: feature.sketch, activeWorkspace: "sketch", design: next }, [featureId], `Reopened ${feature.name} for editing.`);
 }
 
-export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame): DesignChange {
+export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef): DesignChange {
   const history = designOf(project);
-  const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, ...rest } = project.sketch;
-  const sketch = { ...rest, name: "Sketch", plane, ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), ...(frame === undefined ? {} : { planeFrame: frame }), entities: [], constraints: [] };
+  const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, ...rest } = project.sketch;
+  const sketch = { ...rest, name: "Sketch", plane, ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), ...(frame === undefined ? {} : { planeFrame: frame }), ...(face === undefined ? {} : { planeFace: face }), entities: [], constraints: [] };
   const where = frame !== undefined ? "a plane through three points"
     : `the ${plane.replace("datum:", "").toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
   return changed({ ...project, sketch, activeWorkspace: "sketch", design: { ...history, editingSketchId: null } }, [project.sketch.id], `Started a new sketch on ${where}.`);
@@ -217,6 +248,9 @@ function checkSolidFeature(history: DesignHistory, feature: DesignSolidFeature, 
   if (feature.bodyId !== body.id) return fail("INVALID_OPERATION", "The solid's ID must match the feature's body ID.", [feature.id, body.id], "Build the solid with the feature's body ID.");
   const sketch = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
   if (sketch === undefined || sketch.kind !== "sketch") return missing(feature.sketchFeatureId, "The feature must be built on a sketch feature in the timeline.");
+  for (const referenced of [feature.sweepPath?.sketchFeatureId, feature.loftSecondarySketchFeatureId]) {
+    if (referenced !== undefined && !history.features.some((candidate) => candidate.id === referenced && candidate.kind === "sketch")) return missing(referenced, "The sketch this sweep or loft takes its path or second profile from is not in the timeline.");
+  }
   const duplicate = history.features.find((candidate) => (candidate.id === feature.id) !== replacing && candidate.id === feature.id);
   if (duplicate !== undefined) return fail("INVALID_OPERATION", "A timeline feature with this ID already exists.", [feature.id], "Use a new feature ID.");
   if (feature.kind === "pattern" && feature.pattern !== undefined) {
@@ -267,7 +301,7 @@ export function updateDesignSolid(project: WorkbenchProject, feature: DesignSoli
   return changed(withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, next), [feature.id, body.id], `Updated ${feature.name}.`);
 }
 
-export function regenerateDesign(project: WorkbenchProject, results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string }[]): DesignChange {
+export function regenerateDesign(project: WorkbenchProject, results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number }[]): DesignChange {
   const history = designOf(project);
   const byId = new Map(results.map((result) => [result.featureId, result] as const));
   if (byId.size !== results.length) return fail("INVALID_OPERATION", "A feature appears twice in the rebuild results.", [], "Send one result per feature.");
@@ -290,15 +324,29 @@ export function regenerateDesign(project: WorkbenchProject, results: readonly { 
     }
     return candidate;
   }).concat(newPieces);
+  // A sketch drawn on a face follows the face: its stored plane offset moves with it, so reopening the sketch shows it where the face is now.
+  const followedOffsets = new Map<string, number>();
+  for (const result of results) {
+    const feature = history.features.find((candidate) => candidate.id === result.featureId);
+    if (result.sketchPlaneOffsetMm !== undefined && feature !== undefined && feature.kind !== "sketch") followedOffsets.set(feature.sketchFeatureId, result.sketchPlaneOffsetMm);
+  }
+  const retargeted = (sketch: WorkbenchProject["sketch"], offsetMm: number): WorkbenchProject["sketch"] => {
+    const { planeOffsetMm: _old, ...rest } = sketch;
+    return offsetMm === 0 ? rest : { ...rest, planeOffsetMm: offsetMm };
+  };
   const features = history.features.map((feature): DesignFeature => {
+    const followed = followedOffsets.get(feature.id);
+    if (feature.kind === "sketch" && followed !== undefined && feature.sketch.planeFace !== undefined) return { ...feature, sketch: retargeted(feature.sketch, followed) };
     const result = byId.get(feature.id);
     if (result === undefined) return feature;
     const { health: _previous, ...rest } = feature;
     return result.message === undefined ? rest as DesignFeature : { ...rest, health: { message: result.message } } as DesignFeature;
   });
+  const workingFollowed = history.editingSketchId === null ? undefined : followedOffsets.get(history.editingSketchId);
   const failed = results.filter((result) => result.message !== undefined).length;
+  const workingSketch = workingFollowed !== undefined && project.sketch.planeFace !== undefined ? retargeted(project.sketch, workingFollowed) : project.sketch;
   return changed(
-    withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, { ...history, features }),
+    withHistory({ ...project, sketch: workingSketch, part: { ...project.part, generalBodies: bodies } }, { ...history, features }),
     results.map((result) => result.featureId),
     `Rebuilt ${results.length - failed} feature${results.length - failed === 1 ? "" : "s"}${failed === 0 ? "" : `; ${failed} could not be rebuilt`}.${newPieces.length === 0 ? "" : ` The solid was cut into ${newPieces.length + results.filter((result) => result.pieces !== undefined && result.body !== undefined).length} separate bodies (${newPieces.map((piece) => piece.name).join(", ")} split off).`}`
   );
@@ -337,11 +385,15 @@ export function setDesignRollback(project: WorkbenchProject, index: number): Des
   return changed(withHistory(project, { ...history, rollbackIndex: index }), [], index === history.features.length ? "Rolled forward to the end of the timeline." : `Rolled back to after step ${index}.`);
 }
 
-export function renameDesignFeature(project: WorkbenchProject, featureId: string, name: string): DesignChange {
+export function renameDesignFeature(project: WorkbenchProject, featureId: string, nameInput: string): DesignChange {
   const history = designOf(project);
   if (!history.features.some((candidate) => candidate.id === featureId)) return missing(featureId, "The timeline feature does not exist.");
+  const name = nameInput.trim();
+  if (name === "") return fail("INVALID_OPERATION", "The feature name cannot be blank.", [featureId], "Type at least one character for the name.");
+  // A name another feature already has is allowed (parameter expressions that refer to it are then flagged as ambiguous), but said out loud.
+  const clash = history.features.find((candidate) => candidate.id !== featureId && sameName(candidate.name, name));
   const next: DesignHistory = { ...history, features: history.features.map((candidate): DesignFeature => candidate.id === featureId ? { ...candidate, name } : candidate) };
-  return changed(withHistory(project, next), [featureId], `Renamed the feature to ${name}.`);
+  return changed(withHistory(project, next), [featureId], `Renamed the feature to ${name}.${clash === undefined ? "" : ` Another feature is already called "${clash.name}", so expressions that refer to that name are ambiguous until one is renamed.`}`);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -407,9 +459,9 @@ function validDirectionAndThin(value: Record<string, unknown>): boolean {
 }
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "flangeReliefShape", ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "flangeReliefShape", ...FEATURE_REF_KEYS, ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
-  if (!validExtent(value)) return false;
+  if (!validExtent(value) || !validFeatureRefs(value)) return false;
   if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "sheet-base", "sheet-flange", "sheet-hem", "sheet-edge-flange", "hole", "pattern", "edge-blend", ...BODY_EDIT_ONLY_KINDS, ...SHEET_FEATURE_KINDS].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;

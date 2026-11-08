@@ -61,7 +61,10 @@ import {
   type PartFeatureResult
 } from "./part-features.js";
 import { setDesignParameters, settleDesignExpressions } from "./design-parameters.js";
-import { failure, validateWorkbenchProject, validSketchPlaneFrame, validSketchPlaneTilt, WORKBENCH_LIMITS } from "./validation.js";
+import { failure, MAX_AUDIT_CHANGED_IDS, validateWorkbenchProject, validSketchPlaneFrame, validSketchPlaneTilt, WORKBENCH_LIMITS } from "./validation.js";
+import { firstNonFinitePath, MODEL_ENVELOPE, sketchEntityProblem, solidEnvelopeProblem, type EnvelopeProblem } from "./envelope.js";
+import { AUDIT_KEEP_FULL, compactAudit } from "./audit-archive.js";
+import { validSketchPlaneFace } from "./feature-refs.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/iu;
@@ -92,16 +95,29 @@ const VEHICLE_BRAKE_PARAMETERS: readonly VehicleParameterKey[] = [
   "rearBrakeEfficiency", "frontDiscCount", "rearDiscCount", "frontRatedPressurePa", "rearRatedPressurePa"
 ];
 
+/**
+ * Projects this reducer itself returned. Their validity was just established, so the next operation does not walk every mesh of
+ * the project again before it starts (the project it builds is validated in full either way).
+ */
+const VALIDATED_PROJECTS = new WeakSet<object>();
+
 export function applyWorkbenchOperation(
   projectInput: WorkbenchProject,
   operationInput: WorkbenchOperation
 ): WorkbenchResult<AppliedWorkbenchOperation> {
-  const current = validateWorkbenchProject(projectInput);
+  const current: WorkbenchResult<WorkbenchProject> = VALIDATED_PROJECTS.has(projectInput) ? { ok: true, value: projectInput } : validateWorkbenchProject(projectInput);
   if (!current.ok) return current;
   const operationResult = validateWorkbenchOperation(operationInput);
   if (!operationResult.ok) return operationResult;
   const operation = operationResult.value;
-  const intentKey = boundedIntentKey(operation);
+  let intentKey: string;
+  try {
+    intentKey = boundedIntentKey(operation);
+  } catch (error) {
+    // Anything that cannot be written as canonical JSON (a NaN or infinity the shape checks did not look at) is a refused operation, not a crash.
+    const where = firstNonFinitePath(operation);
+    return failure("INVALID_OPERATION", where === undefined ? `The operation cannot be recorded: ${error instanceof Error ? error.message : "unsupported value"}.` : `The operation carries a number that is not finite (NaN or infinity) at ${where}.`, [operation.operationId], "Check the geometry maths that produced the value and send a finite number.");
+  }
   const prior = current.value.audit.find((entry) => entry.operationId === operation.operationId);
   if (prior !== undefined) {
     if (prior.intentKey !== intentKey) {
@@ -112,9 +128,8 @@ export function applyWorkbenchOperation(
   if (operation.expectedRevision !== current.value.revision) {
     return failure("REVISION_CONFLICT", `Expected revision ${operation.expectedRevision}, but the project is at ${current.value.revision}.`, [current.value.id], "Refresh the project and preview the operation again.");
   }
-  if (current.value.audit.length >= WORKBENCH_LIMITS.maxAuditEntries) {
-    return failure("RESOURCE_LIMIT", "The preview audit reached its 500-entry limit.", [current.value.id], "Export the project and start a compacted revision lineage.");
-  }
+  // A full audit never freezes the project: the oldest entries fold into one checkpoint and the last AUDIT_KEEP_FULL stay in full.
+  const priorAudit = current.value.audit.length >= WORKBENCH_LIMITS.maxAuditEntries ? compactAudit(current.value.audit, AUDIT_KEEP_FULL) : current.value.audit;
 
   const changed = settleDesignExpressions(current.value, operation, applyIntent(current.value, operation), resizeSketchEntity);
   if (!changed.ok) return changed;
@@ -122,24 +137,30 @@ export function applyWorkbenchOperation(
   const next: WorkbenchProject = {
     ...refreshMateStatuses(changed.value.project, operation.kind),
     revision: nextRevision,
-    audit: [...current.value.audit, {
+    audit: [...priorAudit, {
       revision: nextRevision,
       operationId: operation.operationId,
       kind: operation.kind,
       intentKey,
       summary: fitAuditSummary(changed.value.summary),
       // The audit keeps the first ids of a big edit (a paste, a pattern, a break); the operation result still carries them all.
-      changedIds: changed.value.changedIds.slice(0, WORKBENCH_LIMITS.maxMates + 1)
+      changedIds: auditChangedIds(changed.value.changedIds)
     }]
   };
-  const validated = validateWorkbenchProject(next);
+  const validated = validateWorkbenchProject(next, { share: true });
   if (!validated.ok) return validated;
+  VALIDATED_PROJECTS.add(validated.value);
   return { ok: true, value: { project: validated.value, changedIds: changed.value.changedIds, summary: changed.value.summary, exactRetry: false } };
 }
 
 /** The audit keeps a summary of at most 240 characters; a long one (a big edit that moved many curves) is shortened rather than refused. */
 function fitAuditSummary(summary: string): string {
   return summary.length <= 240 ? summary : `${summary.slice(0, 237)}...`;
+}
+
+/** The IDs an audit entry lists: the first MAX_AUDIT_CHANGED_IDS, so a large paste or pattern is recorded rather than refused. */
+function auditChangedIds(ids: readonly string[]): readonly string[] {
+  return ids.length <= MAX_AUDIT_CHANGED_IDS ? ids : ids.slice(0, MAX_AUDIT_CHANGED_IDS);
 }
 
 const MATE_STATUS_REFRESH_KINDS: readonly WorkbenchOperation["kind"][] = [
@@ -218,6 +239,10 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "add-sketch-entity":
       if (!keys(input, [...common, "entity"]) || !isRecord(input.entity)) return invalidOperation("The sketch entity payload is invalid.");
+      {
+        const problem = sketchEntityProblem(input.entity);
+        if (problem !== undefined) return envelopeFailure(problem);
+      }
       break;
     case "delete-sketch-entity":
       if (!keys(input, [...common, "entityId"]) || !stableId(input.entityId)) return invalidOperation("The sketch entity ID is invalid.");
@@ -253,7 +278,11 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
         || (Object.hasOwn(input, "removeConstraintIds") && !boundedList(input.removeConstraintIds, WORKBENCH_LIMITS.maxConstraints, stableId))
         || !boundedList(input.removeEntityIds, WORKBENCH_LIMITS.maxEntities, stableId) || !boundedList(input.updateEntities, WORKBENCH_LIMITS.maxEntities, isRecord)
         || !boundedList(input.addEntities, WORKBENCH_LIMITS.maxEntities, isRecord) || !boundedList(input.addConstraints, WORKBENCH_LIMITS.maxConstraints, isRecord)
-        || typeof input.label !== "string" || input.label.length < 1 || input.label.length > 80) return invalidOperation("The sketch edit payload is invalid.");
+        || typeof input.label !== "string" || input.label.length < 1 || input.label.length > 80) return invalidOperation(sketchEditPayloadMessage(input));
+      for (const entity of [...(input.updateEntities as readonly unknown[]), ...(input.addEntities as readonly unknown[])]) {
+        const problem = sketchEntityProblem(entity);
+        if (problem !== undefined) return envelopeFailure(problem);
+      }
       break;
     case "set-sketch-constraints-suppressed":
       if (!keys(input, [...common, "constraintIds", "suppressed"]) || !boundedList(input.constraintIds, 500, stableId) || input.constraintIds.length < 1
@@ -264,6 +293,7 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "commit-design-sketch":
       if (!keys(input, [...common, "featureId", "name"]) || !stableId(input.featureId) || !shortText(input.name, 1, 120)) return invalidOperation("The sketch feature payload is invalid.");
+      if (input.name.trim() === "") return invalidOperation("The feature name cannot be blank. Type at least one character.");
       break;
     case "edit-design-sketch":
     case "delete-design-feature":
@@ -274,11 +304,19 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "add-design-solid":
     case "update-design-solid":
-      if (!keys(input, [...common, "feature", "body"]) || !validSolidFeaturePayload(input.feature) || !validGeneralSolidBodyPayload(input.body)) return invalidOperation("The solid feature or its body is invalid.");
+      if (!keys(input, [...common, "feature", "body"]) || !validSolidFeaturePayload(input.feature) || !validGeneralSolidBodyPayload(input.body)) {
+        const problem = solidEnvelopeProblem(input.feature, input.body);
+        return problem !== undefined ? envelopeFailure(problem) : invalidOperation("The solid feature or its body is invalid.");
+      }
+      {
+        const problem = solidEnvelopeProblem(input.feature, input.body);
+        if (problem !== undefined) return envelopeFailure(problem);
+      }
       break;
     case "regenerate-design":
       if (!keys(input, [...common, "results"]) || !boundedList(input.results, 200, isRecord)
-        || input.results.some((result) => !stableId(result.featureId) || Object.keys(result).some((key) => !["featureId", "body", "pieces", "message"].includes(key))
+        || input.results.some((result) => !stableId(result.featureId) || Object.keys(result).some((key) => !["featureId", "body", "pieces", "message", "sketchPlaneOffsetMm"].includes(key))
+          || (Object.hasOwn(result, "sketchPlaneOffsetMm") && !finiteRange(result.sketchPlaneOffsetMm, -MODEL_ENVELOPE.maxPlaneOffsetMm, MODEL_ENVELOPE.maxPlaneOffsetMm))
           || (Object.hasOwn(result, "body") && !validGeneralSolidBodyPayload(result.body))
           // Pieces a cut or hole severed off the solid; they ride with the result that holds the solid itself.
           || (Object.hasOwn(result, "pieces") && (!Object.hasOwn(result, "body") || !boundedList(result.pieces, 16, validGeneralSolidBodyPayload)))
@@ -301,6 +339,7 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "rename-design-feature":
       if (!keys(input, [...common, "featureId", "name"]) || !stableId(input.featureId) || !shortText(input.name, 1, 120)) return invalidOperation("The rename request is invalid.");
+      if (input.name.trim() === "") return invalidOperation("The feature name cannot be blank. Type at least one character.");
       break;
     case "set-part-parameter":
       if (!keys(input, [...common, "parameter", "value"]) || !PART_PARAMETERS.includes(input.parameter as never) || !finite(input.value)) return invalidOperation("The part parameter edit is invalid.");
@@ -672,10 +711,10 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       );
     }
     case "set-sketch-plane": {
-      const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, ...rest } = project.sketch;
+      const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, ...rest } = project.sketch;
       const offset = operation.offsetMm ?? 0;
       return changed(
-        { ...project, sketch: { ...rest, plane: operation.plane, ...(offset === 0 ? {} : { planeOffsetMm: offset }), ...(operation.tilt === undefined ? {} : { planeTilt: operation.tilt }), ...(operation.frame === undefined ? {} : { planeFrame: operation.frame }) } },
+        { ...project, sketch: { ...rest, plane: operation.plane, ...(offset === 0 ? {} : { planeOffsetMm: offset }), ...(operation.tilt === undefined ? {} : { planeTilt: operation.tilt }), ...(operation.frame === undefined ? {} : { planeFrame: operation.frame }), ...(operation.face === undefined ? {} : { planeFace: operation.face }) } },
         [project.sketch.id],
         operation.frame === undefined
           ? `Placed the sketch on the ${operation.plane.replace("datum:", "").toUpperCase()} plane${offset === 0 ? "" : ` offset ${offset} mm`}${operation.tilt === undefined ? "" : ` tilted ${operation.tilt.angleDeg}° about ${operation.tilt.axis.toUpperCase()}`}.`
@@ -684,7 +723,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "commit-design-sketch": return commitDesignSketch(project, operation.featureId, operation.name);
     case "edit-design-sketch": return editDesignSketch(project, operation.featureId);
-    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt, operation.frame);
+    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt, operation.frame, operation.face);
     case "add-design-solid": return addDesignSolid(project, operation.feature, operation.body);
     case "update-design-solid": return updateDesignSolid(project, operation.feature, operation.body);
     case "regenerate-design": return regenerateDesign(project, operation.results);
@@ -1381,6 +1420,23 @@ function changed(project: WorkbenchProject, changedIds: readonly string[], summa
   return { ok: true, value: { project, changedIds, summary } };
 }
 
+/** A sketch edit payload that failed its shape check: say which list is too long, or which field is wrong, instead of the bare "invalid". */
+function sketchEditPayloadMessage(input: Record<string, unknown>): string {
+  const lists: readonly [string, number][] = [["removeEntityIds", WORKBENCH_LIMITS.maxEntities], ["updateEntities", WORKBENCH_LIMITS.maxEntities], ["addEntities", WORKBENCH_LIMITS.maxEntities], ["addConstraints", WORKBENCH_LIMITS.maxConstraints], ["removeConstraintIds", WORKBENCH_LIMITS.maxConstraints]];
+  for (const [name, maximum] of lists) {
+    const list = input[name];
+    if (Object.hasOwn(input, name) && !Array.isArray(list)) return `The sketch edit field ${name} must be a list.`;
+    if (Array.isArray(list) && list.length > maximum) return `The sketch edit lists ${list.length} items in ${name}; one edit may carry at most ${maximum}. Split it into several edits.`;
+  }
+  if (typeof input.label !== "string" || input.label.length < 1 || input.label.length > 80) return "The sketch edit needs a label of 1 to 80 characters.";
+  return "The sketch edit payload is invalid: check removeEntityIds, updateEntities, addEntities, addConstraints and label.";
+}
+
+function envelopeFailure(problem: EnvelopeProblem): WorkbenchResult<never> {
+  return failure(problem.code, problem.message, problem.entityId === undefined ? [] : [problem.entityId], problem.code === "OUTSIDE_SUPPORTED_ENVELOPE" || problem.code === "DEGENERATE_GEOMETRY"
+    ? `Keep sketch geometry between ${MODEL_ENVELOPE.minGeometryMm} mm and ${MODEL_ENVELOPE.maxSketchCoordinateMm.toLocaleString("en-US")} mm.` : "Use an exact bounded operation schema from the capability list.");
+}
+
 function invalidOperation(message: string): WorkbenchResult<never> {
   return failure("INVALID_OPERATION", message, [], "Use an exact bounded operation schema from the capability list.");
 }
@@ -1432,11 +1488,13 @@ function stableId(value: unknown): value is string {
 
 /** The shared payload of the two operations that place a sketch: a datum plane with an optional offset, tilt or (instead of both) frame. */
 function validSketchPlacementInput(input: Record<string, unknown>, common: readonly string[]): boolean {
-  const optional = ["offsetMm", "tilt", "frame"].filter((key) => Object.hasOwn(input, key));
+  const optional = ["offsetMm", "tilt", "frame", "face"].filter((key) => Object.hasOwn(input, key));
   if (!keys(input, [...common, "plane", ...optional]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)) return false;
-  if (Object.hasOwn(input, "offsetMm") && !(typeof input.offsetMm === "number" && Number.isFinite(input.offsetMm) && Math.abs(input.offsetMm) <= 100_000)) return false;
+  if (Object.hasOwn(input, "offsetMm") && !(typeof input.offsetMm === "number" && Number.isFinite(input.offsetMm) && Math.abs(input.offsetMm) <= MODEL_ENVELOPE.maxPlaneOffsetMm)) return false;
   if (Object.hasOwn(input, "tilt") && !validSketchPlaneTilt(input.tilt)) return false;
   if (Object.hasOwn(input, "frame") && (!validSketchPlaneFrame(input.frame) || input.plane !== "datum:xy" || optional.length > 1)) return false;
+  // A face reference rides along with the face's own offset (and nothing else): it is how the sketch finds that face again.
+  if (Object.hasOwn(input, "face") && (!validSketchPlaneFace(input.face) || Object.hasOwn(input, "tilt") || Object.hasOwn(input, "frame"))) return false;
   return true;
 }
 
@@ -1593,7 +1651,7 @@ function validGeneralSolidBodyPayload(value: unknown): value is GeneralSolidBody
     || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)) return false;
   const positions = value.positionsMm;
   if (!Array.isArray(positions) || positions.length < 12 || positions.length % 3 !== 0 || positions.length > 300_000
-    || positions.some((entry) => typeof entry !== "number" || !Number.isFinite(entry) || Math.abs(entry) > WORKBENCH_LIMITS.maxCoordinateMm)) return false;
+    || positions.some((entry) => typeof entry !== "number" || !Number.isFinite(entry) || Math.abs(entry) > MODEL_ENVELOPE.maxBodyCoordinateMm)) return false;
   const vertexCount = positions.length / 3;
   const indices = value.indices;
   if (!Array.isArray(indices) || indices.length < 3 || indices.length % 3 !== 0 || indices.length > 300_000

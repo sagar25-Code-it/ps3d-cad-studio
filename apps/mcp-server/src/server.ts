@@ -19,7 +19,8 @@ const projectSchema = z.object({
   revision: z.number().int().nonnegative(), unit: z.literal("mm"), activeWorkspace: workspaceSchema,
   sketch: z.record(z.string(), z.unknown()), part: z.record(z.string(), z.unknown()), assembly: z.record(z.string(), z.unknown()),
   surface: z.record(z.string(), z.unknown()), drawing: z.record(z.string(), z.unknown()), electrical: z.record(z.string(), z.unknown()),
-  vehicle: z.record(z.string(), z.unknown()), audit: z.array(z.record(z.string(), z.unknown())).max(500)
+  vehicle: z.record(z.string(), z.unknown()), audit: z.array(z.record(z.string(), z.unknown())).max(1000),
+  design: z.record(z.string(), z.unknown()).optional()
 }).strict();
 const operationSchema = z.object({
   operationId: z.string().regex(/^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u),
@@ -145,6 +146,14 @@ export function createPs3dMcpServer(): McpServer {
     outputSchema: structuredOutputSchema,
     annotations: { title: "Preview linked 3D realization", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   }, async ({ project, guideAcknowledgement }) => toSdkResult(await handleWorkbenchMcpTool("ps3d_preview_electromechanical", { project, guideAcknowledgement })));
+
+  server.registerTool("ps3d_prepare_design_solid", {
+    title: "Build a solid from a finished sketch",
+    description: "Build an extrude, revolve, sweep or loft from a finished sketch of the supplied project and return the ready add-design-solid operation with its diff summary, receipt and candidate project, without mutating anything.",
+    inputSchema: z.object({ project: projectSchema, solid: z.record(z.string(), z.unknown()), guideAcknowledgement: guideAcknowledgementSchema }).strict(),
+    outputSchema: structuredOutputSchema,
+    annotations: { title: "Build a solid from a finished sketch", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  }, async ({ project, solid, guideAcknowledgement }) => toSdkResult(await handleWorkbenchMcpTool("ps3d_prepare_design_solid", { project, solid, guideAcknowledgement })));
 
   server.registerTool("ps3d_preview_operation", {
     title: "Preview PS3D operation",
