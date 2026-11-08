@@ -70,6 +70,7 @@ import { cameraLandmarkTests } from "./camera-landmarks.test.js";
 import { topologyNamingTests } from "./topology-naming.test.js";
 import { sketchSplitJogTests } from "./sketch-split-jog.test.js";
 import { sketchPathMirrorMoveTests } from "./sketch-path-mirror-move.test.js";
+import { sketchClipboardTests } from "./sketch-clipboard.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -101,6 +102,7 @@ const tests: readonly TestCase[] = [
   ...sketchEditToolTests,
   ...sketchSplitJogTests,
   ...sketchPathMirrorMoveTests,
+  ...sketchClipboardTests,
   ...meshBooleanTests,
   ...meshModifyTests,
   ...holeWizardTests,

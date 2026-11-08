@@ -24,6 +24,10 @@ export type SketchHotkeyAction =
   | { readonly kind: "delete-selection" }
   | { readonly kind: "finish" }
   | { readonly kind: "select-all" }
+  /** Ctrl/Cmd+C, X and V: the sketch clipboard. Copy and cut need a curve selection; paste is always offered and says if the clipboard is empty. */
+  | { readonly kind: "copy" }
+  | { readonly kind: "cut" }
+  | { readonly kind: "paste" }
   /** A digit, point or minus pressed while typed-input fields are showing: start typing into the first field. */
   | { readonly kind: "type-value"; readonly key: string }
   /** Tab while typed-input fields are showing: move the focus into them. */
@@ -64,7 +68,14 @@ const LETTER_TOOLS: Readonly<Record<string, Exclude<SketchTool, "select">>> = {
 export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHotkeyContext): SketchHotkeyAction | undefined {
   if (input.alt) return undefined;
   const key = input.key.length === 1 ? input.key.toLowerCase() : input.key;
-  if (input.ctrl || input.meta) return key === "a" && !input.shift ? { kind: "select-all" } : undefined;
+  if (input.ctrl || input.meta) {
+    if (input.shift) return undefined;
+    if (key === "a") return { kind: "select-all" };
+    if (key === "c" && context.curveSelectionCount > 0) return { kind: "copy" };
+    if (key === "x" && context.curveSelectionCount > 0) return { kind: "cut" };
+    if (key === "v" && context.pendingPoints === 0) return { kind: "paste" };
+    return undefined;
+  }
 
   if (key === "Escape") {
     // Escape backs out one level at a time: a drag in progress, points being placed, then a pick mode, a dimension or edit tool, then the drawing tool, then the selection.
@@ -120,6 +131,7 @@ export const SKETCH_HOTKEY_HELP: readonly { readonly keys: string; readonly acti
   { keys: "Delete", action: "Delete the selected curves" },
   { keys: "Enter", action: "Finish a spline" },
   { keys: "Ctrl+A", action: "Select every visible curve" },
+  { keys: "Ctrl+C / Ctrl+X / Ctrl+V", action: "Copy, cut and paste the selected curves with their relations" },
   { keys: "Wheel", action: "Zoom at the cursor" },
   { keys: "Middle drag / Space drag", action: "Pan" }
 ];
