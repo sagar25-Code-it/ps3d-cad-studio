@@ -99,6 +99,16 @@ export const sketchConstraintsUiWpTests: readonly TestCase[] = [
       assert(!smooth.slice(smooth.lastIndexOf("<button", at), at).includes("disabled"), "and is enabled");
       const disabled = panel(sketchWith([l, line("m", [5, 5], [9, 9])]), [l, line("m", [5, 5], [9, 9])]);
       assert(/<button[^>]*disabled=""[^>]*>Smooth the nearest ends<\/button>/u.test(disabled), "two lines cannot be smoothed: the button is disabled");
+      const incident = line("i", [-10, 10], [0, 0]);
+      const refracted = line("r", [0, 0], [3, -14]);
+      const interfaceLine = line("f", [-20, 0], [20, 0]);
+      const bend = panel(sketchWith([incident, refracted, interfaceLine]), [incident, refracted, interfaceLine]);
+      const bendAt = bend.indexOf("Add refraction");
+      assert(bendAt > 0 && !bend.slice(bend.lastIndexOf("<button", bendAt), bendAt).includes("disabled"), "three lines enable Add refraction");
+      const noBend = panel(sketchWith([incident, refracted]), [incident, refracted]);
+      assert(noBend.slice(noBend.lastIndexOf("<button", noBend.indexOf("Add refraction")), noBend.indexOf("Add refraction")).includes("disabled"), "two lines leave Add refraction disabled");
+      const listed = panel(sketchWith([incident, refracted, interfaceLine], [{ id: "constraint:snell", kind: "refraction", entityIds: ["entity:i", "entity:r", "entity:f"], ratio: 1.5 }]), [incident, refracted, interfaceLine]);
+      assert(listed.includes("1 on this selection") && listed.includes("1.5"), "an existing refraction is listed with its ratio");
       const helpers = panel(sketchWith([spline]), [spline]);
       assert(helpers.includes("5 fit points"), "a spline shows its fit points");
       assert(helpers.includes("Point 1") && helpers.includes("Point 5"), "every fit point has a tangent handle");

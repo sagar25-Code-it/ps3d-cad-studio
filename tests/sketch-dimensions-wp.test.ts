@@ -247,6 +247,8 @@ export const sketchDimensionWpTests: readonly TestCase[] = [
         near(entityLengthMm(get(longer, "arc", "arc"))!, 40, 1e-9, "editing the length sweeps it further");
         const shorter = run(longer, { kind: "set-sketch-dimension", entityId: "entity:arc", dimension: "arc-length", valueMm: 5 });
         near(entityLengthMm(get(shorter, "arc", "arc"))!, 5, 1e-9, "and back in");
+        const again = solveLiveSketch(shorter.sketch);
+        assert(again.ok && again.movedIds.length === 0, "solving the sketch again moves nothing: the arc already holds its length");
       }
     }
   },

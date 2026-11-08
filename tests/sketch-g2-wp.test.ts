@@ -1,5 +1,6 @@
 import type { SketchEntity, WorkbenchOperation, WorkbenchProject, WorkbenchSketchConstraint } from "../packages/workbench-core/src/index.js";
 import { applyWorkbenchOperation, constraintFit, createWorkbenchProject, validateWorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { dragLiveSketch } from "../packages/workbench-core/src/sketch-solve.js";
 import { splineEndFrame, splineRadiusReport } from "../packages/workbench-core/src/spline-curvature.js";
 import { analyzeWorkbenchSketch, sampleSpline } from "../packages/workbench-sketch/src/index.js";
 import { entityRadiusReport, minimumRadiusCheck, nearestSmoothJoint, setSplineEndCurvature, setSplineTangent, splineTangentHandles } from "../packages/workbench-sketch/src/spline-helpers.js";
@@ -200,6 +201,23 @@ export const sketchG2WpTests: readonly TestCase[] = [
       const moved = lengthened.sketch.entities.find((entity) => entity.id === "entity:l")!;
       expectG2(lengthened, "s", "start", moved, "end", "after the line was shortened");
       near(splineOf(lengthened, "s").fitPoints[0]![0], -8, 1e-9, "the spline start followed the line end to x = -8");
+    }
+  },
+  {
+    name: "dragging the neighbour's end live (every pointer move) carries the spline's end and keeps it G2",
+    run: () => {
+      const joined = run(projectWith([line("l", [-20, 0], [0, 0]), spline("s", [[2, 3], [8, 12], [16, 14], [24, 10], [30, 2]])]), { kind: "add-sketch-constraint", constraint: smooth("g2", "s", "l", ["start", "end"]) });
+      for (const target of [[-4, 6], [-8, -3], [2, 9]] as const) {
+        const dragged = dragLiveSketch(joined.sketch, { entityId: "entity:l", point: "end", positionMm: target });
+        assert(dragged.ok, `the drag is solved: ${dragged.ok ? "" : dragged.message}`);
+        if (!dragged.ok) continue;
+        const next = { ...joined, sketch: { ...joined.sketch, entities: dragged.entities } };
+        const moved = next.sketch.entities.find((entity) => entity.id === "entity:l")!;
+        if (moved.kind !== "line") continue;
+        near(moved.end[0], target[0], 1e-9, "the line end is where the pointer put it (x)");
+        near(moved.end[1], target[1], 1e-9, "(y)");
+        expectG2(next, "s", "start", moved, "end", `after dragging to (${target})`);
+      }
     }
   },
   {

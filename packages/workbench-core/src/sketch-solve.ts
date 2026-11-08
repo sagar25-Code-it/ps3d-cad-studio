@@ -228,8 +228,9 @@ function fromSolverGeometry(entity: SketchEntity, solved: SketchGeometry, frame:
   }
   if (entity.kind === "arc" && solved.kind === "arc" && frame !== undefined) {
     const wrap = (angle: number): number => ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-    const sameSweep = Math.abs(wrap(solved.endAngleRad - solved.startAngleRad) - wrap(frame.endAngleRad - frame.startAngleRad)) * solved.radiusMm <= MOVE_TOLERANCE_MM
-      && Math.abs(wrap(solved.startAngleRad - frame.startAngleRad)) * solved.radiusMm <= MOVE_TOLERANCE_MM;
+    const apart = (a: number, b: number): number => { const turn = wrap(a - b); return Math.min(turn, Math.PI * 2 - turn); };
+    const sameSweep = apart(wrap(solved.endAngleRad - solved.startAngleRad), wrap(frame.endAngleRad - frame.startAngleRad)) * solved.radiusMm <= MOVE_TOLERANCE_MM
+      && apart(solved.startAngleRad, frame.startAngleRad) * solved.radiusMm <= MOVE_TOLERANCE_MM;
     if (near2(frame.center, solved.center) && Math.abs(frame.radiusMm - solved.radiusMm) <= MOVE_TOLERANCE_MM && sameSweep) return undefined;
     return rebuildArc(entity, solved, frame);
   }

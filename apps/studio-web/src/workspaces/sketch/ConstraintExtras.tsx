@@ -122,6 +122,7 @@ export function ConstraintExtras(props: ExtrasProps): React.JSX.Element {
   return <>
     <ExtraDimensionSection {...props} />
     <SmoothSection {...props} />
+    <RefractionSection {...props} />
     <SplineHelperSection {...props} />
     <PierceSection {...props} />
   </>;
@@ -190,6 +191,26 @@ function SmoothSection(props: ExtrasProps): React.JSX.Element {
       if (!usable || joint === undefined || spline === undefined || other === undefined) return;
       props.onAddConstraint({ id: `constraint:user-${crypto.randomUUID()}`, kind: "smooth", entityIds: [spline.id, other.id], points: joint.points });
     }}>Smooth the nearest ends{usable && joint !== undefined ? ` (${format(joint.gapMm)} mm apart)` : ""}</button>
+  </section>;
+}
+
+function RefractionSection(props: ExtrasProps): React.JSX.Element {
+  const lines = props.selected.slice(-3);
+  const ready = lines.length === 3 && lines.every((entity) => entity.kind === "line");
+  const [ratio, setRatio] = useState("1.5");
+  const existing = props.sketch.constraints.filter((constraint) => constraint.kind === "refraction" && constraint.entityIds.some((id) => props.selected.some((entity) => entity.id === id)));
+  return <section className="inspector-section refraction-controller">
+    <header><strong>Refraction</strong><span>{existing.length} on this selection</span></header>
+    <p className="profile-help">Bends the second line at the third (the interface) by Snell's law. Select the incident line, the refracted line, then the interface line. The ratio is n2 / n1; the refracted line starts where the incident line ends.</p>
+    <div className="extra-row">
+      <input aria-label="Refractive index ratio n2 over n1" inputMode="decimal" value={ratio} onChange={(event) => setRatio(event.target.value)} />
+      <button type="button" disabled={!ready} title={ready ? "Hold the refraction" : "Select three lines: incident, refracted, interface."} onClick={() => {
+        const value = Number(ratio);
+        if (!ready || !Number.isFinite(value) || value < 0.05 || value > 20) { props.onMessage("Type an index ratio between 0.05 and 20."); return; }
+        props.onAddConstraint({ id: `constraint:user-${crypto.randomUUID()}`, kind: "refraction", entityIds: lines.map((entity) => entity.id), ratio: value });
+      }}>Add refraction</button>
+    </div>
+    {existing.length > 0 && <ul className="extra-dimension-list">{existing.map((constraint) => <li key={constraint.id}><b>ratio</b><span>{format(constraint.ratio ?? 1)}</span></li>)}</ul>}
   </section>;
 }
 
