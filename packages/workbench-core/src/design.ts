@@ -184,8 +184,35 @@ function changed(project: WorkbenchProject, changedIds: readonly string[], summa
 
 const insertAt = <T>(items: readonly T[], index: number, item: T): readonly T[] => [...items.slice(0, index), item, ...items.slice(index)];
 
-export function commitDesignSketch(project: WorkbenchProject, featureId: string, name: string): DesignChange {
+const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** The next free default name for a feature of this kind: "Sketch 3" after "Sketch 1" and "Sketch 2" (and after a deleted "Sketch 2", still 3, never a second "Sketch 3"). */
+export function nextFeatureName(history: DesignHistory, prefix: string): string {
+  const taken = history.features.map((feature) => feature.name);
+  let highest = 0;
+  for (const name of taken) {
+    const match = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")} (\\d+)$`, "iu").exec(name.trim());
+    if (match !== null) highest = Math.max(highest, Number(match[1]));
+  }
+  let candidate = Math.max(highest, history.features.filter((feature) => feature.name.toLowerCase().startsWith(prefix.toLowerCase())).length) + 1;
+  while (taken.some((name) => sameName(name, `${prefix} ${candidate}`))) candidate += 1;
+  return `${prefix} ${candidate}`;
+}
+
+/** `name` if no other feature has it, otherwise the same name with " (2)", " (3)" ... added. */
+export function uniqueFeatureName(history: DesignHistory, name: string, exceptFeatureId?: string): string {
+  const others = history.features.filter((feature) => feature.id !== exceptFeatureId).map((feature) => feature.name);
+  if (!others.some((other) => sameName(other, name))) return name;
+  for (let copy = 2; copy < 1_000; copy += 1) {
+    const candidate = `${name} (${copy})`;
+    if (!others.some((other) => sameName(other, candidate))) return candidate;
+  }
+  return name;
+}
+
+export function commitDesignSketch(project: WorkbenchProject, featureId: string, nameInput: string): DesignChange {
   const history = designOf(project);
+  const name = history.features.some((feature) => feature.id === history.editingSketchId) ? nameInput : uniqueFeatureName(history, nameInput.trim());
   if (project.sketch.entities.length === 0) return fail("INVALID_OPERATION", "The sketch is empty, so there is nothing to finish.", [project.sketch.id], "Draw at least one curve first.");
   const editing = history.features.find((feature): feature is DesignSketchFeature => feature.id === history.editingSketchId && feature.kind === "sketch");
   if (editing !== undefined) {
@@ -274,7 +301,7 @@ export function updateDesignSolid(project: WorkbenchProject, feature: DesignSoli
   return changed(withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, next), [feature.id, body.id], `Updated ${feature.name}.`);
 }
 
-export function regenerateDesign(project: WorkbenchProject, results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string }[]): DesignChange {
+export function regenerateDesign(project: WorkbenchProject, results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number }[]): DesignChange {
   const history = designOf(project);
   const byId = new Map(results.map((result) => [result.featureId, result] as const));
   if (byId.size !== results.length) return fail("INVALID_OPERATION", "A feature appears twice in the rebuild results.", [], "Send one result per feature.");
@@ -297,15 +324,29 @@ export function regenerateDesign(project: WorkbenchProject, results: readonly { 
     }
     return candidate;
   }).concat(newPieces);
+  // A sketch drawn on a face follows the face: its stored plane offset moves with it, so reopening the sketch shows it where the face is now.
+  const followedOffsets = new Map<string, number>();
+  for (const result of results) {
+    const feature = history.features.find((candidate) => candidate.id === result.featureId);
+    if (result.sketchPlaneOffsetMm !== undefined && feature !== undefined && feature.kind !== "sketch") followedOffsets.set(feature.sketchFeatureId, result.sketchPlaneOffsetMm);
+  }
+  const retargeted = (sketch: WorkbenchProject["sketch"], offsetMm: number): WorkbenchProject["sketch"] => {
+    const { planeOffsetMm: _old, ...rest } = sketch;
+    return offsetMm === 0 ? rest : { ...rest, planeOffsetMm: offsetMm };
+  };
   const features = history.features.map((feature): DesignFeature => {
+    const followed = followedOffsets.get(feature.id);
+    if (feature.kind === "sketch" && followed !== undefined && feature.sketch.planeFace !== undefined) return { ...feature, sketch: retargeted(feature.sketch, followed) };
     const result = byId.get(feature.id);
     if (result === undefined) return feature;
     const { health: _previous, ...rest } = feature;
     return result.message === undefined ? rest as DesignFeature : { ...rest, health: { message: result.message } } as DesignFeature;
   });
+  const workingFollowed = history.editingSketchId === null ? undefined : followedOffsets.get(history.editingSketchId);
   const failed = results.filter((result) => result.message !== undefined).length;
+  const workingSketch = workingFollowed !== undefined && project.sketch.planeFace !== undefined ? retargeted(project.sketch, workingFollowed) : project.sketch;
   return changed(
-    withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, { ...history, features }),
+    withHistory({ ...project, sketch: workingSketch, part: { ...project.part, generalBodies: bodies } }, { ...history, features }),
     results.map((result) => result.featureId),
     `Rebuilt ${results.length - failed} feature${results.length - failed === 1 ? "" : "s"}${failed === 0 ? "" : `; ${failed} could not be rebuilt`}.${newPieces.length === 0 ? "" : ` The solid was cut into ${newPieces.length + results.filter((result) => result.pieces !== undefined && result.body !== undefined).length} separate bodies (${newPieces.map((piece) => piece.name).join(", ")} split off).`}`
   );
@@ -344,11 +385,15 @@ export function setDesignRollback(project: WorkbenchProject, index: number): Des
   return changed(withHistory(project, { ...history, rollbackIndex: index }), [], index === history.features.length ? "Rolled forward to the end of the timeline." : `Rolled back to after step ${index}.`);
 }
 
-export function renameDesignFeature(project: WorkbenchProject, featureId: string, name: string): DesignChange {
+export function renameDesignFeature(project: WorkbenchProject, featureId: string, nameInput: string): DesignChange {
   const history = designOf(project);
   if (!history.features.some((candidate) => candidate.id === featureId)) return missing(featureId, "The timeline feature does not exist.");
+  const name = nameInput.trim();
+  if (name === "") return fail("INVALID_OPERATION", "The feature name cannot be blank.", [featureId], "Type at least one character for the name.");
+  // A name another feature already has is allowed (parameter expressions that refer to it are then flagged as ambiguous), but said out loud.
+  const clash = history.features.find((candidate) => candidate.id !== featureId && sameName(candidate.name, name));
   const next: DesignHistory = { ...history, features: history.features.map((candidate): DesignFeature => candidate.id === featureId ? { ...candidate, name } : candidate) };
-  return changed(withHistory(project, next), [featureId], `Renamed the feature to ${name}.`);
+  return changed(withHistory(project, next), [featureId], `Renamed the feature to ${name}.${clash === undefined ? "" : ` Another feature is already called "${clash.name}", so expressions that refer to that name are ambiguous until one is renamed.`}`);
 }
 
 // ---------------------------------------------------------------------------------------------

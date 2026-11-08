@@ -11,6 +11,7 @@ import { createThinRevolveBody, startRevolveAt } from "./revolve-thin.js";
 import { blendBodyEdges } from "./edge-blend-step.js";
 import { applyBodyEdit } from "./body-edit-replay.js";
 import { revolveAboutChosenAxis } from "./revolve-feature.js";
+import { followSketchFace } from "./sketch-face-follow.js";
 import { buildLoftFeature, buildSweepFeature, needsSweepLoftBuilder, type SketchLookup } from "./sweep-loft-feature.js";
 
 /**
@@ -27,6 +28,8 @@ export interface RebuildResult {
   /** Bodies a cut or hole severed from `body`; they are named after it (see splitPieceId) and travel with it. */
   readonly pieces?: readonly GeneralSolidBody[];
   readonly message?: string;
+  /** Set when the sketch this feature is built on lies on a face that moved: the offset the sketch now has, to be stored with it. */
+  readonly sketchPlaneOffsetMm?: number;
 }
 
 export const NORMALS: Readonly<Record<SketchPlane, readonly [number, number, number]>> = { xy: [0, 0, 1], xz: [0, -1, 0], yz: [1, 0, 0] };
@@ -167,6 +170,11 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   const placed = shifted(started, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0));
   // A sketch on an angle or three-point plane is built on its datum plane and then moved onto that plane, which keeps the face names.
   return { ok: true, body: isPlaced(sketch) ? { ...placed, positionsMm: placePositions(placed.positionsMm, sketch) } : placed };
+}
+
+/** A rebuild message the `regenerate-design` operation accepts (at most 400 characters). */
+function clipMessage(text: string): string {
+  return text.length <= 400 ? text : `${text.slice(0, 397)}...`;
 }
 
 /** Finds a sketch feature of the timeline by ID, for the sweeps and lofts that take curves or profiles from a sketch other than their own. */
@@ -389,8 +397,11 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
       outcomes.set(step.id, { featureId: step.id });
       continue;
     }
-    const sketchFeature = history.features.find((candidate): candidate is DesignSketchFeature => candidate.id === step.sketchFeatureId && candidate.kind === "sketch");
-    if (sketchFeature === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sketch this feature was built on is no longer in the timeline." }); continue; }
+    const storedSketch = history.features.find((candidate): candidate is DesignSketchFeature => candidate.id === step.sketchFeatureId && candidate.kind === "sketch");
+    if (storedSketch === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sketch this feature was built on is no longer in the timeline." }); continue; }
+    // A sketch drawn on a face follows that face as the solid is now (the body being replayed, one rebuilt earlier in this pass, or the stored one).
+    const followed = followSketchFace(storedSketch, (id) => id === bodyId ? current : fresh?.get(id) ?? project.part.generalBodies?.find((candidate) => candidate.id === id));
+    const sketchFeature = followed.sketchFeature;
     const modifies = modifiesBody(step);
     let sized = modifies && step.extent === "through-all" && current !== undefined ? throughAllOverride(step, sketchFeature, current) : step;
     // A "to" extent is measured from the target's shape as it is at this point of the replay.
@@ -405,8 +416,8 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
     }
     let built = await rebuildSolidFeature(modifies ? { ...sized, bodyId: `${step.id}:tool` } : sized, sketchFeature, existing?.color, sketchLookupOf(history));
     if (!built.ok) { outcomes.set(step.id, { featureId: step.id, message: built.message }); continue; }
-    const notes = [warning, built.warning].filter((note): note is string => note !== undefined);
-    const applied: RebuildResult = notes.length === 0 ? { featureId: step.id } : { featureId: step.id, message: notes.join(" ") };
+    const notes = [followed.warning, warning, built.warning].filter((note): note is string => note !== undefined);
+    const applied: RebuildResult = { featureId: step.id, ...(notes.length === 0 ? {} : { message: clipMessage(notes.join(" ")) }), ...(followed.movedToOffsetMm === undefined ? {} : { sketchPlaneOffsetMm: followed.movedToOffsetMm }) };
     if (trim !== undefined) {
       const trimmedTool = await trimToFace(built.body, trim);
       if (!trimmedTool.ok) { outcomes.set(step.id, { featureId: step.id, message: trimmedTool.message }); continue; }
@@ -445,10 +456,16 @@ function targetsFirst(history: ReturnType<typeof designOf>, bodyIds: readonly st
   const wanted = new Set(bodyIds);
   const reaches = new Map<string, Set<string>>();
   for (const feature of history.features) {
-    if (feature.kind === "sketch" || feature.extentTarget === undefined || feature.extentTarget.bodyId === feature.bodyId) continue;
-    const set = reaches.get(feature.bodyId) ?? new Set<string>();
-    set.add(feature.extentTarget.bodyId);
-    reaches.set(feature.bodyId, set);
+    if (feature.kind === "sketch") continue;
+    // A body reaches the body its extent ends at, and the body whose face its sketch lies on.
+    const sketchFace = history.features.find((candidate) => candidate.id === feature.sketchFeatureId && candidate.kind === "sketch");
+    const faceBody = sketchFace !== undefined && sketchFace.kind === "sketch" ? sketchFace.sketch.planeFace?.bodyId : undefined;
+    for (const reached of [feature.extentTarget?.bodyId, faceBody]) {
+      if (reached === undefined || reached === feature.bodyId) continue;
+      const set = reaches.get(feature.bodyId) ?? new Set<string>();
+      set.add(reached);
+      reaches.set(feature.bodyId, set);
+    }
   }
   const ordered: string[] = [];
   const seen = new Set<string>();
@@ -486,7 +503,11 @@ export async function rebuildDependents(project: WorkbenchProject, sketchFeature
   for (let grew = true; grew;) {
     grew = false;
     for (const feature of history.features) {
-      if (feature.kind === "sketch" || affected.has(feature.bodyId) || feature.extentTarget === undefined || !affected.has(feature.extentTarget.bodyId)) continue;
+      if (feature.kind === "sketch" || affected.has(feature.bodyId)) continue;
+      const sketchFace = history.features.find((candidate) => candidate.id === feature.sketchFeatureId && candidate.kind === "sketch");
+      const faceBody = sketchFace !== undefined && sketchFace.kind === "sketch" ? sketchFace.sketch.planeFace?.bodyId : undefined;
+      // A body that reaches one of these (up to its face, or sketched on its face) changes with it.
+      if (!((feature.extentTarget !== undefined && affected.has(feature.extentTarget.bodyId)) || (faceBody !== undefined && affected.has(faceBody)))) continue;
       affected.add(feature.bodyId);
       grew = true;
     }

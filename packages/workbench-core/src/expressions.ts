@@ -5,8 +5,9 @@
  * passed to `eval`, `Function` or any dynamic code path, so a project file cannot run code by carrying an expression.
  *
  * Values carry a dimension: a length is held in millimetres and an angle in degrees, with exponents so that `mm * mm` is an area
- * and `mm / mm` is a plain number. Unit suffixes (`mm`, `cm`, `m`, `in`, `deg`, `rad`) convert into those base units when the
- * number is read, so `1 in` is exactly `25.4`.
+ * and `mm / mm` is a plain number. Unit suffixes (`mm`, `cm`, `m`, `um`, `in` or `"`, `ft` or `'`, `mil`, `deg`, `rad`) convert into those base
+ * units when the number is read, so `1 in` is exactly `25.4`. A unit after a fraction or a mixed number applies to the whole of it
+ * (`1/2 in`, `1 1/2 in`, `(1/2) in`), and feet and inches can be written together (`5' 3 1/2"`).
  *
  * Every failure is a deterministic `ExpressionError` with the character offset where it was found, never a thrown exception.
  */
@@ -46,6 +47,10 @@ export const EXPRESSION_UNITS: Readonly<Record<string, { readonly factor: number
   cm: { factor: 10, dimension: { length: 1, angle: 0 } },
   m: { factor: 1000, dimension: { length: 1, angle: 0 } },
   in: { factor: 25.4, dimension: { length: 1, angle: 0 } },
+  ft: { factor: 304.8, dimension: { length: 1, angle: 0 } },
+  mil: { factor: 0.0254, dimension: { length: 1, angle: 0 } },
+  thou: { factor: 0.0254, dimension: { length: 1, angle: 0 } },
+  um: { factor: 0.001, dimension: { length: 1, angle: 0 } },
   deg: { factor: 1, dimension: { length: 0, angle: 1 } },
   rad: { factor: 180 / Math.PI, dimension: { length: 0, angle: 1 } }
 };
@@ -122,6 +127,13 @@ function tokenize(source: string): readonly Token[] {
       tokens.push({ type: "name", text: match[0], start: index, end: index + match[0].length });
       index += match[0].length;
       previousWasName = true;
+      continue;
+    }
+    // A double quote is inches and a single quote feet, written straight after a number: 3/4" and 5'.
+    if (char === '"' || char === "'") {
+      tokens.push({ type: "name", text: char === '"' ? "in" : "ft", start: index, end: index + 1 });
+      index += 1;
+      previousWasName = false;
       continue;
     }
     if ("+-*/^(),".includes(char)) {
@@ -231,6 +243,14 @@ class Parser {
       this.leave();
       const close = this.next();
       if (close.type !== "symbol" || close.text !== ")") throw new ExpressionFailure('Missing ")" to close this "(".', token.start);
+      // A unit right after a bracket applies to the whole of it: (1/2) in.
+      const after = this.peek();
+      if (after.type === "name" && Object.hasOwn(EXPRESSION_UNITS, after.text)) {
+        this.next();
+        const unit = EXPRESSION_UNITS[after.text]!;
+        const unitNode: ExpressionNode = { type: "number", quantity: { value: unit.factor, length: unit.dimension.length, angle: unit.dimension.angle }, start: after.start, end: after.end };
+        return { type: "binary", operator: "*", left: inner, right: unitNode, operatorAt: after.start, start: token.start, end: after.end };
+      }
       return inner;
     }
     if (token.type === "name") return this.nameOrCall(token);
@@ -238,19 +258,54 @@ class Parser {
     throw new ExpressionFailure(`Unexpected "${token.text}". A number, a name or "(" is expected here.`, token.start, token.end - token.start);
   }
 
-  private numberWithUnit(token: Extract<Token, { type: "number" }>): ExpressionNode {
-    const literal = Number(token.text);
-    if (!Number.isFinite(literal)) throw new ExpressionFailure("This number is too large.", token.start, token.end - token.start);
+  /**
+   * Reads a number literal and the unit after it. A fraction or a mixed number is one literal, so the unit applies to all of it:
+   * `1/2 in` is half an inch (not one over two inches) and `1 1/2 in` is one and a half.
+   */
+  private readLiteral(token: Extract<Token, { type: "number" }>): { readonly value: number; readonly end: number; readonly unitName?: string } {
+    let value = Number(token.text);
+    if (!Number.isFinite(value)) throw new ExpressionFailure("This number is too large.", token.start, token.end - token.start);
+    let end = token.end;
+    const first = this.tokens[this.index];
+    const second = this.tokens[this.index + 1];
+    const third = this.tokens[this.index + 2];
+    const isInteger = (candidate: Token | undefined): candidate is Extract<Token, { type: "number" }> => candidate !== undefined && candidate.type === "number" && /^\d+$/u.test(candidate.text);
+    const isSlash = (candidate: Token | undefined): boolean => candidate !== undefined && candidate.type === "symbol" && candidate.text === "/";
+    const isUnitName = (candidate: Token | undefined): boolean => candidate !== undefined && candidate.type === "name" && Object.hasOwn(EXPRESSION_UNITS, candidate.text);
+    if (/^\d+$/u.test(token.text) && isInteger(first) && isSlash(second) && isInteger(third) && Number(third.text) !== 0) {
+      value += Number(first.text) / Number(third.text);
+      this.index += 3;
+      end = third.end;
+    } else if (isSlash(first) && second !== undefined && second.type === "number" && isUnitName(third) && Number(second.text) !== 0) {
+      value /= Number(second.text);
+      this.index += 2;
+      end = second.end;
+    }
     const following = this.peek();
     if (following.type === "name") {
       if (!Object.hasOwn(EXPRESSION_UNITS, following.text)) {
-        throw new ExpressionFailure(`"${following.text}" is not a unit. Units are mm, cm, m, in, deg and rad. To multiply by a name, write "*" between them.`, following.start, following.end - following.start);
+        throw new ExpressionFailure(`"${following.text}" is not a unit. Units are mm, cm, m, um, in, ft, mil, deg and rad. To multiply by a name, write "*" between them.`, following.start, following.end - following.start);
       }
-      const unit = EXPRESSION_UNITS[following.text]!;
       this.next();
-      return { type: "number", quantity: { value: clean(literal * unit.factor), length: unit.dimension.length, angle: unit.dimension.angle }, start: token.start, end: following.end };
+      return { value, end: following.end, unitName: following.text };
     }
-    return { type: "number", quantity: { value: literal, length: 0, angle: 0 }, start: token.start, end: token.end };
+    return { value, end };
+  }
+
+  private numberWithUnit(token: Extract<Token, { type: "number" }>): ExpressionNode {
+    const literal = this.readLiteral(token);
+    if (literal.unitName === undefined) return { type: "number", quantity: { value: literal.value, length: 0, angle: 0 }, start: token.start, end: literal.end };
+    const unit = EXPRESSION_UNITS[literal.unitName]!;
+    let value = literal.value * unit.factor;
+    let end = literal.end;
+    // Feet and inches together: 5' 3 1/2" or 5 ft 3 in. A bare second number after feet is inches.
+    if (literal.unitName === "ft" && this.peek().type === "number") {
+      const inches = this.readLiteral(this.next() as Extract<Token, { type: "number" }>);
+      if (inches.unitName !== undefined && inches.unitName !== "in") throw new ExpressionFailure("After feet, give the inches with in or \".", token.start, inches.end - token.start);
+      value += inches.value * 25.4;
+      end = inches.end;
+    }
+    return { type: "number", quantity: { value: clean(value), length: unit.dimension.length, angle: unit.dimension.angle }, start: token.start, end };
   }
 
   private nameOrCall(token: Extract<Token, { type: "name" }>): ExpressionNode {

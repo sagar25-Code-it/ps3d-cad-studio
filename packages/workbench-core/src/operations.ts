@@ -255,6 +255,7 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "commit-design-sketch":
       if (!keys(input, [...common, "featureId", "name"]) || !stableId(input.featureId) || !shortText(input.name, 1, 120)) return invalidOperation("The sketch feature payload is invalid.");
+      if (input.name.trim() === "") return invalidOperation("The feature name cannot be blank. Type at least one character.");
       break;
     case "edit-design-sketch":
     case "delete-design-feature":
@@ -276,7 +277,8 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "regenerate-design":
       if (!keys(input, [...common, "results"]) || !boundedList(input.results, 200, isRecord)
-        || input.results.some((result) => !stableId(result.featureId) || Object.keys(result).some((key) => !["featureId", "body", "pieces", "message"].includes(key))
+        || input.results.some((result) => !stableId(result.featureId) || Object.keys(result).some((key) => !["featureId", "body", "pieces", "message", "sketchPlaneOffsetMm"].includes(key))
+          || (Object.hasOwn(result, "sketchPlaneOffsetMm") && !finiteRange(result.sketchPlaneOffsetMm, -MODEL_ENVELOPE.maxPlaneOffsetMm, MODEL_ENVELOPE.maxPlaneOffsetMm))
           || (Object.hasOwn(result, "body") && !validGeneralSolidBodyPayload(result.body))
           // Pieces a cut or hole severed off the solid; they ride with the result that holds the solid itself.
           || (Object.hasOwn(result, "pieces") && (!Object.hasOwn(result, "body") || !boundedList(result.pieces, 16, validGeneralSolidBodyPayload)))
@@ -299,6 +301,7 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       break;
     case "rename-design-feature":
       if (!keys(input, [...common, "featureId", "name"]) || !stableId(input.featureId) || !shortText(input.name, 1, 120)) return invalidOperation("The rename request is invalid.");
+      if (input.name.trim() === "") return invalidOperation("The feature name cannot be blank. Type at least one character.");
       break;
     case "set-part-parameter":
       if (!keys(input, [...common, "parameter", "value"]) || !PART_PARAMETERS.includes(input.parameter as never) || !finite(input.value)) return invalidOperation("The part parameter edit is invalid.");

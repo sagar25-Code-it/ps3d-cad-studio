@@ -52,6 +52,8 @@ import {
   type ViewProjection
 } from "../../../../packages/viewport-three/src/index.js";
 import { halvedExpression, unhalvedExpression } from "../dimension-expression.js";
+import { SketchUnitContext, readSketchLength, sketchLength, useSketchUnit } from "./sketch-unit.js";
+import type { LengthUnit } from "../../../../packages/workbench-core/src/index.js";
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 import { ViewportChrome } from "../ui/ViewportChrome.js";
@@ -126,6 +128,8 @@ const SNAP_PIXELS = 9;
 const PICK_PIXELS = 10;
 
 interface SketchWorkspaceProps {
+  /** The unit lengths are shown and typed in; the sketch itself is always in millimetres. Absent means millimetres. */
+  readonly displayUnit?: LengthUnit;
   readonly projectId: string;
   readonly sketch: WorkbenchSketch;
   readonly tool: SketchTool;
@@ -1291,7 +1295,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const constraintSlots = new Map<string, number>();
   const curvatureCombs = showComb ? sketchCurvatureCombs(visibleEntities, 60 * px * combScale) : [];
 
-  return <>
+  return <SketchUnitContext.Provider value={props.displayUnit ?? "mm"}>
     <section className="workspace-canvas sketch-stage" aria-label={`Interactive ${planeInfo.name} sketch`}>
       <svg
         ref={camera.svgRef}
@@ -1763,7 +1767,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       </section>
       <div className="scope-note"><strong>Preview solver boundary</strong><p>A small analytic solver enforces horizontal, vertical, parallel, perpendicular, collinear, tangent, concentric, equal, symmetric and fixed relations plus radius and length dimensions on lines, circles and arcs; a conflict is refused with the reason. Rectangles are rigid, point-on-curve and endpoint relations are recorded but not solved, and there is no general nonlinear solver. Degrees of freedom are an estimate.</p></div>
     </aside>
-  </>;
+  </SketchUnitContext.Provider>;
 }
 
 /** A driving dimension drawn like a drawing dimension: extension lines, a dimension line with arrowheads, and editable text. */
@@ -1885,16 +1889,19 @@ function PaletteToggle({ label, active, onToggle }: { readonly label: string; re
 function EntityDimensions({ entity, onApply, onMessage }: { readonly entity: SketchEntity; readonly onApply: (dimension: DrivingDimension, value: number) => void; readonly onMessage: (message: string) => void }): React.JSX.Element {
   if (entity.kind === "line") return <DimensionField label="Length" dimension="length" value={Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1])} onApply={onApply} onMessage={onMessage} />;
   if (entity.kind === "rectangle") return <div className="dimension-stack"><DimensionField label="Width" dimension="width" value={entity.widthMm} onApply={onApply} onMessage={onMessage} /><DimensionField label="Height" dimension="height" value={entity.heightMm} onApply={onApply} onMessage={onMessage} /></div>;
-  if (entity.kind === "circle") return <><DimensionField label="Radius" dimension="radius" value={entity.radiusMm} onApply={onApply} onMessage={onMessage} /><div className="derived-dimension"><span>Diameter</span><strong>{format(entity.radiusMm * 2)} mm</strong></div></>;
-  if (entity.kind === "ellipse") return <div className="dimension-stack"><div className="derived-dimension"><span>Major radius</span><strong>{format(entity.majorRadiusMm)} mm</strong></div><div className="derived-dimension"><span>Minor radius</span><strong>{format(entity.minorRadiusMm)} mm</strong></div></div>;
+  if (entity.kind === "circle") return <><DimensionField label="Radius" dimension="radius" value={entity.radiusMm} onApply={onApply} onMessage={onMessage} /><DerivedLength label="Diameter" valueMm={entity.radiusMm * 2} /></>;
+  if (entity.kind === "ellipse") return <div className="dimension-stack"><DerivedLength label="Major radius" valueMm={entity.majorRadiusMm} /><DerivedLength label="Minor radius" valueMm={entity.minorRadiusMm} /></div>;
   return <div className="derived-dimension"><span>{entity.kind === "arc" ? "Three-point arc" : entity.kind === "spline" ? "Fit-point spline" : "Sketch point"}</span><strong>reference only</strong></div>;
 }
 
 function DimensionField({ label, dimension, value, onApply, onMessage }: { readonly label: string; readonly dimension: DrivingDimension; readonly value: number; readonly onApply: (dimension: DrivingDimension, value: number) => void; readonly onMessage: (message: string) => void }): React.JSX.Element {
-  const [draft, setDraft] = useState(String(Number(value.toFixed(3))));
-  useEffect(() => setDraft(String(Number(value.toFixed(3)))), [value]);
-  return <form className="dimension-field" onSubmit={(event) => { event.preventDefault(); const trimmed = draft.trim(); const next = Number(trimmed); if (trimmed !== "" && Number.isFinite(next)) onApply(dimension, next); else onMessage?.(`Enter a numeric ${label.toLowerCase()} value in millimeters.`); }}>
-    <label><span>{label}</span><div><input aria-label={`${label} in millimeters`} inputMode="decimal" value={draft} onChange={(event) => setDraft(event.target.value)} /><small>mm</small><button type="submit"><CommandIcon name="dimension" />Apply</button></div></label>
+  const unit = useSketchUnit();
+  const shown = (valueMm: number): string => String(Number((unit === "in" ? valueMm / 25.4 : valueMm).toFixed(unit === "in" ? 4 : 3)));
+  const [draft, setDraft] = useState(shown(value));
+  useEffect(() => setDraft(shown(value)), [value, unit]);
+  // Fractions and units are read here: 1/2 in, 3/4", 12 mm, 5' 3". A bare number takes the display unit.
+  return <form className="dimension-field" onSubmit={(event) => { event.preventDefault(); const read = readSketchLength(draft, unit); if (read.ok) onApply(dimension, read.valueMm); else onMessage?.(`${label}: ${read.message}`); }}>
+    <label><span>{label}</span><div><input aria-label={`${label} in ${unit === "in" ? "inches" : "millimeters"}`} inputMode="text" value={draft} onChange={(event) => setDraft(event.target.value)} /><small>{unit}</small><button type="submit"><CommandIcon name="dimension" />Apply</button></div></label>
   </form>;
 }
 
@@ -1952,11 +1959,12 @@ function resolveDirectSketchDimension(points: readonly SketchDimensionPoint[]): 
 }
 
 function DirectDimensionPreview({ dimension, px }: { readonly dimension: DirectSketchDimension; readonly px: number }): React.JSX.Element {
+  const unit = useSketchUnit();
   const x = (dimension.first.point[0] + dimension.second.point[0]) / 2;
   const y = -(dimension.first.point[1] + dimension.second.point[1]) / 2 - 8 * px;
   return <g className={`direct-dimension-preview ${dimension.driving === undefined ? "reference" : "driving"}`} pointerEvents="none">
     <line x1={dimension.first.point[0]} y1={-dimension.first.point[1]} x2={dimension.second.point[0]} y2={-dimension.second.point[1]} />
-    <text x={x} y={y} style={{ fontSize: 12 * px, strokeWidth: 3 * px }}>{format(dimension.valueMm)} mm</text>
+    <text x={x} y={y} style={{ fontSize: 12 * px, strokeWidth: 3 * px }}>{sketchLength(dimension.valueMm, unit)}</text>
   </g>;
 }
 
@@ -2085,6 +2093,11 @@ function profileLabel(profile: SketchProfile): string {
 
 function shortId(id: string): string {
   return id.length < 28 ? id : `${id.slice(0, 18)}…${id.slice(-7)}`;
+}
+
+function DerivedLength({ label, valueMm }: { readonly label: string; readonly valueMm: number }): React.JSX.Element {
+  const unit = useSketchUnit();
+  return <div className="derived-dimension"><span>{label}</span><strong>{sketchLength(valueMm, unit)}</strong></div>;
 }
 
 function format(value: number): string {

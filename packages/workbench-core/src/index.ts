@@ -35,3 +35,5 @@ export * from "./envelope.js";
 export * from "./audit-archive.js";
 export * from "./project-text.js";
 export * from "./feature-refs.js";
+export * from "./face-sketch.js";
+export * from "./units.js";

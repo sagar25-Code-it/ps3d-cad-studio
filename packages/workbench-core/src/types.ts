@@ -1536,7 +1536,7 @@ export type WorkbenchOperation = OperationEnvelope & (
    */
   | { readonly kind: "set-design-parameters"; readonly parameters: readonly DesignParameter[]; readonly renames?: readonly { readonly from: string; readonly to: string }[] }
   /** Applies the result of rebuilding features after a sketch changed: new solids, or the reason a feature failed. */
-  | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string }[] }
+  | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number }[] }
   | { readonly kind: "set-design-feature-suppressed"; readonly featureId: string; readonly suppressed: boolean }
   | { readonly kind: "delete-design-feature"; readonly featureId: string }
   | { readonly kind: "set-design-rollback"; readonly index: number }

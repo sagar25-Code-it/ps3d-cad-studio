@@ -8,6 +8,9 @@ import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { fresh, line, message, pipelineApply, pipelineRun } from "./pipeline-kit.js";
 import { pipelineGeometryTests } from "./pipeline-geometry.test.js";
 import { pipelineSweepTests } from "./pipeline-sweep.test.js";
+import { pipelineFaceTests } from "./pipeline-face.test.js";
+import { pipelineUnitTests } from "./pipeline-units.test.js";
+import { pipelineNamingTests } from "./pipeline-naming.test.js";
 
 function tinyBody(id: string, scale = 1): GeneralSolidBody {
   const p = [0, 0, 0, 10 * scale, 0, 0, 0, 10 * scale, 0, 0, 0, 10 * scale];
@@ -39,6 +42,9 @@ function heavyBody(id: string, rings: number): GeneralSolidBody {
 export const pipelinePlatformTests: readonly TestCase[] = [
   ...pipelineGeometryTests,
   ...pipelineSweepTests,
+  ...pipelineFaceTests,
+  ...pipelineUnitTests,
+  ...pipelineNamingTests,
   {
     name: "P13 an invalid sketch entity is refused with its id, the field and the limit, not a generic project message",
     run: () => {
