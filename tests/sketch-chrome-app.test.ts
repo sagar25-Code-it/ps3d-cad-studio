@@ -22,7 +22,9 @@ import { DEFAULT_CURVE_OPTION_FIELDS } from "../apps/studio-web/src/workspaces/S
 import { RELATIONS_EMPTY_HELP, dimensionModeStatus } from "../apps/studio-web/src/sketch-help-text.js";
 import { createWorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { buildDesignHealthReport } from "../packages/workbench-health/src/index.js";
-import { assert, equal, type TestCase } from "./test-kit.js";
+import { angleDimensionLayout, dimensionLayout } from "../packages/workbench-sketch/src/dimension-layout.js";
+import { formatLength, formatLengthWithUnit, mmToUnit, parseAngleText, parseLengthText, setDimensionLabelUnit, unitToMm, unitWord } from "../packages/workbench-sketch/src/sketch-units.js";
+import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 const repoFile = (relative: string): string => readFileSync(new URL(`../../${relative}`, import.meta.url), "utf8");
 
@@ -48,6 +50,60 @@ function notice(id: string, severity: "warning" | "error", workspace?: FaultBrai
 }
 
 export const sketchChromeAppTests: TestCase[] = [
+  {
+    name: "Sketch units E18: lengths convert to and from the display unit, and a typed unit suffix wins over it",
+    run: () => {
+      near(mmToUnit(25.4, "in"), 1, 1e-12, "25.4 mm is one inch");
+      near(unitToMm(2, "in"), 50.8, 1e-12, "two inches");
+      equal(formatLength(25.4, "in"), "1", "trailing zeros are dropped");
+      equal(formatLength(12.7, "in"), "0.5", "half an inch");
+      equal(formatLength(12.34567, "mm"), "12.346", "millimetres keep three decimals");
+      equal(formatLengthWithUnit(50.8, "in"), "2 in", "with the unit symbol");
+      equal(unitWord("in"), "inches", "the accessible name says inches");
+      near(parseLengthText("12", "mm")!, 12, 1e-12, "a bare number is in the display unit (mm)");
+      near(parseLengthText("12", "in")!, 304.8, 1e-9, "a bare number is in the display unit (in)");
+      near(parseLengthText("0,5 in", "mm")!, 12.7, 1e-9, "a comma decimal and an inch suffix over a metric display unit");
+      near(parseLengthText('2"', "mm")!, 50.8, 1e-9, "a double quote means inches");
+      near(parseLengthText("25.4mm", "in")!, 25.4, 1e-9, "a millimetre suffix over an inch display unit");
+      near(parseLengthText("1.5 cm", "in")!, 15, 1e-9, "centimetres");
+      near(parseLengthText("-3", "mm")!, -3, 1e-12, "negative numbers parse (the editor then refuses them with a message)");
+      equal(parseLengthText("plate_w / 2", "mm"), undefined, "an expression is left to the expression parser");
+      equal(parseLengthText("", "mm"), undefined, "empty text");
+      equal(parseLengthText("12 parsecs", "mm"), undefined, "an unknown unit is not guessed");
+      equal(parseAngleText("45"), 45, "an angle");
+      equal(parseAngleText("90°"), 90, "with a degree sign");
+      equal(parseAngleText("12,5 deg"), 12.5, "with a comma and the word");
+      equal(parseAngleText("12 mm"), undefined, "a length is not an angle");
+    }
+  },
+  {
+    name: "Sketch units E18: driving-dimension text on the canvas follows the display unit, and an angle label stays in degrees",
+    run: () => {
+      const line = { id: "entity:l", kind: "line" as const, start: [0, 0] as const, end: [25.4, 0] as const, construction: false };
+      const second = { id: "entity:m", kind: "line" as const, start: [0, 0] as const, end: [0, 10] as const, construction: false };
+      try {
+        equal(dimensionLayout(line, "length", 25.4, 0.1)?.label, "25.4", "millimetres by default");
+        setDimensionLabelUnit("in");
+        equal(dimensionLayout(line, "length", 25.4, 0.1)?.label, "1", "an inch-based sketch reads the line as 1");
+        equal(dimensionLayout({ id: "entity:c", kind: "circle", center: [0, 0], radiusMm: 12.7, construction: false }, "radius", 12.7, 0.1)?.label, "Ø1", "a diameter in inches");
+        equal(angleDimensionLayout(line, second, 90, 0.1)?.label, "90°", "an angle label is degrees whatever the display unit");
+      } finally {
+        setDimensionLabelUnit("mm");
+      }
+      equal(dimensionLayout(line, "length", 25.4, 0.1)?.label, "25.4", "and it can be set back to millimetres");
+    }
+  },
+  {
+    name: "Sketch units E18: the dimension editor names its unit (degrees for an angle), is no longer hard-wired to millimetres, and the Sketch palette has a unit switch",
+    run: () => {
+      const workspace = repoFile("apps/studio-web/src/workspaces/SketchWorkspace.tsx");
+      assert(!workspace.includes("aria-label={`${props.label} in millimetres`}"), "the editor's accessible name is no longer always millimetres");
+      assert(workspace.includes('unitSymbol={dimensionEdit.dimension === "angle" ? "°" : unit}') && workspace.includes('unitName={dimensionEdit.dimension === "angle" ? "degrees" : unitWord(unit)}'), "an angle is labelled in degrees");
+      assert(workspace.includes('aria-label="Sketch display units"'), "the palette can switch the unit without leaving Sketch");
+      assert(workspace.includes("parseAngleText(dimensionText)") && workspace.includes("parseLengthText(dimensionText, unit)"), "typed text is read as degrees or as a length in the display unit");
+      assert(repoFile("apps/studio-web/src/App.tsx").includes("displayUnit={document.displayUnit}"), "the document's display unit reaches the sketch");
+    }
+  },
   {
     name: "Version indicator: version.json records are parsed strictly, so an HTML fallback, a 404 body or a tampered record is never taken for a build",
     run: () => {

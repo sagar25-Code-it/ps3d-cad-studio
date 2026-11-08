@@ -1,3 +1,4 @@
+import { formatDimensionLabelValue } from "./sketch-units.js";
 import type { SketchEntity, Vec2 } from "../../workbench-core/src/index.js";
 import { arcShape } from "../../workbench-core/src/sketch-measure.js";
 import { entityPoints } from "./index.js";
@@ -70,7 +71,7 @@ function linear(start: Vec2, end: Vec2, normal: Vec2, valueMm: number, pxMm: num
     dimensionLine: { from: first, to: second },
     arrows: [{ tip: first, direction: [-direction[0], -direction[1]] }, { tip: second, direction }],
     textAt: [(first[0] + second[0]) / 2 + normal[0] * 9 * pxMm, (first[1] + second[1]) / 2 + normal[1] * 9 * pxMm],
-    label: `${labelPrefix}${formatValue(valueMm)}`
+    label: `${labelPrefix}${formatDimensionLabelValue(valueMm)}`
   };
 }
 
@@ -109,7 +110,7 @@ export function dimensionLayout(entity: SketchEntity, dimension: DrivingDimensio
       // The arrows touch the curve from inside, pointing outward at both ends.
       arrows: [{ tip: near, direction: [-direction[0], -direction[1]] }, { tip: far, direction }],
       textAt: [far[0] + direction[0] * 16 * pxMm, far[1] + direction[1] * 16 * pxMm],
-      label: `Ø${formatValue(valueMm * 2)}`
+      label: `Ø${formatDimensionLabelValue(valueMm * 2)}`
     };
   }
   if (entity.kind === "arc" && dimension === "arc-length") return arcLengthDimensionLayout(entity, valueMm, pxMm);
@@ -175,7 +176,7 @@ export function drivenDimensionLayout(entity: SketchEntity, kind: DrivenDimensio
       dimensionLine: { from: near, to: far },
       arrows: [{ tip: near, direction: [-direction[0], -direction[1]] }, { tip: far, direction }],
       textAt: [far[0] + direction[0] * 18 * pxMm, far[1] + direction[1] * 18 * pxMm],
-      label: `PERIM ${formatValue(circumference)}`
+      label: `PERIM ${formatDimensionLabelValue(circumference)}`
     };
   }
   return undefined;
@@ -253,7 +254,7 @@ export function arcLengthDimensionLayout(arc: Extract<SketchEntity, { kind: "arc
   const reach = shape.radiusMm + (DIMENSION_OFFSET_PX + DIMENSION_OVERSHOOT_PX) * pxMm;
   const gapRadius = shape.radiusMm + DIMENSION_GAP_PX * pxMm;
   const extensions: DimensionSegment[] = [from, from + shape.sweepRad].map((angle) => ({ from: arcPoint(shape.center, gapRadius, angle), to: arcPoint(shape.center, reach, angle) }));
-  return arcDimension(shape.center, standOff, from, shape.sweepRad, extensions, `⌒${formatValue(valueMm)}`, 10 * pxMm, reference);
+  return arcDimension(shape.center, standOff, from, shape.sweepRad, extensions, `⌒${formatDimensionLabelValue(valueMm)}`, 10 * pxMm, reference);
 }
 
 /** A perimeter dimension: a leader from the outline to a text label, since a closed outline has no two ends to dimension between. */
@@ -283,7 +284,7 @@ export function perimeterDimensionLayout(entity: SketchEntity, valueMm: number, 
     dimensionLine: { from, to },
     arrows: [{ tip: from, direction: [-outward[0], -outward[1]] }],
     textAt: [to[0] + outward[0] * 18 * pxMm, to[1] + outward[1] * 18 * pxMm],
-    label: wrapLabel(`P ${formatValue(valueMm)}`, reference)
+    label: wrapLabel(`P ${formatDimensionLabelValue(valueMm)}`, reference)
   };
 }
 

@@ -144,3 +144,6 @@
   .studio-app .sketch-stage.palette-docked .sketch-canvas { width: 100%; }
   .studio-app .sketch-plane-chip.canvas { top: 3.6rem; }
 }
+
+/* ---- Sketch palette unit switch ---- */
+.studio-app .sketch-palette .palette-select select { min-width: 0; max-width: 8.5rem; padding: 0.15rem 0.25rem; font-size: inherit; }

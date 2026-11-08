@@ -46,6 +46,8 @@ import { sketchEntityNames } from "../../../../packages/workbench-core/src/sketc
 import { useSketchCamera } from "./sketch/useSketchCamera.js";
 import { useSketchHotkeys } from "./sketch/useSketchHotkeys.js";
 import { useSketchPref } from "./sketch/useSketchPref.js";
+import type { DisplayUnit } from "../../../../packages/model-schema/src/index.js";
+import { formatLength, formatLengthWithUnit, parseAngleText, parseLengthText, setDimensionLabelUnit, unitWord, type SketchLengthUnit } from "../../../../packages/workbench-sketch/src/sketch-units.js";
 import { describeSketchPlane } from "../sketch-plane-ui.js";
 import { DEFAULT_PALETTE_LAYOUT } from "./sketch/sketch-prefs.js";
 import {
@@ -210,6 +212,9 @@ interface SketchWorkspaceProps {
   /** The same solids with their shapes, for the faces and vertices a "to" extent can reach. */
   readonly targetBodies: readonly GeneralSolidBody[];
   readonly onChangePlane: () => void;
+  /** The document's display unit. The sketch is stored in millimetres; fields, the HUD and dimension text show and accept this unit. */
+  readonly displayUnit: DisplayUnit;
+  readonly onDisplayUnit: (unit: DisplayUnit) => void;
   readonly editTool: SketchEditToolId | null;
   readonly showMovable: boolean;
   readonly checkOpen: boolean;
@@ -357,6 +362,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // The palette is docked beside the canvas by default (it no longer covers drawing area); it can float or fold up, and the choice is remembered.
   const [paletteLayout, setPaletteLayout] = useSketchPref("paletteLayout", DEFAULT_PALETTE_LAYOUT);
   const planeDescription = describeSketchPlane(props.sketch);
+  lengthUnit = props.displayUnit;
+  setDimensionLabelUnit(props.displayUnit);
+  const unit: SketchLengthUnit = props.displayUnit;
+  /** A millimetre value as the text the dimension editor starts with, in the display unit. */
+  const lengthText = (valueMm: number): string => formatLength(valueMm, unit);
   const [selectedProfileIds, setSelectedProfileIds] = useState<readonly string[]>([]);
   const boxGesture = useRef<BoxGesture | undefined>(undefined);
   // Direct manipulation: the gesture, and the live (uncommitted) result shown while it runs.
@@ -818,7 +828,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       setDimensionEdit(next);
       // A dimension bound to an expression shows the expression, so it can be edited as text; a circle shows its diameter.
       const bound = existing?.expression === undefined ? undefined : entity.kind === "circle" ? unhalvedExpression(existing.expression) : existing.expression;
-      setDimensionText(bound ?? String(Number(shown.toFixed(3))));
+      setDimensionText(bound ?? lengthText(shown));
     }, 0);
   };
 
@@ -828,13 +838,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const value = constraint.kind === "angle" ? constraint.valueDeg : constraint.valueMm;
     if (value === undefined) return;
     const next = { entityId: constraint.entityIds[0]!, dimension: name, anchor, label: name === "angle" ? "Angle (degrees)" : name === "arc-length" ? "Arc length" : "Perimeter", ...(constraint.entityIds[1] === undefined ? {} : { secondEntityId: constraint.entityIds[1] }) };
-    window.setTimeout(() => { setDimensionEdit(next); setDimensionText(String(Number(value.toFixed(3)))); }, 0);
+    window.setTimeout(() => { setDimensionEdit(next); setDimensionText(constraint.kind === "angle" ? String(Number(value.toFixed(3))) : lengthText(value)); }, 0);
   };
 
   const commitDimensionEdit = (): void => {
     const edit = dimensionEdit;
     if (edit === undefined) return;
-    const typed = parseDynamicNumber(dimensionText);
+    // An angle is typed in degrees; every other dimension is a length in the display unit (a typed suffix such as 12 mm or 0.5in wins). typed is degrees or millimetres.
+    const typed = edit.dimension === "angle" ? parseAngleText(dimensionText) : parseLengthText(dimensionText, unit);
     const entity = props.sketch.entities.find((candidate) => candidate.id === edit.entityId);
     // Text that is not a number is an expression (plate_w / 2): the dimension is bound to it. The project checks it and says what is wrong.
     if (typed === undefined && dimensionText.trim() !== "" && dimensionText.trim() !== "-") {
@@ -1404,6 +1415,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
       {dimensionEdit !== undefined && <DimensionEditor
         label={dimensionEdit.label}
+        unitSymbol={dimensionEdit.dimension === "angle" ? "°" : unit}
+        unitName={dimensionEdit.dimension === "angle" ? "degrees" : unitWord(unit)}
         text={dimensionText}
         position={(() => {
           const at = sketchToScreen(dimensionEdit.anchor, { left: 0, top: 0, width: camera.size.width, height: camera.size.height }, camera.camera);
@@ -1445,6 +1458,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           <button onClick={() => setPaletteLayout((current) => ({ ...current, dock: current.dock === "docked" ? "floating" : "docked" }))} title={paletteLayout.dock === "docked" ? "Float the palette over the canvas" : "Dock the palette beside the canvas"} aria-label={paletteLayout.dock === "docked" ? "Float the palette" : "Dock the palette"}>{paletteLayout.dock === "docked" ? "Float" : "Dock"}</button>
           <button onClick={() => setPaletteLayout((current) => ({ ...current, collapsed: !current.collapsed }))} aria-expanded={!paletteLayout.collapsed} title={paletteLayout.collapsed ? "Expand the palette" : "Fold the palette up"} aria-label={paletteLayout.collapsed ? "Expand the palette" : "Fold the palette up"}>{paletteLayout.collapsed ? "+" : "−"}</button>
         </div></header>
+        <label className="palette-select"><span>Units</span><select aria-label="Sketch display units" value={props.displayUnit} onChange={(event) => props.onDisplayUnit(event.target.value === "in" ? "in" : "mm")}><option value="mm">Millimetres</option><option value="in">Inches</option></select></label>
         <PaletteToggle label="Sketch grid" active={props.viewportState.gridVisible} onToggle={props.onGrid} />
         <PaletteToggle label="Snap" active={snapEnabled} onToggle={setSnapEnabled} />
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
@@ -1706,7 +1720,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         </details>
       </div>
 
-      <div className="canvas-hud"><span>{planePlacement} · {planeInfo.horizontalLabel} → · {planeInfo.verticalLabel} ↑</span><span>{props.dimensionMode ? "Dimension" : sketchToolLabel(props.tool)}</span><span>Grid {props.viewportState.gridVisible ? `${format(grid.minorMm)} mm` : "off"}</span><span>Snap {snapEnabled ? `${SNAP_PIXELS} px` : "off"}</span><span>{pointerInside ? `${planeInfo.horizontalLabel} ${format(cursor[0])}  ${planeInfo.verticalLabel} ${format(cursor[1])} mm` : "Cursor outside the sketch"}</span><span>{visibleEntities.length}/{props.sketch.entities.length} entities visible</span><strong>{analysis.classification.replace("-", " ")}</strong></div>
+      <div className="canvas-hud"><span>{planePlacement} · {planeInfo.horizontalLabel} → · {planeInfo.verticalLabel} ↑</span><span>{props.dimensionMode ? "Dimension" : sketchToolLabel(props.tool)}</span><span>Grid {props.viewportState.gridVisible ? fmtLen(grid.minorMm) : "off"}</span><span>Snap {snapEnabled ? `${SNAP_PIXELS} px` : "off"}</span><span>{pointerInside ? `${planeInfo.horizontalLabel} ${formatLength(cursor[0], unit)}  ${planeInfo.verticalLabel} ${fmtLen(cursor[1])}` : "Cursor outside the sketch"}</span><span>{visibleEntities.length}/{props.sketch.entities.length} entities visible</span><strong>{analysis.classification.replace("-", " ")}</strong></div>
       <div className="confirmation-corner" role="group" aria-label="Sketch confirmation corner">
         <small>Sketch</small>
         <button type="button" onClick={props.onCancelSketch} title="Cancel the sketch and return to Design. Pending points are dropped."><CommandIcon name="cancel" />Cancel</button>
@@ -1764,7 +1778,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {dimensionPoints.length === 0 && <p className="empty-copy">Click a line, rectangle, or circle for its primary driving dimension, or pick any two blue definition points.</p>}
         {dimensionPoints.length === 1 && <div className="dimension-pick-state"><b>1</b><span>{dimensionPoints[0]!.label}</span><small>Pick the second point.</small></div>}
         {directDimension !== undefined && <>
-          <dl className="compact-facts"><div><dt>Selection</dt><dd>{directDimension.first.label} → {directDimension.second.label}</dd></div><div><dt>Distance</dt><dd>{format(directDimension.valueMm)} mm</dd></div><div><dt>ΔX</dt><dd>{format(directDimension.delta[0])} mm</dd></div><div><dt>ΔY</dt><dd>{format(directDimension.delta[1])} mm</dd></div></dl>
+          <dl className="compact-facts"><div><dt>Selection</dt><dd>{directDimension.first.label} → {directDimension.second.label}</dd></div><div><dt>Distance</dt><dd>{fmtLen(directDimension.valueMm)}</dd></div><div><dt>ΔX</dt><dd>{fmtLen(directDimension.delta[0])}</dd></div><div><dt>ΔY</dt><dd>{fmtLen(directDimension.delta[1])}</dd></div></dl>
           {directDimension.driving === undefined
             ? <div className="inline-warning">This is a reference measurement. Editing arbitrary cross-entity point pairs requires the nonlinear constraint solver.</div>
             : <DimensionField label={directDimension.label} dimension={directDimension.driving.dimension} value={directDimension.valueMm} onApply={(dimension, value) => props.onSetDimension(directDimension.driving!.entityId, dimension, value)} onMessage={props.onMessage} />}
@@ -1804,7 +1818,7 @@ function DimensionMarks({ entity, dimension, valueMm, relaxed, px, onEdit }: { r
 }
 
 /** Type a new value for a driving dimension next to it: Enter applies, Esc closes. */
-function DimensionEditor(props: { readonly label: string; readonly text: string; readonly position: readonly [number, number]; readonly onChange: (text: string) => void; readonly onCommit: () => void; readonly onCancel: () => void }): React.JSX.Element {
+function DimensionEditor(props: { readonly label: string; /** "°" for an angle, otherwise the display unit; names the field for assistive technology as well. */ readonly unitSymbol: string; readonly unitName: string; readonly text: string; readonly position: readonly [number, number]; readonly onChange: (text: string) => void; readonly onCommit: () => void; readonly onCancel: () => void }): React.JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
   return <div className="dimension-editor" style={{ left: props.position[0], top: props.position[1] }} role="group" aria-label={`Edit ${props.label.toLowerCase()}`}>
@@ -1812,7 +1826,7 @@ function DimensionEditor(props: { readonly label: string; readonly text: string;
       <input
         ref={inputRef}
         inputMode="decimal"
-        aria-label={`${props.label} in millimetres`}
+        aria-label={`${props.label} in ${props.unitName}`}
         value={props.text}
         onChange={(event) => props.onChange(event.target.value)}
         onBlur={props.onCancel}
@@ -1821,7 +1835,7 @@ function DimensionEditor(props: { readonly label: string; readonly text: string;
           else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel(); }
         }}
       />
-      <small>mm</small>
+      <small>{props.unitSymbol}</small>
     </label>
     <em>Enter applies a driving value · Esc closes</em>
   </div>;
@@ -1907,16 +1921,17 @@ function PaletteToggle({ label, active, onToggle }: { readonly label: string; re
 function EntityDimensions({ entity, onApply, onMessage }: { readonly entity: SketchEntity; readonly onApply: (dimension: DrivingDimension, value: number) => void; readonly onMessage: (message: string) => void }): React.JSX.Element {
   if (entity.kind === "line") return <DimensionField label="Length" dimension="length" value={Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1])} onApply={onApply} onMessage={onMessage} />;
   if (entity.kind === "rectangle") return <div className="dimension-stack"><DimensionField label="Width" dimension="width" value={entity.widthMm} onApply={onApply} onMessage={onMessage} /><DimensionField label="Height" dimension="height" value={entity.heightMm} onApply={onApply} onMessage={onMessage} /></div>;
-  if (entity.kind === "circle") return <><DimensionField label="Radius" dimension="radius" value={entity.radiusMm} onApply={onApply} onMessage={onMessage} /><div className="derived-dimension"><span>Diameter</span><strong>{format(entity.radiusMm * 2)} mm</strong></div></>;
-  if (entity.kind === "ellipse") return <div className="dimension-stack"><div className="derived-dimension"><span>Major radius</span><strong>{format(entity.majorRadiusMm)} mm</strong></div><div className="derived-dimension"><span>Minor radius</span><strong>{format(entity.minorRadiusMm)} mm</strong></div></div>;
+  if (entity.kind === "circle") return <><DimensionField label="Radius" dimension="radius" value={entity.radiusMm} onApply={onApply} onMessage={onMessage} /><div className="derived-dimension"><span>Diameter</span><strong>{fmtLen(entity.radiusMm * 2)}</strong></div></>;
+  if (entity.kind === "ellipse") return <div className="dimension-stack"><div className="derived-dimension"><span>Major radius</span><strong>{fmtLen(entity.majorRadiusMm)}</strong></div><div className="derived-dimension"><span>Minor radius</span><strong>{fmtLen(entity.minorRadiusMm)}</strong></div></div>;
   return <div className="derived-dimension"><span>{entity.kind === "arc" ? "Three-point arc" : entity.kind === "spline" ? "Fit-point spline" : "Sketch point"}</span><strong>reference only</strong></div>;
 }
 
 function DimensionField({ label, dimension, value, onApply, onMessage }: { readonly label: string; readonly dimension: DrivingDimension; readonly value: number; readonly onApply: (dimension: DrivingDimension, value: number) => void; readonly onMessage: (message: string) => void }): React.JSX.Element {
-  const [draft, setDraft] = useState(String(Number(value.toFixed(3))));
-  useEffect(() => setDraft(String(Number(value.toFixed(3)))), [value]);
-  return <form className="dimension-field" onSubmit={(event) => { event.preventDefault(); const trimmed = draft.trim(); const next = Number(trimmed); if (trimmed !== "" && Number.isFinite(next)) onApply(dimension, next); else onMessage?.(`Enter a numeric ${label.toLowerCase()} value in millimeters.`); }}>
-    <label><span>{label}</span><div><input aria-label={`${label} in millimeters`} inputMode="decimal" value={draft} onChange={(event) => setDraft(event.target.value)} /><small>mm</small><button type="submit"><CommandIcon name="dimension" />Apply</button></div></label>
+  const unit = lengthUnit;
+  const [draft, setDraft] = useState(formatLength(value, unit));
+  useEffect(() => setDraft(formatLength(value, unit)), [value, unit]);
+  return <form className="dimension-field" onSubmit={(event) => { event.preventDefault(); const next = parseLengthText(draft, unit); if (next !== undefined) onApply(dimension, next); else onMessage?.(`Enter a numeric ${label.toLowerCase()} value in ${unitWord(unit)}.`); }}>
+    <label><span>{label}</span><div><input aria-label={`${label} in ${unitWord(unit)}`} inputMode="decimal" value={draft} onChange={(event) => setDraft(event.target.value)} /><small>{unit}</small><button type="submit"><CommandIcon name="dimension" />Apply</button></div></label>
   </form>;
 }
 
@@ -1978,7 +1993,7 @@ function DirectDimensionPreview({ dimension, px }: { readonly dimension: DirectS
   const y = -(dimension.first.point[1] + dimension.second.point[1]) / 2 - 8 * px;
   return <g className={`direct-dimension-preview ${dimension.driving === undefined ? "reference" : "driving"}`} pointerEvents="none">
     <line x1={dimension.first.point[0]} y1={-dimension.first.point[1]} x2={dimension.second.point[0]} y2={-dimension.second.point[1]} />
-    <text x={x} y={y} style={{ fontSize: 12 * px, strokeWidth: 3 * px }}>{format(dimension.valueMm)} mm</text>
+    <text x={x} y={y} style={{ fontSize: 12 * px, strokeWidth: 3 * px }}>{fmtLen(dimension.valueMm)}</text>
   </g>;
 }
 
@@ -2112,4 +2127,11 @@ function shortId(id: string): string {
 
 function format(value: number): string {
   return String(Number(value.toFixed(3)));
+}
+
+/** The display unit of the workspace being rendered. SketchWorkspace sets it on every render before its children draw; the helpers below read it. */
+let lengthUnit: SketchLengthUnit = "mm";
+/** A length in millimetres as text with the display unit: "12.7 mm" or "0.5 in". */
+function fmtLen(valueMm: number): string {
+  return formatLengthWithUnit(valueMm, lengthUnit);
 }
