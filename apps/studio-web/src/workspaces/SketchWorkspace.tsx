@@ -25,6 +25,11 @@ import { mirrorImages, withDynamicMirror } from "../../../../packages/workbench-
 import { copySketchSelection, cutSketchSelection, nextPasteNumber, parseClipboard, pasteSketchClipboard, readSketchClipboard, serializeClipboard, storeSketchClipboard, type SketchClipboard } from "../../../../packages/workbench-sketch/src/sketch-clipboard.js";
 import { SKETCH_HOTKEY_HELP, type SketchHotkeyAction } from "../../../../packages/workbench-sketch/src/hotkeys.js";
 import { DRAW_CONSTRUCTION_OFF_MESSAGE, DRAW_CONSTRUCTION_ON_MESSAGE, entityForDrawMode, planForDrawMode } from "../../../../packages/workbench-sketch/src/draw-construction.js";
+import { findTextObject, planSketchText, planSketchTextEdit, textSpecFromFields } from "../../../../packages/workbench-sketch/src/sketch-text.js";
+import type { SketchTextObject } from "../../../../packages/workbench-core/src/index.js";
+import { SketchExportPanel, SketchImportPanel, SketchUnderlayPanel, type UnderlayPickState } from "./sketch/SketchExchangePanel.js";
+import { SketchPatternPanel } from "./sketch/SketchPatternPanel.js";
+import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
 import { autoConstraintsFor, dropConstraintFor, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
@@ -260,6 +265,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // Relations drawn with a shape (Coincident at snapped ends, Horizontal on a level guide...) and the snap each placed point had.
   const [autoConstrain, setAutoConstrain] = useState(true);
   const [drawAsConstruction, setDrawAsConstruction] = useState(false);
+  // Placed text being re-edited (double-click a text curve), and the two points picked to calibrate the picture underlay.
+  const [textEditId, setTextEditId] = useState<string | null>(null);
+  const [underlayPick, setUnderlayPick] = useState<UnderlayPickState>({ active: false, points: [] });
   const [pendingInference, setPendingInference] = useState<readonly PlacedPointInference[]>([]);
   // Picking the points of a Coincident or Midpoint relation on the canvas.
   const [pickRelation, setPickRelation] = useState<"coincident" | "midpoint" | null>(null);
@@ -495,6 +503,32 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const shareClipboardText = (clipboard: SketchClipboard): void => {
     void Promise.resolve(globalThis.navigator?.clipboard?.writeText(serializeClipboard(clipboard))).catch(() => undefined);
   };
+  /** Places new text at the click, or re-draws the text being edited (at the click, or where it was when `anchor` is absent). */
+  const placeText = (anchor?: Vec2): void => {
+    const spec = textSpecFromFields({ text: curveFields.text, height: curveFields.textHeight, widthFactor: curveFields.textWidth, spacing: curveFields.textSpacing, align: curveFields.textAlign, rotation: curveFields.textRotation, construction: drawAsConstruction });
+    if (!spec.ok) { props.onMessage(spec.diagnostics[0]?.message ?? "Check the text settings."); return; }
+    const editing = textEditId;
+    const plan = editing === null ? planSketchText(editContext(), anchor ?? [0, 0], spec.value) : planSketchTextEdit(editContext(), props.sketch, editing, spec.value, anchor);
+    if (!plan.ok) { props.onMessage(plan.diagnostics[0]?.message ?? "The text was rejected."); return; }
+    const accepted = editing === null ? applyDrawn(plan.value) : props.onApplyEdit(plan.value);
+    if (accepted === false) return;
+    setPending([]);
+    if (editing !== null) setTextEditId(null);
+    props.onMessage(editing === null ? `Added the text "${spec.value.text}". Double-click it later to edit it.` : `Edited the text "${spec.value.text}".`);
+  };
+  const startTextEdit = (text: SketchTextObject): void => {
+    setCurveFields((current) => ({ ...current, text: text.text, textHeight: String(text.heightMm), textWidth: String(text.widthFactor), textSpacing: String(text.spacing), textRotation: String(text.rotationDeg), textAlign: text.align }));
+    setTextEditId(text.id);
+    props.onActivateTool("text");
+    props.onMessage(`Editing the text "${text.text}": change it in the Sketch palette and press Apply to the text, or click the sketch to move it there.`);
+  };
+  const handleCanvasDoubleClick = (event: React.MouseEvent<SVGSVGElement>): void => {
+    const id = (event.target as Element).closest<SVGElement>("[data-selection-id]")?.dataset["selectionId"];
+    const text = id === undefined ? undefined : findTextObject(props.sketch, id);
+    if (text === undefined) return;
+    event.preventDefault();
+    startTextEdit(text);
+  };
   const copySelection = (cut: boolean): void => {
     if (cut) {
       const result = cutSketchSelection(editContext(), selectionIds, props.sketch.name);
@@ -548,6 +582,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (props.tool !== "select" || props.dimensionMode || props.editTool !== null) { setPickRelation(null); setPickedPoint(undefined); }
   }, [props.tool, props.dimensionMode, props.editTool]);
   useEffect(() => { setFieldText({}); }, [props.tool, props.cancelVersion, pending.length]);
+  // Text editing belongs to the Text tool; leaving it, or the picture panel, drops what was half done.
+  useEffect(() => { if (props.tool !== "text") setTextEditId(null); }, [props.tool]);
+  useEffect(() => { if (props.editTool !== "underlay") setUnderlayPick({ active: false, points: [] }); }, [props.editTool]);
+  useEffect(() => { if (textEditId !== null && !(props.sketch.texts ?? []).some((text) => text.id === textEditId)) setTextEditId(null); }, [props.sketch.texts, textEditId]);
   useEffect(() => {
     if (focusRequest === undefined) return;
     const element = fieldRefs.current[focusRequest.id];
@@ -590,6 +628,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setCursor(snapped.point);
     setInference(placing ? result : undefined);
     if (!commit) return;
+    if (underlayPick.active && props.editTool === "underlay") {
+      const next = [...underlayPick.points, point];
+      setUnderlayPick({ active: next.length < 2, points: next });
+      props.onMessage(next.length < 2 ? "Picture: first point set. Click the second point on the picture." : "Picture: both points set. Type their real distance and press Calibrate scale.");
+      return;
+    }
     if (isClickEditTool(props.editTool) && props.tool === "select") {
       const target = nearestEntityId(props.sketch, point, PICK_PIXELS * px);
       if (target === undefined) { props.onMessage(`${SKETCH_EDIT_TOOL_LABELS[props.editTool]}: click directly on a curve.`); return; }
@@ -659,6 +703,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       props.onMessage(`${sketchToolLabel(props.tool)}: point ${points.length} accepted${label === "" ? "" : ` (${label})`}.${nextPrompt === undefined ? "" : ` Next: ${nextPrompt}.`}`);
       return;
     }
+    if (props.tool === "text") { placeText(point); return; }
     if (isShapeTool(props.tool)) {
       const shape = buildShape(props.tool, points);
       if (!shape.ok) {
@@ -1312,6 +1357,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         onPointerDownCapture={handleCanvasPointerDownCapture}
         onPointerMove={handleCanvasPointerMove}
         onPointerDown={handleCanvasPointerDown}
+        onDoubleClick={handleCanvasDoubleClick}
         onPointerUp={finishCanvasDrag}
         onPointerCancel={finishCanvasDrag}
         onPointerEnter={() => setPointerInside(true)}
@@ -1336,6 +1382,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           horizontalLabel={planeInfo.horizontalLabel}
           verticalLabel={planeInfo.verticalLabel}
         />
+        {props.sketch.underlay !== undefined && <UnderlayLayer underlay={props.sketch.underlay} />}
         {showProfiles && profiles.map((profile) => <SketchProfileShape key={profile.id} profile={profile} selected={selectedProfileIds.includes(profile.id)} {...(interactive ? { onSelect: (additive: boolean) => selectProfile(profile, additive) } : {})} />)}
         {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={selectionIds.includes(entity.id)} hovered={hoverId === entity.id} movable={props.showMovable && movableIds.has(entity.id)} constrained={analysis.entityFreedom[entity.id] === 0} {...(interactive ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive), onHover: (inside: boolean) => setHoverId(inside ? entity.id : null), onGrab: (event: React.PointerEvent, handle: DragHandle) => beginDrag(event, entity.id, handle), handles: grabHandlesOf(entity) } : {})} />)}
         {curvatureCombs.map(({ entityId, comb }) => <g key={`comb:${entityId}`} className="curvature-comb" data-comb-entity={entityId} pointerEvents="none" fill="none" stroke="#d9480f" strokeWidth={px}>
@@ -1348,6 +1395,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {showDimensions && drivingDimensions.map((view) => <DimensionMarks key={view.constraint.id} entity={view.entity} dimension={view.dimension} valueMm={view.constraint.valueMm ?? 0} relaxed={view.constraint.suppressed === true} px={px} {...(interactive ? { onEdit: () => openDimensionEditor(view.entity, view.dimension) } : {})} />)}
         {showDimensions && <ExtraDimensionMarks sketch={visibleSketch} px={px} {...(interactive ? { onEdit: openExtraDimensionEditor } : {})} />}
         {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r={4 * px} className="pending-point" />)}
+        {underlayPick.points.length > 0 && props.editTool === "underlay" && <g className="underlay-pick" pointerEvents="none" stroke="#d9480f" strokeWidth={1.5 * px} fill="none">
+          {underlayPick.points.length === 2 && <line x1={underlayPick.points[0]![0]} y1={-underlayPick.points[0]![1]} x2={underlayPick.points[1]![0]} y2={-underlayPick.points[1]![1]} strokeDasharray={`${6 * px} ${4 * px}`} />}
+          {underlayPick.points.map((point, index) => <g key={index}><circle cx={point[0]} cy={-point[1]} r={5 * px} /><line x1={point[0] - 9 * px} y1={-point[1]} x2={point[0] + 9 * px} y2={-point[1]} /><line x1={point[0]} y1={-point[1] - 9 * px} x2={point[0]} y2={-point[1] + 9 * px} /></g>)}
+        </g>}
         {props.tool !== "select" && pointerInside && !camera.panning && inference !== undefined && <InferenceMarks inference={inference} px={px} />}
         {props.tool !== "select" && pointerInside && !camera.panning && <circle cx={cursor[0]} cy={-cursor[1]} r={3.5 * px} className="cursor-point" />}
         {showDimensions && visibleEntities.filter((entity) => !dimensionedIds.has(entity.id)).map((entity) => <SketchDimensionGlyph key={`dimension:${entity.id}`} entity={entity} px={px} />)}
@@ -1436,7 +1487,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
         <PaletteToggle label="Draw as construction (Q)" active={drawAsConstruction} onToggle={(next) => { setDrawAsConstruction(next); props.onMessage(next ? DRAW_CONSTRUCTION_ON_MESSAGE : DRAW_CONSTRUCTION_OFF_MESSAGE); }} />
         {props.tool === "polygon" && <label className="palette-number"><span>Polygon sides</span><input type="number" min={POLYGON_MIN_SIDES} max={POLYGON_MAX_SIDES} step={1} value={polygonSides} aria-label="Number of polygon sides" onChange={(event) => setPolygonSides(event.target.value)} /></label>}
-        <SketchCurveOptionsPanel tool={props.tool} fields={curveFields} onChange={setCurveFields} blockNames={blockNames} selectedCount={selectedEntities.length} onSaveBlock={saveSelectionAsBlock} />
+        <SketchCurveOptionsPanel tool={props.tool} fields={curveFields} onChange={setCurveFields} blockNames={blockNames} selectedCount={selectedEntities.length} onSaveBlock={saveSelectionAsBlock} textEdit={textEditId === null ? undefined : { onApply: () => placeText(), onCancel: () => { setTextEditId(null); props.onMessage("Text editing cancelled."); } }} />
+        {props.tool === "select" && selectedEntity !== undefined && findTextObject(props.sketch, selectedEntity.id) !== undefined && <button className="palette-action" title="Re-open this text (or double-click it)" onClick={() => startTextEdit(findTextObject(props.sketch, selectedEntity.id)!)}><CommandIcon name="edit" />Edit text</button>}
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
         <PaletteToggle label="Constraints" active={showConstraints} onToggle={setShowConstraints} />
@@ -1712,7 +1764,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       {dynamicMirrorEntity !== undefined && props.editTool !== "dynamic-mirror" && <div className="inline-warning movable-note" role="status" aria-label="Dynamic mirror active">
         Dynamic mirror is on: what you draw is mirrored about {dynamicMirrorEntity.id.replace(/^entity:/u, "")}. <button className="palette-action" onClick={() => { setDynamicMirrorAxis(null); props.onMessage("Dynamic mirror stopped."); }}><CommandIcon name="cancel" />Stop</button>
       </div>}
-      {props.editTool !== null && <SketchEditPanel tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} jog={jogParams} onJog={setJogParams} dynamicMirrorAxis={dynamicMirrorAxis} onDynamicMirror={(axisId) => { setDynamicMirrorAxis(axisId); props.onMessage(axisId === null ? "Dynamic mirror stopped." : `Dynamic mirror on: pick a drawing tool; everything you draw is mirrored about ${axisId.replace(/^entity:/u, "")}.`); }} />}
+      {props.editTool === "pattern" && <SketchPatternPanel sketch={props.sketch} selectionIds={selectionIds} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
+      {props.editTool === "import-drawing" && <SketchImportPanel sketch={props.sketch} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
+      {props.editTool === "export-drawing" && <SketchExportPanel sketch={props.sketch} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
+      {props.editTool === "underlay" && <SketchUnderlayPanel sketch={props.sketch} pick={underlayPick} onPickStart={() => { setUnderlayPick({ active: true, points: [] }); props.onMessage("Picture: click the first point on the picture."); }} onPickCancel={() => setUnderlayPick({ active: false, points: [] })} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
+      {props.editTool !== null && props.editTool !== "pattern" && props.editTool !== "import-drawing" && props.editTool !== "export-drawing" && props.editTool !== "underlay" && <SketchEditPanel tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} jog={jogParams} onJog={setJogParams} dynamicMirrorAxis={dynamicMirrorAxis} onDynamicMirror={(axisId) => { setDynamicMirrorAxis(axisId); props.onMessage(axisId === null ? "Dynamic mirror stopped." : `Dynamic mirror on: pick a drawing tool; everything you draw is mirrored about ${axisId.replace(/^entity:/u, "")}.`); }} />}
       {props.checkOpen && <SketchRepairPanel sketch={props.sketch} onApplyEdit={props.onApplyEdit} onSetSuppressed={props.onSetSuppressed} onSelect={(ids) => { setSelectionIds(ids); props.onSelect(ids.at(-1) ?? null); }} onMessage={props.onMessage} onClose={props.onCloseCheck} />}
       {props.showMovable && <div className="inline-warning movable-note">{movableIds.size === 0 ? "Show Movable: every entity is fully constrained." : `Show Movable: ${movableIds.size} entit${movableIds.size === 1 ? "y has" : "ies have"} estimated degrees of freedom (amber).`}</div>}
       <section className="inspector-section point-relations"><header><strong>Point relations</strong><span>{pickRelation === null ? "pick points" : pickRelation}</span></header>

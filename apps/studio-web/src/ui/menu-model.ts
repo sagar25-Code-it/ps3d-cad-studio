@@ -85,6 +85,9 @@ export interface WorkbenchMenuActions {
   readonly onShortcuts: () => void;
   /** Opens a Part analysis (geometry check, interference, draft, wall thickness, curvature, section comb). Absent: the entries are not listed. */
   readonly onAnalysis?: (mode: "geometry-check" | "interference" | "draft" | "wall-thickness" | "gaussian-curvature" | "section-comb") => void;
+  /** Opens the sketch DXF / SVG import and export panels (switching to the Sketch workspace first). Absent: the entries are not listed. */
+  readonly onSketchImport?: () => void;
+  readonly onSketchExport?: () => void;
 }
 
 /** Builds the menubar for the current state. Pure: same state and actions, same menus. */
@@ -186,6 +189,8 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
     { id: "tools.exchange", label: "3D Exchange Center…", icon: "exchange", divider: true, hint: "Import and export mesh formats", action: actions.onExchange },
     { id: "tools.export-stl", label: "Export STL (all shown)", icon: "export", action: actions.onExportStl },
     { id: "tools.plate-json", label: "Plate JSON (plate only)", icon: "json", action: actions.onPlateJson },
+    ...(actions.onSketchImport === undefined ? [] : [{ id: "tools.sketch-import", label: "Import sketch from DXF / SVG…", icon: "open", divider: true, hint: "Lines, arcs, circles, ellipses, polylines, splines and SVG paths become sketch curves; you confirm the scale", action: actions.onSketchImport }]),
+    ...(actions.onSketchExport === undefined ? [] : [{ id: "tools.sketch-export", label: "Export sketch as DXF / SVG…", icon: "export", hint: "The visible curves of the working sketch, construction on its own layer", action: actions.onSketchExport }]),
     { id: "tools.mcp-workspace", label: "MCP workspace", icon: "mcp", divider: true, action: () => actions.onWorkspace("automate") },
     { id: "tools.mcp-access", label: "MCP account and tokens", icon: "mcp", action: actions.onAccess }
   ] };

@@ -22,7 +22,9 @@ import { offsetMoveEntities } from "../../../../packages/workbench-sketch/src/of
 import { CommandIcon } from "../ui/CommandIcon.js";
 
 export type SketchEditToolId = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "stretch" | "corner" | "fillet" | "chamfer" | "trim" | "extend"
-  | "split" | "jog" | "delete-curve" | "offset-move" | "make-path" | "dynamic-mirror";
+  | "split" | "jog" | "delete-curve" | "offset-move" | "make-path" | "dynamic-mirror"
+  /** Insert group: DXF/SVG import, DXF/SVG export and the picture to trace (their panels live in sketch/SketchExchangePanel.tsx). */
+  | "import-drawing" | "export-drawing" | "underlay";
 
 /** The tools that act on a click on a curve rather than on the selection, so the canvas must not start a selection box for them. */
 export function isClickEditTool(tool: SketchEditToolId | null): tool is "trim" | "extend" | "split" | "jog" | "delete-curve" {
@@ -55,7 +57,10 @@ export const SKETCH_EDIT_TOOL_LABELS: Readonly<Record<SketchEditToolId, string>>
   "delete-curve": "Delete Curve",
   "offset-move": "Offset Move",
   "make-path": "Make Path",
-  "dynamic-mirror": "Dynamic Mirror"
+  "dynamic-mirror": "Dynamic Mirror",
+  "import-drawing": "Import DXF / SVG",
+  "export-drawing": "Export DXF / SVG",
+  underlay: "Picture to trace"
 };
 
 const INSTRUCTIONS: Readonly<Record<SketchEditToolId, string>> = {
@@ -76,7 +81,10 @@ const INSTRUCTIONS: Readonly<Record<SketchEditToolId, string>> = {
   "delete-curve": "Click a curve to delete it and heal the gap: the two curves that met it are extended or trimmed to meet each other.",
   "offset-move": "Select a chain or a closed region, then Apply. Offset mode moves each curve along its normal (positive is left of the first line's direction; a closed region grows) and stretches the lines attached to it. Vector mode moves the selection by X and Y and the attached curves follow.",
   "make-path": "Select the curves of a path. They are chained end to end from a free end; gaps, branches and curves that do not connect are listed. Close the gaps, or join the path into one spline so a sweep can follow it.",
-  "dynamic-mirror": "Select the mirror line, then Start. Everything you draw afterwards is created together with its mirror image, linked by a symmetry relation, until you Stop."
+  "dynamic-mirror": "Select the mirror line, then Start. Everything you draw afterwards is created together with its mirror image, linked by a symmetry relation, until you Stop.",
+  "import-drawing": "Choose a DXF or SVG file, confirm the scale, then Import.",
+  "export-drawing": "Choose DXF or SVG and download the visible curves of this sketch.",
+  underlay: "Load a PNG or JPEG to trace, calibrate it with two points and a known distance."
 };
 
 /** The Stretch window in sketch millimetres: opposite corners, x1 <= x2 and y1 <= y2 when drawn. */
