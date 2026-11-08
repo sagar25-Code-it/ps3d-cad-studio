@@ -287,7 +287,7 @@ function arcEntity(template: SketchEntity, id: string, center: Vec2, radius: num
   return { id, kind: "arc", start: clockwise ? last : first, mid, end: clockwise ? first : last, construction: template.construction, ...(template.visible === undefined ? {} : { visible: template.visible }) };
 }
 
-export { extendAt, powerTrim, trimAt, trimToClosest } from "./trim-extend.js";
+export { breakAtCrossings, extendAt, powerTrim, trimAt, trimToClosest } from "./trim-extend.js";
 
 /** Parameters t (0 at a, 1 at b, extended beyond) where the infinite line a-b meets a bounded curve. */
 function lineHits(a: Vec2, b: Vec2, curve: Curve): number[] {

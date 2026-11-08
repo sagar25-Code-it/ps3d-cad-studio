@@ -2,6 +2,8 @@ import { MIRROR_AXIS_X, MIRROR_AXIS_Y, mirrorEntities, patternEntities, selectio
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { applyOk, arc, circle, commit, con, ctx, ellipse, entityById, ids, line, ofKind, problems, projectWith, radiusOfArc, rect, relationsOf, spline } from "./edit-test-kit.js";
 import type { WorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { offsetEntities } from "../packages/workbench-sketch/src/edit-tools.js";
+import { parseDecimal } from "../packages/workbench-sketch/src/edit-input.js";
 
 function clean(project: WorkbenchProject): void {
   const found = problems(project);
@@ -197,6 +199,22 @@ export const sketchEditTransformTests: readonly TestCase[] = [
       near(ellipseBounds.x2, 30, 1e-9, "and 30 wide");
       const tilted = projectWith([ellipse("e", [0, 0], 30, 10, 90)]);
       near(selectionBounds(tilted.sketch, ids("e"))!.y2, 30, 1e-9, "turned 90 degrees it is 30 high");
+    }
+  },
+  {
+    name: "Sketch edit E19 panel fields accept a comma as the decimal mark and an empty or unreadable field is a rejected number, not zero",
+    run: () => {
+      equal(parseDecimal("12,5"), 12.5, "12,5 reads as 12.5");
+      equal(parseDecimal(" -3,25 "), -3.25, "with a sign and spaces");
+      equal(parseDecimal("7"), 7, "plain numbers still work");
+      assert(Number.isNaN(parseDecimal("")), "an empty field is not 0");
+      assert(Number.isNaN(parseDecimal("abc")), "text is NaN");
+      assert(Number.isNaN(parseDecimal("1,000,5")), "ambiguous separators are NaN");
+      const project = projectWith([line("a", [0, 0], [10, 0])]);
+      const typed = applyOk(project, offsetEntities(ctx(project), ids("a"), parseDecimal("12,5")));
+      near(ofKind(typed, "line")[1]!.start[1], 12.5, 1e-12, "an offset typed as 12,5 lands 12.5 mm away");
+      assert(!offsetEntities(ctx(project), ids("a"), parseDecimal("")).ok, "an empty distance is refused with a message");
+      assert(!transformEntities(ctx(project), ids("a"), { kind: "rotate", angleDeg: 30, center: [parseDecimal("abc"), 0] }, false).ok, "a centre typed as text is refused at planning time");
     }
   },
   {

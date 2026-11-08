@@ -1,4 +1,4 @@
-import { extendAt, trimAt } from "../packages/workbench-sketch/src/edit-tools.js";
+import { breakAtCrossings, extendAt, trimAt } from "../packages/workbench-sketch/src/edit-tools.js";
 import { splitAt } from "../packages/workbench-sketch/src/split-jog.js";
 import { sampleSpline } from "../packages/workbench-sketch/src/index.js";
 import { powerTrim, trimToClosest } from "../packages/workbench-sketch/src/trim-extend.js";
@@ -120,6 +120,22 @@ export const sketchEditTrimTests: readonly TestCase[] = [
       assert(!powerTrim(ctx(project), [[200, 5], [210, 5]]).ok, "a path that crosses nothing is refused");
       const closest = applyOk(project, trimToClosest(ctx(project), "entity:h", [20, 0]));
       assert(closeTo(startOf(closest, "entity:h"), [30, 0]), "trim to closest removes the end up to the first crossing, whatever the exact pick");
+    }
+  },
+  {
+    name: "Sketch edit Break at crossings cuts every crossing curve in one edit, keeping relations on the pieces",
+    run: () => {
+      const project = projectWith(
+        [line("h", [0, 0], [100, 0]), line("v1", [30, -10], [30, 10]), line("v2", [60, -10], [60, 10]), circle("c", [80, 0], 10)],
+        [con("hor", "horizontal", ["h"]), con("ver", "vertical", ["v1"])]
+      );
+      const broken = applyOk(project, breakAtCrossings(ctx(project)));
+      clean(broken);
+      const horizontals = ofKind(broken, "line").filter((candidate) => candidate.start[1] === 0 && candidate.end[1] === 0);
+      equal(horizontals.length, 5, "the horizontal line is cut at x = 30, 60, 70 and 90 into five pieces");
+      equal(relationsOf(broken, "horizontal").length, horizontals.length, "each piece is horizontal");
+      assert(ofKind(broken, "circle").length === 0 && ofKind(broken, "arc").length === 2, "the circle, crossed twice by the line, became two arcs");
+      assert(!breakAtCrossings(ctx(projectWith([line("a", [0, 0], [10, 0]), line("b", [0, 5], [10, 5])]))).ok, "curves that never cross have nothing to break");
     }
   },
   {

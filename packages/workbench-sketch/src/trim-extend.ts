@@ -4,6 +4,7 @@ import {
   arcFrame,
   circleHits,
   curvesOf,
+  distanceToCurve,
   lineHits,
   nearestEntityId,
   wrapTwoPi,
@@ -13,6 +14,7 @@ import {
   type SketchEditResult
 } from "./edit-tools.js";
 import { explodeRectangle } from "./corner-tools.js";
+import { splitAt } from "./split-jog.js";
 import { carriedRelations, diffPlan, finishPlan, sketchAfter } from "./edit-relations.js";
 
 /**
@@ -473,4 +475,51 @@ export function extendAt(context: SketchEditContext, targetId: string, pick: Vec
   else if (target?.kind === "spline") raw = extendSpline(context, target, pick);
   else return reject("Extend applies to lines, arcs and splines. Pick near the end of one.");
   return raw.ok ? finishPlan(context, raw.value) : raw;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Break at crossings
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Break / Intersect: splits the given curves (all visible lines, arcs and circles when none are given) at every crossing with another
+ * curve in one edit, so a drawing full of crossings is cut into pieces ready for trimming or extruding. Relations migrate to the pieces.
+ */
+export function breakAtCrossings(context: SketchEditContext, ids: readonly string[] = []): SketchEditResult {
+  const sketch = context.sketch;
+  const targets = sketch.entities.filter((entity): entity is Line | Arc | Circle => (ids.length === 0 || ids.includes(entity.id)) && entity.visible !== false && !entity.construction && (entity.kind === "line" || entity.kind === "arc" || entity.kind === "circle"));
+  if (targets.length === 0) return reject("Select lines, arcs or circles to break, or select nothing to break every curve.");
+  let working: WorkbenchSketch = sketch;
+  let cuts = 0;
+  for (const target of targets) {
+    const others = sketch.entities.filter((entity) => entity.id !== target.id && entity.visible !== false && entity.kind !== "point");
+    const boundaries = others.flatMap(curvesOf);
+    const points: Vec2[] = [];
+    if (target.kind === "line") {
+      for (const curve of boundaries) for (const t of lineHits(target.start, target.end, curve)) if (t > 1e-6 && t < 1 - 1e-6) points.push([target.start[0] + (target.end[0] - target.start[0]) * t, target.start[1] + (target.end[1] - target.start[1]) * t]);
+    } else {
+      const circle = target.kind === "circle" ? { center: target.center, radius: target.radiusMm } : (() => { const frame = arcFrame(target); return frame === undefined ? undefined : { center: frame.center, radius: frame.radius }; })();
+      if (circle === undefined) continue;
+      for (const curve of boundaries) for (const angle of circleHits(circle.center, circle.radius, curve)) points.push([circle.center[0] + circle.radius * Math.cos(angle), circle.center[1] + circle.radius * Math.sin(angle)]);
+    }
+    const unique = points.filter((point, index) => points.findIndex((other) => dist(other, point) < 1e-6) === index).slice(0, 40);
+    if (target.kind === "circle" && unique.length < 2) continue;
+    const family = new Set([target.id]);
+    for (const point of unique) {
+      // The piece of this curve that holds the point now (earlier cuts may have replaced it).
+      const piece = [...family].map((id) => working.entities.find((entity) => entity.id === id)).filter((entity): entity is SketchEntity => entity !== undefined)
+        .find((entity) => curvesOf(entity).some((curve) => distanceToCurve(point, curve) < 1e-6));
+      if (piece === undefined) continue;
+      const stepContext: SketchEditContext = { sketch: working, newId: context.newId };
+      const step = splitAt(stepContext, piece.id, point, { snapMm: 1e-4 });
+      if (!step.ok) continue;
+      const next = sketchAfter(working, step.value);
+      if (typeof next === "string") continue;
+      for (const added of step.value.addEntities) family.add(added.id);
+      working = next;
+      cuts += 1;
+    }
+  }
+  if (cuts === 0) return reject("No curves cross each other, so there is nothing to break.");
+  return finishPlan(context, diffPlan(sketch, working, `Break at crossings: ${cuts} cut${cuts === 1 ? "" : "s"}`));
 }

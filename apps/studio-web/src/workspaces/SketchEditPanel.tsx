@@ -21,6 +21,7 @@ import {
   type SketchEditResult
 } from "../../../../packages/workbench-sketch/src/edit-tools.js";
 import { cornerQuadrant } from "../../../../packages/workbench-sketch/src/corner-tools.js";
+import { parseDecimal } from "../../../../packages/workbench-sketch/src/edit-input.js";
 import { resolveMirrorAxis } from "../../../../packages/workbench-sketch/src/dynamic-mirror.js";
 import { describePath, healPathGaps, makePath, pathToSpline } from "../../../../packages/workbench-sketch/src/make-path.js";
 import { offsetMoveEntities } from "../../../../packages/workbench-sketch/src/offset-move.js";
@@ -100,13 +101,7 @@ export interface StretchWindowRect {
   readonly y2: number;
 }
 
-/** A typed number: a comma is accepted as the decimal mark (12,5), and an empty or unreadable field is NaN, never 0. */
-export function parseDecimal(text: string): number {
-  const trimmed = text.trim();
-  if (trimmed === "") return Number.NaN;
-  const separated = /^[+-]?\d+,\d+$/u.test(trimmed) ? trimmed.replace(",", ".") : trimmed;
-  return Number(separated);
-}
+export { parseDecimal };
 
 interface SketchEditPanelProps {
   /** The window drawn on the canvas, which the panel shows in its fields. */
