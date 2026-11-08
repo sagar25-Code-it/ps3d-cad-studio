@@ -105,6 +105,7 @@ import { limitsSurfaceTests } from "./limits-surface-suite.test.js";
 import { sketchTextObjectTests } from "./sketch-text-objects.test.js";
 import { sketchPatternObjectTests } from "./sketch-pattern-objects.test.js";
 import { sketchExchangeTests } from "./sketch-exchange.test.js";
+import { sketchUnderlayTests } from "./sketch-underlay.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -219,7 +220,8 @@ const tests: readonly TestCase[] = [
   ...limitsSurfaceTests,
   ...sketchTextObjectTests,
   ...sketchPatternObjectTests,
-  ...sketchExchangeTests
+  ...sketchExchangeTests,
+  ...sketchUnderlayTests
 ];
 let failures = 0;
 
