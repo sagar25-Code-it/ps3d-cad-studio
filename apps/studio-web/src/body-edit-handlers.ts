@@ -1,6 +1,6 @@
 import type { BodyEditSpec, DesignSketchFeature, DesignSolidFeature, FaceRef, GeneralSolidBody, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { baseFeatureOf, describeBodyEdit, designOf } from "../../../packages/workbench-core/src/index.js";
-import { analyzeFaces, faceOutlineSegments, fitCylinder, resolveFace, shellBody } from "../../../packages/workbench-geometry/src/index.js";
+import { analyzeFaces, draftFaces, faceOutlineSegments, fitCylinder, resolveFace, shellBody } from "../../../packages/workbench-geometry/src/index.js";
 import { detectSketchProfiles } from "../../../packages/workbench-sketch/src/index.js";
 import { openCurveIds } from "./web-profile.js";
 import type { ViewportGuideSegment, ViewportMeasurePoint } from "../../../packages/viewport-three/src/index.js";
@@ -125,7 +125,11 @@ export function createBodyEditHandlers(deps: BodyEditDeps): { readonly run: (mod
     const angle = Number.parseFloat(angleRaw);
     if (!Number.isFinite(angle) || angle === 0 || Math.abs(angle) > 45) { deps.showGuides([]); deps.say("ready", "Draft: enter an angle between -45° and 45°, not zero."); return; }
     const spec: BodyEditSpec = { kind: "draft", angleDeg: angle, pullDirection: [pull[0]!, pull[1]!, pull[2]!], neutralPointMm: neutral[0]!.pointMm, faces };
-    await finish(bodyEditFeature("draft", spec, base, body.id, angle), body, `Drafted ${body.name}: ${describeBodyEdit(spec)}.`);
+    // Try it on the current mesh first, so the faces that cannot be leaned (a cap, a curved face) are named before the step is recorded.
+    const trial = draftFaces({ positionsMm: body.positionsMm, indices: body.indices }, { angleDeg: angle, pullDirection: spec.pullDirection, neutralPointMm: spec.neutralPointMm, faces });
+    if (!trial.ok) { deps.showGuides([]); deps.say("error", `Draft: ${trial.message}`); return; }
+    const skipped = trial.skipped.length === 0 ? "" : ` ${trial.skipped.length} picked ${trial.skipped.length === 1 ? "face" : "faces"} could not be drafted and ${trial.skipped.length === 1 ? "was" : "were"} left as they are: ${[...new Set(trial.skipped.map((entry) => entry.reason))].join(" ")}`;
+    await finish(bodyEditFeature("draft", spec, base, body.id, angle), body, `Drafted ${body.name}: ${describeBodyEdit(spec)}.${skipped}`);
   };
 
   const offsetRegion = async (): Promise<void> => {

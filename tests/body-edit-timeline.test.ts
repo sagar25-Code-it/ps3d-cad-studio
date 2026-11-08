@@ -237,6 +237,9 @@ export const bodyEditHandlerTests: readonly TestCase[] = [
         click([20, 0, 10], [1, 0, 0]), click([-20, 0, 10], [-1, 0, 0]), click([0, 15, 10], [0, 1, 0]), click([0, -15, 10], [0, -1, 0])
       ], ["0, 0, 1", "5"]);
       near(volumeOfBody(drafted.project), 40 * 30 * 20 - 70 * k * 400 + (4 / 3) * k * k * 8000, 1e-3, "neutral bottom face, pull +Z, four walls: the tapered volume");
+      const withCap = await driveHandler(project, "draft", [click([0, 0, 0], [0, 0, -1]), click([20, 0, 10], [1, 0, 0]), click([0, 0, 20], [0, 0, 1])], ["0, 0, 1", "5"]);
+      assert(designOf(withCap.project).features.some((feature) => feature.kind === "draft"), "a draft with one usable wall and one cap is still recorded");
+      assert(withCap.statuses.some((text) => text.includes("1 picked face could not be drafted") && text.includes("square to the pull")), "and the cap is named as a face that could not be drafted: " + withCap.statuses.join(" / "));
       const noWalls = await driveHandler(project, "draft", [click([0, 0, 0], [0, 0, -1])], ["0, 0, 1", "5"]);
       equal(designOf(noWalls.project).features.length, designOf(project).features.length, "a draft with no faces picked records nothing");
       const offset = await driveHandler(project, "offset-region", [click([0, 0, 20], [0, 0, 1])], ["4"]);
