@@ -1,5 +1,5 @@
-import type { DesignSolidFeature } from "../../../packages/workbench-core/src/index.js";
-import { validSolidFeaturePayload } from "../../../packages/workbench-core/src/index.js";
+import type { DesignSolidFeature, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
+import { bindFeatureExpressions, findBindableField, validSolidFeaturePayload } from "../../../packages/workbench-core/src/index.js";
 
 /**
  * The editable parameters of every solid step in the timeline. The edit dialog renders `parameterFieldsOf(feature)` and
@@ -155,23 +155,40 @@ export function parameterFieldsOf(feature: DesignSolidFeature): readonly Paramet
   }
 }
 
+/** The text each field shows: the expression when the number is bound to one, the number otherwise. */
 export function parameterValuesOf(feature: DesignSolidFeature): Readonly<Record<string, string>> {
   const values: Record<string, string> = {};
-  for (const field of parameterFieldsOf(feature) ?? []) values[field.id] = field.read(feature);
+  for (const field of parameterFieldsOf(feature) ?? []) values[field.id] = feature.expressions?.[field.id] ?? field.read(feature);
   return values;
+}
+
+/** Whether a field's number can be driven by an expression (not every field can: a vector or a choice cannot). */
+export function fieldAcceptsExpression(feature: DesignSolidFeature, fieldId: string): boolean {
+  return findBindableField(feature, fieldId) !== undefined;
 }
 
 export type ParameterResult =
   | { readonly ok: true; readonly feature: DesignSolidFeature }
   | { readonly ok: false; readonly message: string; readonly fieldId?: string };
 
-/** Parses the typed values, applies the ones that changed, and checks the result against the saved-project validator. */
-export function applyParameterValues(feature: DesignSolidFeature, values: Readonly<Record<string, string>>): ParameterResult {
+/**
+ * Parses the typed values, applies the ones that changed, and checks the result against the saved-project validator.
+ *
+ * With `project`, a number field may also hold an expression (`2 * pin_r`, `Extrude1.distance / 2`): it is bound to the field, the
+ * field takes what it evaluates to, and a field typed as a plain number is unbound. Without `project`, only plain numbers are accepted.
+ */
+export function applyParameterValues(feature: DesignSolidFeature, values: Readonly<Record<string, string>>, project?: WorkbenchProject): ParameterResult {
   const fields = parameterFieldsOf(feature);
   if (fields === undefined) return { ok: false, message: "This step has no editable numbers." };
   let next = feature;
+  const expressionTexts: Record<string, string> = {};
   for (const field of fields) {
-    const raw = (values[field.id] ?? "").trim().replace(/,(?=\d)(?!.*,)/u, ".");
+    const typed = (values[field.id] ?? "").trim();
+    const raw = typed.replace(/,(?=\d)(?!.*,)/u, ".");
+    if (project !== undefined && (field.input === "number" || field.input === "integer") && typed !== "" && !Number.isFinite(Number(raw)) && fieldAcceptsExpression(feature, field.id)) {
+      expressionTexts[field.id] = typed;
+      continue;
+    }
     if (field.input === "select") { next = field.write(next, raw); continue; }
     if (field.input === "vector") {
       const parts = (values[field.id] ?? "").split(/[,\s]+/u).filter((part) => part !== "").map((part) => Number(part.replace(",", ".")));
@@ -187,6 +204,14 @@ export function applyParameterValues(feature: DesignSolidFeature, values: Readon
     if (field.max !== undefined && parsed > field.max) return { ok: false, fieldId: field.id, message: `${field.label}: enter a value of at most ${field.max}${field.unit === "" ? "" : ` ${field.unit}`}.` };
     if ((feature.kind === "dome" || feature.kind === "offset-face" || feature.kind === "emboss") && parsed === 0) return { ok: false, fieldId: field.id, message: `${field.label}: zero would change nothing.` };
     next = field.write(next, parsed);
+  }
+  if (project !== undefined && (Object.keys(expressionTexts).length > 0 || feature.expressions !== undefined)) {
+    const bound = bindFeatureExpressions(project, next, expressionTexts);
+    if (!bound.ok) {
+      const label = fields.find((field) => field.id === bound.fieldId)?.label ?? "Value";
+      return { ok: false, fieldId: bound.fieldId, message: `${label}: ${bound.message}${bound.position === undefined ? "" : ` (character ${bound.position + 1})`}` };
+    }
+    next = bound.feature;
   }
   if (!validSolidFeaturePayload(next)) return { ok: false, message: "Those values are outside what this step supports." };
   return { ok: true, feature: { ...next, name: refreshedName(next) } };
@@ -210,4 +235,61 @@ export function refreshedName(feature: DesignSolidFeature): string {
     case "emboss": return name.replace(/-?\d+(?:\.\d+)? mm$/u, `${(feature.embossHeightMm ?? 0).toFixed(2)} mm`);
     default: return name;
   }
+}
+
+/** What the extrude/revolve form holds besides the size: the side, a second side, the "To" reach it keeps, and a revolve's thin wall. */
+export interface PlainSizeInput {
+  readonly text: string;
+  readonly direction: NonNullable<DesignSolidFeature["direction"]>;
+  readonly throughAll: boolean;
+  /** The step keeps the target recorded when it was made; its size is measured from that target and `text` is ignored. */
+  readonly reaching?: boolean;
+  /** The second side of a two-side step, as typed (a plain number). */
+  readonly secondText?: string;
+  /** A revolve's thin wall: the thickness as typed (a plain number) and the side the wall sits on. */
+  readonly thin?: { readonly wallText: string; readonly side: NonNullable<DesignSolidFeature["thinSide"]> };
+}
+
+/**
+ * The size of an extrude (distance) or a revolve (angle), which have their own form instead of a field list. `text` is a plain number
+ * or an expression; `direction` is the step's side; `throughAll` keeps a cut's size out of it. A plain number unbinds the size. The
+ * second side, the "To" reach and the thin wall travel with it (see `PlainSizeInput`), and the result passes the saved-project validator.
+ */
+export function applyPlainSize(feature: DesignSolidFeature, input: PlainSizeInput, project: WorkbenchProject): ParameterResult {
+  const isExtrude = feature.kind === "extrude";
+  const fieldId = isExtrude ? "distance" : "angle";
+  const reaching = input.reaching === true;
+  const { direction: _direction, extent: _extent, extentTarget: _target, secondValueMm: _second, thinWallMm: _wall, thinSide: _side, ...rest } = feature;
+  void _direction; void _extent; void _target; void _second; void _wall; void _side;
+  const typed = input.text.trim();
+  const parsed = input.throughAll || reaching ? Math.abs(feature.valueMm) : Number(typed.replace(",", "."));
+  const isExpression = !input.throughAll && !reaching && typed !== "" && !Number.isFinite(parsed);
+  if (!isExpression && (!Number.isFinite(parsed) || parsed <= 0 || (!isExtrude && parsed > 360))) {
+    return { ok: false, fieldId, message: isExtrude ? "Enter a distance greater than zero." : "Enter an angle between 0 and 360 degrees." };
+  }
+  const secondParsed = Number((input.secondText ?? "").trim().replace(",", "."));
+  const twoSide = input.direction === "two-side" && !input.throughAll;
+  if (twoSide && (!Number.isFinite(secondParsed) || secondParsed <= 0)) return { ok: false, fieldId, message: `Enter a second ${isExtrude ? "distance" : "angle"} greater than zero.` };
+  const wallParsed = Number((input.thin?.wallText ?? "").trim().replace(",", "."));
+  if (!isExtrude && input.thin !== undefined && (!Number.isFinite(wallParsed) || wallParsed <= 0)) return { ok: false, fieldId, message: "Enter a wall thickness greater than zero." };
+  const placement = {
+    ...(input.direction !== "one-side" && !input.throughAll ? { direction: input.direction } : {}),
+    ...(twoSide ? { secondValueMm: secondParsed } : {}),
+    ...(input.throughAll ? { extent: "through-all" as const } : {}),
+    ...(reaching && feature.extentTarget !== undefined && feature.extent !== undefined ? { extent: feature.extent, extentTarget: feature.extentTarget } : {}),
+    ...(!isExtrude && input.thin !== undefined ? { thinWallMm: wallParsed, thinSide: input.thin.side } : {})
+  };
+  const checked = (next: DesignSolidFeature): ParameterResult => {
+    if (!isExtrude && twoSide && !reaching && next.valueMm + secondParsed > 360) return { ok: false, fieldId, message: "The two angles add up to more than a full turn." };
+    if (!validSolidFeaturePayload(next)) return { ok: false, fieldId, message: "Those settings do not go together. A To extent cannot be symmetric or (for a revolve) two-sided." };
+    return { ok: true, feature: next };
+  };
+  // Anything that is not a plain number is an expression (pin_r * 2): it is bound to the size and evaluated now.
+  if (isExpression) {
+    const bound = bindFeatureExpressions(project, { ...rest, ...placement }, { [fieldId]: typed });
+    if (!bound.ok) return { ok: false, fieldId, message: `${bound.message}${bound.position === undefined ? "" : ` (character ${bound.position + 1})`}` };
+    return checked(bound.feature);
+  }
+  const plain = bindFeatureExpressions(project, { ...rest, valueMm: parsed, ...placement }, {});
+  return checked(plain.ok ? plain.feature : { ...rest, valueMm: parsed, ...placement });
 }

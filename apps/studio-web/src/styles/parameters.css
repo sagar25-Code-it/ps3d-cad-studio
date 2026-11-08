@@ -1,0 +1,32 @@
+/* Change Parameters dialog and the expression hints in the Edit feature dialog. */
+.parameters-dialog { width: min(860px, calc(100vw - 2rem)); }
+.parameters-content { display: grid; gap: 0.6rem; max-height: min(70vh, 640px); overflow: auto; }
+.parameters-intro { margin: 0; color: #4a545c; font-size: 12.5px; line-height: 1.45; }
+.parameters-intro code, .parameters-bound code { padding: 0 0.25rem; border-radius: 3px; background: #e6ebef; font: inherit; font-family: var(--mono, monospace); font-size: 12px; }
+.parameters-table { display: grid; gap: 0.35rem; }
+.parameters-row { display: grid; grid-template-columns: minmax(7rem, 1fr) minmax(9rem, 1.6fr) 8.5rem 6.5rem minmax(6rem, 1fr) 2rem; align-items: center; gap: 0.35rem; }
+.parameters-row > input, .parameters-row > select { min-width: 0; padding: 0.35rem 0.45rem; border: 1px solid #aeb5bb; border-radius: 5px; background: #fff; font: inherit; font-size: 12.5px; }
+.parameters-row > input[aria-invalid="true"] { border-color: #c0392b; background: #fdeceb; }
+.parameters-row > output { overflow: hidden; color: #2c3237; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.parameters-row > button { display: grid; width: 2rem; height: 2rem; place-items: center; border: 1px solid #c5ccd2; border-radius: 5px; color: #b02a1c; background: #fff; }
+.parameters-head { color: #5d6a73; font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; }
+.parameters-problem, .parameters-used { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+.parameters-problem { color: #8f2a1f; }
+.parameters-used { color: #5d6a73; }
+.parameters-empty { margin: 0; color: #5d6a73; font-size: 12.5px; }
+.parameters-add { justify-self: start; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.7rem; border: 1px solid #aab4ba; border-radius: 4px; background: #fff; font-size: 12.5px; }
+.parameters-add .command-icon { width: 15px; height: 15px; }
+.parameters-bound summary { cursor: pointer; color: #2c3237; font-size: 12.5px; }
+.parameters-bound ul { display: grid; gap: 0.25rem; margin: 0.4rem 0 0; padding: 0; list-style: none; }
+.parameters-bound li { padding: 0.3rem 0.5rem; border: 1px solid #d3d9de; border-radius: 5px; background: #f7f9fa; }
+.parameters-bound li.failed { border-color: #c0392b; background: #fdeceb; }
+.parameters-bound li span { display: grid; min-width: 0; }
+.parameters-bound li strong { font-size: 12.5px; }
+.parameters-bound li small { color: #5d6a73; font-size: 12px; overflow-wrap: anywhere; }
+.feature-edit-live { display: block; margin-top: 0.2rem; color: #1f6fb6; font-size: 12px; }
+.feature-edit-live.failed { color: #8f2a1f; }
+.feature-edit-expression-hint { margin: 0; color: #5d6a73; font-size: 12px; line-height: 1.4; }
+@media (max-width: 720px) {
+  .parameters-row { grid-template-columns: 1fr 1fr; }
+  .parameters-head { display: none; }
+}

@@ -31,6 +31,7 @@ import {
 } from "./types.js";
 import { createElectricalTemplate } from "./templates.js";
 import { validateDesignHistory } from "./design.js";
+import { MAX_EXPRESSION_LENGTH, parseExpression } from "./expressions.js";
 import {
   ELECTROMECHANICAL_CATALOG,
   createElectromechanicalAssembly,
@@ -297,12 +298,15 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   const hasSuppressed = Object.hasOwn(value, "suppressed");
   const hasPoints = Object.hasOwn(value, "points");
   const hasValueDeg = Object.hasOwn(value, "valueDeg");
+  const hasExpression = Object.hasOwn(value, "expression");
   const hasDriven = Object.hasOwn(value, "driven");
   const hasPierce = Object.hasOwn(value, "pierce");
   const hasRatio = Object.hasOwn(value, "ratio");
   const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : []), ...(hasPoints ? ["points"] : []),
-    ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : [])];
+    ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : []), ...(hasExpression ? ["expression"] : [])];
   if (!exactKeys(value, expectedKeys) || (hasSuppressed && typeof value.suppressed !== "boolean")) return false;
+  // An expression only drives a dimension, and must be short, parseable text.
+  if (hasExpression && (!hasValue || typeof value.expression !== "string" || value.expression.length < 1 || value.expression.length > MAX_EXPRESSION_LENGTH || !parseExpression(value.expression).ok)) return false;
   if (hasDriven && typeof value.driven !== "boolean") return false;
   const driven = value.driven === true;
   // A driven (reference) dimension is measured: it carries no value of its own, and only dimension kinds can be driven.

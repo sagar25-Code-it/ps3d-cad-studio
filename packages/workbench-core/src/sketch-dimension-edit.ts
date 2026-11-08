@@ -34,7 +34,7 @@ function solveSummary(report: Extract<LiveSketchSolveReport, { readonly ok: true
 }
 
 /** Old-style direct resize for the dimensions that always had one (a line's length, a circle's radius, a rectangle's sides). */
-function resizeDirect(entity: SketchEntity, dimension: SketchDimensionName, valueMm: number): SketchEntity | undefined {
+export function resizeSketchEntity(entity: SketchEntity, dimension: SketchDimensionName, valueMm: number): SketchEntity | undefined {
   if (entity.kind === "line" && dimension === "length") {
     const dx = entity.end[0] - entity.start[0];
     const dy = entity.end[1] - entity.start[1];
@@ -131,7 +131,7 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
   const constraints = withDimension(constraint);
 
   // The dimensions that always had a direct resize keep it, then the relations touching the entity are re-enforced.
-  const resized = resizeDirect(target, name, value);
+  const resized = resizeSketchEntity(target, name, value);
   const baseSketch = { ...sketch, constraints, entities: resized === undefined ? sketch.entities : sketch.entities.map((entity) => entity.id === target.id ? resized : entity) };
   const solved = solveLiveSketch(baseSketch, entityIds);
   if (!solved.ok) return solveFailure(solved);

@@ -10,7 +10,7 @@ function recordingActions(): { readonly actions: WorkbenchMenuActions; readonly 
     onCreatePrimitive: (shape) => { calls.push(`primitive:${shape}`); },
     onCombine: record("combine"), onInsertToAssembly: record("insert-assembly"),
     onMasterCart: record("master-cart"), onRenderStudio: record("render-studio"),
-    onEditSelectedFeature: record("edit-feature"), onToggleSuppressSelected: record("suppress"),
+    onEditSelectedFeature: record("edit-feature"), onChangeParameters: record("parameters"), onToggleSuppressSelected: record("suppress"),
     onDeleteSelected: record("delete"), onMoveSelectedBody: record("move"), onResizeSelectedBody: record("resize"), onModifyGeneralBody: (modifier: string) => record(`modify-${modifier}`)(), onPattern: (kind) => { calls.push(`pattern:${kind}`); },
     onFit: record("fit"), onHome: record("home"), onToggleGrid: record("grid"),
     onWorkspace: (workspace) => { calls.push(`workspace:${workspace}`); },

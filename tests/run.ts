@@ -79,6 +79,9 @@ import { sketchRepairTests } from "./sketch-repair.test.js";
 import { extentTerminationTests } from "./extent-terminations.test.js";
 import { revolveTerminationTests } from "./revolve-terminations.test.js";
 import { reachUiTests } from "./reach-ui.test.js";
+import { expressionTests } from "./expressions.test.js";
+import { designParameterTests } from "./design-parameters.test.js";
+import { parameterDialogTests } from "./parameter-dialogs.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -162,7 +165,10 @@ const tests: readonly TestCase[] = [
   ...topologyNamingTests,
   ...extentTerminationTests,
   ...revolveTerminationTests,
-  ...reachUiTests
+  ...reachUiTests,
+  ...expressionTests,
+  ...designParameterTests,
+  ...parameterDialogTests
 ];
 let failures = 0;
 
