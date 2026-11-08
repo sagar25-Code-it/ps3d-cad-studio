@@ -1,3 +1,4 @@
+import { dimensionNameOf } from "./sketch-dimension-edit.js";
 import { bindableFieldsOf, boundValueProblem, featureAlias, findBindableField, type BindableDimension, type BindableField } from "./feature-bindings.js";
 import {
   describeDimension,
@@ -10,7 +11,7 @@ import {
   type Quantity,
   type ReferenceResolution
 } from "./expressions.js";
-import type { DesignHistory, DesignParameter, DesignSolidFeature, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
+import type { DesignHistory, DesignParameter, DesignSolidFeature, SketchDimensionName, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 
 /**
  * The expression engine's view of a project: user parameters, bound feature numbers and bound sketch dimensions form a graph in
@@ -65,8 +66,13 @@ export interface ExpressionReport {
 
 type NodeResult = { readonly ok: true; readonly quantity: Quantity } | { readonly ok: false; readonly message: string; readonly position?: number };
 
-function sketchDimensionOf(constraint: WorkbenchSketchConstraint): "length" | "width" | "height" | "radius" | undefined {
-  return constraint.dimension ?? (constraint.kind === "radius" ? "radius" : undefined);
+/** The long dimensions (arc length, perimeter, diameter) reach twice as far as a length. */
+const LONG_DIMENSIONS: readonly SketchDimensionName[] = ["arc-length", "perimeter", "diameter"];
+/** A distance between points or lines may be zero. */
+const ZERO_ALLOWED: readonly SketchDimensionName[] = ["aligned", "horizontal", "vertical", "point-line", "line-line"];
+
+function sketchDimensionOf(constraint: WorkbenchSketchConstraint): SketchDimensionName {
+  return dimensionNameOf(constraint);
 }
 
 /** The sketches whose dimensions can carry expressions: each timeline sketch, then the working sketch. */
@@ -75,7 +81,11 @@ function sketchesOf(history: DesignHistory, working: WorkbenchSketch | undefined
   return working === undefined ? owners : [...owners, { ownerId: working.id, name: "Working sketch", sketch: working }];
 }
 
-const DIMENSION_WORD: Readonly<Record<"length" | "width" | "height" | "radius", string>> = { length: "length", width: "width", height: "height", radius: "radius" };
+const DIMENSION_WORD: Readonly<Record<SketchDimensionName, string>> = {
+  length: "length", width: "width", height: "height", radius: "radius", diameter: "diameter", angle: "angle", "arc-length": "arc length", perimeter: "perimeter",
+  aligned: "distance", horizontal: "horizontal distance", vertical: "vertical distance", "point-line": "distance to line", "line-line": "distance between lines",
+  "major-radius": "major radius", "minor-radius": "minor radius"
+};
 
 class Evaluation {
   private readonly parameters = new Map<string, DesignParameter>();
@@ -244,9 +254,18 @@ class Evaluation {
     if (!evaluated.ok) return evaluated;
     const quantity = evaluated.quantity;
     const scalar = quantity.length === 0 && quantity.angle === 0;
+    if (constraint.kind === "angle") {
+      // An angle dimension takes degrees: a plain number means degrees, "30 deg" and "0.5 rad" convert.
+      if (!scalar && !(quantity.length === 0 && quantity.angle === 1)) return { ok: false, message: `An angle dimension needs an angle, but this expression gives ${describeDimension(quantity)}.` };
+      if (!(quantity.value >= 0 && quantity.value < 360)) return { ok: false, message: `An angle dimension must be at least 0° and under 360°, but this expression gives ${Number(quantity.value.toFixed(6))}°.` };
+      return { ok: true, quantity: { value: quantity.value, ...dimensionOfKind("angle") } };
+    }
     if (!scalar && !(quantity.length === 1 && quantity.angle === 0)) return { ok: false, message: `A dimension needs a length, but this expression gives ${describeDimension(quantity)}.` };
-    if (!(quantity.value >= SKETCH_DIMENSION_RANGE_MM.min && quantity.value <= SKETCH_DIMENSION_RANGE_MM.max)) {
-      return { ok: false, message: `A dimension must be between ${SKETCH_DIMENSION_RANGE_MM.min} and ${SKETCH_DIMENSION_RANGE_MM.max} mm, but this expression gives ${Number(quantity.value.toFixed(6))} mm.` };
+    const name = sketchDimensionOf(constraint);
+    const minimum = ZERO_ALLOWED.includes(name) ? 0 : SKETCH_DIMENSION_RANGE_MM.min;
+    const maximum = LONG_DIMENSIONS.includes(name) ? SKETCH_DIMENSION_RANGE_MM.max * 2 : SKETCH_DIMENSION_RANGE_MM.max;
+    if (!(quantity.value >= minimum && quantity.value <= maximum)) {
+      return { ok: false, message: `A dimension must be between ${minimum} and ${maximum} mm, but this expression gives ${Number(quantity.value.toFixed(6))} mm.` };
     }
     return { ok: true, quantity: { value: quantity.value, ...dimensionOfKind("length") } };
   }
@@ -294,10 +313,10 @@ export function evaluateDesignExpressions(history: DesignHistory, working?: Work
     for (const constraint of owner.sketch.constraints) {
       if (constraint.expression === undefined) continue;
       const dimension = sketchDimensionOf(constraint);
-      const label = `${owner.name} · ${dimension === undefined ? "dimension" : DIMENSION_WORD[dimension]} of ${constraint.entityIds[0] ?? "?"}`;
+      const label = `${owner.name} · ${DIMENSION_WORD[dimension]} of ${constraint.entityIds[0] ?? "?"}`;
       const node = evaluation.sketchNode(constraint);
       bindings.push(node.ok
-        ? { source: "sketch", ownerId: owner.ownerId, fieldId: constraint.id, label, expression: constraint.expression, ok: true, value: node.quantity.value, dimension: "length" }
+        ? { source: "sketch", ownerId: owner.ownerId, fieldId: constraint.id, label, expression: constraint.expression, ok: true, value: node.quantity.value, dimension: constraint.kind === "angle" ? "angle" : "length" }
         : { source: "sketch", ownerId: owner.ownerId, fieldId: constraint.id, label, expression: constraint.expression, ok: false, message: node.message, ...(node.position === undefined ? {} : { position: node.position }) });
     }
   }

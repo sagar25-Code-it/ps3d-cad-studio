@@ -1,113 +1,115 @@
-import { evaluateSketchExpression } from "./expression.js";
+import {
+  buildSolverModel,
+  directPointVariables,
+  entityVariableCount,
+  getReferencedPoint,
+  measureDimensionValue,
+  pinPointEquation,
+  resolveDimensionTarget,
+  wrapPi,
+  writeEntityValues,
+  type Equation,
+  type SolverModel
+} from "./equation-model.js";
+import { solveModel, type ResidualReport } from "./lm-solver.js";
+import { analyzeRank, describeSets, joinNames } from "./rank-analysis.js";
 import type {
-  CircleGeometry,
   DimensionMeasurement,
-  GeometryReference,
-  LineGeometry,
   ParametricSketchDocument,
   ParametricSketchSolver,
-  SketchConstraint,
   SketchDiagnostic,
   SketchDimension,
   SketchDofState,
   SketchGeometry,
+  SketchRelationSet,
   SketchSolveRequest,
-  SketchSolveResult,
-  Vec2
+  SketchSolveResult
 } from "./types.js";
-import { constraintReferences, dimensionReferences, validateParametricSketch } from "./validation.js";
+import { validateParametricSketch } from "./validation.js";
+
+export { getReferencedPoint };
 
 const DEFAULT_TOLERANCE_MM = 1e-7;
-const DEFAULT_MAX_PASSES = 8;
+const COLLAPSE_MM = 1e-6;
 
 export const analyticSketchSolver: ParametricSketchSolver = {
-  identity: { name: "ps3d-analytic-sketch", version: "0.1.0", deterministic: true },
+  identity: { name: "ps3d-simultaneous-sketch", version: "0.2.0", deterministic: true },
   solve: solveAnalyticSketch
 };
 
 /**
- * Small exact-analytic backend for the common line/circle subset. This is an
- * orchestration-safe baseline, not a claim of general nonlinear convergence.
- * Every unsupported relation is returned explicitly instead of being guessed.
+ * Simultaneous nonlinear solver for the sketch document. Every active constraint and driving dimension becomes residual
+ * equations over all the unknowns at once (see equation-model.ts); a damped Gauss-Newton iteration finds the nearest geometry
+ * for which they all hold, so closed loops, interacting relations and long chains solve in one go and the result does not
+ * depend on the order the relations were added. Fixed geometry is never an unknown. The degrees of freedom are the rank
+ * deficiency of the relations' Jacobian, and relations that overlap or contradict are reported by name.
+ *
+ * `validate` leaves the geometry alone and reports which relations the stored geometry violates; `regenerate` solves;
+ * `drag` pins one point at the pointer and solves the rest around it.
  */
 export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveResult {
   const validation = validateParametricSketch(request.document);
   if (!validation.valid) return failedResult(request.document, validation.diagnostics);
 
   const tolerance = request.toleranceMm ?? DEFAULT_TOLERANCE_MM;
-  const maxPasses = Math.max(1, Math.min(request.maxPasses ?? DEFAULT_MAX_PASSES, 32));
-  let document = cloneDocument(request.document);
   const diagnostics: SketchDiagnostic[] = [...validation.diagnostics];
-  const appliedConstraints = new Set<string>();
-  const appliedDimensions = new Set<string>();
-  const baseFixed = collectFixedReferences(document.constraints, document.geometry);
-  let fixed = baseFixed;
+  const labelOf = makeLabeler(request.document, request.labels);
+  const preserveOption = request.preserve === undefined || request.mode === "validate" ? {} : { preserve: new Set(request.preserve) };
+  let model = buildSolverModel(request.document, { ...(request.anchors === undefined ? {} : { anchors: request.anchors }), ...preserveOption });
+  for (const candidate of model.diagnostics) addUniqueDiagnostic(diagnostics, candidate);
 
-  if (request.mode === "drag" && request.dragTarget !== undefined) {
-    const drag = setReferencedPoint(document, request.dragTarget.reference, request.dragTarget.positionMm, baseFixed);
-    document = drag.document;
-    if (drag.diagnostic !== undefined) diagnostics.push(drag.diagnostic);
-    // The point under the pointer stays where the pointer put it while the other constraints relax around it: a joint
-    // follows the dragged end rather than pulling it back, and dragging a line's middle keeps both ends in place relative to each other.
-    const pinned = new Set(baseFixed);
-    const target = request.dragTarget.reference;
-    pinned.add(referenceKey(target));
-    if (target.selector === "midpoint") {
-      pinned.add(`${target.entityId}:start`);
-      pinned.add(`${target.entityId}:end`);
-    }
-    fixed = pinned;
-  }
+  let document = request.document;
+  let failed = false;
 
   if (request.mode === "validate") {
-    for (const constraint of [...document.constraints].filter((candidate) => !candidate.suppressed).sort(byId)) {
-      const support = analyticConstraintSupport(document, constraint);
-      if (support !== undefined) {
-        addUniqueDiagnostic(diagnostics, support);
-        continue;
-      }
-      const probe = applyConstraint(document, constraint, fixed, tolerance);
-      if (probe.diagnostic !== undefined) addUniqueDiagnostic(diagnostics, probe.diagnostic);
-      else if (probe.changed) {
-        addUniqueDiagnostic(diagnostics, diagnostic(
+    const seen = new Set<string>();
+    const out = new Float64Array(8);
+    for (const equation of model.equations) {
+      if (equation.source !== "constraint" || seen.has(equation.id)) continue;
+      equation.eval(model.x, out, 0);
+      if (Array.from({ length: equation.size }, (_, row) => Math.abs(out[row]!)).some((value) => !(value <= tolerance))) {
+        seen.add(equation.id);
+        addUniqueDiagnostic(diagnostics, makeDiagnostic(
           "CONSTRAINT_CONFLICT",
           "error",
-          `Constraint '${constraint.id}' is not satisfied by the stored geometry.`,
-          [constraint.id],
+          `Constraint '${equation.id}' is not satisfied by the stored geometry.`,
+          [equation.id],
           "Regenerate the sketch or repair the constraint before treating this revision as valid."
         ));
       }
     }
   } else {
-    const constraints = [...document.constraints].filter((constraint) => !constraint.suppressed).sort(byId);
-    const dimensions = [...document.dimensions].filter((dimension) => !dimension.suppressed).sort(byId);
-    for (let pass = 0; pass < maxPasses; pass += 1) {
-      let changed = false;
-      for (const constraint of constraints) {
-        const result = applyConstraint(document, constraint, fixed, tolerance);
-        document = result.document;
-        changed ||= result.changed;
-        if (result.applied) appliedConstraints.add(constraint.id);
-        if (result.diagnostic !== undefined) addUniqueDiagnostic(diagnostics, result.diagnostic);
+    const pointer = request.mode === "drag" && request.dragTarget !== undefined ? preparePointer(model, request, diagnostics) : undefined;
+    if (pointer?.blocked === true) {
+      failed = true;
+    } else {
+      let outcome = solveModel(model, { tolerance }, pointer?.frozen);
+      if (!outcome.ok && pointer === undefined && request.anchors !== undefined && request.anchors.length > 0) {
+        // The geometry the hints wanted to keep still cannot be kept (a Fix elsewhere, or a dimension on it): solve again with nothing preferred.
+        const retry = buildSolverModel(request.document, preserveOption);
+        const second = solveModel(retry, { tolerance });
+        if (second.ok) {
+          model = retry;
+          outcome = second;
+        }
       }
-      for (const dimension of dimensions) {
-        if (dimension.mode !== "driving") continue;
-        const result = applyDrivingDimension(document, dimension, fixed, tolerance);
-        document = result.document;
-        changed ||= result.changed;
-        if (result.applied) appliedDimensions.add(dimension.id);
-        if (result.diagnostic !== undefined) addUniqueDiagnostic(diagnostics, result.diagnostic);
+      if (!outcome.ok && pointer?.goal !== undefined) {
+        // The pointer cannot be followed exactly (a dimension holds the line, say): take the nearest geometry the relations allow.
+        if (pointer.hardPin !== undefined) model.equations.splice(model.equations.indexOf(pointer.hardPin), 1);
+        model.x.set(model.x0);
+        outcome = solveModel(model, { tolerance, goals: [{ equation: pointer.goal, factor: 0.3 }] });
       }
-      if (!changed) break;
-      if (pass === maxPasses - 1) {
-        addUniqueDiagnostic(diagnostics, {
-          code: "SOLVER_DID_NOT_CONVERGE",
-          severity: "error",
-          message: `The analytic solver exceeded ${maxPasses} deterministic passes.`,
-          relatedIds: [document.id],
-          recovery: "Remove cyclic relations or delegate the sketch to a nonlinear solver backend.",
-          unsupported: false
-        });
+      if (!outcome.ok) {
+        failed = true;
+        reportFailure(model, outcome.failing, labelOf, diagnostics, request.mode === "drag" ? "DRAG_CONFLICT" : undefined);
+      } else {
+        document = applySolution(model);
+        const collapse = findCollapse(model, document, labelOf);
+        if (collapse !== undefined) {
+          failed = true;
+          addUniqueDiagnostic(diagnostics, collapse);
+          document = request.document;
+        }
       }
     }
   }
@@ -115,20 +117,23 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
   const postValidation = validateParametricSketch(document);
   if (!postValidation.valid) {
     for (const candidate of postValidation.diagnostics) addUniqueDiagnostic(diagnostics, candidate);
-    document = cloneDocument(request.document);
-    appliedConstraints.clear();
-    appliedDimensions.clear();
+    document = request.document;
+    failed = true;
   }
 
   const measurements = measureDimensions(document, diagnostics);
-  verifyDrivingDimensions(document, measurements, diagnostics, tolerance);
-  const hasError = diagnostics.some((diagnostic) => diagnostic.severity === "error" && !diagnostic.unsupported);
-  const hasUnsupported = diagnostics.some((diagnostic) => diagnostic.unsupported);
-  const hasConflict = diagnostics.some((diagnostic) => diagnostic.code === "CONSTRAINT_CONFLICT" || diagnostic.code === "DIMENSION_CONFLICT" || diagnostic.code === "DRAG_CONFLICT");
-  const hasNonConflictError = diagnostics.some((diagnostic) => diagnostic.severity === "error" && !diagnostic.unsupported && diagnostic.code !== "CONSTRAINT_CONFLICT" && diagnostic.code !== "DIMENSION_CONFLICT" && diagnostic.code !== "DRAG_CONFLICT");
-  const dofConstraintIds = request.mode === "validate" ? supportedConstraintIds(document) : appliedConstraints;
-  const dofDimensionIds = request.mode === "validate" ? supportedDrivingDimensionIds(document) : appliedDimensions;
-  const dof = estimateDegreesOfFreedom(document, dofConstraintIds, dofDimensionIds, hasNonConflictError, hasConflict);
+  if (!failed) verifyDrivingDimensions(document, model, measurements, diagnostics, tolerance);
+  const hasError = diagnostics.some((candidate) => candidate.severity === "error" && !candidate.unsupported);
+  const hasUnsupported = diagnostics.some((candidate) => candidate.unsupported);
+  // The analysis reads the geometry the answer will have: the solved numbers, or the stored ones when nothing was applied.
+  if (document === request.document) model.x.set(model.x0);
+  const rank = analyzeRank(model, { invalid: hasError && !diagnostics.some(isConflict) });
+  const sets: readonly SketchRelationSet[] = describeSets(rank.sets, labelOf);
+  const dof: SketchDofState = {
+    ...rank.dof,
+    classification: hasError && !diagnostics.some(isConflict) ? "invalid" : rank.dof.classification === "over-constrained" || diagnostics.some(isConflict) ? "over-constrained" : rank.dof.classification,
+    relationSets: sets
+  };
   const nextDocument: ParametricSketchDocument = {
     ...document,
     revision: request.mode === "validate" || request.mode === "drag" || documentsEqual(document, request.document)
@@ -141,393 +146,177 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
     diagnostics,
     dof,
     measurements,
-    appliedConstraintIds: [...appliedConstraints].sort(),
-    appliedDimensionIds: [...appliedDimensions].sort(),
+    appliedConstraintIds: failed ? [] : [...model.appliedConstraints].sort(),
+    appliedDimensionIds: failed ? [] : [...model.appliedDimensions].sort(),
     deterministicFingerprint: fingerprint(nextDocument)
   };
 }
 
-interface ApplyResult {
-  readonly document: ParametricSketchDocument;
-  readonly changed: boolean;
-  readonly applied: boolean;
-  readonly diagnostic?: SketchDiagnostic;
+function isConflict(candidate: SketchDiagnostic): boolean {
+  return candidate.code === "CONSTRAINT_CONFLICT" || candidate.code === "DIMENSION_CONFLICT" || candidate.code === "DRAG_CONFLICT";
 }
 
-function applyConstraint(
-  document: ParametricSketchDocument,
-  constraint: SketchConstraint,
-  fixed: ReadonlySet<string>,
-  tolerance: number
-): ApplyResult {
-  if (constraint.kind === "fix") return { document, changed: false, applied: true };
-  if (constraint.kind === "tangent") return applyTangent(document, constraint, fixed, tolerance);
-  if (constraint.kind === "symmetric") return applySymmetric(document, constraint, fixed, tolerance);
-  if (constraint.kind === "horizontal" || constraint.kind === "vertical") {
-    const line = findLine(document, constraint.line.entityId);
-    if (line === undefined) return invalidReference(document, constraint.id, "The orientation constraint requires a line.");
-    const startFixed = isFixed(fixed, line.id, "start");
-    const endFixed = isFixed(fixed, line.id, "end");
-    const delta = constraint.kind === "horizontal" ? line.end[1] - line.start[1] : line.end[0] - line.start[0];
-    if (Math.abs(delta) <= tolerance) return { document, changed: false, applied: true };
-    if (startFixed && endFixed) return conflict(document, constraint.id, "Both line endpoints are fixed and violate the orientation constraint.");
-    const next = constraint.kind === "horizontal"
-      ? endFixed ? replaceLine(document, line.id, [line.start[0], line.end[1]], line.end) : replaceLine(document, line.id, line.start, [line.end[0], line.start[1]])
-      : endFixed ? replaceLine(document, line.id, [line.end[0], line.start[1]], line.end) : replaceLine(document, line.id, line.start, [line.start[0], line.end[1]]);
-    return { document: next, changed: true, applied: true };
-  }
-  if (constraint.kind === "coincident") {
-    if (getReferencedPoint(document, constraint.first) === undefined || getReferencedPoint(document, constraint.second) === undefined) {
-      return unsupported(
-        document,
-        "UNSUPPORTED_CONSTRAINT",
-        "The analytic backend solves point-to-point coincidence only; point-on-curve coincidence needs nonlinear curve evaluation.",
-        [constraint.id],
-        "Use a nonlinear solver backend; the preserved coincidence constraint is not approximated."
-      );
+/** Writes the solved numbers back into geometry, leaving every entity that did not change exactly as it was. */
+function applySolution(model: SolverModel): ParametricSketchDocument {
+  const geometry = model.document.geometry.map((original) => {
+    const entry = model.layout.get(original.id)!;
+    let changed = false;
+    for (let index = 0; index < entry.count; index += 1) {
+      if (model.x[entry.base + index] !== model.x0[entry.base + index]) {
+        changed = true;
+        break;
+      }
     }
-    if (
-      constraint.first.entityId === constraint.second.entityId
-      && constraint.first.selector !== constraint.second.selector
-      && distance(getReferencedPoint(document, constraint.first)!, getReferencedPoint(document, constraint.second)!) > tolerance
-    ) {
-      return conflict(document, constraint.id, "Coinciding two distinct defining points of one entity would collapse or corrupt that entity.");
+    return changed ? writeEntityValues(original, model.x, entry.base) : original;
+  });
+  return { ...model.document, geometry };
+}
+
+interface Pointer {
+  readonly blocked: boolean;
+  readonly frozen?: Uint8Array;
+  /** The pointer as an equation: soft when the point is pinned directly, otherwise the hard pin that was added. */
+  readonly goal?: Equation;
+  readonly hardPin?: Equation;
+}
+
+/** Puts the dragged point where the pointer is and holds it there while the rest relaxes. */
+function preparePointer(model: SolverModel, request: SketchSolveRequest, diagnostics: SketchDiagnostic[]): Pointer {
+  const target = request.dragTarget!;
+  const reference = target.reference;
+  const entry = model.layout.get(reference.entityId);
+  const position = target.positionMm;
+  if (!Number.isFinite(position[0]) || !Number.isFinite(position[1])) {
+    addUniqueDiagnostic(diagnostics, makeDiagnostic("INVALID_NUMBER", "error", "A point target is non-finite.", [reference.entityId], "Provide finite sketch coordinates."));
+    return { blocked: true };
+  }
+  if (entry === undefined) {
+    addUniqueDiagnostic(diagnostics, makeDiagnostic("MISSING_REFERENCE", "error", "The selected geometry no longer exists.", [reference.entityId], "Restart the drag after regenerating the sketch."));
+    return { blocked: true };
+  }
+  const frozen = Uint8Array.from(model.frozen);
+  const fixedMessage = "The selected point is fixed.";
+  const fail = (message: string, recovery: string): Pointer => {
+    addUniqueDiagnostic(diagnostics, makeDiagnostic("DRAG_CONFLICT", "error", message, [reference.entityId], recovery));
+    return { blocked: true };
+  };
+  const b = entry.base;
+  const g = entry.geometry;
+  if ((g.kind === "line" || g.kind === "slot") && reference.selector === "midpoint") {
+    if ([0, 1, 2, 3].some((index) => frozen[b + index] === 1)) return fail(`A ${g.kind} midpoint cannot move while either endpoint is fixed.`, "Release the fixed endpoint or move a free defining point.");
+    const dx = position[0] - (model.x0[b]! + model.x0[b + 2]!) / 2;
+    const dy = position[1] - (model.x0[b + 1]! + model.x0[b + 3]!) / 2;
+    model.x[b] = model.x0[b]! + dx;
+    model.x[b + 1] = model.x0[b + 1]! + dy;
+    model.x[b + 2] = model.x0[b + 2]! + dx;
+    model.x[b + 3] = model.x0[b + 3]! + dy;
+    for (let index = 0; index < 4; index += 1) frozen[b + index] = 1;
+    return { blocked: false, frozen };
+  }
+  const direct = directPointVariables(model, reference);
+  if (direct !== undefined) {
+    if (frozen[direct[0]] === 1 || frozen[direct[1]] === 1) return fail(fixedMessage, "Remove the fixed constraint before dragging.");
+    model.x[direct[0]] = position[0];
+    model.x[direct[1]] = position[1];
+    frozen[direct[0]] = 1;
+    frozen[direct[1]] = 1;
+    const goal = pinPointEquation(model, "drag:pointer", reference, position);
+    // If holding the point exactly is impossible the solve is retried with the point as a strong preference instead.
+    return { blocked: false, frozen, ...(goal === undefined ? {} : { goal }) };
+  }
+  const pin = pinPointEquation(model, "drag:pointer", reference, position);
+  if (pin === undefined) {
+    addUniqueDiagnostic(diagnostics, makeDiagnostic("INVALID_REFERENCE", "error", "The selected reference is not a writable defining point.", [reference.entityId], "Select a point, endpoint, or center."));
+    return { blocked: true };
+  }
+  if (pin.vars.every((variable) => frozen[variable] === 1)) return fail(fixedMessage, "Remove the fixed constraint before dragging.");
+  // A derived point (an arc end, a rectangle corner) is held by a hard equation that is part of the solve.
+  model.equations.push(pin);
+  return { blocked: false, frozen, goal: pin, hardPin: pin };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Failure reports
+// ---------------------------------------------------------------------------------------------------------------------
+
+function reportFailure(
+  model: SolverModel,
+  failing: readonly ResidualReport[],
+  labelOf: (id: string) => string,
+  diagnostics: SketchDiagnostic[],
+  forcedCode: SketchDiagnostic["code"] | undefined
+): void {
+  const analysis = analyzeRank(model);
+  const conflicts = analysis.sets.filter((set) => set.kind === "conflicting");
+  const failingIds = new Set(failing.map((report) => report.equation.id));
+  // Prefer the dependency sets that contain a relation that is actually violated.
+  const relevant = conflicts.filter((set) => set.ids.some((id) => failingIds.has(id)));
+  const chosen = (relevant.length > 0 ? relevant : conflicts).slice(0, 3);
+  if (chosen.length > 0) {
+    for (const set of chosen) {
+      const labels = set.ids.map(labelOf);
+      addUniqueDiagnostic(diagnostics, makeDiagnostic(
+        forcedCode ?? (set.ids.every((id) => model.document.dimensions.some((dimension) => dimension.id === id)) ? "DIMENSION_CONFLICT" : "CONSTRAINT_CONFLICT"),
+        "error",
+        `These relations contradict each other and cannot all hold: ${joinNames(labels)}.`,
+        set.ids,
+        "Remove or relax one of the listed relations, then try again."
+      ));
     }
-    return makePointsCoincident(document, constraint.first, constraint.second, fixed, tolerance, constraint.id);
+    return;
   }
-  if (constraint.kind === "concentric") {
-    const first = centerReference(constraint.first);
-    const second = centerReference(constraint.second);
-    if (first === undefined || second === undefined) return invalidReference(document, constraint.id, "Concentric requires two circle or arc centers.");
-    return makePointsCoincident(document, first, second, fixed, tolerance, constraint.id);
-  }
-  if (constraint.kind === "midpoint") {
-    const line = findLine(document, constraint.line.entityId);
-    if (line === undefined) return invalidReference(document, constraint.id, "Midpoint requires a point and a line.");
-    return moveReference(document, constraint.point, midpoint(line.start, line.end), fixed, tolerance, constraint.id);
-  }
-  if (constraint.kind === "equal") return applyEqual(document, constraint, fixed, tolerance);
-  if (constraint.kind === "parallel" || constraint.kind === "perpendicular" || constraint.kind === "collinear") {
-    return applyLineRelation(document, constraint, fixed, tolerance);
-  }
-  return unsupported(document, "UNSUPPORTED_CONSTRAINT", "This constraint kind is not implemented by the analytic backend.", [document.id], "Use a solver backend that declares support for this relation.");
+  const ids = [...new Set(failing.map((report) => report.equation.id))].slice(0, 6);
+  const labels = ids.map(labelOf);
+  addUniqueDiagnostic(diagnostics, makeDiagnostic(
+    forcedCode ?? "CONSTRAINT_CONFLICT",
+    "error",
+    ids.length === 0 ? "The sketch relations could not be solved together." : `These relations cannot all be satisfied together: ${joinNames(labels)}${failingIds.size > ids.length ? ` and ${failingIds.size - ids.length} more` : ""}.`,
+    ids,
+    "Remove or relax one of the listed relations, or change a dimension, then try again."
+  ));
 }
 
-function applyEqual(
-  document: ParametricSketchDocument,
-  constraint: Extract<SketchConstraint, { kind: "equal" }>,
-  fixed: ReadonlySet<string>,
-  tolerance: number
-): ApplyResult {
-  const first = findGeometry(document, constraint.first.entityId);
-  const second = findGeometry(document, constraint.second.entityId);
-  if (first?.kind === "line" && second?.kind === "line") {
-    const firstLength = distance(first.start, first.end);
-    const secondLength = distance(second.start, second.end);
-    if (Math.abs(firstLength - secondLength) <= tolerance) return { document, changed: false, applied: true };
-    if (lineFullyFixed(fixed, first) && lineFullyFixed(fixed, second)) return conflict(document, constraint.id, "Both unequal lines are fixed.");
-    if (!lineFullyFixed(fixed, second)) return resizeLine(document, second, firstLength, fixed, constraint.id, tolerance);
-    return resizeLine(document, first, secondLength, fixed, constraint.id, tolerance);
+/** A solution that squashes a curve to nothing is not a solution; name the relations acting on it. */
+function findCollapse(model: SolverModel, solved: ParametricSketchDocument, labelOf: (id: string) => string): SketchDiagnostic | undefined {
+  for (const geometry of solved.geometry) {
+    const before = model.layout.get(geometry.id)!.geometry;
+    if (geometry === before || geometry.suppressed) continue;
+    const reason = collapseReason(geometry);
+    if (reason === undefined || collapseReason(before) !== undefined) continue;
+    const acting = [...new Set(model.equations.filter((equation) => equation.entities.includes(geometry.id)).map((equation) => equation.id))].sort();
+    const ids = [geometry.id, ...acting];
+    return makeDiagnostic(
+      "CONSTRAINT_CONFLICT",
+      "error",
+      `${labelOf(geometry.id)} would ${reason}. The relations acting on it contradict each other: ${joinNames(acting.slice(0, 6).map(labelOf))}${acting.length > 6 ? ` and ${acting.length - 6} more` : ""}.`,
+      ids,
+      "Remove or relax one of the listed relations."
+    );
   }
-  if (isRadialGeometry(first) && isRadialGeometry(second)) {
-    if (Math.abs(first.radiusMm - second.radiusMm) <= tolerance) return { document, changed: false, applied: true };
-    if (isFixed(fixed, first.id, "radius") && isFixed(fixed, second.id, "radius")) return conflict(document, constraint.id, "Both unequal circle radii are fixed.");
-    const target = isFixed(fixed, second.id, "radius") ? second.radiusMm : first.radiusMm;
-    const id = isFixed(fixed, second.id, "radius") ? first.id : second.id;
-    return { document: replaceRadius(document, id, target), changed: true, applied: true };
-  }
-  return invalidReference(document, constraint.id, "Equal currently requires two lines or two circles of the same kind.");
+  return undefined;
 }
 
-function applyLineRelation(
-  document: ParametricSketchDocument,
-  constraint: Extract<SketchConstraint, { kind: "parallel" | "perpendicular" | "collinear" }>,
-  fixed: ReadonlySet<string>,
-  tolerance: number
-): ApplyResult {
-  const first = findLine(document, constraint.first.entityId);
-  const second = findLine(document, constraint.second.entityId);
-  if (first === undefined || second === undefined) return invalidReference(document, constraint.id, `${constraint.kind} requires two lines.`);
-  if (lineFullyFixed(fixed, second)) {
-    if (lineFullyFixed(fixed, first)) return conflict(document, constraint.id, `Both lines are fixed and violate ${constraint.kind}.`);
-    return orientLineFromReference(document, first, second, constraint.kind, fixed, tolerance, constraint.id, true);
+function collapseReason(geometry: SketchGeometry): string | undefined {
+  switch (geometry.kind) {
+    case "line": return Math.hypot(geometry.end[0] - geometry.start[0], geometry.end[1] - geometry.start[1]) <= COLLAPSE_MM ? "collapse to a point" : undefined;
+    case "circle": return geometry.radiusMm <= COLLAPSE_MM ? "shrink to nothing" : undefined;
+    case "arc": return geometry.radiusMm <= COLLAPSE_MM ? "shrink to nothing" : undefined;
+    case "rectangle": return geometry.widthMm <= COLLAPSE_MM || geometry.heightMm <= COLLAPSE_MM ? "collapse to a line" : undefined;
+    case "ellipse": return Math.hypot(geometry.majorAxis[0], geometry.majorAxis[1]) <= COLLAPSE_MM || geometry.minorToMajorRatio <= 1e-9 ? "collapse to a line" : undefined;
+    default: return undefined;
   }
-  return orientLineFromReference(document, second, first, constraint.kind, fixed, tolerance, constraint.id, false);
 }
 
-function orientLineFromReference(
-  document: ParametricSketchDocument,
-  moving: LineGeometry,
-  reference: LineGeometry,
-  relation: "parallel" | "perpendicular" | "collinear",
-  fixed: ReadonlySet<string>,
-  tolerance: number,
-  ownerId: string,
-  reverse: boolean
-): ApplyResult {
-  const referenceDirection = normalized(subtract(reference.end, reference.start));
-  if (referenceDirection === undefined) return invalidReference(document, ownerId, "The reference line is degenerate.");
-  const direction: Vec2 = relation === "perpendicular" ? [-referenceDirection[1], referenceDirection[0]] : referenceDirection;
-  const length = distance(moving.start, moving.end);
-  let start = moving.start;
-  let end: Vec2 = [start[0] + direction[0] * length, start[1] + direction[1] * length];
-  if (relation === "collinear") {
-    const projected = projectPointOnLine(start, reference.start, reference.end);
-    start = projected;
-    end = [start[0] + direction[0] * length, start[1] + direction[1] * length];
-  }
-  if (isFixed(fixed, moving.id, "end")) {
-    end = moving.end;
-    start = [end[0] - direction[0] * length, end[1] - direction[1] * length];
-  }
-  if (isFixed(fixed, moving.id, "start") && isFixed(fixed, moving.id, "end")) return conflict(document, ownerId, "The moving line is fully fixed.");
-  const changed = distance(start, moving.start) > tolerance || distance(end, moving.end) > tolerance;
-  return { document: changed ? replaceLine(document, moving.id, start, end) : document, changed, applied: true };
-}
-
-type CircleOrArc = Extract<SketchGeometry, { kind: "circle" | "arc" }>;
-
-function applyTangent(
-  document: ParametricSketchDocument,
-  constraint: Extract<SketchConstraint, { kind: "tangent" }>,
-  fixed: ReadonlySet<string>,
-  tolerance: number
-): ApplyResult {
-  const first = findGeometry(document, constraint.first.entityId);
-  const second = findGeometry(document, constraint.second.entityId);
-  const line = first?.kind === "line" ? first : second?.kind === "line" ? second : undefined;
-  const circle = isRadialGeometry(first) ? first : isRadialGeometry(second) ? second : undefined;
-  if (line !== undefined && circle !== undefined) {
-    const foot = projectPointOnLine(circle.center, line.start, line.end);
-    const gap = distance(circle.center, foot);
-    if (!isFixed(fixed, circle.id, "radius")) {
-      if (gap <= tolerance) return conflict(document, constraint.id, "The circle center lies on the line, so no tangent radius exists; move the circle first.");
-      if (Math.abs(circle.radiusMm - gap) <= tolerance) return { document, changed: false, applied: true };
-      return { document: replaceRadius(document, circle.id, gap), changed: true, applied: true };
-    }
-    // Radius is fixed: translate the center perpendicular to the line to the tangent offset.
-    const direction = normalized(subtract(circle.center, foot)) ?? lineNormal(line);
-    const target: Vec2 = [foot[0] + direction[0] * circle.radiusMm, foot[1] + direction[1] * circle.radiusMm];
-    return moveReference(document, { entityId: circle.id, selector: "center" }, target, fixed, tolerance, constraint.id);
-  }
-  if (isRadialGeometry(first) && isRadialGeometry(second)) {
-    const centerGap = distance(first.center, second.center);
-    if (centerGap <= tolerance) return conflict(document, constraint.id, "Concentric circles cannot be tangent; separate the centers first.");
-    // |centerGap - keptRadius| yields the external tangent radius when centerGap > keptRadius and the internal one otherwise.
-    const resize = (kept: CircleOrArc, moved: CircleOrArc): ApplyResult => {
-      const targetRadius = Math.abs(centerGap - kept.radiusMm);
-      if (targetRadius <= tolerance) return conflict(document, constraint.id, "Tangency would collapse the circle to a zero radius.");
-      if (Math.abs(moved.radiusMm - targetRadius) <= tolerance) return { document, changed: false, applied: true };
-      return { document: replaceRadius(document, moved.id, targetRadius), changed: true, applied: true };
-    };
-    if (!isFixed(fixed, second.id, "radius")) return resize(first, second);
-    if (!isFixed(fixed, first.id, "radius")) return resize(second, first);
-    return conflict(document, constraint.id, "Both circle radii are fixed and are not tangent.");
-  }
-  return invalidReference(document, constraint.id, "Tangent requires a line and a circle, or two circles or arcs.");
-}
-
-function applySymmetric(
-  document: ParametricSketchDocument,
-  constraint: Extract<SketchConstraint, { kind: "symmetric" }>,
-  fixed: ReadonlySet<string>,
-  tolerance: number
-): ApplyResult {
-  const axis = findLine(document, constraint.axis.entityId);
-  if (axis === undefined) return invalidReference(document, constraint.id, "Symmetric requires an axis line.");
-  const firstPoint = getReferencedPoint(document, constraint.first);
-  const secondPoint = getReferencedPoint(document, constraint.second);
-  if (firstPoint === undefined || secondPoint === undefined) {
-    return unsupported(document, "UNSUPPORTED_CONSTRAINT", "The analytic backend mirrors point references about a line axis only.", [constraint.id], "Reference two writable points and a line axis, or use a nonlinear backend.");
-  }
-  if (distance(secondPoint, reflectAcrossLine(firstPoint, axis)) <= tolerance) return { document, changed: false, applied: true };
-  if (!isReferenceFixed(fixed, constraint.second)) return moveReference(document, constraint.second, reflectAcrossLine(firstPoint, axis), fixed, tolerance, constraint.id);
-  if (!isReferenceFixed(fixed, constraint.first)) return moveReference(document, constraint.first, reflectAcrossLine(secondPoint, axis), fixed, tolerance, constraint.id);
-  return conflict(document, constraint.id, "Both symmetric points are fixed and are not mirror images across the axis.");
-}
-
-function reflectAcrossLine(point: Vec2, axis: LineGeometry): Vec2 {
-  const foot = projectPointOnLine(point, axis.start, axis.end);
-  return [2 * foot[0] - point[0], 2 * foot[1] - point[1]];
-}
-
-function lineNormal(line: LineGeometry): Vec2 {
-  const direction = normalized(subtract(line.end, line.start)) ?? [1, 0];
-  return [-direction[1], direction[0]];
-}
-
-function applyDrivingDimension(
-  document: ParametricSketchDocument,
-  dimension: SketchDimension,
-  fixed: ReadonlySet<string>,
-  tolerance: number
-): ApplyResult {
-  const resolved = resolveDimensionTarget(document, dimension);
-  if (resolved.diagnostic !== undefined) return { document, changed: false, applied: false, diagnostic: resolved.diagnostic };
-  const target = resolved.value!;
-  if (dimension.kind === "length") {
-    const line = findLine(document, dimension.target.entityId);
-    if (line === undefined) return invalidDimension(document, dimension.id, "Length requires a line.");
-    if (target <= 0) return dimensionConflict(document, dimension.id, "A line length must be positive.");
-    return resizeLine(document, line, target, fixed, dimension.id, tolerance);
-  }
-  if (dimension.kind === "radius" || dimension.kind === "diameter") {
-    const geometry = findGeometry(document, dimension.target.entityId);
-    if (geometry?.kind !== "circle" && geometry?.kind !== "arc") return invalidDimension(document, dimension.id, `${dimension.kind} requires a circle or arc.`);
-    const radius = dimension.kind === "diameter" ? target / 2 : target;
-    if (radius <= 0) return dimensionConflict(document, dimension.id, "A radius must be positive.");
-    if (isFixed(fixed, geometry.id, "radius") && Math.abs(geometry.radiusMm - radius) > tolerance) return dimensionConflict(document, dimension.id, "The radius is fixed at another value.");
-    const changed = Math.abs(geometry.radiusMm - radius) > tolerance;
-    return { document: changed ? replaceRadius(document, geometry.id, radius) : document, changed, applied: true };
-  }
-  if (dimension.kind === "linear") {
-    const first = getReferencedPoint(document, dimension.first);
-    const second = getReferencedPoint(document, dimension.second);
-    if (first === undefined || second === undefined) return invalidDimension(document, dimension.id, "Linear dimensions require two point references.");
-    const magnitude = Math.abs(target);
-    const firstFixed = isReferenceFixed(fixed, dimension.first);
-    const secondFixed = isReferenceFixed(fixed, dimension.second);
-    if (firstFixed && secondFixed) return dimensionConflict(document, dimension.id, "Both dimension references are fixed at another separation.");
-    const horizontalSign = second[0] < first[0] ? -1 : 1;
-    const verticalSign = second[1] < first[1] ? -1 : 1;
-    const alignedDirection = normalized(subtract(second, first)) ?? [1, 0];
-    if (!secondFixed) {
-      const next: Vec2 = dimension.orientation === "horizontal"
-        ? [first[0] + horizontalSign * magnitude, second[1]]
-        : dimension.orientation === "vertical"
-          ? [second[0], first[1] + verticalSign * magnitude]
-          : [first[0] + alignedDirection[0] * magnitude, first[1] + alignedDirection[1] * magnitude];
-      return moveReference(document, dimension.second, next, fixed, tolerance, dimension.id, "DIMENSION_CONFLICT");
-    }
-    const next: Vec2 = dimension.orientation === "horizontal"
-      ? [second[0] - horizontalSign * magnitude, first[1]]
-      : dimension.orientation === "vertical"
-        ? [first[0], second[1] - verticalSign * magnitude]
-        : [second[0] - alignedDirection[0] * magnitude, second[1] - alignedDirection[1] * magnitude];
-    return moveReference(document, dimension.first, next, fixed, tolerance, dimension.id, "DIMENSION_CONFLICT");
-  }
-  if (dimension.kind === "coordinate-x" || dimension.kind === "coordinate-y") {
-    const point = getReferencedPoint(document, dimension.target);
-    if (point === undefined) return invalidDimension(document, dimension.id, "Coordinate dimensions require a point reference.");
-    const next: Vec2 = dimension.kind === "coordinate-x" ? [target, point[1]] : [point[0], target];
-    return moveReference(document, dimension.target, next, fixed, tolerance, dimension.id, "DIMENSION_CONFLICT");
-  }
-  if (dimension.kind === "arc-length") {
-    const arc = findGeometry(document, dimension.target.entityId);
-    if (arc?.kind !== "arc") return invalidDimension(document, dimension.id, "Arc length requires an arc.");
-    if (target <= 0) return dimensionConflict(document, dimension.id, "An arc length must be positive.");
-    const wanted = target / arc.radiusMm;
-    if (wanted >= Math.PI * 2 - 1e-9) return dimensionConflict(document, dimension.id, "An arc cannot be as long as, or longer than, its full circle at this radius.");
-    const current = arcSweep(arc);
-    if (Math.abs(current - wanted) * arc.radiusMm <= tolerance) return { document, changed: false, applied: true };
-    if (isFixed(fixed, arc.id, "self")) return dimensionConflict(document, dimension.id, "The arc is fixed at another length.");
-    // The start of the arc and its radius are held; the far end sweeps to the length asked for.
-    return { document: replaceGeometry(document, { ...arc, endAngleRad: arc.startAngleRad + wanted }), changed: true, applied: true };
-  }
-  if (dimension.kind === "angle") {
-    const first = findLine(document, dimension.first.entityId);
-    const second = findLine(document, dimension.second.entityId);
-    if (first === undefined || second === undefined) return invalidDimension(document, dimension.id, "Angular dimensions require two lines.");
-    const wanted = normalizeAngle(target);
-    const firstFixed = lineFullyFixed(fixed, first);
-    const secondFixed = lineFullyFixed(fixed, second);
-    if (firstFixed && secondFixed) return dimensionConflict(document, dimension.id, "Both lines are fixed and cannot satisfy the angle.");
-    // The second line turns about a pivot to make the angle; when only the first can move, it turns the other way.
-    const mover = secondFixed ? first : second;
-    const reference = secondFixed ? second : first;
-    const direction = Math.atan2(reference.end[1] - reference.start[1], reference.end[0] - reference.start[0]) + (secondFixed ? -wanted : wanted);
-    const length = distance(mover.start, mover.end);
-    const unit: Vec2 = [Math.cos(direction), Math.sin(direction)];
-    const startFixed = isFixed(fixed, mover.id, "start");
-    const endFixed = isFixed(fixed, mover.id, "end");
-    // Turn about the joint the two lines share, so the corner they form stays closed; otherwise about the end that is held, else the start.
-    const joined = (point: Vec2): boolean => distance(point, reference.start) <= 1e-6 || distance(point, reference.end) <= 1e-6;
-    const pivotAtEnd = joined(mover.end) && !joined(mover.start) ? true : joined(mover.start) ? false : endFixed && !startFixed;
-    if (!pivotAtEnd && endFixed) return dimensionConflict(document, dimension.id, "The line's far end is fixed, so it cannot turn about its start.");
-    if (pivotAtEnd && startFixed) return dimensionConflict(document, dimension.id, "The line's far end is fixed, so it cannot turn about its end.");
-    const nextStart: Vec2 = pivotAtEnd ? [mover.end[0] - unit[0] * length, mover.end[1] - unit[1] * length] : mover.start;
-    const nextEnd: Vec2 = pivotAtEnd ? mover.end : [mover.start[0] + unit[0] * length, mover.start[1] + unit[1] * length];
-    const changed = distance(nextStart, mover.start) > tolerance || distance(nextEnd, mover.end) > tolerance;
-    return { document: changed ? replaceLine(document, mover.id, nextStart, nextEnd) : document, changed, applied: true };
-  }
-  return unsupported(document, "UNSUPPORTED_DIMENSION", "This driving dimension is not implemented by the analytic backend.", [document.id], "Use a backend that declares support for this dimension.");
-}
-
-function makePointsCoincident(
-  document: ParametricSketchDocument,
-  firstReference: GeometryReference,
-  secondReference: GeometryReference,
-  fixed: ReadonlySet<string>,
-  tolerance: number,
-  ownerId: string
-): ApplyResult {
-  const first = getReferencedPoint(document, firstReference);
-  const second = getReferencedPoint(document, secondReference);
-  if (first === undefined || second === undefined) return invalidReference(document, ownerId, "Coincident requires two point-like references.");
-  if (distance(first, second) <= tolerance) return { document, changed: false, applied: true };
-  const firstFixed = isReferenceFixed(fixed, firstReference);
-  const secondFixed = isReferenceFixed(fixed, secondReference);
-  if (firstFixed && secondFixed) return conflict(document, ownerId, "Both separated points are fixed.");
-  return secondFixed
-    ? moveReference(document, firstReference, second, fixed, tolerance, ownerId)
-    : moveReference(document, secondReference, first, fixed, tolerance, ownerId);
-}
-
-function moveReference(
-  document: ParametricSketchDocument,
-  reference: GeometryReference,
-  target: Vec2,
-  fixed: ReadonlySet<string>,
-  tolerance: number,
-  ownerId: string,
-  conflictCode: "CONSTRAINT_CONFLICT" | "DIMENSION_CONFLICT" = "CONSTRAINT_CONFLICT"
-): ApplyResult {
-  const current = getReferencedPoint(document, reference);
-  if (current === undefined) return invalidReference(document, ownerId, "The relation requires a writable point reference.");
-  if (distance(current, target) <= tolerance) return { document, changed: false, applied: true };
-  if (isReferenceFixed(fixed, reference)) {
-    return {
-      document,
-      changed: false,
-      applied: false,
-      diagnostic: diagnostic(conflictCode, "error", "A fixed point cannot move to satisfy the relation.", [ownerId, reference.entityId], "Remove the fixed constraint or change the requested value.")
-    };
-  }
-  const moved = setReferencedPoint(document, reference, target, fixed);
-  return moved.diagnostic === undefined
-    ? { document: moved.document, changed: true, applied: true }
-    : { document, changed: false, applied: false, diagnostic: moved.diagnostic };
-}
-
-function resizeLine(
-  document: ParametricSketchDocument,
-  line: LineGeometry,
-  targetLength: number,
-  fixed: ReadonlySet<string>,
-  ownerId: string,
-  tolerance: number
-): ApplyResult {
-  const currentLength = distance(line.start, line.end);
-  if (Math.abs(currentLength - targetLength) <= tolerance) return { document, changed: false, applied: true };
-  const direction = normalized(subtract(line.end, line.start));
-  if (direction === undefined) return invalidDimension(document, ownerId, "A degenerate line cannot be dimensioned.");
-  const startFixed = isFixed(fixed, line.id, "start");
-  const endFixed = isFixed(fixed, line.id, "end");
-  if (startFixed && endFixed) return dimensionConflict(document, ownerId, "Both endpoints are fixed at another length.");
-  if (endFixed) {
-    const start: Vec2 = [line.end[0] - direction[0] * targetLength, line.end[1] - direction[1] * targetLength];
-    return { document: replaceLine(document, line.id, start, line.end), changed: true, applied: true };
-  }
-  const end: Vec2 = [line.start[0] + direction[0] * targetLength, line.start[1] + direction[1] * targetLength];
-  return { document: replaceLine(document, line.id, line.start, end), changed: true, applied: true };
-}
+// ---------------------------------------------------------------------------------------------------------------------
+// Measurements
+// ---------------------------------------------------------------------------------------------------------------------
 
 function measureDimensions(document: ParametricSketchDocument, diagnostics: SketchDiagnostic[]): readonly DimensionMeasurement[] {
   const measurements: DimensionMeasurement[] = [];
   for (const dimension of [...document.dimensions].filter((candidate) => !candidate.suppressed).sort(byId)) {
-    const measured = measureDimension(document, dimension);
+    const measured = measureDimensionValue(document, dimension);
     if (measured === undefined) {
-      addUniqueDiagnostic(diagnostics, diagnostic("UNSUPPORTED_DIMENSION", "warning", `The analytic backend cannot measure ${dimension.kind} '${dimension.id}'.`, [dimension.id], "Delegate this dimension to a backend that supports its geometry.", true));
+      addUniqueDiagnostic(diagnostics, makeDiagnostic("UNSUPPORTED_DIMENSION", "warning", `The solver cannot measure ${dimension.kind} '${dimension.id}'.`, [dimension.id], "Delegate this dimension to a backend that supports its geometry.", true));
       continue;
     }
     measurements.push({ dimensionId: dimension.id, value: measured, unit: dimension.unit, mode: dimension.mode });
@@ -535,343 +324,51 @@ function measureDimensions(document: ParametricSketchDocument, diagnostics: Sket
   return measurements;
 }
 
-function measureDimension(document: ParametricSketchDocument, dimension: SketchDimension): number | undefined {
-  if (dimension.kind === "length") {
-    const line = findLine(document, dimension.target.entityId);
-    return line === undefined ? undefined : distance(line.start, line.end);
-  }
-  if (dimension.kind === "radius" || dimension.kind === "diameter") {
-    const geometry = findGeometry(document, dimension.target.entityId);
-    if (geometry?.kind !== "circle" && geometry?.kind !== "arc") return undefined;
-    return dimension.kind === "diameter" ? geometry.radiusMm * 2 : geometry.radiusMm;
-  }
-  if (dimension.kind === "arc-length") {
-    const arc = findGeometry(document, dimension.target.entityId);
-    return arc?.kind === "arc" ? arc.radiusMm * arcSweep(arc) : undefined;
-  }
-  if (dimension.kind === "linear") {
-    const first = getReferencedPoint(document, dimension.first);
-    const second = getReferencedPoint(document, dimension.second);
-    if (first === undefined || second === undefined) return undefined;
-    return dimension.orientation === "horizontal" ? Math.abs(second[0] - first[0]) : dimension.orientation === "vertical" ? Math.abs(second[1] - first[1]) : distance(first, second);
-  }
-  if (dimension.kind === "coordinate-x" || dimension.kind === "coordinate-y") {
-    const point = getReferencedPoint(document, dimension.target);
-    return point === undefined ? undefined : dimension.kind === "coordinate-x" ? point[0] : point[1];
-  }
-  const first = findLine(document, dimension.first.entityId);
-  const second = findLine(document, dimension.second.entityId);
-  if (first === undefined || second === undefined) return undefined;
-  return normalizeAngle(Math.atan2(second.end[1] - second.start[1], second.end[0] - second.start[0]) - Math.atan2(first.end[1] - first.start[1], first.end[0] - first.start[0]));
-}
-
 function verifyDrivingDimensions(
   document: ParametricSketchDocument,
+  model: SolverModel,
   measurements: readonly DimensionMeasurement[],
   diagnostics: SketchDiagnostic[],
   tolerance: number
 ): void {
   for (const dimension of document.dimensions) {
-    if (dimension.suppressed || dimension.mode !== "driving") continue;
-    const target = resolveDimensionTarget(document, dimension);
-    if (target.diagnostic !== undefined) {
-      addUniqueDiagnostic(diagnostics, target.diagnostic);
-      continue;
-    }
+    if (dimension.suppressed || dimension.mode !== "driving" || !model.appliedDimensions.has(dimension.id)) continue;
     const measurement = measurements.find((candidate) => candidate.dimensionId === dimension.id);
+    const target = resolveDimensionTarget(document, dimension);
+    if (measurement === undefined || target === undefined) continue;
+    const expected = dimension.kind === "linear" || dimension.kind === "point-line-distance" || dimension.kind === "line-line-distance" ? Math.abs(target) : dimension.kind === "diameter" ? target : target;
     const unitTolerance = dimension.unit === "rad" ? 1e-9 : tolerance;
-    const expected = dimension.kind === "angle" ? normalizeAngle(target.value!) : target.value!;
-    if (measurement !== undefined && Math.abs(measurement.value - expected) > unitTolerance) {
-      addUniqueDiagnostic(diagnostics, diagnostic("DIMENSION_CONFLICT", "error", `Dimension '${dimension.id}' evaluates to ${measurement.value} ${dimension.unit}, not ${expected} ${dimension.unit}.`, [dimension.id], "Remove a conflicting constraint or change the driving value."));
+    const gap = dimension.kind === "angle" ? Math.abs(wrapPi(measurement.value - expected)) : Math.abs(measurement.value - expected);
+    if (gap > unitTolerance) {
+      addUniqueDiagnostic(diagnostics, makeDiagnostic("DIMENSION_CONFLICT", "error", `Dimension '${dimension.id}' evaluates to ${measurement.value} ${dimension.unit}, not ${expected} ${dimension.unit}.`, [dimension.id], "Remove a conflicting constraint or change the driving value."));
     }
   }
 }
 
-function resolveDimensionTarget(document: ParametricSketchDocument, dimension: SketchDimension): { readonly value?: number; readonly diagnostic?: SketchDiagnostic } {
-  if (dimension.value.expression === undefined) return { value: dimension.value.value };
-  const result = evaluateSketchExpression(dimension.value.expression, document.parameters, dimension.id);
-  return result.ok ? { value: result.value! } : { diagnostic: result.diagnostic! };
-}
+// ---------------------------------------------------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------------------------------------------------
 
-function estimateDegreesOfFreedom(
-  document: ParametricSketchDocument,
-  appliedConstraints: ReadonlySet<string>,
-  appliedDimensions: ReadonlySet<string>,
-  invalid: boolean,
-  conflicted = false
-): SketchDofState {
-  const freedom = new Map(document.geometry.filter((geometry) => !geometry.suppressed).map((geometry) => [geometry.id, geometry.source?.associative === true ? 0 : baseFreedom(geometry)]));
-  for (const constraint of document.constraints.filter((candidate) => appliedConstraints.has(candidate.id)).sort(byId)) {
-    if (constraint.kind === "fix") {
-      if (constraint.target.selector === "self" || constraint.target.selector === "curve") freedom.set(constraint.target.entityId, 0);
-      else reduceFreedom(freedom, [constraint.target.entityId], constraint.target.selector === "radius" ? 1 : 2);
-    }
-    else reduceFreedom(freedom, constraintReferences(constraint).map((reference) => reference.entityId), constraintReduction(constraint));
-  }
-  for (const dimension of document.dimensions.filter((candidate) => candidate.mode === "driving" && appliedDimensions.has(candidate.id)).sort(byId)) {
-    reduceFreedom(freedom, dimensionReferences(dimension).map((reference) => reference.entityId), 1);
-  }
-  const entries = [...freedom.entries()].sort(([left], [right]) => left.localeCompare(right));
-  const total = entries.reduce((sum, [, value]) => sum + value, 0);
-  return {
-    classification: invalid ? "invalid" : conflicted ? "over-constrained" : total === 0 ? "fully-constrained" : "under-constrained",
-    total: Math.max(0, total),
-    byEntity: Object.fromEntries(entries.map(([id, value]) => [id, Math.max(0, value)])),
-    unconstrainedEntityIds: entries.filter(([, value]) => value > 0).map(([id]) => id),
-    method: "analytic-rank-estimate-v1"
+function makeLabeler(document: ParametricSketchDocument, labels: Readonly<Record<string, string>> | undefined): (id: string) => string {
+  return (id: string): string => {
+    const given = labels?.[id];
+    if (given !== undefined) return given;
+    const constraint = document.constraints.find((candidate) => candidate.id === id);
+    if (constraint !== undefined) return `${constraint.kind} constraint '${id}'`;
+    const dimension = document.dimensions.find((candidate) => candidate.id === id);
+    if (dimension !== undefined) return `${dimension.kind} dimension '${id}'`;
+    return id;
   };
-}
-
-function supportedConstraintIds(document: ParametricSketchDocument): ReadonlySet<string> {
-  return new Set(
-    document.constraints
-      .filter((constraint) => !constraint.suppressed && analyticConstraintSupport(document, constraint) === undefined)
-      .map((constraint) => constraint.id)
-  );
-}
-
-function supportedDrivingDimensionIds(document: ParametricSketchDocument): ReadonlySet<string> {
-  return new Set(
-    document.dimensions
-      .filter((dimension) => !dimension.suppressed && dimension.mode === "driving" && measureDimension(document, dimension) !== undefined)
-      .map((dimension) => dimension.id)
-  );
-}
-
-function analyticConstraintSupport(document: ParametricSketchDocument, constraint: SketchConstraint): SketchDiagnostic | undefined {
-  if (constraint.kind === "tangent") {
-    const first = findGeometry(document, constraint.first.entityId);
-    const second = findGeometry(document, constraint.second.entityId);
-    const lineCircle = (first?.kind === "line" && isRadialGeometry(second)) || (second?.kind === "line" && isRadialGeometry(first));
-    const twoRadial = isRadialGeometry(first) && isRadialGeometry(second);
-    if (!lineCircle && !twoRadial) {
-      return diagnostic(
-        "UNSUPPORTED_CONSTRAINT",
-        "warning",
-        "The analytic backend solves tangency between a line and a circle or arc, or between two circles or arcs.",
-        [constraint.id],
-        "Use a nonlinear solver backend for tangency that involves splines or other curves.",
-        true
-      );
-    }
-    return undefined;
-  }
-  if (constraint.kind === "symmetric") {
-    const axis = findLine(document, constraint.axis.entityId);
-    if (axis === undefined || getReferencedPoint(document, constraint.first) === undefined || getReferencedPoint(document, constraint.second) === undefined) {
-      return diagnostic(
-        "UNSUPPORTED_CONSTRAINT",
-        "warning",
-        "The analytic backend mirrors point references about a line axis only.",
-        [constraint.id],
-        "Reference two writable points and a line axis, or use a nonlinear backend.",
-        true
-      );
-    }
-    return undefined;
-  }
-  if (constraint.kind === "coincident" && (getReferencedPoint(document, constraint.first) === undefined || getReferencedPoint(document, constraint.second) === undefined)) {
-    return diagnostic(
-      "UNSUPPORTED_CONSTRAINT",
-      "warning",
-      "The analytic backend solves point-to-point coincidence only; point-on-curve coincidence needs nonlinear curve evaluation.",
-      [constraint.id],
-      "Use a nonlinear solver backend; the preserved coincidence constraint is not approximated.",
-      true
-    );
-  }
-  return undefined;
-}
-
-function baseFreedom(geometry: SketchGeometry): number {
-  if (geometry.kind === "point") return 2;
-  if (geometry.kind === "line") return 4;
-  if (geometry.kind === "circle") return 3;
-  if (geometry.kind === "arc" || geometry.kind === "ellipse" || geometry.kind === "slot") return 5;
-  if (geometry.kind === "polygon") return 4;
-  return Math.max(0, geometry.controlPoints.length * 2);
-}
-
-function isRadialGeometry(geometry: SketchGeometry | undefined): geometry is Extract<SketchGeometry, { kind: "circle" | "arc" }> {
-  return geometry?.kind === "circle" || geometry?.kind === "arc";
-}
-
-function constraintReduction(constraint: SketchConstraint): number {
-  if (constraint.kind === "coincident" || constraint.kind === "concentric" || constraint.kind === "midpoint" || constraint.kind === "collinear") return 2;
-  return 1;
-}
-
-function reduceFreedom(freedom: Map<string, number>, ids: readonly string[], amount: number): void {
-  let remaining = amount;
-  for (const id of [...new Set(ids)].sort()) {
-    const current = freedom.get(id) ?? 0;
-    const reduction = Math.min(current, remaining);
-    freedom.set(id, current - reduction);
-    remaining -= reduction;
-    if (remaining === 0) break;
-  }
-}
-
-function collectFixedReferences(constraints: readonly SketchConstraint[], geometry: readonly SketchGeometry[]): ReadonlySet<string> {
-  const fixed = new Set<string>();
-  for (const entity of geometry) {
-    if (entity.source?.associative === true) fixed.add(`${entity.id}:self`);
-  }
-  for (const constraint of constraints) {
-    if (!constraint.suppressed && constraint.kind === "fix") fixed.add(referenceKey(constraint.target));
-  }
-  return fixed;
-}
-
-function isReferenceFixed(fixed: ReadonlySet<string>, reference: GeometryReference): boolean {
-  return isFixed(fixed, reference.entityId, reference.selector);
-}
-
-function isFixed(fixed: ReadonlySet<string>, entityId: string, selector: GeometryReference["selector"]): boolean {
-  return fixed.has(`${entityId}:self`) || fixed.has(`${entityId}:${selector}`);
-}
-
-function lineFullyFixed(fixed: ReadonlySet<string>, line: LineGeometry): boolean {
-  return isFixed(fixed, line.id, "self") || (isFixed(fixed, line.id, "start") && isFixed(fixed, line.id, "end"));
-}
-
-function referenceKey(reference: GeometryReference): string {
-  return `${reference.entityId}:${reference.selector === "curve" ? "self" : reference.selector}`;
-}
-
-function centerReference(reference: GeometryReference): GeometryReference | undefined {
-  return reference.selector === "self" || reference.selector === "curve" || reference.selector === "center"
-    ? { entityId: reference.entityId, selector: "center" }
-    : undefined;
-}
-
-export function getReferencedPoint(document: ParametricSketchDocument, reference: GeometryReference): Vec2 | undefined {
-  const geometry = findGeometry(document, reference.entityId);
-  if (geometry === undefined) return undefined;
-  if (geometry.kind === "point" && (reference.selector === "point" || reference.selector === "self")) return geometry.point;
-  if (geometry.kind === "line") {
-    if (reference.selector === "start") return geometry.start;
-    if (reference.selector === "end") return geometry.end;
-    if (reference.selector === "midpoint") return midpoint(geometry.start, geometry.end);
-  }
-  if ((geometry.kind === "circle" || geometry.kind === "arc" || geometry.kind === "ellipse" || geometry.kind === "polygon") && reference.selector === "center") return geometry.center;
-  if (geometry.kind === "slot") {
-    if (reference.selector === "start") return geometry.startCenter;
-    if (reference.selector === "end") return geometry.endCenter;
-    if (reference.selector === "midpoint") return midpoint(geometry.startCenter, geometry.endCenter);
-  }
-  return undefined;
-}
-
-function setReferencedPoint(
-  document: ParametricSketchDocument,
-  reference: GeometryReference,
-  point: Vec2,
-  fixed: ReadonlySet<string>
-): { readonly document: ParametricSketchDocument; readonly diagnostic?: SketchDiagnostic } {
-  if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) {
-    return { document, diagnostic: diagnostic("INVALID_NUMBER", "error", "A point target is non-finite.", [reference.entityId], "Provide finite sketch coordinates.") };
-  }
-  if (isReferenceFixed(fixed, reference)) {
-    return { document, diagnostic: diagnostic("DRAG_CONFLICT", "error", "The selected point is fixed.", [reference.entityId], "Remove the fixed constraint before dragging.") };
-  }
-  const geometry = findGeometry(document, reference.entityId);
-  if (geometry === undefined) return { document, diagnostic: diagnostic("MISSING_REFERENCE", "error", "The selected geometry no longer exists.", [reference.entityId], "Restart the drag after regenerating the sketch.") };
-  let replacement: SketchGeometry | undefined;
-  if (geometry.kind === "point" && (reference.selector === "self" || reference.selector === "point")) replacement = { ...geometry, point };
-  else if (geometry.kind === "line" && reference.selector === "start") replacement = { ...geometry, start: point };
-  else if (geometry.kind === "line" && reference.selector === "end") replacement = { ...geometry, end: point };
-  else if (geometry.kind === "line" && reference.selector === "midpoint") {
-    if (isFixed(fixed, geometry.id, "start") || isFixed(fixed, geometry.id, "end")) {
-      return { document, diagnostic: diagnostic("DRAG_CONFLICT", "error", "A line midpoint cannot move while either endpoint is fixed.", [reference.entityId], "Release the fixed endpoint or move a free defining point.") };
-    }
-    const current = midpoint(geometry.start, geometry.end);
-    const delta: Vec2 = [point[0] - current[0], point[1] - current[1]];
-    replacement = {
-      ...geometry,
-      start: [geometry.start[0] + delta[0], geometry.start[1] + delta[1]],
-      end: [geometry.end[0] + delta[0], geometry.end[1] + delta[1]]
-    };
-  }
-  else if (geometry.kind === "circle" && reference.selector === "center") replacement = { ...geometry, center: point };
-  else if (geometry.kind === "arc" && reference.selector === "center") replacement = { ...geometry, center: point };
-  else if (geometry.kind === "ellipse" && reference.selector === "center") replacement = { ...geometry, center: point };
-  else if (geometry.kind === "polygon" && reference.selector === "center") replacement = { ...geometry, center: point };
-  else if (geometry.kind === "slot" && reference.selector === "start") replacement = { ...geometry, startCenter: point };
-  else if (geometry.kind === "slot" && reference.selector === "end") replacement = { ...geometry, endCenter: point };
-  else if (geometry.kind === "slot" && reference.selector === "midpoint") {
-    if (isFixed(fixed, geometry.id, "start") || isFixed(fixed, geometry.id, "end")) {
-      return { document, diagnostic: diagnostic("DRAG_CONFLICT", "error", "A slot midpoint cannot move while either center endpoint is fixed.", [reference.entityId], "Release the fixed endpoint or move a free defining point.") };
-    }
-    const current = midpoint(geometry.startCenter, geometry.endCenter);
-    const delta: Vec2 = [point[0] - current[0], point[1] - current[1]];
-    replacement = {
-      ...geometry,
-      startCenter: [geometry.startCenter[0] + delta[0], geometry.startCenter[1] + delta[1]],
-      endCenter: [geometry.endCenter[0] + delta[0], geometry.endCenter[1] + delta[1]]
-    };
-  }
-  if (replacement === undefined) {
-    return { document, diagnostic: diagnostic("INVALID_REFERENCE", "error", "The selected reference is not a writable defining point.", [reference.entityId], "Select a point, endpoint, or center.") };
-  }
-  return { document: replaceGeometry(document, replacement) };
-}
-
-function findGeometry(document: ParametricSketchDocument, id: string): SketchGeometry | undefined {
-  return document.geometry.find((geometry) => geometry.id === id);
-}
-
-function findLine(document: ParametricSketchDocument, id: string): LineGeometry | undefined {
-  const geometry = findGeometry(document, id);
-  return geometry?.kind === "line" ? geometry : undefined;
-}
-
-function replaceLine(document: ParametricSketchDocument, id: string, start: Vec2, end: Vec2): ParametricSketchDocument {
-  const line = findLine(document, id);
-  return line === undefined ? document : replaceGeometry(document, { ...line, start, end });
-}
-
-function replaceRadius(document: ParametricSketchDocument, id: string, radiusMm: number): ParametricSketchDocument {
-  const geometry = findGeometry(document, id);
-  if (geometry?.kind !== "circle" && geometry?.kind !== "arc") return document;
-  return replaceGeometry(document, { ...geometry, radiusMm });
-}
-
-function replaceGeometry(document: ParametricSketchDocument, replacement: SketchGeometry): ParametricSketchDocument {
-  return { ...document, geometry: document.geometry.map((geometry) => geometry.id === replacement.id ? replacement : geometry) };
-}
-
-function cloneDocument(document: ParametricSketchDocument): ParametricSketchDocument {
-  return {
-    ...document,
-    plane: {
-      ...document.plane,
-      originMm: [...document.plane.originMm],
-      xAxis: [...document.plane.xAxis],
-      yAxis: [...document.plane.yAxis],
-      normal: [...document.plane.normal]
-    },
-    parameters: { ...document.parameters },
-    geometry: document.geometry.map(cloneGeometry),
-    constraints: document.constraints.map((constraint) => ({ ...constraint })),
-    dimensions: document.dimensions.map((dimension) => ({ ...dimension, value: { ...dimension.value } }))
-  };
-}
-
-function cloneGeometry(geometry: SketchGeometry): SketchGeometry {
-  if (geometry.kind === "point") return { ...geometry, point: [...geometry.point] };
-  if (geometry.kind === "line") return { ...geometry, start: [...geometry.start], end: [...geometry.end] };
-  if (geometry.kind === "circle" || geometry.kind === "arc" || geometry.kind === "ellipse" || geometry.kind === "polygon") {
-    if (geometry.kind === "ellipse") return { ...geometry, center: [...geometry.center], majorAxis: [...geometry.majorAxis] };
-    if (geometry.kind === "polygon") return { ...geometry, center: [...geometry.center], vertex: [...geometry.vertex] };
-    return { ...geometry, center: [...geometry.center] };
-  }
-  if (geometry.kind === "spline") return { ...geometry, controlPoints: geometry.controlPoints.map((point) => [...point]), knots: [...geometry.knots] };
-  return { ...geometry, startCenter: [...geometry.startCenter], endCenter: [...geometry.endCenter] };
 }
 
 function failedResult(document: ParametricSketchDocument, diagnostics: readonly SketchDiagnostic[]): SketchSolveResult {
-  const dof = estimateDegreesOfFreedom(document, new Set(), new Set(), true);
+  const dof: SketchDofState = {
+    classification: "invalid",
+    total: 0,
+    byEntity: Object.fromEntries(document.geometry.filter((geometry) => !geometry.suppressed).map((geometry) => [geometry.id, entityVariableCount(geometry)])),
+    unconstrainedEntityIds: [],
+    method: "jacobian-rank-v2"
+  };
   return {
     status: "failed",
     document,
@@ -884,33 +381,7 @@ function failedResult(document: ParametricSketchDocument, diagnostics: readonly 
   };
 }
 
-function unsupported(
-  document: ParametricSketchDocument,
-  code: "UNSUPPORTED_CONSTRAINT" | "UNSUPPORTED_DIMENSION",
-  message: string,
-  relatedIds: readonly string[],
-  recovery: string
-): ApplyResult {
-  return { document, changed: false, applied: false, diagnostic: diagnostic(code, "warning", message, relatedIds, recovery, true) };
-}
-
-function invalidReference(document: ParametricSketchDocument, ownerId: string, message: string): ApplyResult {
-  return { document, changed: false, applied: false, diagnostic: diagnostic("INVALID_REFERENCE", "error", message, [ownerId], "Repair the relation's geometry references.") };
-}
-
-function invalidDimension(document: ParametricSketchDocument, ownerId: string, message: string): ApplyResult {
-  return { document, changed: false, applied: false, diagnostic: diagnostic("INVALID_REFERENCE", "error", message, [ownerId], "Select compatible geometry for the dimension.") };
-}
-
-function conflict(document: ParametricSketchDocument, ownerId: string, message: string): ApplyResult {
-  return { document, changed: false, applied: false, diagnostic: diagnostic("CONSTRAINT_CONFLICT", "error", message, [ownerId], "Suppress or remove one conflicting constraint.") };
-}
-
-function dimensionConflict(document: ParametricSketchDocument, ownerId: string, message: string): ApplyResult {
-  return { document, changed: false, applied: false, diagnostic: diagnostic("DIMENSION_CONFLICT", "error", message, [ownerId], "Change the driving dimension or release fixed geometry.") };
-}
-
-function diagnostic(
+function makeDiagnostic(
   code: SketchDiagnostic["code"],
   severity: SketchDiagnostic["severity"],
   message: string,
@@ -928,45 +399,6 @@ function addUniqueDiagnostic(diagnostics: SketchDiagnostic[], candidate: SketchD
 
 function byId<T extends { readonly id: string }>(left: T, right: T): number {
   return left.id.localeCompare(right.id);
-}
-
-function midpoint(first: Vec2, second: Vec2): Vec2 {
-  return [(first[0] + second[0]) / 2, (first[1] + second[1]) / 2];
-}
-
-function subtract(first: Vec2, second: Vec2): Vec2 {
-  return [first[0] - second[0], first[1] - second[1]];
-}
-
-function normalized(vector: Vec2): Vec2 | undefined {
-  const length = Math.hypot(vector[0], vector[1]);
-  return length <= 1e-12 ? undefined : [vector[0] / length, vector[1] / length];
-}
-
-function distance(first: Vec2, second: Vec2): number {
-  return Math.hypot(second[0] - first[0], second[1] - first[1]);
-}
-
-function projectPointOnLine(point: Vec2, start: Vec2, end: Vec2): Vec2 {
-  const vector = subtract(end, start);
-  const denominator = vector[0] ** 2 + vector[1] ** 2;
-  if (denominator <= 1e-18) return start;
-  const offset = subtract(point, start);
-  const parameter = (offset[0] * vector[0] + offset[1] * vector[1]) / denominator;
-  return [start[0] + parameter * vector[0], start[1] + parameter * vector[1]];
-}
-
-/** The counter-clockwise angle an arc sweeps from its start angle to its end angle, in [0, 2π). */
-function arcSweep(arc: Extract<SketchGeometry, { kind: "arc" }>): number {
-  const turn = (arc.endAngleRad - arc.startAngleRad) % (Math.PI * 2);
-  return (turn + Math.PI * 2) % (Math.PI * 2);
-}
-
-function normalizeAngle(angle: number): number {
-  let normalizedAngle = angle;
-  while (normalizedAngle <= -Math.PI) normalizedAngle += Math.PI * 2;
-  while (normalizedAngle > Math.PI) normalizedAngle -= Math.PI * 2;
-  return normalizedAngle;
 }
 
 function documentsEqual(left: ParametricSketchDocument, right: ParametricSketchDocument): boolean {
@@ -991,3 +423,4 @@ function canonicalJson(value: unknown): string {
   }
   return JSON.stringify(value);
 }
+

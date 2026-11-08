@@ -31,3 +31,8 @@ export * from "./planar-faces.js";
 export { dragLiveSketch, solveLiveSketch, type LiveDragTarget, type LiveSketchSolveReport } from "./sketch-solve.js";
 export * from "./engineering-intent.js";
 export * from "./subd-cage.js";
+export { analyzeLiveSketch, type LiveSketchAnalysis } from "./sketch-analysis.js";
+export { anchorsForConstraint, anchorsForDimension, preserveForConstraint, type LiveAnchor } from "./sketch-anchors.js";
+export { describeConstraint, entityKindOf, entityNames, liveConstraintId } from "./sketch-translate.js";
+export { redriveDimension, dimensionNameOf, locateDimensionConstraint } from "./sketch-dimension-edit.js";
+export type { LiveRelationSet, LiveSolveOptions } from "./sketch-solve.js";

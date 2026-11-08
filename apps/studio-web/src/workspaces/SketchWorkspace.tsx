@@ -56,7 +56,7 @@ import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 import { ViewportChrome } from "../ui/ViewportChrome.js";
 
-type DrivingDimension = SketchDimensionName;
+type DrivingDimension = "length" | "width" | "height" | "radius" | "angle" | "arc-length" | "perimeter";
 type SketchDimensionHandle = "start" | "mid" | "end" | "left" | "right" | "top" | "bottom" | "center" | "radius";
 
 interface SketchDimensionPoint {
@@ -407,7 +407,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // Driving dimensions are drawn as real dimensions (extension lines, arrows, editable text); curves without one keep a quiet reference value.
   const drivingDimensions = useMemo(() => visibleSketch.constraints.flatMap((constraint) => {
     if ((constraint.kind !== "distance" && constraint.kind !== "radius") || constraint.valueMm === undefined || constraint.entityIds.length !== 1) return [];
-    const dimension: DrivingDimension | undefined = constraint.dimension ?? (constraint.kind === "radius" ? "radius" : undefined);
+    const named = constraint.dimension ?? (constraint.kind === "radius" ? "radius" : undefined);
+    const dimension: DrivingDimension | undefined = named === "length" || named === "width" || named === "height" || named === "radius" ? named : undefined;
     const entity = visibleEntities.find((candidate) => candidate.id === constraint.entityIds[0]);
     if (dimension === undefined || entity === undefined) return [];
     return [{ constraint, entity, dimension }];

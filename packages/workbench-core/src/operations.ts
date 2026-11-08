@@ -20,13 +20,16 @@ import type {
   WorkspaceId
 } from "./types.js";
 import { validSubdCageData } from "./subd-cage.js";
-import { ELECTRICAL_SHEET_BOUNDS, ELECTROMECHANICAL_CATALOG_REVISION, GENERAL_BODY_OPERATIONS, SKETCH_DATUM_PLANES } from "./types.js";
+import { ELECTRICAL_SHEET_BOUNDS, ELECTROMECHANICAL_CATALOG_REVISION, GENERAL_BODY_OPERATIONS, SKETCH_DATUM_PLANES, SKETCH_POINT_REFS } from "./types.js";
 import { createBessContainerAssembly, createCargoContainerAssembly, createElectricalTemplate } from "./templates.js";
 import { createElectromechanicalAssembly, electricalSignature } from "./electromechanical.js";
 import { createVehicleTemplate, vehicleHardPoints, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
 import { resizeSketchEntity, setSketchDimension } from "./sketch-dimension-edit.js";
+import { checkNewConstraint } from "./sketch-constraint-check.js";
+import { anchorsForConstraint, preserveForConstraint } from "./sketch-anchors.js";
+import { isSketchDatumEntityId } from "./types.js";
 import { solveAssemblyMates } from "./assembly-solve.js";
 import {
   addDesignSolid,
@@ -173,7 +176,32 @@ function fingerprint64(text: string): string {
   return `${high.toString(16).padStart(8, "0")}${low.toString(16).padStart(8, "0")}`;
 }
 
+/** True when a number anywhere inside the value is NaN or infinite; such a payload cannot be canonicalised or stored. */
+function containsNonFinite(value: unknown, depth = 0): boolean {
+  if (typeof value === "number") return !Number.isFinite(value);
+  if (depth > 12 || value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some((item) => containsNonFinite(item, depth + 1));
+  return Object.values(value as Record<string, unknown>).some((item) => containsNonFinite(item, depth + 1));
+}
+
+const SKETCH_DIMENSION_NAMES: readonly string[] = ["length", "width", "height", "radius", "diameter", "angle", "arc-length", "perimeter", "aligned", "horizontal", "vertical", "point-line", "line-line", "major-radius", "minor-radius"];
+
+/** Says what is wrong with a malformed set-sketch-dimension payload instead of a bare "invalid". */
+function sketchDimensionProblem(input: Record<string, unknown>): string {
+  if (!SKETCH_DIMENSION_NAMES.includes(String(input.dimension))) return `The sketch dimension "${String(input.dimension)}" is not one of: ${SKETCH_DIMENSION_NAMES.join(", ")}.`;
+  if (!finite(input.valueMm)) return "The sketch dimension needs a finite number for its value.";
+  if (Object.hasOwn(input, "points") && (!Array.isArray(input.points) || input.points.length < 1 || input.points.length > 2 || input.points.some((point) => !(SKETCH_POINT_REFS as readonly unknown[]).includes(point)))) {
+    return `The dimension's points must be one or two of: ${SKETCH_POINT_REFS.join(", ")}.`;
+  }
+  if (Object.hasOwn(input, "expression")) {
+    if (input.driven === true) return "A reference (driven) dimension is measured, so it cannot be bound to an expression.";
+    if (!(typeof input.expression === "string" && input.expression.length >= 1 && input.expression.length <= 400)) return "A dimension expression must be text of 1 to 400 characters.";
+  }
+  return "The sketch dimension edit is invalid: check the entity IDs and the dimension name.";
+}
+
 export function validateWorkbenchOperation(input: unknown): WorkbenchResult<WorkbenchOperation> {
+  if (containsNonFinite(input)) return invalidOperation("The operation contains a number that is not finite (NaN or Infinity); enter a finite value.");
   if (!isRecord(input) || !stableId(input.operationId) || !Number.isSafeInteger(input.expectedRevision) || (input.expectedRevision as number) < 0 || typeof input.kind !== "string") {
     return invalidOperation("The operation envelope is invalid.");
   }
@@ -195,13 +223,13 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       if (!keys(input, [...common, "constraintId"]) || !stableId(input.constraintId)) return invalidOperation("The sketch constraint ID is invalid.");
       break;
     case "set-sketch-dimension":
-      if (!keys(input, [...common, "entityId", "dimension", "valueMm", ...(Object.hasOwn(input, "secondEntityId") ? ["secondEntityId"] : []), ...(Object.hasOwn(input, "driven") ? ["driven"] : []), ...(Object.hasOwn(input, "expression") ? ["expression"] : [])]) || !stableId(input.entityId)
-        || !["length", "width", "height", "radius", "angle", "arc-length", "perimeter"].includes(String(input.dimension)) || !finite(input.valueMm)
+      if (!keys(input, [...common, "entityId", "dimension", "valueMm", ...(Object.hasOwn(input, "secondEntityId") ? ["secondEntityId"] : []), ...(Object.hasOwn(input, "points") ? ["points"] : []), ...(Object.hasOwn(input, "driven") ? ["driven"] : []), ...(Object.hasOwn(input, "expression") ? ["expression"] : [])]) || !stableId(input.entityId)
+        || !SKETCH_DIMENSION_NAMES.includes(String(input.dimension)) || !finite(input.valueMm)
         || (Object.hasOwn(input, "secondEntityId") && !stableId(input.secondEntityId)) || (Object.hasOwn(input, "driven") && typeof input.driven !== "boolean")
-        // An expression binds a plain length, width, height or radius; a reference (driven) dimension and the other kinds carry none.
-        || (Object.hasOwn(input, "expression") && (!(typeof input.expression === "string" && input.expression.length >= 1 && input.expression.length <= 400)
-          || !["length", "width", "height", "radius"].includes(String(input.dimension)) || input.driven === true))) {
-        return invalidOperation("The sketch dimension edit is invalid.");
+        || (Object.hasOwn(input, "points") && (!Array.isArray(input.points) || input.points.length < 1 || input.points.length > 2 || input.points.some((point) => !(SKETCH_POINT_REFS as readonly unknown[]).includes(point))))
+        // An expression binds any driving dimension (a length, a radius, an angle in degrees...) to the parameter table; a reference (driven) dimension carries none.
+        || (Object.hasOwn(input, "expression") && (!(typeof input.expression === "string" && input.expression.length >= 1 && input.expression.length <= 400) || input.driven === true))) {
+        return invalidOperation(sketchDimensionProblem(input));
       }
       break;
     case "toggle-sketch-construction":
@@ -589,14 +617,19 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "add-sketch-constraint": {
       if (project.sketch.constraints.some((constraint) => constraint.id === operation.constraint.id)) return invalidOperation("The sketch constraint ID already exists.");
+      // A relation that cannot mean anything (a horizontal circle, a radius on a line, a line parallel to itself) is refused with the reason.
+      const refusal = checkNewConstraint(project, operation.constraint);
+      if (refusal !== undefined) return refusal;
       const withConstraint = { ...project.sketch, constraints: [...project.sketch.constraints, operation.constraint] };
       // Enforce the relation on the geometry it touches; a conflict rejects the whole operation.
-      const solved = solveLiveSketch(withConstraint, operation.constraint.entityIds);
+      const entityMap = new Map(withConstraint.entities.map((entity) => [entity.id, entity] as const));
+      const solved = solveLiveSketch(withConstraint, operation.constraint.entityIds.filter((id) => !isSketchDatumEntityId(id)), { anchors: anchorsForConstraint(operation.constraint, entityMap, withConstraint.constraints), preserve: preserveForConstraint(operation.constraint, entityMap) });
       if (!solved.ok) return solveFailure(solved);
+      const overlap = solved.redundant.filter((set) => set.constraintIds.includes(operation.constraint.id));
       return changed(
         { ...project, sketch: { ...withConstraint, entities: solved.entities } },
         [operation.constraint.id, ...solved.movedIds],
-        `Added ${operation.constraint.kind} constraint.${solveSummary(solved)}`
+        `Added ${operation.constraint.kind} constraint.${solveSummary(solved)}${overlap.length === 0 ? "" : ` Note: ${overlap[0]!.message}`}`
       );
     }
     case "delete-sketch-constraint":
@@ -619,7 +652,8 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
         })
       };
       // Restoring a relation re-enforces it; a restore that conflicts with the geometry is refused.
-      const solved = operation.suppressed ? undefined : solveLiveSketch(withFlags, targets.flatMap((constraint) => constraint.entityIds));
+      const restoredMap = new Map(withFlags.entities.map((entity) => [entity.id, entity] as const));
+      const solved = operation.suppressed ? undefined : solveLiveSketch(withFlags, targets.flatMap((constraint) => constraint.entityIds).filter((id) => !isSketchDatumEntityId(id)), { anchors: targets.flatMap((constraint) => anchorsForConstraint(constraint, restoredMap, withFlags.constraints)), preserve: targets.flatMap((constraint) => preserveForConstraint(constraint, restoredMap)) });
       if (solved !== undefined && !solved.ok) return solveFailure(solved);
       return changed(
         { ...project, sketch: { ...withFlags, entities: solved === undefined ? withFlags.entities : solved.entities } },

@@ -1,5 +1,6 @@
 import { splineLengthMm } from "./spline-curvature.js";
-import type { SketchEntity, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
+import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
+import { SKETCH_AXIS_X_ID, SKETCH_AXIS_Y_ID, SKETCH_ORIGIN_ID } from "./types.js";
 
 /** Measuring the sketch: lengths, arc sweeps, perimeters and angles, and the value any dimension constraint reads off the geometry. */
 
@@ -69,14 +70,59 @@ export function angleBetweenLinesDeg(first: Extract<SketchEntity, { kind: "line"
   return wrapped > 360 - 1e-9 ? 0 : wrapped;
 }
 
+/** Where a named defining point of an entity is, or the origin; undefined when the entity has no such point. */
+export function livePointOf(entity: SketchEntity | undefined, ref: SketchPointRef | undefined): Vec2 | undefined {
+  if (entity === undefined) return undefined;
+  switch (entity.kind) {
+    case "point": return ref === undefined || ref === "self" ? entity.point : undefined;
+    case "line": return ref === "start" ? entity.start : ref === "end" ? entity.end : ref === "mid" ? [(entity.start[0] + entity.end[0]) / 2, (entity.start[1] + entity.end[1]) / 2] : undefined;
+    case "circle":
+    case "ellipse": return ref === "center" ? entity.center : undefined;
+    case "arc": {
+      if (ref === "start") return entity.start;
+      if (ref === "end") return entity.end;
+      if (ref === "mid") return entity.mid;
+      return ref === "center" ? arcShape(entity.start, entity.mid, entity.end)?.center : undefined;
+    }
+    case "rectangle": {
+      if (ref === "center") return entity.center;
+      const corner = /^corner-([0-3])$/u.exec(ref ?? "");
+      if (corner === null) return undefined;
+      const k = Number(corner[1]);
+      const sx = (k === 0 || k === 3 ? -0.5 : 0.5) * entity.widthMm;
+      const sy = (k === 0 || k === 1 ? -0.5 : 0.5) * entity.heightMm;
+      const turn = (entity.rotationDeg * Math.PI) / 180;
+      return [entity.center[0] + Math.cos(turn) * sx - Math.sin(turn) * sy, entity.center[1] + Math.sin(turn) * sx + Math.cos(turn) * sy];
+    }
+    case "spline": return undefined;
+  }
+}
+
+function datumLine(id: string): { readonly start: Vec2; readonly end: Vec2 } | undefined {
+  return id === SKETCH_AXIS_X_ID ? { start: [0, 0], end: [1, 0] } : id === SKETCH_AXIS_Y_ID ? { start: [0, 0], end: [0, 1] } : undefined;
+}
+
 /** What a dimension constraint measures in the current geometry: degrees for an angle, millimetres otherwise; undefined when it cannot be measured. */
 export function measureDimensionConstraint(sketch: Pick<WorkbenchSketch, "entities">, constraint: WorkbenchSketchConstraint): number | undefined {
   const entities = constraint.entityIds.map((id) => sketch.entities.find((entity) => entity.id === id));
-  if (entities.some((entity) => entity === undefined)) return undefined;
+  const datum = constraint.entityIds.map((id) => id === SKETCH_ORIGIN_ID || datumLine(id) !== undefined);
+  if (entities.some((entity, index) => entity === undefined && !datum[index])) return undefined;
   const [first, second] = entities as readonly SketchEntity[];
+  const lineOf = (index: number): { readonly start: Vec2; readonly end: Vec2 } | undefined => {
+    const entity = entities[index];
+    return entity?.kind === "line" ? entity : datumLine(constraint.entityIds[index] ?? "");
+  };
+  const pointOf = (index: number): Vec2 | undefined => constraint.entityIds[index] === SKETCH_ORIGIN_ID ? [0, 0] : livePointOf(entities[index], constraint.points?.[index]);
   switch (constraint.kind) {
-    case "angle":
-      return first?.kind === "line" && second?.kind === "line" ? angleBetweenLinesDeg(first, second) : undefined;
+    case "angle": {
+      if (entities.length === 1) return first?.kind === "ellipse" ? ((first.rotationDeg % 360) + 360) % 360 : undefined;
+      const a = lineOf(0);
+      const b = lineOf(1);
+      if (a === undefined || b === undefined) return undefined;
+      const turn = ((Math.atan2(b.end[1] - b.start[1], b.end[0] - b.start[0]) - Math.atan2(a.end[1] - a.start[1], a.end[0] - a.start[0])) * 180) / Math.PI;
+      const wrapped = ((turn % 360) + 360) % 360;
+      return wrapped > 360 - 1e-9 ? 0 : wrapped;
+    }
     case "arc-length":
       return first === undefined || entities.length !== 1 ? undefined : first.kind === "arc" || first.kind === "spline" || first.kind === "line" ? entityLengthMm(first) : undefined;
     case "perimeter": {
@@ -88,12 +134,34 @@ export function measureDimensionConstraint(sketch: Pick<WorkbenchSketch, "entiti
       }
       return total;
     }
-    case "radius":
-      return first?.kind === "circle" ? first.radiusMm : first?.kind === "arc" ? arcShape(first.start, first.mid, first.end)?.radiusMm : undefined;
-    case "distance":
+    case "radius": {
+      const scale = constraint.dimension === "diameter" ? 2 : 1;
+      if (first?.kind === "ellipse") return constraint.dimension === "minor-radius" ? first.minorRadiusMm : first.majorRadiusMm;
+      return first?.kind === "circle" ? scale * first.radiusMm : first?.kind === "arc" ? scale * (arcShape(first.start, first.mid, first.end)?.radiusMm ?? NaN) : undefined;
+    }
+    case "distance": {
+      switch (constraint.dimension) {
+        case "aligned": case "horizontal": case "vertical": {
+          const a = pointOf(0);
+          const b = pointOf(1);
+          if (a === undefined || b === undefined) return undefined;
+          return constraint.dimension === "horizontal" ? Math.abs(b[0] - a[0]) : constraint.dimension === "vertical" ? Math.abs(b[1] - a[1]) : Math.hypot(b[0] - a[0], b[1] - a[1]);
+        }
+        case "point-line": case "line-line": {
+          const line = constraint.dimension === "point-line" ? lineOf(1) : lineOf(0);
+          const other = constraint.dimension === "point-line" ? pointOf(0) : (() => { const l = lineOf(1); return l === undefined ? undefined : ([(l.start[0] + l.end[0]) / 2, (l.start[1] + l.end[1]) / 2] as Vec2); })();
+          if (line === undefined || other === undefined) return undefined;
+          const ux = line.end[0] - line.start[0];
+          const uy = line.end[1] - line.start[1];
+          return Math.abs(ux * (other[1] - line.start[1]) - uy * (other[0] - line.start[0])) / Math.max(Math.hypot(ux, uy), 1e-12);
+        }
+        default:
+          break;
+      }
       if (first?.kind === "line") return Math.hypot(first.end[0] - first.start[0], first.end[1] - first.start[1]);
       if (first?.kind === "rectangle") return constraint.dimension === "height" ? first.heightMm : first.widthMm;
       return undefined;
+    }
     default:
       return undefined;
   }

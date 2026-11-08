@@ -178,24 +178,48 @@ export type SketchConstraintKind =
   | "pierce"
   | "refraction";
 
-/** Which defining point of an entity a point-level relation (Coincident, Midpoint) refers to. */
-export const SKETCH_POINT_REFS = ["start", "end", "mid", "center", "self"] as const;
+/**
+ * Which defining point of an entity a point-level relation (Coincident, Midpoint, point-level Fixed, point-to-point distance) refers to.
+ * `curve` means "anywhere on the curve", which turns a Coincident into point-on-curve; `corner-0` to `corner-3` are a rectangle's
+ * corners, counter-clockwise from the lower left of its own frame.
+ */
+export const SKETCH_POINT_REFS = ["start", "end", "mid", "center", "self", "curve", "corner-0", "corner-1", "corner-2", "corner-3"] as const;
 export type SketchPointRef = (typeof SKETCH_POINT_REFS)[number];
 
-/** The dimensions `set-sketch-dimension` can drive or measure. */
-export type SketchDimensionName = "length" | "width" | "height" | "radius" | "angle" | "arc-length" | "perimeter";
+/**
+ * The sketch origin and the X and Y axes can be named in a constraint's `entityIds` like any entity: they never move. The origin is a
+ * point (use the `self` point reference), the axes are infinite lines (use `curve` for point-on-axis).
+ */
+export const SKETCH_ORIGIN_ID = "sketch:origin";
+export const SKETCH_AXIS_X_ID = "sketch:axis-x";
+export const SKETCH_AXIS_Y_ID = "sketch:axis-y";
+export const SKETCH_DATUM_ENTITY_IDS: readonly string[] = [SKETCH_ORIGIN_ID, SKETCH_AXIS_X_ID, SKETCH_AXIS_Y_ID];
+export function isSketchDatumEntityId(id: string): boolean {
+  return id === SKETCH_ORIGIN_ID || id === SKETCH_AXIS_X_ID || id === SKETCH_AXIS_Y_ID;
+}
+
+/**
+ * The dimensions `set-sketch-dimension` can drive or measure. `aligned`, `horizontal` and `vertical` are distances between two points
+ * (or from the origin), `point-line` a point to a line and `line-line` two lines; `major-radius` and `minor-radius` size an ellipse.
+ */
+export type SketchDimensionName = "length" | "width" | "height" | "radius" | "diameter" | "angle" | "arc-length" | "perimeter"
+  | "aligned" | "horizontal" | "vertical" | "point-line" | "line-line" | "major-radius" | "minor-radius";
+
+/** The dimension names that are distances between points, or a point and a line, or two lines. */
+export const SKETCH_RELATIVE_DISTANCE_NAMES: readonly SketchDimensionName[] = ["aligned", "horizontal", "vertical", "point-line", "line-line"];
 
 export interface WorkbenchSketchConstraint {
   readonly id: string;
   readonly kind: SketchConstraintKind;
   readonly entityIds: readonly string[];
   /**
-   * Coincident and Midpoint only: the defining point each referenced entity contributes, in the same order as
-   * `entityIds` (a Midpoint names only the point's owner; its second entity is the whole line).
+   * The defining point each referenced entity contributes, in the same order as `entityIds`: for Coincident, Midpoint, point-level Fixed
+   * and the point distances (a Midpoint names only the point's owner; its second entity is the whole line; a point-to-line distance names
+   * only the point's owner). A Coincident whose second point is `curve` is point-on-curve.
    */
   readonly points?: readonly SketchPointRef[];
   readonly valueMm?: number;
-  readonly dimension?: "length" | "width" | "height" | "radius";
+  readonly dimension?: "length" | "width" | "height" | "radius" | "diameter" | "aligned" | "horizontal" | "vertical" | "point-line" | "line-line" | "major-radius" | "minor-radius";
   /**
    * Angle dimension only: the angle in degrees, counter-clockwise, from the direction of `entityIds[0]` to the direction of
    * `entityIds[1]` (each line runs from its start to its end). Held by the solver unless the dimension is `driven`.
@@ -1450,8 +1474,10 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly dimension: SketchDimensionName;
       /** Millimetres, or degrees for an angle dimension. Ignored (the measured value is kept) when `driven`. */
       readonly valueMm: number;
-      /** Angle dimension only: the second line. The angle runs from `entityId` to this line. */
+      /** Angle dimension only: the second line. The angle runs from `entityId` to this line. Also the second entity of a distance between two entities. */
       readonly secondEntityId?: string;
+      /** A distance between points: the point each entity contributes (the origin is `sketch:origin` with `self`). */
+      readonly points?: readonly SketchPointRef[];
       /** Make or keep this dimension a driven (reference) one: it is measured, never enforced. */
       readonly driven?: boolean;
       /** With `expression`, the dimension is bound to it and the evaluated expression wins over `valueMm`. */

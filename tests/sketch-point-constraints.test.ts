@@ -70,16 +70,21 @@ export const sketchPointConstraintTests: readonly TestCase[] = [
     }
   },
   {
-    name: "points that the solver cannot move are recorded with a reason instead of being approximated",
+    name: "an arc end can be joined (the later pick moves onto the first), and a spline point is refused with the reason instead of being stored dead",
     run: () => {
       const arc: SketchEntity = { id: "entity:arc", kind: "arc", start: [10, 0], mid: [7, 7], end: [0, 10], construction: false };
       const project = projectWith([line("entity:l", [30, 0], [40, 5]), arc]);
-      const recorded = addConstraint(project, { id: "constraint:arc-end", kind: "coincident", entityIds: ["entity:l", "entity:arc"], points: ["start", "end"] });
-      assert(recorded.ok, "the relation is still recorded");
-      assert(/Arc end points cannot be joined yet/.test(recorded.value.summary), `the summary explains why: ${recorded.value.summary}`);
-      const before = project.sketch.entities.find((entity) => entity.id === "entity:l");
-      const after = recorded.value.project.sketch.entities.find((entity) => entity.id === "entity:l");
-      assert(JSON.stringify(before) === JSON.stringify(after), "nothing moved");
+      const joined = addConstraint(project, { id: "constraint:arc-end", kind: "coincident", entityIds: ["entity:l", "entity:arc"], points: ["start", "end"] });
+      assert(joined.ok, `the arc end joins: ${joined.ok ? "" : joined.diagnostics[0]?.message ?? ""}`);
+      const moved = joined.value.project.sketch.entities.find((entity) => entity.id === "entity:arc");
+      assert(moved?.kind === "arc", "the arc exists");
+      near(moved.end[0], 30, 1e-9, "the arc's end sits on the line's start (x)");
+      near(moved.end[1], 0, 1e-9, "the arc's end sits on the line's start (y)");
+      const kept = joined.value.project.sketch.entities.find((entity) => entity.id === "entity:l");
+      assert(kept?.kind === "line" && kept.start[0] === 30 && kept.end[0] === 40, "the line, picked first, is the reference and did not move");
+      const spline: SketchEntity = { id: "entity:sp", kind: "spline", fitPoints: [[50, 0], [55, 5], [60, 0]], construction: false };
+      const refused = addConstraint(projectWith([line("entity:l", [30, 0], [40, 5]), spline]), { id: "constraint:spline-end", kind: "coincident", entityIds: ["entity:l", "entity:sp"], points: ["start", "end"] });
+      assert(!refused.ok && /Splines cannot be joined/.test(refused.diagnostics[0]?.message ?? ""), "a spline point is refused with the reason");
     }
   },
   {
@@ -88,8 +93,12 @@ export const sketchPointConstraintTests: readonly TestCase[] = [
       equal(constraintFit("coincident", ["line", "line"], ["end", "start"]).ok, true, "line ends join");
       equal(constraintFit("coincident", ["line", "circle"], ["start", "center"]).ok, true, "a line end joins a circle centre");
       equal(constraintFit("coincident", ["line", "line"], ["mid", "start"]).ok, true, "a line midpoint can be joined");
-      equal(constraintFit("coincident", ["line", "arc"], ["end", "end"]).ok, false, "an arc end cannot");
-      equal(constraintFit("coincident", ["line", "rectangle"], ["end", "corner" as never]).ok, false, "a rectangle corner cannot");
+      equal(constraintFit("coincident", ["line", "arc"], ["end", "end"]).ok, true, "an arc end can");
+      equal(constraintFit("coincident", ["line", "rectangle"], ["end", "corner-2"]).ok, true, "a rectangle corner can");
+      equal(constraintFit("coincident", ["line", "rectangle"], ["end", "corner" as never]).ok, false, "a corner that does not exist cannot");
+      equal(constraintFit("coincident", ["line", "spline"], ["end", "start"]).ok, false, "a spline point cannot");
+      equal(constraintFit("coincident", ["point", "line"], ["self", "curve"]).ok, true, "a point can sit on a line");
+      equal(constraintFit("coincident", ["origin", "circle"], ["self", "center"]).ok, true, "a circle centre can sit on the origin");
       equal(constraintFit("coincident", ["circle", "circle"], ["start" as never, "center"]).ok, false, "a circle has no start point");
       equal(constraintFit("coincident", ["line", "line"]).ok, false, "without the points there is nothing to join");
       equal(constraintFit("coincident", ["line"], ["start"]).ok, false, "one point cannot be coincident");
@@ -128,8 +137,10 @@ export const sketchPointConstraintTests: readonly TestCase[] = [
       const entities = [line("entity:a", [0, 0], [10, 0]), line("entity:b", [10, 0], [20, 5])];
       const joint: WorkbenchSketchConstraint = { id: "constraint:join", kind: "coincident", entityIds: ["entity:a", "entity:b"], points: ["end", "start"] };
       const shared = analyzeWorkbenchSketch(projectWith(entities, [joint]).sketch);
-      equal(shared.entityFreedom["entity:a"], 3, "the first curve loses one");
-      equal(shared.entityFreedom["entity:b"], 3, "the second curve loses one");
+      // The freedom of a curve is how many independent ways it can still move with the rest free to follow: a joint leaves both curves fully mobile (a drags b along), but the pair has six, not eight.
+      equal(shared.entityFreedom["entity:a"], 4, "the first curve can still move every way");
+      equal(shared.entityFreedom["entity:b"], 4, "the second curve can still move every way");
+      equal(shared.degreesOfFreedom, 6, "two lines have eight, the joint takes two");
       const pinned = analyzeWorkbenchSketch(projectWith(entities, [{ id: "constraint:fix", kind: "fixed", entityIds: ["entity:a"] }, joint]).sketch);
       equal(pinned.entityFreedom["entity:a"], 0, "a Fixed curve has nothing left");
       equal(pinned.entityFreedom["entity:b"], 2, "its partner takes the whole joint, so the joined end is pinned");

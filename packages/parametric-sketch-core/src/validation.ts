@@ -7,6 +7,7 @@ import type {
   SketchDimension,
   SketchGeometry
 } from "./types.js";
+import { isSketchDatumId } from "./types.js";
 
 export interface SketchValidationResult {
   readonly valid: boolean;
@@ -99,19 +100,23 @@ export function constraintReferences(constraint: SketchConstraint): readonly Geo
   if (constraint.kind === "fix") return [constraint.target];
   if (constraint.kind === "horizontal" || constraint.kind === "vertical") return [constraint.line];
   if (constraint.kind === "midpoint") return [constraint.point, constraint.line];
+  if (constraint.kind === "on-curve") return [constraint.point, constraint.curve];
   if (constraint.kind === "symmetric") return [constraint.first, constraint.second, constraint.axis];
   return [constraint.first, constraint.second];
 }
 
 export function dimensionReferences(dimension: SketchDimension): readonly GeometryReference[] {
-  if (dimension.kind === "linear" || dimension.kind === "angle") return [dimension.first, dimension.second];
+  if (dimension.kind === "linear" || dimension.kind === "angle" || dimension.kind === "line-line-distance") return [dimension.first, dimension.second];
+  if (dimension.kind === "point-line-distance") return [dimension.point, dimension.line];
   return [dimension.target];
 }
 
 export function supportsPointSelector(geometry: SketchGeometry, selector: GeometryReference["selector"]): boolean {
   if (geometry.kind === "point") return selector === "self" || selector === "point";
   if (geometry.kind === "line") return selector === "start" || selector === "end" || selector === "midpoint";
-  if (geometry.kind === "circle" || geometry.kind === "arc" || geometry.kind === "ellipse" || geometry.kind === "polygon") return selector === "center";
+  if (geometry.kind === "arc") return selector === "center" || selector === "start" || selector === "end" || selector === "midpoint";
+  if (geometry.kind === "rectangle") return selector === "center" || selector === "corner-0" || selector === "corner-1" || selector === "corner-2" || selector === "corner-3";
+  if (geometry.kind === "circle" || geometry.kind === "ellipse" || geometry.kind === "polygon") return selector === "center";
   if (geometry.kind === "slot") return selector === "start" || selector === "end" || selector === "midpoint";
   return false;
 }
@@ -133,7 +138,8 @@ function validateGeometry(geometry: SketchGeometry, diagnostics: SketchDiagnosti
     geometry.kind === "ellipse" ? distance([0, 0], geometry.majorAxis) <= 1e-9 || geometry.minorToMajorRatio <= 0 || geometry.minorToMajorRatio > 1 :
     geometry.kind === "spline" ? !Number.isInteger(geometry.degree) || geometry.degree < 1 || geometry.controlPoints.length < geometry.degree + 1 || geometry.knots.length !== geometry.controlPoints.length + geometry.degree + 1 || !nondecreasing(geometry.knots) :
     geometry.kind === "polygon" ? geometry.sides < 3 || !Number.isInteger(geometry.sides) || distance(geometry.center, geometry.vertex) <= 1e-9 :
-    geometry.kind === "slot" ? geometry.widthMm <= 1e-9 || distance(geometry.startCenter, geometry.endCenter) <= 1e-9 : false;
+    geometry.kind === "slot" ? geometry.widthMm <= 1e-9 || distance(geometry.startCenter, geometry.endCenter) <= 1e-9 :
+    geometry.kind === "rectangle" ? geometry.widthMm <= 1e-9 || geometry.heightMm <= 1e-9 : false;
   if (degenerate) diagnostics.push(error("DEGENERATE_GEOMETRY", `Geometry '${geometry.id}' is degenerate.`, [geometry.id], "Increase its size or provide the minimum valid number of defining points."));
 }
 
@@ -167,7 +173,13 @@ function validateConstraintCompatibility(
     }
   };
   if (constraint.kind === "horizontal" || constraint.kind === "vertical") {
-    requireKinds([constraint.line], ["line"], "requires a line");
+    requireKinds([constraint.line], ["line", "rectangle"], "requires a line or rectangle");
+  } else if (constraint.kind === "on-curve") {
+    requireKinds([constraint.curve], ["line", "circle", "arc", "ellipse", "slot"], "requires a line, circle, arc or ellipse");
+    const pointGeometry = geometryById.get(constraint.point.entityId);
+    if (pointGeometry !== undefined && !supportsPointSelector(pointGeometry, constraint.point.selector)) {
+      diagnostics.push(error("INVALID_REFERENCE", `on-curve constraint '${constraint.id}' requires a point-like reference.`, [constraint.id], "Select a point, endpoint, or center."));
+    }
   } else if (constraint.kind === "parallel" || constraint.kind === "perpendicular" || constraint.kind === "collinear") {
     requireKinds([constraint.first, constraint.second], ["line"], "requires two lines");
   } else if (constraint.kind === "midpoint") {
@@ -177,15 +189,16 @@ function validateConstraintCompatibility(
       diagnostics.push(error("INVALID_REFERENCE", `midpoint constraint '${constraint.id}' requires a writable point-like reference.`, [constraint.id], "Select a point, endpoint, or center."));
     }
   } else if (constraint.kind === "concentric") {
-    requireKinds([constraint.first, constraint.second], ["circle", "arc", "ellipse"], "requires two center-bearing curves");
+    requireKinds([constraint.first, constraint.second], ["circle", "arc", "ellipse", "rectangle", "polygon"], "requires two center-bearing curves");
   } else if (constraint.kind === "equal") {
     const first = geometryById.get(constraint.first.entityId);
     const second = geometryById.get(constraint.second.entityId);
     const bothLines = first?.kind === "line" && second?.kind === "line";
     const radialKinds: readonly SketchGeometry["kind"][] = ["circle", "arc"];
     const bothRadial = first !== undefined && second !== undefined && radialKinds.includes(first.kind) && radialKinds.includes(second.kind);
-    if (first !== undefined && second !== undefined && !bothLines && !bothRadial) {
-      diagnostics.push(error("INVALID_REFERENCE", `equal constraint '${constraint.id}' requires two lines or two circle/arc radii.`, [constraint.id], "Select two lines, or two circles/arcs."));
+    const bothSame = first !== undefined && second !== undefined && first.kind === second.kind && (first.kind === "ellipse" || first.kind === "rectangle");
+    if (first !== undefined && second !== undefined && !bothLines && !bothRadial && !bothSame) {
+      diagnostics.push(error("INVALID_REFERENCE", `equal constraint '${constraint.id}' requires two lines, two circle/arc radii, two ellipses or two rectangles.`, [constraint.id], "Select two lines, two circles/arcs, two ellipses or two rectangles."));
     }
   }
 }
@@ -203,14 +216,29 @@ function validateDimensionCompatibility(
     if (geometry !== undefined && geometry.kind !== "line") incompatible("requires a line");
   } else if (dimension.kind === "radius" || dimension.kind === "diameter") {
     const geometry = geometryById.get(dimension.target.entityId);
-    if (geometry !== undefined && geometry.kind !== "circle" && geometry.kind !== "arc") incompatible("requires a circle or arc");
+    if (geometry !== undefined && geometry.kind !== "circle" && geometry.kind !== "arc" && geometry.kind !== "ellipse") incompatible("requires a circle, arc or ellipse");
   } else if (dimension.kind === "arc-length") {
     const geometry = geometryById.get(dimension.target.entityId);
     if (geometry !== undefined && geometry.kind !== "arc") incompatible("requires an arc");
   } else if (dimension.kind === "angle") {
     const first = geometryById.get(dimension.first.entityId);
     const second = geometryById.get(dimension.second.entityId);
+    const direction = (geometry: SketchGeometry | undefined): boolean => geometry === undefined || geometry.kind === "line" || geometry.kind === "ellipse";
+    if (!direction(first) || !direction(second)) incompatible("requires two lines");
+  } else if (dimension.kind === "point-line-distance") {
+    const point = geometryById.get(dimension.point.entityId);
+    const line = geometryById.get(dimension.line.entityId);
+    if ((point !== undefined && !supportsPointSelector(point, dimension.point.selector)) || (line !== undefined && line.kind !== "line")) incompatible("requires a point and a line");
+  } else if (dimension.kind === "line-line-distance") {
+    const first = geometryById.get(dimension.first.entityId);
+    const second = geometryById.get(dimension.second.entityId);
     if ((first !== undefined && first.kind !== "line") || (second !== undefined && second.kind !== "line")) incompatible("requires two lines");
+  } else if (dimension.kind === "perimeter") {
+    const geometry = geometryById.get(dimension.target.entityId);
+    if (geometry !== undefined && geometry.kind !== "circle" && geometry.kind !== "ellipse" && geometry.kind !== "rectangle") incompatible("requires a circle, ellipse or rectangle");
+  } else if (dimension.kind === "width" || dimension.kind === "height") {
+    const geometry = geometryById.get(dimension.target.entityId);
+    if (geometry !== undefined && geometry.kind !== "rectangle") incompatible("requires a rectangle");
   } else if (dimension.kind === "linear") {
     const first = geometryById.get(dimension.first.entityId);
     const second = geometryById.get(dimension.second.entityId);
@@ -229,6 +257,7 @@ function validateReference(
   diagnostics: SketchDiagnostic[],
   ownerId: string
 ): void {
+  if (isSketchDatumId(reference.entityId)) return;
   const geometry = geometryById.get(reference.entityId);
   if (geometry === undefined) {
     diagnostics.push(error("MISSING_REFERENCE", `Reference '${reference.entityId}' does not exist.`, [ownerId, reference.entityId], "Repair or remove the dangling reference."));
@@ -250,6 +279,7 @@ function geometryNumbers(geometry: SketchGeometry): readonly number[] {
   if (geometry.kind === "ellipse") return [...geometry.center, ...geometry.majorAxis, geometry.minorToMajorRatio];
   if (geometry.kind === "spline") return [...geometry.controlPoints.flatMap((point) => [...point]), ...geometry.knots, geometry.degree];
   if (geometry.kind === "polygon") return [...geometry.center, ...geometry.vertex, geometry.sides];
+  if (geometry.kind === "rectangle") return [...geometry.center, geometry.widthMm, geometry.heightMm, geometry.rotationRad];
   return [...geometry.startCenter, ...geometry.endCenter, geometry.widthMm];
 }
 

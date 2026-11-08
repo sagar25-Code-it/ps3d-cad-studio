@@ -7,6 +7,8 @@ import {
   GENERAL_BODY_OPERATIONS,
   SKETCH_DATUM_PLANES,
   SKETCH_POINT_REFS,
+  SKETCH_RELATIVE_DISTANCE_NAMES,
+  isSketchDatumEntityId,
   isElectricalSheetPositionAvailable,
   type AssemblyIntent,
   type AssemblyMate,
@@ -294,7 +296,7 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   // A reference perimeter may sum a whole chain of curves; a refraction names three lines and a symmetry three curves.
   const maxEntities = !isRecord(value) ? 0 : value.kind === "perimeter" ? 64 : value.kind === "symmetry" || value.kind === "refraction" ? 3 : 2;
   if (!isRecord(value) || !stableId(value.id) || !Array.isArray(value.entityIds) || value.entityIds.length < 1 || value.entityIds.length > maxEntities
-    || value.entityIds.some((id) => typeof id !== "string" || !entityIds.has(id))) return false;
+    || value.entityIds.some((id) => typeof id !== "string" || !(entityIds.has(id) || isSketchDatumEntityId(id)))) return false;
   if (!CONSTRAINT_KINDS.includes(String(value.kind))) return false;
   const hasValue = Object.hasOwn(value, "valueMm");
   const hasDimension = Object.hasOwn(value, "dimension");
@@ -315,14 +317,15 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   // A driven (reference) dimension is measured: it carries no value of its own, and only dimension kinds can be driven.
   if (driven && (hasValue || hasValueDeg || !["radius", "distance", "angle", "arc-length", "perimeter"].includes(String(value.kind)))) return false;
   if (hasDimension && (!hasValue && !driven)) return false;
-  if (hasDimension && !["length", "width", "height", "radius"].includes(String(value.dimension))) return false;
+  if (hasDimension && !["length", "width", "height", "radius", "diameter", "aligned", "horizontal", "vertical", "point-line", "line-line", "major-radius", "minor-radius"].includes(String(value.dimension))) return false;
   if (hasValueDeg && (value.kind !== "angle" || !(typeof value.valueDeg === "number" && Number.isFinite(value.valueDeg) && value.valueDeg >= 0 && value.valueDeg < 360))) return false;
   if (value.kind === "angle" && !driven && !hasValueDeg) return false;
-  if (value.kind === "angle" && (value.entityIds.length !== 2 || hasValue)) return false;
+  // An angle is between two lines (or a line and an axis); an ellipse alone gives the turn of its major axis.
+  if (value.kind === "angle" && (value.entityIds.length < 1 || value.entityIds.length > 2 || hasValue)) return false;
   if (hasPoints) {
     // Only point-level relations name defining points, and each name must be a known point reference.
     const points = value.points;
-    if ((value.kind !== "coincident" && value.kind !== "midpoint" && value.kind !== "smooth") || !Array.isArray(points) || points.length < 1 || points.length > value.entityIds.length
+    if ((value.kind !== "coincident" && value.kind !== "midpoint" && value.kind !== "smooth" && value.kind !== "fixed" && value.kind !== "distance") || !Array.isArray(points) || points.length < 1 || points.length > value.entityIds.length
       || points.some((point) => !(SKETCH_POINT_REFS as readonly unknown[]).includes(point))) return false;
     if (value.kind === "smooth" && (points.length !== 2 || points.some((point) => point !== "start" && point !== "end"))) return false;
   }
@@ -339,6 +342,8 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   if (hasRatio && (value.kind !== "refraction" || !finiteRange(value.ratio, 0.05, 20))) return false;
   if (value.kind === "refraction" && (!hasRatio || value.entityIds.length !== 3)) return false;
   if (hasValue && value.kind === "arc-length" || hasValue && value.kind === "perimeter") return finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, 40_000);
+  // A distance between points may be zero (two points level with each other).
+  if (hasValue && value.kind === "distance" && (SKETCH_RELATIVE_DISTANCE_NAMES as readonly unknown[]).includes(value.dimension)) return finiteRange(value.valueMm, 0, 20_000);
   return !hasValue || finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, 20_000);
 }
 
