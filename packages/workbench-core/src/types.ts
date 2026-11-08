@@ -183,6 +183,11 @@ export interface WorkbenchSketchConstraint {
   readonly points?: readonly SketchPointRef[];
   readonly valueMm?: number;
   readonly dimension?: "length" | "width" | "height" | "radius";
+  /**
+   * A dimension only: the expression that drives `valueMm` (`2 * pin_r`). `valueMm` keeps the last value the expression gave, and is
+   * recomputed whenever a parameter it uses changes. Absent for a dimension typed as a plain number.
+   */
+  readonly expression?: string;
   /** A relaxed constraint stays recorded but is ignored by the solver and the degree-of-freedom estimate. */
   readonly suppressed?: boolean;
 }
@@ -1202,13 +1207,31 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   readonly flangeAngleDeg?: number;
   /** Sheet-hem only: hem style — "closed" folds the flange back against the base, "open" leaves a gap of sheetThicknessMm. */
   readonly hemStyle?: "closed" | "open";
+  /**
+   * Numbers of this step that an expression drives, by field ID (`{ distance: "2 * pin_r" }`). The plain property (`valueMm` and so on) keeps
+   * the last value the expression gave, so a step whose expression later fails still builds from its previous good number.
+   */
+  readonly expressions?: Readonly<Record<string, string>>;
 }
 
 export type DesignFeature = DesignSketchFeature | DesignSolidFeature;
 
+/**
+ * A named, project-wide value that features and sketch dimensions can use in expressions. `unit` says what the value is: "mm" for a length,
+ * "deg" for an angle, "" for a plain number; a bare number in the expression takes that unit.
+ */
+export interface DesignParameter {
+  readonly name: string;
+  readonly expression: string;
+  readonly unit: "mm" | "deg" | "";
+  readonly comment: string;
+}
+
 /** The parametric history (timeline). Optional so projects saved before it existed still load unchanged. */
 export interface DesignHistory {
   readonly features: readonly DesignFeature[];
+  /** The user parameter table (Change Parameters). Absent until the first parameter is added. */
+  readonly parameters?: readonly DesignParameter[];
   /** How many features are active: the rollback marker sits after this many. `features.length` means no rollback. */
   readonly rollbackIndex: number;
   /** The sketch feature the working sketch was opened from, or null for a sketch that has not been finished yet. */
@@ -1246,7 +1269,8 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "delete-sketch-entity"; readonly entityId: string }
   | { readonly kind: "add-sketch-constraint"; readonly constraint: WorkbenchSketchConstraint }
   | { readonly kind: "delete-sketch-constraint"; readonly constraintId: string }
-  | { readonly kind: "set-sketch-dimension"; readonly entityId: string; readonly dimension: "length" | "width" | "height" | "radius"; readonly valueMm: number }
+  /** With `expression`, the dimension is bound to it and the evaluated expression wins over `valueMm`. */
+  | { readonly kind: "set-sketch-dimension"; readonly entityId: string; readonly dimension: "length" | "width" | "height" | "radius"; readonly valueMm: number; readonly expression?: string }
   | { readonly kind: "toggle-sketch-construction"; readonly entityId: string }
   | { readonly kind: "toggle-sketch-entity-visibility"; readonly entityId: string }
   | {
@@ -1270,6 +1294,12 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "add-design-solid"; readonly feature: DesignSolidFeature; readonly body: GeneralSolidBody }
   /** Changes a solid feature's parameters and replaces its solid. */
   | { readonly kind: "update-design-solid"; readonly feature: DesignSolidFeature; readonly body: GeneralSolidBody }
+  /**
+   * Replaces the user parameter table. `renames` lists parameters whose name changed (old to new): every expression that used the old name,
+   * in the table, in features and in sketch dimensions, is rewritten, so a rename never breaks a reference. Every bound number is then
+   * re-evaluated; the caller rebuilds the solids afterwards with `regenerate-design`.
+   */
+  | { readonly kind: "set-design-parameters"; readonly parameters: readonly DesignParameter[]; readonly renames?: readonly { readonly from: string; readonly to: string }[] }
   /** Applies the result of rebuilding features after a sketch changed: new solids, or the reason a feature failed. */
   | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly message?: string }[] }
   | { readonly kind: "set-design-feature-suppressed"; readonly featureId: string; readonly suppressed: boolean }
@@ -1417,7 +1447,7 @@ export type WorkbenchOperation = OperationEnvelope & (
 export const WORKBENCH_OPERATION_KINDS = [
   "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
   "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-sketch-plane",
-  "commit-design-sketch", "edit-design-sketch", "new-design-sketch", "add-design-solid", "update-design-solid", "regenerate-design",
+  "commit-design-sketch", "edit-design-sketch", "new-design-sketch", "add-design-solid", "update-design-solid", "regenerate-design", "set-design-parameters",
   "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
   "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility", "modify-general-body",
   "add-construction-plane", "delete-construction-plane", "toggle-construction-plane-visibility", "rename-construction-plane",

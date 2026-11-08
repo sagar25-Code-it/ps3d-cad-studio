@@ -53,6 +53,7 @@ import {
   validatePartFeatureStack,
   type PartFeatureResult
 } from "./part-features.js";
+import { setDesignParameters, settleDesignExpressions } from "./design-parameters.js";
 import { failure, validateWorkbenchProject, validSketchPlaneFrame, validSketchPlaneTilt, WORKBENCH_LIMITS } from "./validation.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
@@ -108,7 +109,7 @@ export function applyWorkbenchOperation(
     return failure("RESOURCE_LIMIT", "The preview audit reached its 500-entry limit.", [current.value.id], "Export the project and start a compacted revision lineage.");
   }
 
-  const changed = applyIntent(current.value, operation);
+  const changed = settleDesignExpressions(current.value, operation, applyIntent(current.value, operation), resizeSketchEntity);
   if (!changed.ok) return changed;
   const nextRevision = current.value.revision + 1;
   const next: WorkbenchProject = {
@@ -190,8 +191,9 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       if (!keys(input, [...common, "constraintId"]) || !stableId(input.constraintId)) return invalidOperation("The sketch constraint ID is invalid.");
       break;
     case "set-sketch-dimension":
-      if (!keys(input, [...common, "entityId", "dimension", "valueMm"]) || !stableId(input.entityId)
-        || !["length", "width", "height", "radius"].includes(String(input.dimension)) || !finite(input.valueMm)) {
+      if (!keys(input, [...common, "entityId", "dimension", "valueMm", ...(Object.hasOwn(input, "expression") ? ["expression"] : [])]) || !stableId(input.entityId)
+        || !["length", "width", "height", "radius"].includes(String(input.dimension)) || !finite(input.valueMm)
+        || (Object.hasOwn(input, "expression") && !(typeof input.expression === "string" && input.expression.length >= 1 && input.expression.length <= 400))) {
         return invalidOperation("The sketch dimension edit is invalid.");
       }
       break;
@@ -235,6 +237,13 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
           // A result with neither a body nor a message means the step applied cleanly (a join or cut reports this: the
           // finished shape travels with the step that made the body).
           || (Object.hasOwn(result, "message") && !shortText(result.message, 1, 400)))) return invalidOperation("The rebuild results are invalid.");
+      break;
+    case "set-design-parameters":
+      if (!keys(input, [...common, "parameters", ...(Object.hasOwn(input, "renames") ? ["renames"] : [])]) || !boundedList(input.parameters, 200, isRecord)
+        || input.parameters.some((parameter) => !keys(parameter, ["name", "expression", "unit", "comment"]) || typeof parameter.name !== "string" || typeof parameter.expression !== "string"
+          || !["mm", "deg", ""].includes(String(parameter.unit)) || typeof parameter.comment !== "string")
+        || (Object.hasOwn(input, "renames") && (!boundedList(input.renames, 200, isRecord)
+          || input.renames.some((rename) => !keys(rename, ["from", "to"]) || typeof rename.from !== "string" || typeof rename.to !== "string")))) return invalidOperation("The parameter table is invalid.");
       break;
     case "set-design-feature-suppressed":
       if (!keys(input, [...common, "featureId", "suppressed"]) || !stableId(input.featureId) || typeof input.suppressed !== "boolean") return invalidOperation("The suppress request is invalid.");
@@ -650,6 +659,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     case "add-design-solid": return addDesignSolid(project, operation.feature, operation.body);
     case "update-design-solid": return updateDesignSolid(project, operation.feature, operation.body);
     case "regenerate-design": return regenerateDesign(project, operation.results);
+    case "set-design-parameters": return setDesignParameters(project, operation.parameters, operation.renames ?? [], resizeSketchEntity);
     case "set-design-feature-suppressed": return setDesignFeatureSuppressed(project, operation.featureId, operation.suppressed);
     case "delete-design-feature": return deleteDesignFeature(project, operation.featureId);
     case "set-design-rollback": return setDesignRollback(project, operation.index);
@@ -1251,7 +1261,7 @@ function markElectromechanicalStale(project: WorkbenchProject, electrical: Elect
   return { ...project, electrical, assembly };
 }
 
-function resizeSketchEntity(entity: SketchEntity, dimension: "length" | "width" | "height" | "radius", valueMm: number): SketchEntity | undefined {
+export function resizeSketchEntity(entity: SketchEntity, dimension: "length" | "width" | "height" | "radius", valueMm: number): SketchEntity | undefined {
   if (entity.kind === "line" && dimension === "length") {
     const dx = entity.end[0] - entity.start[0];
     const dy = entity.end[1] - entity.start[1];

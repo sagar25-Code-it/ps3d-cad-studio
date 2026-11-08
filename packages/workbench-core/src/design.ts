@@ -11,6 +11,8 @@ import type {
   WorkbenchProject,
   WorkbenchResult
 } from "./types.js";
+import { validFeatureExpressions } from "./feature-bindings.js";
+import { validParameterTable } from "./parameter-graph.js";
 
 /**
  * The parametric history ("timeline"): an ordered list of sketch and solid features with a rollback marker. A sketch
@@ -156,7 +158,7 @@ export function commitDesignSketch(project: WorkbenchProject, featureId: string,
   if (history.features.length >= MAX_DESIGN_FEATURES) return fail("RESOURCE_LIMIT", "The timeline reached its feature limit.", [], "Delete a feature before adding another.");
   if (history.features.some((feature) => feature.id === featureId)) return fail("INVALID_OPERATION", "A timeline feature with this ID already exists.", [featureId], "Use a new feature ID.");
   const feature: DesignSketchFeature = { id: featureId, name, kind: "sketch", suppressed: false, sketch: project.sketch };
-  const next: DesignHistory = { features: insertAt(history.features, history.rollbackIndex, feature), rollbackIndex: history.rollbackIndex + 1, editingSketchId: featureId };
+  const next: DesignHistory = { ...history, features: insertAt(history.features, history.rollbackIndex, feature), rollbackIndex: history.rollbackIndex + 1, editingSketchId: featureId };
   return changed(withHistory(project, next), [featureId], `Finished ${name} into the timeline.`);
 }
 
@@ -270,6 +272,7 @@ export function deleteDesignFeature(project: WorkbenchProject, featureId: string
   // Only a body's own (new-body) step takes the body with it; removing a join or cut leaves the body, which the caller rebuilds.
   const goneBodies = new Set(history.features.filter((candidate): candidate is DesignSolidFeature => removed.has(candidate.id) && candidate.kind !== "sketch" && !modifiesBody(candidate)).map((candidate) => candidate.bodyId));
   const next: DesignHistory = {
+    ...history,
     features: history.features.filter((candidate) => !removed.has(candidate.id)),
     rollbackIndex: history.rollbackIndex - removedBeforeMarker,
     editingSketchId: history.editingSketchId !== null && removed.has(history.editingSketchId) ? null : history.editingSketchId
@@ -306,7 +309,7 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "expressions"])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
   if (Object.hasOwn(value, "extent")) {
     // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
@@ -513,13 +516,14 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (Object.hasOwn(value, "draftAngleDeg")) {
     if (value.kind !== "draft" || typeof value.draftAngleDeg !== "number" || !Number.isFinite(value.draftAngleDeg) || value.draftAngleDeg <= 0 || value.draftAngleDeg >= 80) return false;
   }
+  if (Object.hasOwn(value, "expressions") && !validFeatureExpressions(value.kind as DesignSolidFeature["kind"], value.expressions)) return false;
   if (Object.hasOwn(value, "health") && !(isRecord(value.health) && hasOnly(value.health, ["message"], []) && shortText(value.health.message, 400))) return false;
   return true;
 }
 
 /** Checks a saved timeline: feature shapes, unique IDs, solids built on earlier sketches, and a consistent rollback marker. */
 export function validateDesignHistory(value: unknown, validSketch: (sketch: unknown) => boolean): value is DesignHistory {
-  if (!isRecord(value) || !hasOnly(value, ["features", "rollbackIndex", "editingSketchId"], [])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["features", "rollbackIndex", "editingSketchId"], ["parameters"])) return false;
   const features = value.features;
   if (!Array.isArray(features) || features.length > MAX_DESIGN_FEATURES) return false;
   if (typeof value.rollbackIndex !== "number" || !Number.isInteger(value.rollbackIndex) || value.rollbackIndex < 0 || value.rollbackIndex > features.length) return false;
@@ -543,5 +547,7 @@ export function validateDesignHistory(value: unknown, validSketch: (sketch: unkn
       }
     }
   }
-  return value.editingSketchId === null || (typeof value.editingSketchId === "string" && sketchIds.has(value.editingSketchId));
+  if (!(value.editingSketchId === null || (typeof value.editingSketchId === "string" && sketchIds.has(value.editingSketchId)))) return false;
+  // The parameter table and every bound number must form a graph without a cycle.
+  return validParameterTable(value as unknown as DesignHistory);
 }

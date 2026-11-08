@@ -31,6 +31,7 @@ import {
 } from "./types.js";
 import { createElectricalTemplate } from "./templates.js";
 import { validateDesignHistory } from "./design.js";
+import { MAX_EXPRESSION_LENGTH, parseExpression } from "./expressions.js";
 import {
   ELECTROMECHANICAL_CATALOG,
   createElectromechanicalAssembly,
@@ -293,8 +294,11 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   const hasDimension = Object.hasOwn(value, "dimension");
   const hasSuppressed = Object.hasOwn(value, "suppressed");
   const hasPoints = Object.hasOwn(value, "points");
-  const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : []), ...(hasPoints ? ["points"] : [])];
+  const hasExpression = Object.hasOwn(value, "expression");
+  const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : []), ...(hasPoints ? ["points"] : []), ...(hasExpression ? ["expression"] : [])];
   if (!exactKeys(value, expectedKeys) || (hasDimension && !hasValue) || (hasSuppressed && typeof value.suppressed !== "boolean")) return false;
+  // An expression only drives a dimension, and must be short, parseable text.
+  if (hasExpression && (!hasValue || typeof value.expression !== "string" || value.expression.length < 1 || value.expression.length > MAX_EXPRESSION_LENGTH || !parseExpression(value.expression).ok)) return false;
   if (hasDimension && !["length", "width", "height", "radius"].includes(String(value.dimension))) return false;
   if (hasPoints) {
     // Only point-level relations name defining points, and each name must be a known point reference.
