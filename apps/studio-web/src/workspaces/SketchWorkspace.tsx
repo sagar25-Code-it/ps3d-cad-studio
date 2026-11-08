@@ -525,7 +525,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (reader === undefined) { props.onMessage("The sketch clipboard is empty. Select curves and press Ctrl+C first."); return; }
     void globalThis.navigator.clipboard.readText().then((text) => {
       const parsed = parseClipboard(text);
-      if (!parsed.ok) { props.onMessage("The sketch clipboard is empty. Select curves and press Ctrl+C first."); return; }
+      if (!parsed.ok) { props.onMessage(`The sketch clipboard cannot be pasted: ${parsed.diagnostics[0]?.message ?? "it does not hold sketch curves."} Select curves and press Ctrl+C first.`); return; }
       storeSketchClipboard(parsed.value);
       pasteFrom(parsed.value);
     }).catch(() => props.onMessage("The sketch clipboard is empty. Select curves and press Ctrl+C first."));

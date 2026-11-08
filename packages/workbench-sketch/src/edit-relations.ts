@@ -414,3 +414,49 @@ export function carriedRelations(
     .filter((constraint) => constraint.suppressed !== true && kinds.includes(constraint.kind) && constraint.entityIds.includes(fromId))
     .map((constraint): WorkbenchSketchConstraint => ({ ...constraint, id: context.newId("constraint"), entityIds: constraint.entityIds.map((id) => (id === fromId ? toId : id)) }));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Parallel pairs whose lines run opposite ways
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The live solver reads Parallel as "same direction", so a copied or mirrored pair whose lines run opposite ways (a mirrored polygon
+ * reverses its winding) would be demoted to unconstrained. The copy is the same shape either way, so one line of such a pair is
+ * stored reversed (start and end swapped), and every relation that names its ends or its direction is adjusted to match.
+ */
+export function alignParallelDirections(
+  entities: readonly SketchEntity[],
+  constraints: readonly WorkbenchSketchConstraint[]
+): { readonly entities: readonly SketchEntity[]; readonly constraints: readonly WorkbenchSketchConstraint[] } {
+  const lines = new Map(entities.filter((entity): entity is Extract<SketchEntity, { kind: "line" }> => entity.kind === "line").map((entity) => [entity.id, entity] as const));
+  const flipped = new Set<string>();
+  const directionOf = (id: string): Vec2 => {
+    const line = lines.get(id)!;
+    const sign = flipped.has(id) ? -1 : 1;
+    return [sign * (line.end[0] - line.start[0]), sign * (line.end[1] - line.start[1])];
+  };
+  for (const constraint of constraints) {
+    if (constraint.kind !== "parallel" || constraint.suppressed === true) continue;
+    const [first, second] = constraint.entityIds;
+    if (first === undefined || second === undefined || !lines.has(first) || !lines.has(second)) continue;
+    const a = directionOf(first);
+    const b = directionOf(second);
+    if (a[0] * b[0] + a[1] * b[1] >= 0) continue;
+    const candidate = flipped.has(second) ? first : second;
+    if (flipped.has(candidate)) continue;
+    flipped.add(candidate);
+  }
+  if (flipped.size === 0) return { entities, constraints };
+  const swapRef = (ref: SketchPointRef): SketchPointRef => (ref === "start" ? "end" : ref === "end" ? "start" : ref);
+  return {
+    entities: entities.map((entity) => (entity.kind === "line" && flipped.has(entity.id) ? { ...entity, start: entity.end, end: entity.start } : entity)),
+    constraints: constraints.map((constraint): WorkbenchSketchConstraint => {
+      if (!constraint.entityIds.some((id) => flipped.has(id))) return constraint;
+      const points = constraint.points === undefined ? undefined : constraint.points.map((ref, index) => (flipped.has(constraint.entityIds[index] ?? "") ? swapRef(ref) : ref));
+      // An angle runs from the direction of the first line to the direction of the second: reversing one of them adds a half turn.
+      const turned = constraint.kind === "angle" && constraint.valueDeg !== undefined && constraint.entityIds.filter((id) => flipped.has(id)).length === 1
+        ? { valueDeg: (constraint.valueDeg + 180) % 360 } : {};
+      return { ...constraint, ...(points === undefined ? {} : { points }), ...turned };
+    })
+  };
+}

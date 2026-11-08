@@ -11,7 +11,8 @@ import {
 } from "../../workbench-core/src/index.js";
 import { entityExtents } from "./index.js";
 import { editPlan, type SketchEditContext, type SketchEditPlan, type SketchEditResult } from "./edit-tools.js";
-import { cloneWithRelations, internalRelations, planHolds } from "./sketch-clone.js";
+import { cloneWithRelations, internalRelations } from "./sketch-clone.js";
+import { alignParallelDirections, finishPlan } from "./edit-relations.js";
 
 /**
  * The sketch clipboard (Ctrl+C / Ctrl+X / Ctrl+V). Copy takes the selected entities with the relations that only involve them, in plain
@@ -89,13 +90,14 @@ export function pasteSketchClipboard(context: SketchEditContext, clipboard: Sket
   if (context.sketch.entities.length + clipboard.entities.length > WORKBENCH_LIMITS.maxEntities) return failure("RESOURCE_LIMIT", "Pasting would exceed the sketch's entity limit.", [], "Delete some curves first.");
   const [dx, dy] = options.offsetMm ?? pasteOffset(clipboard, options.pasteNumber ?? 1);
   const shift = (point: Vec2): Vec2 => [point[0] + dx, point[1] + dy];
-  const full = cloneWithRelations(context, clipboard.entities, clipboard.constraints, { point: shift, rotation: (degrees) => degrees });
-  const label = `Pasted ${full.entities.length} curve${full.entities.length === 1 ? "" : "s"}${full.constraints.length === 0 ? "" : ` with ${full.constraints.length} relation${full.constraints.length === 1 ? "" : "s"}`}`;
-  const withRelations = editPlan(label, { addEntities: full.entities, addConstraints: full.constraints });
-  if (!withRelations.ok) return withRelations;
-  if (planHolds(context.sketch, withRelations.value).ok) return withRelations;
-  // The solver would not take the copied relations as they were; the geometry is still exactly the copy.
-  return editPlan(`Pasted ${full.entities.length} curve${full.entities.length === 1 ? "" : "s"} (relations not carried over)`, { addEntities: full.entities });
+  const cloned = cloneWithRelations(context, clipboard.entities, clipboard.constraints, { point: shift, rotation: (degrees) => degrees });
+  const full = alignParallelDirections(cloned.entities, cloned.constraints);
+  const planned = finishPlan(context, { label: `Pasted ${full.entities.length} curve${full.entities.length === 1 ? "" : "s"}`, removeEntityIds: [], updateEntities: [], addEntities: full.entities, addConstraints: full.constraints });
+  if (!planned.ok) return planned;
+  // Relations the solver could not hold on the copy were left out by the plan; say how many travelled.
+  const kept = planned.value.addConstraints.length;
+  const lost = full.constraints.length - kept;
+  return editPlan(`Pasted ${full.entities.length} curve${full.entities.length === 1 ? "" : "s"}${kept === 0 ? "" : ` with ${kept} relation${kept === 1 ? "" : "s"}`}${lost > 0 ? ` (${lost} could not be carried over)` : ""}`, planned.value);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -106,39 +108,67 @@ export function serializeClipboard(clipboard: SketchClipboard): string {
   return JSON.stringify(clipboard);
 }
 
-const ENTITY_KINDS = ["line", "rectangle", "circle", "ellipse", "arc", "point", "spline"] as const;
-const CONSTRAINT_KINDS: readonly SketchConstraintKind[] = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed"];
+const CONSTRAINT_KINDS: readonly SketchConstraintKind[] = [
+  "horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed",
+  "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"
+];
 const POINT_REFS: readonly SketchPointRef[] = ["start", "end", "mid", "center", "self"];
-const MAX_COORDINATE = 1e6;
+/** The project's own coordinate limit: nothing the sketch would refuse can travel through the clipboard. */
+const MAX_COORDINATE = WORKBENCH_LIMITS.maxCoordinateMm;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= MAX_COORDINATE;
+const finite = (value: unknown, limit: number = MAX_COORDINATE): value is number => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= limit;
 const isPoint = (value: unknown): value is Vec2 => Array.isArray(value) && value.length === 2 && finite(value[0]) && finite(value[1]);
+const onlyKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean => Object.keys(value).every((key) => keys.includes(key));
 
-function validEntity(value: unknown): value is SketchEntity {
-  if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0 || value.id.length > 128 || typeof value.construction !== "boolean") return false;
-  if (value.visible !== undefined && typeof value.visible !== "boolean") return false;
+/** A clean copy of a valid entity (known keys only), or undefined when the data is not a sketch entity. */
+function cleanEntity(value: unknown): SketchEntity | undefined {
+  if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0 || value.id.length > 128 || typeof value.construction !== "boolean") return undefined;
+  if (value.visible !== undefined && typeof value.visible !== "boolean") return undefined;
+  const base = { id: value.id, construction: value.construction, ...(value.visible === undefined ? {} : { visible: value.visible as boolean }) };
+  const known = (extra: readonly string[]): boolean => onlyKeys(value, ["id", "kind", "construction", "visible", ...extra]);
   switch (value.kind) {
-    case "line": return isPoint(value.start) && isPoint(value.end);
-    case "arc": return isPoint(value.start) && isPoint(value.mid) && isPoint(value.end);
-    case "circle": return isPoint(value.center) && finite(value.radiusMm) && value.radiusMm > 0;
-    case "point": return isPoint(value.point);
-    case "rectangle": return isPoint(value.center) && finite(value.widthMm) && finite(value.heightMm) && value.widthMm > 0 && value.heightMm > 0 && finite(value.rotationDeg);
-    case "ellipse": return isPoint(value.center) && finite(value.majorRadiusMm) && finite(value.minorRadiusMm) && value.majorRadiusMm > 0 && value.minorRadiusMm > 0 && finite(value.rotationDeg);
-    case "spline": return Array.isArray(value.fitPoints) && value.fitPoints.length >= 3 && value.fitPoints.length <= 24 && value.fitPoints.every(isPoint);
-    default: return false;
+    case "line": return known(["start", "end"]) && isPoint(value.start) && isPoint(value.end) ? { ...base, kind: "line", start: value.start, end: value.end } : undefined;
+    case "arc": return known(["start", "mid", "end"]) && isPoint(value.start) && isPoint(value.mid) && isPoint(value.end) ? { ...base, kind: "arc", start: value.start, mid: value.mid, end: value.end } : undefined;
+    case "circle": return known(["center", "radiusMm"]) && isPoint(value.center) && finite(value.radiusMm, 10_000) && value.radiusMm > 0 ? { ...base, kind: "circle", center: value.center, radiusMm: value.radiusMm } : undefined;
+    case "point": return known(["point"]) && isPoint(value.point) ? { ...base, kind: "point", point: value.point } : undefined;
+    case "rectangle":
+      return known(["center", "widthMm", "heightMm", "rotationDeg"]) && isPoint(value.center) && finite(value.widthMm, 20_000) && finite(value.heightMm, 20_000) && value.widthMm > 0 && value.heightMm > 0 && finite(value.rotationDeg, 360)
+        ? { ...base, kind: "rectangle", center: value.center, widthMm: value.widthMm, heightMm: value.heightMm, rotationDeg: value.rotationDeg } : undefined;
+    case "ellipse":
+      return known(["center", "majorRadiusMm", "minorRadiusMm", "rotationDeg"]) && isPoint(value.center) && finite(value.majorRadiusMm, 10_000) && finite(value.minorRadiusMm, 10_000) && value.majorRadiusMm > 0 && value.minorRadiusMm > 0 && finite(value.rotationDeg, 360)
+        ? { ...base, kind: "ellipse", center: value.center, majorRadiusMm: value.majorRadiusMm, minorRadiusMm: value.minorRadiusMm, rotationDeg: value.rotationDeg } : undefined;
+    case "spline":
+      return known(["fitPoints"]) && Array.isArray(value.fitPoints) && value.fitPoints.length >= 3 && value.fitPoints.length <= 24 && value.fitPoints.every(isPoint) ? { ...base, kind: "spline", fitPoints: value.fitPoints as Vec2[] } : undefined;
+    default: return undefined;
   }
 }
 
-function validConstraint(value: unknown, entityIds: ReadonlySet<string>): value is WorkbenchSketchConstraint {
-  if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0 || value.id.length > 128) return false;
-  if (!CONSTRAINT_KINDS.includes(value.kind as SketchConstraintKind)) return false;
-  if (!Array.isArray(value.entityIds) || value.entityIds.length === 0 || value.entityIds.length > 4 || !value.entityIds.every((id) => typeof id === "string" && entityIds.has(id))) return false;
-  if (value.points !== undefined && !(Array.isArray(value.points) && value.points.length <= 4 && value.points.every((ref) => POINT_REFS.includes(ref as SketchPointRef)))) return false;
-  if (value.valueMm !== undefined && !finite(value.valueMm)) return false;
-  if (value.dimension !== undefined && !["length", "width", "height", "radius"].includes(value.dimension as string)) return false;
-  if (value.suppressed !== undefined && typeof value.suppressed !== "boolean") return false;
-  return true;
+/**
+ * A clean copy of a valid relation, or undefined. Every relation kind round-trips, with its value, angle, ratio, driven flag and pierce
+ * reference; a parameter expression is dropped (its parameters belong to the project it came from), keeping the number it last gave.
+ */
+function cleanConstraint(value: unknown, entityIds: ReadonlySet<string>): WorkbenchSketchConstraint | undefined {
+  if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0 || value.id.length > 128) return undefined;
+  if (!CONSTRAINT_KINDS.includes(value.kind as SketchConstraintKind)) return undefined;
+  if (!onlyKeys(value, ["id", "kind", "entityIds", "points", "valueMm", "dimension", "valueDeg", "driven", "pierce", "ratio", "expression", "suppressed"])) return undefined;
+  const maxEntities = value.kind === "perimeter" ? 64 : value.kind === "symmetry" || value.kind === "refraction" ? 3 : 2;
+  if (!Array.isArray(value.entityIds) || value.entityIds.length === 0 || value.entityIds.length > maxEntities || !value.entityIds.every((id) => typeof id === "string" && entityIds.has(id))) return undefined;
+  if (value.points !== undefined && !(Array.isArray(value.points) && value.points.length <= 4 && value.points.every((ref) => POINT_REFS.includes(ref as SketchPointRef)))) return undefined;
+  if (value.valueMm !== undefined && !finite(value.valueMm, 40_000)) return undefined;
+  if (value.valueDeg !== undefined && !(finite(value.valueDeg, 360) && value.valueDeg >= 0 && value.valueDeg < 360)) return undefined;
+  if (value.ratio !== undefined && !(finite(value.ratio, 20) && value.ratio >= 0.05)) return undefined;
+  if (value.dimension !== undefined && !["length", "width", "height", "radius"].includes(value.dimension as string)) return undefined;
+  if (value.driven !== undefined && typeof value.driven !== "boolean") return undefined;
+  if (value.suppressed !== undefined && typeof value.suppressed !== "boolean") return undefined;
+  if (value.expression !== undefined && typeof value.expression !== "string") return undefined;
+  if (value.pierce !== undefined) {
+    const pierce = value.pierce;
+    const ok = isRecord(pierce) && ((pierce.kind === "axis" && typeof pierce.axisId === "string" && onlyKeys(pierce, ["kind", "axisId"])) || (pierce.kind === "body-edge" && typeof pierce.bodyId === "string" && Number.isInteger(pierce.chain) && onlyKeys(pierce, ["kind", "bodyId", "chain"])));
+    if (!ok) return undefined;
+  }
+  const { expression: _expression, ...rest } = value;
+  return rest as unknown as WorkbenchSketchConstraint;
 }
 
 /** Reads clipboard text produced by `serializeClipboard`, refusing anything that is not exactly that. */
@@ -148,14 +178,16 @@ export function parseClipboard(text: string): WorkbenchResult<SketchClipboard> {
   try { data = JSON.parse(text); } catch { return reject("The clipboard does not hold sketch curves.", "Copy curves in a sketch first."); }
   if (!isRecord(data) || data.format !== SKETCH_CLIPBOARD_FORMAT || !Array.isArray(data.entities) || !Array.isArray(data.constraints)) return reject("The clipboard does not hold sketch curves.", "Copy curves in a sketch first.");
   if (data.entities.length === 0 || data.entities.length > 200 || data.constraints.length > 400) return reject("The clipboard holds too many or no curves.");
-  if (!data.entities.every(validEntity)) return reject("The clipboard has a curve that is not valid.");
-  const entities = data.entities as SketchEntity[];
+  const cleaned = data.entities.map(cleanEntity);
+  if (cleaned.some((entity) => entity === undefined)) return reject("The clipboard has a curve that is not valid.");
+  const entities = cleaned as SketchEntity[];
   const ids = new Set(entities.map((entity) => entity.id));
   if (ids.size !== entities.length) return reject("The clipboard repeats a curve.");
-  if (!data.constraints.every((constraint) => validConstraint(constraint, ids))) return reject("The clipboard has a relation that is not valid.");
+  const cleanedConstraints = data.constraints.map((constraint) => cleanConstraint(constraint, ids));
+  if (cleanedConstraints.some((constraint) => constraint === undefined)) return reject("The clipboard has a relation that is not valid.");
   const from = typeof data.from === "string" ? data.from.slice(0, 80) : "the clipboard";
   const leftBehind = typeof data.leftBehind === "number" && Number.isInteger(data.leftBehind) && data.leftBehind >= 0 ? data.leftBehind : 0;
-  return { ok: true, value: { format: SKETCH_CLIPBOARD_FORMAT, entities, constraints: data.constraints as WorkbenchSketchConstraint[], from, leftBehind } };
+  return { ok: true, value: { format: SKETCH_CLIPBOARD_FORMAT, entities, constraints: cleanedConstraints as WorkbenchSketchConstraint[], from, leftBehind } };
 }
 
 // ---------------------------------------------------------------------------------------------

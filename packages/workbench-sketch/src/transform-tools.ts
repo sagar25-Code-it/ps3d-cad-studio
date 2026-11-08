@@ -2,7 +2,7 @@ import { failure, type SketchEntity, type Vec2, type WorkbenchSketch, type Workb
 import { isDimensionConstraint, measureDimensionConstraint } from "../../workbench-core/src/sketch-measure.js";
 import { entityExtents, entityPoints } from "./index.js";
 import { mapEntity, type SketchEditContext, type SketchEditResult } from "./edit-tools.js";
-import { constraintHolds, finishPlan, finiteVec, nameOf, pairRelation } from "./edit-relations.js";
+import { alignParallelDirections, constraintHolds, finishPlan, finiteVec, nameOf, pairRelation } from "./edit-relations.js";
 import { internalRelations } from "./sketch-clone.js";
 
 /**
@@ -83,7 +83,8 @@ function cloneSet(context: SketchEditContext, sources: readonly SketchEntity[], 
       constraints.push(measured === undefined ? cloned : withMeasuredValue(cloned, measured));
     } else if (constraintHolds(probe, cloned)) constraints.push(cloned);
   }
-  return { entities: copies, constraints, idMap };
+  const aligned = alignParallelDirections(copies, constraints);
+  return { entities: aligned.entities, constraints: aligned.constraints, idMap };
 }
 
 /** Dimensions that follow the geometry: every driving dimension whose entities all moved, re-valued to what the new geometry measures. */
