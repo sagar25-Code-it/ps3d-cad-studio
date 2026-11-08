@@ -57,7 +57,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Mirror | Have | `mirror` edit tool |
 | Dynamic Mirror | Missing | Pre-select an axis and mirror future strokes live - not shipped |
 | Make Path (chain for cams) | Missing | |
-| Array / Polar / Move-Copy-Rotate-Scale-Stretch | Partial | Linear pattern shipped; Polar / Rotate / Scale / Stretch missing |
+| Array / Polar / Move-Copy-Rotate-Scale-Stretch | Partial | Rectangular and circular (polar) patterns, Move / Copy, Rotate and Scale are shipped as sketch edit tools (`patternEntities`, `transformEntities`): each acts in place or on copies, scales circle / rectangle / ellipse sizes with the geometry, and an in-place edit is solved against the sketch relations and refused if it would break one. Stretch (move only the endpoints inside a window) is still missing |
 | Clipboard (Ctrl+C/X/V in a sketch) | Missing | |
 | Convert / Project / Intersect / Silhouette / Face curves | Missing | No projection from a solid onto the sketch |
 | Repair sketch / Validate sketch / SketchXpert | Partial | Health report flags over-defined sketches; interactive repair missing |
@@ -144,9 +144,9 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 
 | PDF tool | Status | Where / Gap |
 |---|---|---|
-| Zebra stripes (G0 / G1 / G2 / G3) | Missing | |
+| Zebra stripes (G0 / G1 / G2 / G3) | Partial | The Part ribbon's Zebra toggle shades every body with the black-and-white bands of a striped environment reflected in its surface (`Viewport.setZebra`, a `MeshStandardMaterial` fragment-shader patch driven by world-space reflection). Axis (X / Y / Z) and stripe density are adjustable. It shows G0 and G1 breaks by eye; there is no automatic continuity grade or G3 test |
 | Gaussian / mean curvature map | Missing | |
-| Curvature comb | Missing | |
+| Curvature comb | Partial | The Sketch palette's Curvature comb toggle draws teeth along arcs, circles, ellipses and fit-point splines (`curvatureCombOf`, `sketchCurvatureCombs`): tooth length is curvature times a common scale so curves compare, teeth point away from the centre of curvature and flip sides at an inflection, and the tooth tips are joined into an envelope. Combs on surface edges and on 3D curves are still out |
 | Mass-inertia integrator (BRepGProp) | Shipped | `solidMetrics` returns volume, surface area, centroid, triangle count AND the full 3×3 inertia tensor at the body centroid (`inertiaTensorMm5`), computed per-tetrahedron with the Tonon-2004 explicit formulas and summed against the mesh centroid. Multiply by a density in kg/mm³ to get the kg·mm² inertia the mass-properties report needs |
 | Geometry checker (BRepCheck) | Partial | Design-health report flags open / near-open profiles; full B-rep checks missing |
 | Section analysis | Shipped | `sectionAnalysis(positionsMm, indices, plane, offsetMm)` in `packages/workbench-core/src/solid-metrics.ts` computes a planar cross-section of any general-body mesh and returns the ordered edges (pairs of 3D endpoints) where each triangle crosses the plane; a UI binding to display the cross-section on the viewport is still to come |
@@ -158,7 +158,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | PDF requirement | Status | Where / Gap |
 |---|---|---|
 | Base flange / sheet base | Shipped | `DesignSolidFeature.kind: "sheet-base"` extrudes a sketch profile by `sheetThicknessMm` |
-| Edge flange (bend angle, inner radius, length) | Partial | `kind: "sheet-flange"` builds a leg + circular bend + straight flange (`bentStripSection` / `tessellateBentStrip`) from `sheetThicknessMm`, `sheetBendRadiusMm`, `flangeLengthMm`, `flangeAngleDeg` (1–180°). The profile's X-extent is the flat leg and the height field is the strip width; the flange is its own body, not yet attached to a picked edge of an existing sheet |
+| Edge flange (bend angle, inner radius, length) | Shipped | `kind: "sheet-flange"` builds a standalone leg + circular bend + straight flange (`bentStripSection` / `tessellateBentStrip`) from `sheetThicknessMm`, `sheetBendRadiusMm`, `flangeLengthMm`, `flangeAngleDeg` (1-180 degrees). `kind: "sheet-edge-flange"` bends the same flange from a picked top-face edge of an existing plate: `sheetFrameOf` names the plate's straight boundary edges, and `attachEdgeFlange` removes the plate's side wall on that edge and the flange's end wall and welds the two, so the result is one closed solid whose inner and outer surfaces continue the plate's top and bottom faces. The edge number is stable because it indexes the plate as its first step made it, so further flanges can be added on other edges; the timeline step replays when the sketch or an earlier step changes. Edges are picked by number from a list in a prompt rather than clicked in the viewport |
 | Hem (closed / open) | Shipped | `kind: "sheet-hem"` is a 180° flange; closed uses a 0.05 mm inner radius so the return leg lies on the sheet, open keeps the bend radius |
 | Bend allowance / deduction / K-factor | Shipped | `sheetBendAllowanceMm`, `sheetOutsideSetbackMm`, `sheetBendDeductionMm` in `packages/workbench-geometry/src/sheet-metal.ts`, default K-factor 0.44 |
 | Unfold / flat pattern | Partial | `flatPatternOf` unfolds a leg + bend + flange into the flat blank (length, bend allowance, outline, bend lines) and `flatPatternSvg` renders it at 1 mm per unit. Single-bend strips only; multi-bend parts, corner reliefs and bend tables are out |

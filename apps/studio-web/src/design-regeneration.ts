@@ -1,6 +1,7 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
+import { attachEdgeFlange } from "../../../packages/workbench-geometry/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 
 /**
@@ -17,7 +18,7 @@ export interface RebuildResult {
   readonly message?: string;
 }
 
-const NORMALS: Readonly<Record<SketchPlane, readonly [number, number, number]>> = { xy: [0, 0, 1], xz: [0, -1, 0], yz: [1, 0, 0] };
+export const NORMALS: Readonly<Record<SketchPlane, readonly [number, number, number]>> = { xy: [0, 0, 1], xz: [0, -1, 0], yz: [1, 0, 0] };
 
 export function planeKeyOf(plane: SketchDatumPlane): SketchPlane {
   return plane === "datum:xz" ? "xz" : plane === "datum:yz" ? "yz" : "xy";
@@ -38,7 +39,7 @@ function shifted(body: GeneralSolidBody, normal: readonly [number, number, numbe
 
 /** Builds the solid a feature describes from the sketch snapshot it is based on. For a join or cut this is the tool solid. */
 export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature, color = "#b9c2c8"): Promise<SolidRebuild> {
-  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent") {
+  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange") {
     return { ok: false, message: "A direct-edit / indent step is applied during timeline replay, not through the sketch-driven builder." };
   }
   const sketch = sketchFeature.sketch;
@@ -156,9 +157,21 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
   const existing = project.part.generalBodies?.find((body) => body.id === bodyId);
   const outcomes = new Map<string, RebuildResult>();
   let current: GeneralSolidBody | undefined;
+  let baseBody: GeneralSolidBody | undefined;
   for (const step of steps) {
     // A lone body is rebuilt whatever its state; the steps of a chain only while they are live.
     if (chained && !isFeatureActive(history, step.id)) continue;
+    // Edge flange: bend a flange up from a named top-face edge of the sheet this body started as.
+    if (step.kind === "sheet-edge-flange") {
+      if (current === undefined || baseBody === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sheet this flange bends from could not be built." }); continue; }
+      const attached = attachEdgeFlange(current, baseBody, NORMALS[baseBody.feature?.plane ?? "xy"], { edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0 });
+      if (!attached.ok) { outcomes.set(step.id, { featureId: step.id, message: attached.message }); continue; }
+      const { brep: _faceNames, ...withoutFaces } = current;
+      void _faceNames;
+      current = { ...withoutFaces, positionsMm: [...attached.positionsMm], indices: [...attached.indices] };
+      outcomes.set(step.id, { featureId: step.id });
+      continue;
+    }
     // Direct-edit steps (move-body / scale-body / move-face / offset-face / emboss) transform the current body in place.
     if (isDirectEditFeature(step)) {
       if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this step changes could not be built, so there is nothing to modify." }); continue; }
@@ -183,7 +196,7 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
     const sized = modifies && step.extent === "through-all" && current !== undefined ? throughAllOverride(step, sketchFeature, current) : step;
     const built = await rebuildSolidFeature(modifies ? { ...sized, bodyId: `${step.id}:tool` } : sized, sketchFeature, existing?.color);
     if (!built.ok) { outcomes.set(step.id, { featureId: step.id, message: built.message }); continue; }
-    if (!modifies) { current = built.body; outcomes.set(step.id, { featureId: step.id }); continue; }
+    if (!modifies) { current = built.body; baseBody = built.body; outcomes.set(step.id, { featureId: step.id }); continue; }
     if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this step changes could not be built, so there is nothing to modify." }); continue; }
     if (step.operation !== "join" && step.operation !== "cut") { outcomes.set(step.id, { featureId: step.id, message: "The modifier step has no boolean operation set." }); continue; }
     const combined = await combineGeneralBodies({ target: current, tool: built.body, mode: step.operation, bodyId, name: current.name });

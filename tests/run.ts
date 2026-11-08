@@ -41,6 +41,7 @@ import { frenetTangencyDirectEditTests } from "./frenet-tangency-direct-edit.tes
 import { faceHelixDimStylesTests } from "./face-helix-dim-styles.test.js";
 import { bigPushTests } from "./big-push.test.js";
 import { sheetMetalTests } from "./sheet-metal.test.js";
+import { inspectTransformEdgeFlangeTests } from "./inspect-transform-edge-flange.test.js";
 import { constructionPlaneTests } from "./construction-planes.test.js";
 import { assemblyMeshTests } from "./assembly-mesh.test.js";
 import { assemblyMateTests } from "./assembly-mates.test.js";
@@ -104,6 +105,7 @@ const tests: readonly TestCase[] = [
   ...faceHelixDimStylesTests,
   ...bigPushTests,
   ...sheetMetalTests,
+  ...inspectTransformEdgeFlangeTests,
   ...constructionPlaneTests,
   ...assemblyMeshTests,
   ...assemblyMateTests,

@@ -50,6 +50,9 @@ interface WorkbenchRibbonProps {
   readonly onAddConstructionPlane: (mode: "offset" | "angle" | "three-points" | "midplane" | "tangent-to-cylinder") => void;
   readonly onAddConstructionAxis: (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis") => void;
   readonly onAddConstructionPoint: (mode: "xyz" | "midpoint" | "axis-plane-intersection") => void;
+  readonly onEdgeFlange: () => void;
+  readonly zebra: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null;
+  readonly onZebra: (next: { readonly axis: "x" | "y" | "z"; readonly frequency: number } | null) => void;
   readonly onDirectEdit: (mode: "move-body" | "scale-body" | "move-face" | "offset-face") => void;
   readonly onHoleWizard: () => void;
   readonly onInsertComponent: (shape: "box" | "cylinder") => void;
@@ -154,6 +157,9 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="line" label="Extend" hint="click a line" active={props.sketchEditTool === "extend"} onClick={() => props.onSketchEditTool("extend")} />
         <RibbonButton icon="constraint" label="Corner" hint="two lines" active={props.sketchEditTool === "corner"} onClick={() => props.onSketchEditTool("corner")} />
         <RibbonButton icon="pattern" label="Pattern" hint="grid / circular" active={props.sketchEditTool === "pattern"} onClick={() => props.onSketchEditTool("pattern")} />
+        <RibbonButton icon="move" label="Move / Copy" hint="dx · dy" active={props.sketchEditTool === "move"} onClick={() => props.onSketchEditTool("move")} />
+        <RibbonButton icon="revolve" label="Rotate" hint="angle · centre" active={props.sketchEditTool === "rotate"} onClick={() => props.onSketchEditTool("rotate")} />
+        <RibbonButton icon="scale" label="Scale" hint="factor · centre" active={props.sketchEditTool === "scale"} onClick={() => props.onSketchEditTool("scale")} />
         <RibbonButton icon="mirror" label="Mirror" hint="about a line" active={props.sketchEditTool === "mirror"} onClick={() => props.onSketchEditTool("mirror")} />
       </RibbonGroup>
       <RibbonGroup label="Include & solve">
@@ -227,6 +233,9 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="chamfer" label="Chamfer" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer")} />
         <RibbonButton icon="shell" label="Shell" hint="open +Z" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("shell")} />
       </RibbonGroup>
+      <RibbonGroup label="Sheet metal">
+        <RibbonButton icon="bore" label="Edge Flange" hint="pick edge · bend" disabled={!generalBodySelected} onClick={props.onEdgeFlange} />
+      </RibbonGroup>
       <RibbonGroup label="Direct editing">
         <RibbonButton icon="move" label="Move Body" hint="dx · dy · dz" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("move-body")} />
         <RibbonButton icon="scale" label="Scale Body" hint="×factor" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("scale-body")} />
@@ -243,6 +252,9 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
       <RibbonGroup label="Inspect & exchange">
         <RibbonButton icon="fit" label="Fit" hint="view" onClick={props.onFit} />
+        <RibbonButton icon="draft" label="Zebra" hint={props.zebra === null ? "G1 / G2 check" : `on · ${props.zebra.axis.toUpperCase()} stripes`} active={props.zebra !== null} onClick={() => props.onZebra(props.zebra === null ? { axis: "z", frequency: 6 } : null)} />
+        {props.zebra !== null && <RibbonButton icon="axes" label={`Zebra axis ${props.zebra.axis.toUpperCase()}`} hint="cycle X · Y · Z" onClick={() => props.onZebra({ ...props.zebra!, axis: props.zebra!.axis === "x" ? "y" : props.zebra!.axis === "y" ? "z" : "x" })} />}
+        {props.zebra !== null && <RibbonButton icon="pattern" label={`Stripes ×${props.zebra.frequency}`} hint="denser · coarser" onClick={() => props.onZebra({ ...props.zebra!, frequency: props.zebra!.frequency >= 24 ? 3 : props.zebra!.frequency * 2 })} />}
         <RibbonButton icon="json" label="Plate JSON" hint="plate only" onClick={props.onNativeDownload} />
         <RibbonButton icon="open" label="Open plate" hint="load" onClick={props.onNativeOpen} />
         <RibbonButton icon="export" label="Export STL" hint="all shown" onClick={props.onExportStl} />

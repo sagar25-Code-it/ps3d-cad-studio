@@ -51,6 +51,7 @@ import {
   type Vec3,
   type WorkspaceId
 } from "../../../packages/workbench-core/src/index.js";
+import { sheetFrameOf } from "../../../packages/workbench-geometry/src/index.js";
 import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshShell, meshTappedHole, METRIC_FASTENERS } from "../../../packages/workbench-geometry/src/index.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
 import { buildDesignHealthReport } from "../../../packages/workbench-health/src/index.js";
@@ -70,7 +71,7 @@ import {
 } from "../../../packages/exchange-3d/src/index.js";
 import { detectSketchProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
-import { hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
+import { NORMALS as PLANE_NORMALS, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
 import { CombineDialog, type CombineChoice } from "./ui/CombineDialog.js";
@@ -299,6 +300,8 @@ export function App(): React.JSX.Element {
   const [sketchCancelVersion, setSketchCancelVersion] = useState(0);
   const [combineRequest, setCombineRequest] = useState<{ readonly targetId: string | undefined; readonly mode: BooleanMode } | null>(null);
   const [sketchEditTool, setSketchEditTool] = useState<SketchEditToolId | null>(null);
+  const zebraRef = useRef<{ readonly axis: "x" | "y" | "z"; readonly frequency: number } | null>(null);
+  const [zebra, setZebraState] = useState<{ readonly axis: "x" | "y" | "z"; readonly frequency: number } | null>(null);
   const [sketchShowMovable, setSketchShowMovable] = useState(false);
   const [sketchCheckOpen, setSketchCheckOpen] = useState(false);
   const [sketchRequest, setSketchRequest] = useState<{ readonly command: "fix-curve" | "relax-relations" | "relax-dimensions"; readonly serial: number } | null>(null);
@@ -658,6 +661,7 @@ export function App(): React.JSX.Element {
     });
     viewport.restoreViewState(viewportState);
     viewportRef.current = viewport;
+    if (zebraRef.current !== null) viewport.setZebra(zebraRef.current);
     return () => { viewport.dispose(); viewportRef.current = undefined; };
   }, [acceptMeasurePoint, assemblyExplodeMaxMm, commitAssemblyExplode, isThreeDimensional, masterCartOpen, openContextMenu, previewAssemblyExplode, project.activeWorkspace]);
 
@@ -1100,6 +1104,45 @@ export function App(): React.JSX.Element {
     if (!applyProjectOperation({ kind: "add-construction-point", point })) { setStatus("ready"); setStatusText(`The project rejected ${labelText}.`); return; }
     setSelectedId(point.id);
     setStatusText(`Created ${point.name} (point ${ordinal}).`);
+  };
+
+  const handleEdgeFlange = async (): Promise<void> => {
+    const current = projectRef.current;
+    const bodies = current.part.generalBodies ?? [];
+    const body = bodies.find((candidate) => candidate.id === selectedId) ?? bodies[0];
+    if (body === undefined) { setStatus("ready"); setStatusText("Edge flange: create or select a plate first (a Sheet metal base plate or any extruded profile)."); return; }
+    const history = designOf(current);
+    const base = baseFeatureOf(history, body.id);
+    const sketchFeature = base === undefined ? undefined : history.features.find((candidate) => candidate.id === base.sketchFeatureId && candidate.kind === "sketch");
+    if (base === undefined || sketchFeature?.kind !== "sketch") { setStatus("ready"); setStatusText("Edge flange: this body is not in the timeline, so a flange cannot be recorded."); return; }
+    const rebuilt = await rebuildSolidFeature(base, sketchFeature, body.color);
+    if (!rebuilt.ok) { setStatus("error"); setStatusText(`Edge flange: ${rebuilt.message}`); return; }
+    const frame = sheetFrameOf(rebuilt.body, PLANE_NORMALS[rebuilt.body.feature?.plane ?? "xy"]);
+    if (frame === undefined || frame.edges.length === 0) { setStatus("ready"); setStatusText("Edge flange: this body has no flat top face with straight edges to bend from."); return; }
+    const direction = (vector: readonly [number, number, number]): string => {
+      const axis = [Math.abs(vector[0]), Math.abs(vector[1]), Math.abs(vector[2])];
+      const index = axis.indexOf(Math.max(...axis));
+      return `${vector[index]! < 0 ? "-" : "+"}${"XYZ"[index]}`;
+    };
+    const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
+    const listing = frame.edges.map((edge) => `${edge.index}: ${edge.lengthMm.toFixed(1)} mm, faces ${direction(edge.outward)}`).join("\n");
+    const edgeRaw = ask(`Edge to bend a flange from (plate ${frame.thicknessMm.toFixed(2)} mm thick):\n${listing}`, "0");
+    if (edgeRaw === null) return;
+    const edgeIndex = Number.parseInt(edgeRaw, 10);
+    if (!Number.isInteger(edgeIndex) || frame.edges[edgeIndex] === undefined) { setStatus("ready"); setStatusText(`Edge flange: pick an edge number from 0 to ${frame.edges.length - 1}.`); return; }
+    const radius = Number.parseFloat(ask("Inner bend radius (mm):", String(frame.thicknessMm)) ?? "");
+    const length = Number.parseFloat(ask("Flange length after the bend (mm):", "20") ?? "");
+    const angle = Number.parseFloat(ask("Bend angle (degrees, 1 to 180):", "90") ?? "");
+    if (![radius, length, angle].every(Number.isFinite) || radius < 0 || length <= 0 || angle <= 0 || angle > 180) { setStatus("ready"); setStatusText("Edge flange: enter a bend radius of 0 or more, a flange length above 0 and an angle up to 180°."); return; }
+    const feature: DesignSolidFeature = {
+      id: `feature:sheet-edge-flange-${crypto.randomUUID()}`,
+      name: `Edge flange ${edgeIndex} (${angle.toFixed(0)}°, ${length.toFixed(0)} mm)`,
+      kind: "sheet-edge-flange", suppressed: false,
+      sketchFeatureId: base.sketchFeatureId, profileIds: [],
+      valueMm: Math.max(0.01, length), bodyId: body.id, operation: "direct-edit",
+      flangeEdgeIndex: edgeIndex, sheetBendRadiusMm: radius, flangeLengthMm: length, flangeAngleDeg: angle
+    };
+    void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
   };
 
   const handleDirectEdit = (mode: "move-body" | "scale-body" | "move-face" | "offset-face"): void => {
@@ -3068,6 +3111,14 @@ export function App(): React.JSX.Element {
       onAddConstructionPlane={handleAddConstructionPlane}
       onAddConstructionAxis={handleAddConstructionAxis}
       onAddConstructionPoint={handleAddConstructionPoint}
+      zebra={zebra}
+      onZebra={(next) => {
+        zebraRef.current = next;
+        setZebraState(next);
+        viewportRef.current?.setZebra(next);
+        setStatusText(next === null ? "Zebra stripes off." : `Zebra stripes on (${next.axis.toUpperCase()} axis, ×${next.frequency}). Orbit the model: stripes that run straight across a seam mean tangent (G1) continuity; stripes that kink there mean a tangent break.`);
+      }}
+      onEdgeFlange={() => void handleEdgeFlange()}
       onDirectEdit={handleDirectEdit}
       onHoleWizard={handleHoleWizard}
       onFit={fitViewport}

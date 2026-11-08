@@ -283,6 +283,58 @@ export function patternEntities(context: SketchEditContext, ids: readonly string
 }
 
 // ---------------------------------------------------------------------------------------------
+// Move, rotate and scale
+// ---------------------------------------------------------------------------------------------
+
+export type TransformSpec =
+  | { readonly kind: "move"; readonly dxMm: number; readonly dyMm: number }
+  | { readonly kind: "rotate"; readonly angleDeg: number; readonly center: Vec2 }
+  | { readonly kind: "scale"; readonly factor: number; readonly center: Vec2 };
+
+/** Scales every defining point about `center` and the size fields by `factor`, giving the entity `id`. */
+function scaleEntity(entity: SketchEntity, id: string, center: Vec2, factor: number): SketchEntity {
+  const point = (value: Vec2): Vec2 => [center[0] + (value[0] - center[0]) * factor, center[1] + (value[1] - center[1]) * factor];
+  if (entity.kind === "circle") return { ...entity, id, center: point(entity.center), radiusMm: entity.radiusMm * factor };
+  if (entity.kind === "rectangle") return { ...entity, id, center: point(entity.center), widthMm: entity.widthMm * factor, heightMm: entity.heightMm * factor };
+  if (entity.kind === "ellipse") return { ...entity, id, center: point(entity.center), majorRadiusMm: entity.majorRadiusMm * factor, minorRadiusMm: entity.minorRadiusMm * factor };
+  return mapEntity(entity, id, point, (degrees) => degrees);
+}
+
+/**
+ * Moves, rotates or scales the selected entities. With `copy` the originals stay and transformed copies with fresh IDs are
+ * added; otherwise the entities are updated in place, and the solver rejects the edit if a relation outside the selection
+ * would be broken (Relax Relations first).
+ */
+export function transformEntities(context: SketchEditContext, ids: readonly string[], spec: TransformSpec, copy: boolean): SketchEditResult {
+  const sources = ids.map((id) => find(context.sketch, id));
+  if (sources.length === 0 || sources.some((entity) => entity === undefined)) return reject("Select the entities to transform.");
+  const entities = sources as SketchEntity[];
+  if (copy && entities.length > MAX_COPIES) return reject(`A copy is limited to ${MAX_COPIES} entities.`);
+  let apply: (entity: SketchEntity, id: string) => SketchEntity;
+  let label: string;
+  if (spec.kind === "move") {
+    if (!Number.isFinite(spec.dxMm) || !Number.isFinite(spec.dyMm) || Math.hypot(spec.dxMm, spec.dyMm) < 0.001 || Math.abs(spec.dxMm) > 100_000 || Math.abs(spec.dyMm) > 100_000) return reject("Enter a move distance of at least 0.001 mm.");
+    apply = (entity, id) => mapEntity(entity, id, (point) => [point[0] + spec.dxMm, point[1] + spec.dyMm], (degrees) => degrees);
+    label = `${copy ? "Copied" : "Moved"} ${entities.length} entit${entities.length === 1 ? "y" : "ies"} by (${format(spec.dxMm)}, ${format(spec.dyMm)}) mm`;
+  } else if (spec.kind === "rotate") {
+    if (!Number.isFinite(spec.angleDeg) || Math.abs(spec.angleDeg) < 0.001 || Math.abs(spec.angleDeg) > 360) return reject("Enter a rotation angle between 0.001 and 360 degrees.");
+    const radians = (spec.angleDeg * Math.PI) / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const [cx, cy] = spec.center;
+    apply = (entity, id) => mapEntity(entity, id, (point) => [cx + (point[0] - cx) * cos - (point[1] - cy) * sin, cy + (point[0] - cx) * sin + (point[1] - cy) * cos], (degrees) => degrees + spec.angleDeg);
+    label = `${copy ? "Copied" : "Rotated"} ${entities.length} entit${entities.length === 1 ? "y" : "ies"} ${format(spec.angleDeg)}°`;
+  } else {
+    if (!Number.isFinite(spec.factor) || spec.factor < 0.01 || spec.factor > 100 || Math.abs(spec.factor - 1) < 1e-6) return reject("Enter a scale factor between 0.01 and 100 (other than 1).");
+    apply = (entity, id) => scaleEntity(entity, id, spec.center, spec.factor);
+    label = `${copy ? "Copied" : "Scaled"} ${entities.length} entit${entities.length === 1 ? "y" : "ies"} by ${format(spec.factor)}x`;
+  }
+  return copy
+    ? plan(label, { addEntities: entities.map((entity) => apply(entity, context.newId("entity"))) })
+    : plan(label, { updateEntities: entities.map((entity) => apply(entity, entity.id)) });
+}
+
+// ---------------------------------------------------------------------------------------------
 // Corner, fillet, chamfer
 // ---------------------------------------------------------------------------------------------
 

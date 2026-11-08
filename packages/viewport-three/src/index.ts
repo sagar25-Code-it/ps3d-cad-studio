@@ -1,8 +1,11 @@
 import * as THREE from "three";
+import { ZEBRA_FRAGMENT_SOURCE, ZEBRA_UNIFORMS_SOURCE, axisVector, clampZebraFrequency, type ZebraOptions } from "./zebra.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { cloneExchangeObject, disposeExchangeObject, inspectExchangeObject, type ExchangeBounds, type ViewportJpeg } from "../../exchange-3d/src/index.js";
 import type { ModelSuccessResponse } from "../../worker-protocol/src/index.js";
 import type { PreviewBounds, PreviewPrimitive, PreviewScene } from "../../workbench-geometry/src/index.js";
+
+export { ZEBRA_AXES, ZEBRA_DEFAULT, ZEBRA_MAX_FREQUENCY, ZEBRA_MIN_FREQUENCY, clampZebraFrequency, zebraBandAt, zebraReflection, type ZebraAxis, type ZebraOptions } from "./zebra.js";
 
 export interface ViewportOptions {
   readonly onSelectBody: (bodyId: string | null) => void;
@@ -177,6 +180,7 @@ export class ThreeViewportAdapter {
   readonly #resizeObserver: ResizeObserver;
   readonly #options: ViewportOptions;
   readonly #objects: THREE.Object3D[] = [];
+  #zebra: ZebraOptions | null = null;
   readonly #pickable: THREE.Object3D[] = [];
   #bodyId: string | undefined;
   #selectedId: string | undefined;
@@ -322,6 +326,35 @@ export class ThreeViewportAdapter {
   setSelectionFilter(filter: SelectionFilter): void {
     this.#selectionFilter = filter;
     this.#emitViewState();
+  }
+
+  /** Shades every standard-material mesh with zebra stripes (or restores normal shading with null). New geometry picks it up too. */
+  setZebra(options: ZebraOptions | null): void {
+    this.#zebra = options === null ? null : { axis: options.axis, frequency: clampZebraFrequency(options.frequency) };
+    for (const object of this.#objects) object.traverse((entry) => this.#applyZebra(entry));
+    this.#emitViewState();
+  }
+
+  getZebra(): ZebraOptions | null {
+    return this.#zebra;
+  }
+
+  #applyZebra(entry: THREE.Object3D): void {
+    if (!(entry instanceof THREE.Mesh) || !(entry.material instanceof THREE.MeshStandardMaterial)) return;
+    const material = entry.material;
+    const options = this.#zebra;
+    material.customProgramCacheKey = () => (options === null ? "" : `zebra:${options.axis}:${options.frequency}`);
+    material.onBeforeCompile = options === null
+      ? () => undefined
+      : (shader) => {
+        const axis = axisVector(options.axis);
+        shader.uniforms["uZebraAxis"] = { value: new THREE.Vector3(axis[0], axis[1], axis[2]) };
+        shader.uniforms["uZebraFrequency"] = { value: options.frequency };
+        shader.fragmentShader = shader.fragmentShader
+          .replace("void main() {", `${ZEBRA_UNIFORMS_SOURCE}void main() {`)
+          .replace("#include <opaque_fragment>", `#include <opaque_fragment>${ZEBRA_FRAGMENT_SOURCE}`);
+      };
+    material.needsUpdate = true;
   }
 
   setShadingMode(mode: ViewportShadingMode): void {
@@ -947,6 +980,7 @@ export class ThreeViewportAdapter {
     this.#bodyGroup.add(object);
     this.#objects.push(object);
     if (pickable) this.#pickable.push(object);
+    if (this.#zebra !== null) object.traverse((entry) => this.#applyZebra(entry));
   }
 
   #addPrimitive(primitive: PreviewPrimitive): void {

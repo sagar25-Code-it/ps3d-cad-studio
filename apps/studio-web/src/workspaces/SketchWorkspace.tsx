@@ -18,6 +18,7 @@ import {
 } from "../../../../packages/workbench-sketch/src/index.js";
 import { gridSteps, sketchToScreen } from "../../../../packages/workbench-sketch/src/camera.js";
 import { dynamicFieldsFor, measureFromCursor, parseDynamicNumber, pointFromDynamicInput, type DynamicFieldId, type DynamicValues } from "../../../../packages/workbench-sketch/src/dynamic-input.js";
+import { sketchCurvatureCombs } from "../../../../packages/workbench-sketch/src/curvature-comb.js";
 import { constraintsOnEntities, extendAt, nearestEntityId, trimAt, type SketchEditPlan } from "../../../../packages/workbench-sketch/src/edit-tools.js";
 import { SKETCH_HOTKEY_HELP, type SketchHotkeyAction } from "../../../../packages/workbench-sketch/src/hotkeys.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
@@ -307,6 +308,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [showProfiles, setShowProfiles] = useState(true);
   const [showDimensions, setShowDimensions] = useState(true);
   const [showConstraints, setShowConstraints] = useState(true);
+  const [showComb, setShowComb] = useState(false);
+  const [combScale, setCombScale] = useState(1);
   const [selectedProfileIds, setSelectedProfileIds] = useState<readonly string[]>([]);
   const boxGesture = useRef<BoxGesture | undefined>(undefined);
   // Direct manipulation: the gesture, and the live (uncommitted) result shown while it runs.
@@ -1046,6 +1049,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     dragLive !== undefined ? "dragging" : ""
   ].filter(Boolean).join(" ");
   const constraintSlots = new Map<string, number>();
+  const curvatureCombs = showComb ? sketchCurvatureCombs(visibleEntities, 60 * px * combScale) : [];
 
   return <>
     <section className="workspace-canvas sketch-stage" aria-label={`Interactive ${planeInfo.name} sketch`}>
@@ -1086,6 +1090,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         />
         {showProfiles && profiles.map((profile) => <SketchProfileShape key={profile.id} profile={profile} selected={selectedProfileIds.includes(profile.id)} {...(interactive ? { onSelect: (additive: boolean) => selectProfile(profile, additive) } : {})} />)}
         {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={selectionIds.includes(entity.id)} hovered={hoverId === entity.id} movable={props.showMovable && movableIds.has(entity.id)} constrained={analysis.entityFreedom[entity.id] === 0} {...(interactive ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive), onHover: (inside: boolean) => setHoverId(inside ? entity.id : null), onGrab: (event: React.PointerEvent, handle: DragHandle) => beginDrag(event, entity.id, handle), handles: grabHandlesOf(entity) } : {})} />)}
+        {curvatureCombs.map(({ entityId, comb }) => <g key={`comb:${entityId}`} className="curvature-comb" data-comb-entity={entityId} pointerEvents="none" fill="none" stroke="#d9480f" strokeWidth={px}>
+          {comb.teeth.map((tooth, index) => <line key={index} x1={tooth.base[0]} y1={-tooth.base[1]} x2={tooth.tip[0]} y2={-tooth.tip[1]} strokeOpacity={0.7} />)}
+          <polyline points={comb.envelope.map((point) => `${point[0]},${-point[1]}`).join(" ")} strokeWidth={1.4 * px} />
+        </g>)}
         {previewEntity !== undefined && <SketchEntityShape entity={previewEntity} px={px} selected={false} hovered={false} preview />}
         {previewShape?.entities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
         {showDimensions && drivingDimensions.map((view) => <DimensionMarks key={view.constraint.id} entity={view.entity} dimension={view.dimension} valueMm={view.constraint.valueMm ?? 0} relaxed={view.constraint.suppressed === true} px={px} {...(interactive ? { onEdit: () => openDimensionEditor(view.entity, view.dimension) } : {})} />)}
@@ -1171,6 +1179,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
         <PaletteToggle label="Constraints" active={showConstraints} onToggle={setShowConstraints} />
+        <PaletteToggle label="Curvature comb" active={showComb} onToggle={setShowComb} />
+        {showComb && <label><span>Comb scale</span><input type="range" aria-label="Curvature comb scale" min={0.2} max={3} step={0.1} value={combScale} onChange={(event) => setCombScale(Number(event.target.value))} /></label>}
         <button className="palette-action" disabled={selectedEntity === undefined} onClick={() => selectedEntity !== undefined && props.onToggleConstruction(selectedEntity.id)}><CommandIcon name={selectedEntity?.construction === true ? "rectangle" : "construction"} />{selectedEntity?.construction === true ? "Profile geometry" : "Construction"}</button>
         <div className="sketch-make-solid" aria-label="Create a solid from a profile">
           <span className="make-solid-title">Create solid</span>

@@ -73,7 +73,7 @@ the same reviewed source content.
 The shell also provides an original color-wheel workspace system, a functional
 File/Edit/Create/View/Inspect/Automate/Help menu bar, a context-sensitive top
 command ribbon with project-owned inline SVG symbols, a keyboard-navigable and
-workspace-filtered 341-command original CAD catalog with explicit capability
+workspace-filtered 344-command original CAD catalog with explicit capability
 levels, a persistent
 model browser with Origin/Sketches/Feature History/Bodies/revision timeline,
 workspace-preserving selection, revision audit,

@@ -1001,7 +1001,7 @@ export interface DesignSketchFeature extends DesignFeatureBase {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
@@ -1141,6 +1141,11 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   readonly sheetThicknessMm?: number;
   /** Sheet-base / sheet-flange only: inner bend radius in millimetres (for the bend K-factor and flat-pattern unfold). */
   readonly sheetBendRadiusMm?: number;
+  /**
+   * Sheet-edge-flange only: which top-face edge of the sheet to bend the flange from. The index is into the edge list of the
+   * sheet as its first step made it (`sheetFrameOf`), so it stays stable when other flanges are added later.
+   */
+  readonly flangeEdgeIndex?: number;
   /** Sheet-flange only: length of the flange in millimetres (how far the flange extends from the edge). */
   readonly flangeLengthMm?: number;
   /** Sheet-flange only: bend angle in degrees (90 is a right-angle flange). */

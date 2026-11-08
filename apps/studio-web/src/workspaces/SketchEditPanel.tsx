@@ -10,17 +10,21 @@ import {
   mirrorEntities,
   offsetEntities,
   patternEntities,
+  transformEntities,
   type SketchEditPlan,
   type SketchEditResult
 } from "../../../../packages/workbench-sketch/src/edit-tools.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 
-export type SketchEditToolId = "offset" | "mirror" | "pattern" | "corner" | "fillet" | "chamfer" | "trim" | "extend";
+export type SketchEditToolId = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "corner" | "fillet" | "chamfer" | "trim" | "extend";
 
 export const SKETCH_EDIT_TOOL_LABELS: Readonly<Record<SketchEditToolId, string>> = {
   offset: "Offset",
   mirror: "Mirror",
   pattern: "Pattern",
+  move: "Move / Copy",
+  rotate: "Rotate",
+  scale: "Scale",
   corner: "Corner",
   fillet: "Fillet",
   chamfer: "Chamfer",
@@ -32,6 +36,9 @@ const INSTRUCTIONS: Readonly<Record<SketchEditToolId, string>> = {
   offset: "Select the curves to offset (a connected chain of lines is mitred), set the distance, then Apply. Positive is outward for circles, arcs, rectangles and closed loops, and to the left of a line's direction.",
   mirror: "Select the entities to mirror, then the mirror line last, then Apply. Mirrored lines and circles get symmetric relations.",
   pattern: "Select the entities to repeat, choose a layout, then Apply. The original is the first instance.",
+  move: "Select the entities, enter the X and Y distance, then Apply. Tick Copy to leave the originals and add moved copies.",
+  rotate: "Select the entities, set the angle (counter-clockwise) and the centre, then Apply. Tick Copy to keep the originals.",
+  scale: "Select the entities, set the factor and the centre, then Apply. Circles, rectangles and ellipses scale their size too. Tick Copy to keep the originals.",
   corner: "Select two lines, then Apply. Both are extended or trimmed to meet at their intersection.",
   fillet: "Select two lines (or one rectangle), set the radius, then Apply. The lines are shortened to the tangent points and an arc joins them.",
   chamfer: "Select two lines (or one rectangle), set the distance, then Apply. The lines are shortened and a straight cut joins them.",
@@ -64,6 +71,11 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   const [bevel, setBevel] = useState("2");
   const [bevelSecond, setBevelSecond] = useState("2");
   const [bevelAngle, setBevelAngle] = useState("45");
+  const [moveX, setMoveX] = useState("10");
+  const [moveY, setMoveY] = useState("0");
+  const [rotateAngle, setRotateAngle] = useState("45");
+  const [scaleFactor, setScaleFactor] = useState("2");
+  const [copyMode, setCopyMode] = useState(false);
   const [chamferMode, setChamferMode] = useState<"equal" | "asymmetric" | "distance-angle">("equal");
   const interactive = props.tool !== "trim" && props.tool !== "extend";
 
@@ -81,6 +93,9 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
           : chamferMode === "asymmetric" ? chamferCornersAsymmetric(context, ids, Number(bevel), Number(bevelSecond))
           : chamferCornersAngle(context, ids, Number(bevel), Number(bevelAngle));
         break;
+      case "move": result = transformEntities(context, ids, { kind: "move", dxMm: Number(moveX), dyMm: Number(moveY) }, copyMode); break;
+      case "rotate": result = transformEntities(context, ids, { kind: "rotate", angleDeg: Number(rotateAngle), center: [Number(centerX), Number(centerY)] }, copyMode); break;
+      case "scale": result = transformEntities(context, ids, { kind: "scale", factor: Number(scaleFactor), center: [Number(centerX), Number(centerY)] }, copyMode); break;
       case "pattern":
         result = patternEntities(context, ids, layout === "rectangular"
           ? { kind: "rectangular", countX: Number(countX), countY: Number(countY), dxMm: Number(stepX), dyMm: Number(stepY) }
@@ -100,6 +115,10 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
     <header><strong>{SKETCH_EDIT_TOOL_LABELS[props.tool]}</strong><span>{props.selectionIds.length} selected</span></header>
     <p className="profile-help">{INSTRUCTIONS[props.tool]}</p>
     {props.tool === "offset" && field("Distance", offset, setOffset, "mm")}
+    {props.tool === "move" && <>{field("Distance X", moveX, setMoveX, "mm")}{field("Distance Y", moveY, setMoveY, "mm")}</>}
+    {props.tool === "rotate" && <>{field("Angle", rotateAngle, setRotateAngle, "°")}{field("Centre X", centerX, setCenterX, "mm")}{field("Centre Y", centerY, setCenterY, "mm")}</>}
+    {props.tool === "scale" && <>{field("Factor", scaleFactor, setScaleFactor, "×")}{field("Centre X", centerX, setCenterX, "mm")}{field("Centre Y", centerY, setCenterY, "mm")}</>}
+    {(props.tool === "move" || props.tool === "rotate" || props.tool === "scale") && <label className="check-row"><input type="checkbox" aria-label="Copy instead of moving the originals" checked={copyMode} onChange={(event) => setCopyMode(event.target.checked)} /><span>Copy (keep the originals)</span></label>}
     {props.tool === "fillet" && field("Radius", radius, setRadius, "mm")}
     {props.tool === "chamfer" && <>
       <label><span>Chamfer mode</span><select aria-label="Chamfer mode" value={chamferMode} onChange={(event) => setChamferMode(event.target.value as "equal" | "asymmetric" | "distance-angle")}><option value="equal">Equal distance</option><option value="asymmetric">Two distances</option><option value="distance-angle">Distance + angle</option></select></label>
