@@ -1568,9 +1568,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     "sketch-canvas",
     showProfiles ? "show-profiles" : "hide-profiles",
     camera.panning ? "panning" : camera.spaceHeld || navigationPan ? "pan-ready" : "",
-    dragLive !== undefined ? "dragging" : ""
+    dragLive !== undefined ? "dragging" : "",
+    zoomWindowMode ? "zoom-window" : "",
+    measureMode ? "measuring" : ""
   ].filter(Boolean).join(" ");
-  const constraintSlots = new Map<string, number>();
+  const pressDimension = (entry: (typeof dimensionViews)[number], event: React.PointerEvent, additive: boolean): void => {
+    selectConstraint(entry.id, additive);
+    if (!interactive || additive || event.button !== 0 || !isRepositionable(entry.layout)) return;
+    dimensionDrag.current = { pointerId: event.pointerId, constraintId: entry.id, startMm: camera.toSketch(event.clientX, event.clientY), startClient: [event.clientX, event.clientY], startOffsetPx: entry.offsetPx, layoutAt: entry.layoutAt, moved: false };
+  };
+  const activeSpline = activeFit === undefined ? undefined : visibleEntities.find((entity) => entity.id === activeFit.entityId);
   const curvatureCombs = showComb ? sketchCurvatureCombs(visibleEntities, 60 * px * combScale) : [];
 
   return <>
@@ -1581,8 +1588,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         data-sketch-canvas={plane}
         viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
         preserveAspectRatio="xMidYMid meet"
-        role="img"
+        role="application"
+        aria-roledescription="sketch canvas"
+        tabIndex={0}
+        aria-describedby="sketch-canvas-help"
         aria-label={`${planeInfo.name} sketch with ${props.sketch.entities.length} entities and ${analysis.degreesOfFreedom} estimated degrees of freedom`}
+        onKeyDown={handleCanvasKeyDown}
+        onDoubleClick={handleCanvasDoubleClick}
         onPointerDownCapture={handleCanvasPointerDownCapture}
         onPointerMove={handleCanvasPointerMove}
         onPointerDown={handleCanvasPointerDown}
@@ -1611,7 +1623,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           verticalLabel={planeInfo.verticalLabel}
         />
         {showProfiles && profiles.map((profile) => <SketchProfileShape key={profile.id} profile={profile} selected={selectedProfileIds.includes(profile.id)} {...(interactive ? { onSelect: (additive: boolean) => selectProfile(profile, additive) } : {})} />)}
-        {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={selectionIds.includes(entity.id)} hovered={hoverId === entity.id} movable={props.showMovable && movableIds.has(entity.id)} constrained={analysis.entityFreedom[entity.id] === 0} {...(interactive ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive), onHover: (inside: boolean) => setHoverId(inside ? entity.id : null), onGrab: (event: React.PointerEvent, handle: DragHandle) => beginDrag(event, entity.id, handle), handles: grabHandlesOf(entity) } : {})} />)}
+        {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={selectionIds.includes(entity.id)} hovered={hoverId === entity.id} related={relatedIds.has(entity.id)} focused={focusedId === entity.id} handleRadiusPx={hitSizes.grabHandlePx} hitRadiusPx={hitSizes.grabHitPx} movable={props.showMovable && movableIds.has(entity.id)} constrained={analysis.entityFreedom[entity.id] === 0} {...(interactive ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive), onHover: (inside: boolean) => setHoverId(inside ? entity.id : null), onGrab: (event: React.PointerEvent, handle: DragHandle) => beginDrag(event, entity.id, handle), onHandlePick: (handle: SketchGrabHandle) => setActiveFit(handle.handle.kind === "fit" ? { entityId: entity.id, index: handle.handle.index } : undefined), handles: grabHandlesOf(entity) } : {})} />)}
+        {interactive && activeSpline?.kind === "spline" && activeFit !== undefined && selectionIds.includes(activeSpline.id) && <SplineHandles spline={activeSpline} activeIndex={activeFit.index} px={px} handleRadiusPx={hitSizes.grabHandlePx} hitRadiusPx={hitSizes.grabHitPx} canRemove={activeSpline.fitPoints.length > 3} onGrab={(event, handle) => beginDrag(event, activeSpline.id, handle)} onRemove={() => { removeActiveFitPoint(); }} />}
         {curvatureCombs.map(({ entityId, comb }) => <g key={`comb:${entityId}`} className="curvature-comb" data-comb-entity={entityId} pointerEvents="none" fill="none" stroke="#d9480f" strokeWidth={px}>
           {comb.teeth.map((tooth, index) => <line key={index} x1={tooth.base[0]} y1={-tooth.base[1]} x2={tooth.tip[0]} y2={-tooth.tip[1]} strokeOpacity={0.7} />)}
           <polyline points={comb.envelope.map((point) => `${point[0]},${-point[1]}`).join(" ")} strokeWidth={1.4 * px} />
@@ -1619,18 +1632,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {previewEntity !== undefined && <SketchEntityShape entity={previewEntity} px={px} selected={false} hovered={false} preview />}
         {previewShape?.entities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
         {mirrorGhosts.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
-        {showDimensions && drivingDimensions.map((view) => <DimensionMarks key={view.constraint.id} entity={view.entity} dimension={view.dimension} valueMm={view.constraint.valueMm ?? 0} relaxed={view.constraint.suppressed === true} px={px} {...(interactive ? { onEdit: () => openDimensionEditor(view.entity, view.dimension) } : {})} />)}
-        {showDimensions && <ExtraDimensionMarks sketch={visibleSketch} px={px} {...(interactive ? { onEdit: openExtraDimensionEditor } : {})} />}
+        {showDimensions && dimensionViews.map((entry) => <DimensionMarks key={entry.id} constraintId={entry.id} entityId={entry.view.entity.id} layout={entry.layout} px={px} relaxed={entry.view.constraint.suppressed === true} selected={selectedConstraintIds.includes(entry.id)} interactive={interactive} repositionable={isRepositionable(entry.layout)} title={constraintTitles.get(entry.id) ?? "Dimension"} onPress={(event, additive) => pressDimension(entry, event, additive)} onEdit={() => openDimensionEditor(entry.view.entity, entry.view.dimension)} />)}
+        {showDimensions && <ExtraDimensionMarks sketch={visibleSketch} px={px} selectedIds={selectedConstraintIds} {...(interactive ? { onEdit: openExtraDimensionEditor, onSelect: selectConstraint } : {})} />}
         {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r={4 * px} className="pending-point" />)}
         {props.tool !== "select" && pointerInside && !camera.panning && inference !== undefined && <InferenceMarks inference={inference} px={px} />}
         {props.tool !== "select" && pointerInside && !camera.panning && <circle cx={cursor[0]} cy={-cursor[1]} r={3.5 * px} className="cursor-point" />}
-        {showDimensions && visibleEntities.filter((entity) => !dimensionedIds.has(entity.id)).map((entity) => <SketchDimensionGlyph key={`dimension:${entity.id}`} entity={entity} px={px} />)}
-        {showConstraints && visibleSketch.constraints.map((constraint) => {
-          const primary = constraint.entityIds[0] ?? "";
-          const slot = constraintSlots.get(primary) ?? 0;
-          constraintSlots.set(primary, slot + 1);
-          return <ConstraintGlyph key={constraint.id} constraint={constraint} entities={visibleEntities} px={px} slot={slot} />;
-        })}
+        {showDimensions && visibleEntities.filter((entity) => !dimensionedIds.has(entity.id)).map((entity) => <SketchDimensionGlyph key={`dimension:${entity.id}`} entity={entity} px={px} label={(value) => formatLengthLabel(value, dimensionDisplay)} />)}
+        <ConstraintGlyphLayer glyphs={glyphs} px={px} selectedIds={selectedConstraintIds} hoveredId={hoverConstraintId} interactive={interactive} titles={constraintTitles} onHover={setHoverConstraintId} onSelect={selectConstraint} />
+        {measureMode && <MeasureOverlay state={measureState} px={px} />}
         {pickRelation !== null && visibleEntities.flatMap(relationPoints).map((handle) => <rect
           key={handle.id}
           className={`relation-point${pickedPoint?.id === handle.id ? " selected" : ""}`}
@@ -1648,7 +1657,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           {directDimension !== undefined && <DirectDimensionPreview dimension={directDimension} px={px} />}
         </>}
         {selectionBox !== undefined && <rect
-          className={`selection-box ${props.editTool === "stretch" ? "stretch-draw" : selectionBoxMode(selectionBox.start, selectionBox.end)}`}
+          className={`selection-box ${zoomWindowMode ? "zoom-draw" : props.editTool === "stretch" ? "stretch-draw" : selectionBoxMode(selectionBox.start, selectionBox.end)}`}
           x={Math.min(selectionBox.start[0], selectionBox.end[0])}
           y={-Math.max(selectionBox.start[1], selectionBox.end[1])}
           width={Math.abs(selectionBox.end[0] - selectionBox.start[0])}
@@ -1668,6 +1677,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
       {dimensionEdit !== undefined && <DimensionEditor
         label={dimensionEdit.label}
+        unitLabel={dimensionEdit.dimension === "angle" ? "°" : dimensionDisplay.unit}
+        reference={dimensionReference}
+        onReferenceChange={setDimensionReference}
         text={dimensionText}
         position={(() => {
           const at = sketchToScreen(dimensionEdit.anchor, { left: 0, top: 0, width: camera.size.width, height: camera.size.height }, camera.camera);
@@ -1699,6 +1711,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         }}
       />}
 
+      <div id="sketch-canvas-help" className="sketch-sr-only">Sketch canvas. Use the arrow keys to move between curves, Enter or Space to select the focused curve, Shift plus Enter to add it to the selection, Delete to remove the selection, and Escape to step back.</div>
+      <div className="sketch-sr-only" role="status" aria-live="polite">{announcement}</div>
+      {zoomWindowMode && <div className="dimension-mode-banner"><CommandIcon name="view" /><span><strong>Zoom window</strong>Drag a rectangle on the canvas. Esc cancels.</span></div>}
+      {measureMode && <div className="dimension-mode-banner"><CommandIcon name="dimension" /><span><strong>Measure</strong>{measureState.result !== undefined ? describeMeasurement(measureState.result) : measureState.picks.length === 1 ? "Pick a second point for a distance, or a second line for an angle." : "Click a point, or a line. Nothing is added to the sketch. Esc finishes."}</span></div>}
       {props.dimensionMode && <div className="dimension-mode-banner"><CommandIcon name="dimension" /><span><strong>Sketch Dimension</strong>Select a curve, or pick two blue definition points. Esc to finish.</span></div>}
 
       <ViewportChrome workspace="sketch" state={props.viewportState} measurePoints={[]} onNavigationMode={props.onNavigationMode} onSelectionFilter={props.onSelectionFilter} onOrientation={props.onOrientation} onViewAngles={props.onViewAngles} onProjection={props.onProjection} onGrid={props.onGrid} onAxes={props.onAxes} onShadingMode={() => undefined} onBodyColor={() => undefined} onBackgroundTone={() => undefined} onFit={camera.fit} onHome={camera.fit} onClearMeasure={() => undefined} />
@@ -2048,45 +2064,6 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   </>;
 }
 
-/** A driving dimension drawn like a drawing dimension: extension lines, a dimension line with arrowheads, and editable text. */
-function DimensionMarks({ entity, dimension, valueMm, relaxed, px, onEdit }: { readonly entity: SketchEntity; readonly dimension: DrivingDimension; readonly valueMm: number; readonly relaxed: boolean; readonly px: number; readonly onEdit?: () => void }): React.JSX.Element {
-  const layout = dimensionLayout(entity, dimension, valueMm, px);
-  if (layout === undefined) return <></>;
-  const flip = (point: Vec2): string => `${point[0]},${-point[1]}`;
-  const textWidth = (layout.label.length * 7.4 + 12) * px;
-  return <g className={`driving-dimension${relaxed ? " relaxed" : ""}`} data-dimension-for={entity.id} pointerEvents={onEdit === undefined ? "none" : undefined}>
-    {layout.extensionLines.map((segment, index) => <line key={index} x1={segment.from[0]} y1={-segment.from[1]} x2={segment.to[0]} y2={-segment.to[1]} />)}
-    <line x1={layout.dimensionLine.from[0]} y1={-layout.dimensionLine.from[1]} x2={layout.dimensionLine.to[0]} y2={-layout.dimensionLine.to[1]} />
-    {layout.arrows.map((arrow, index) => <polygon key={index} className="arrow" points={arrowHead(arrow, px).map(flip).join(" ")} />)}
-    <rect className="driving-dimension-hit" x={layout.textAt[0] - textWidth / 2} y={-layout.textAt[1] - 11 * px} width={textWidth} height={20 * px} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onEdit?.(); }} />
-    <text className="driving-dimension-text" x={layout.textAt[0]} y={-layout.textAt[1] + 4 * px} style={{ fontSize: 12.5 * px, strokeWidth: 3.5 * px }} pointerEvents="none">{layout.label}</text>
-  </g>;
-}
-
-/** Type a new value for a driving dimension next to it: Enter applies, Esc closes. */
-function DimensionEditor(props: { readonly label: string; readonly text: string; readonly position: readonly [number, number]; readonly onChange: (text: string) => void; readonly onCommit: () => void; readonly onCancel: () => void }): React.JSX.Element {
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
-  return <div className="dimension-editor" style={{ left: props.position[0], top: props.position[1] }} role="group" aria-label={`Edit ${props.label.toLowerCase()}`}>
-    <label><span>{props.label}</span>
-      <input
-        ref={inputRef}
-        inputMode="decimal"
-        aria-label={`${props.label} in millimetres`}
-        value={props.text}
-        onChange={(event) => props.onChange(event.target.value)}
-        onBlur={props.onCancel}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") { event.preventDefault(); props.onCommit(); }
-          else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel(); }
-        }}
-      />
-      <small>mm</small>
-    </label>
-    <em>Enter applies a driving value · Esc closes</em>
-  </div>;
-}
-
 /** The editable length, angle, width, height or radius next to the cursor while a shape is being placed. */
 function DynamicInputBox(props: {
   readonly fields: readonly { readonly id: DynamicFieldId; readonly label: string; readonly unit: string }[];
@@ -2242,9 +2219,9 @@ function DirectDimensionPreview({ dimension, px }: { readonly dimension: DirectS
   </g>;
 }
 
-function SketchEntityShape({ entity, px, selected, hovered, onSelect, onHover, onGrab, handles, preview = false, movable = false, constrained = false }: { readonly entity: SketchEntity; readonly px: number; readonly selected: boolean; readonly hovered: boolean; readonly onSelect?: (additive: boolean) => void; readonly onHover?: (inside: boolean) => void; readonly onGrab?: (event: React.PointerEvent, handle: DragHandle) => void; readonly handles?: readonly SketchGrabHandle[]; readonly preview?: boolean; readonly movable?: boolean; readonly constrained?: boolean }): React.JSX.Element {
+function SketchEntityShape({ entity, px, selected, hovered, related = false, focused = false, handleRadiusPx = 5, hitRadiusPx = 10, onSelect, onHover, onGrab, onHandlePick, handles, preview = false, movable = false, constrained = false }: { readonly entity: SketchEntity; readonly px: number; readonly selected: boolean; readonly hovered: boolean; readonly related?: boolean; readonly focused?: boolean; readonly handleRadiusPx?: number; readonly hitRadiusPx?: number; readonly onSelect?: (additive: boolean) => void; readonly onHover?: (inside: boolean) => void; readonly onGrab?: (event: React.PointerEvent, handle: DragHandle) => void; readonly onHandlePick?: (handle: SketchGrabHandle) => void; readonly handles?: readonly SketchGrabHandle[]; readonly preview?: boolean; readonly movable?: boolean; readonly constrained?: boolean }): React.JSX.Element {
   // Fully constrained curves are drawn in a neutral tone and under-constrained ones in the working colour, so what can still move is visible at a glance.
-  const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""} ${hovered && !selected ? "hover" : ""} ${preview ? "tool-preview" : ""} ${movable && !selected ? "movable" : ""} ${constrained && !preview && entity.kind !== "point" ? "constrained" : ""}`;
+  const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""} ${hovered && !selected ? "hover" : ""} ${related ? "related" : ""} ${focused ? "kb-focus" : ""} ${preview ? "tool-preview" : ""} ${movable && !selected ? "movable" : ""} ${constrained && !preview && entity.kind !== "point" ? "constrained" : ""}`;
   const geometry = (cls: string, hit: boolean): React.JSX.Element => {
     if (entity.kind === "line") return <line className={cls} x1={entity.start[0]} y1={-entity.start[1]} x2={entity.end[0]} y2={-entity.end[1]} />;
     if (entity.kind === "rectangle") return <rect className={cls} x={entity.center[0] - entity.widthMm / 2} y={-entity.center[1] - entity.heightMm / 2} width={entity.widthMm} height={entity.heightMm} transform={`rotate(${-entity.rotationDeg} ${entity.center[0]} ${-entity.center[1]})`} />;
@@ -2264,17 +2241,19 @@ function SketchEntityShape({ entity, px, selected, hovered, onSelect, onHover, o
   >
     {geometry("sketch-hit", true)}
     {geometry(className, false)}
-    {(selected || hovered) && handles?.map((handle) => <circle
-      key={handle.id}
-      className={`grab-handle ${handle.handle.kind}`}
-      data-grab-handle={handle.id}
-      cx={handle.point[0]}
-      cy={-handle.point[1]}
-      r={5 * px}
-      role="button"
-      aria-label={`Drag ${handle.label}`}
-      onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onSelect(false); onGrab?.(event, handle.handle); }}
-    />)}
+    {(selected || hovered) && handles?.map((handle) => <g key={handle.id}>
+      <circle className="grab-hit" cx={handle.point[0]} cy={-handle.point[1]} r={hitRadiusPx * px} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onSelect(false); onHandlePick?.(handle); onGrab?.(event, handle.handle); }} />
+      <circle
+        className={`grab-handle ${handle.handle.kind}`}
+        data-grab-handle={handle.id}
+        cx={handle.point[0]}
+        cy={-handle.point[1]}
+        r={handleRadiusPx * px}
+        role="button"
+        aria-label={`Drag ${handle.label}`}
+        onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); onSelect(false); onHandlePick?.(handle); onGrab?.(event, handle.handle); }}
+      />
+    </g>)}
   </g>;
 }
 
@@ -2328,29 +2307,16 @@ function SketchProfileShape({ profile, selected, onSelect }: { readonly profile:
   return <path {...common} d={`${path} Z`} />;
 }
 
-function SketchDimensionGlyph({ entity, px }: { readonly entity: SketchEntity; readonly px: number }): React.JSX.Element {
+function SketchDimensionGlyph({ entity, px, label }: { readonly entity: SketchEntity; readonly px: number; readonly label: (valueMm: number) => string }): React.JSX.Element {
   const style = { fontSize: 12 * px, strokeWidth: 3 * px };
   if (entity.kind === "line") {
     const x = (entity.start[0] + entity.end[0]) / 2;
     const y = -(entity.start[1] + entity.end[1]) / 2 - 8 * px;
-    return <text x={x} y={y} style={style} className="sketch-dimension-glyph">{format(Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]))}</text>;
+    return <text x={x} y={y} style={style} className="sketch-dimension-glyph">{label(Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]))}</text>;
   }
-  if (entity.kind === "rectangle") return <><text x={entity.center[0]} y={-entity.center[1] + entity.heightMm / 2 + 16 * px} style={style} className="sketch-dimension-glyph">{format(entity.widthMm)}</text><text x={entity.center[0] + entity.widthMm / 2 + 12 * px} y={-entity.center[1]} style={style} className="sketch-dimension-glyph vertical">{format(entity.heightMm)}</text></>;
-  if (entity.kind === "circle") return <text x={entity.center[0] + entity.radiusMm * 0.35} y={-entity.center[1] - 8 * px} style={style} className="sketch-dimension-glyph">R {format(entity.radiusMm)}</text>;
+  if (entity.kind === "rectangle") return <><text x={entity.center[0]} y={-entity.center[1] + entity.heightMm / 2 + 16 * px} style={style} className="sketch-dimension-glyph">{label(entity.widthMm)}</text><text x={entity.center[0] + entity.widthMm / 2 + 12 * px} y={-entity.center[1]} style={style} className="sketch-dimension-glyph vertical">{label(entity.heightMm)}</text></>;
+  if (entity.kind === "circle") return <text x={entity.center[0] + entity.radiusMm * 0.35} y={-entity.center[1] - 8 * px} style={style} className="sketch-dimension-glyph">R {label(entity.radiusMm)}</text>;
   return <></>;
-}
-
-function ConstraintGlyph({ constraint, entities, px, slot }: { readonly constraint: WorkbenchSketchConstraint; readonly entities: readonly SketchEntity[]; readonly px: number; readonly slot: number }): React.JSX.Element {
-  const entity = entities.find((candidate) => candidate.id === constraint.entityIds[0]);
-  if (entity === undefined) return <></>;
-  // A point-level relation is drawn at the point it joins; every other relation at the middle of its curve.
-  const joined = constraint.points?.[0] === undefined ? undefined : relationPoints(entity).find((candidate) => candidate.ref === constraint.points?.[0]);
-  const point = constraint.kind === "midpoint" || constraint.kind === "coincident" ? (joined?.point ?? entityAnchor(entity)) : entityAnchor(entity);
-  const label = constraint.kind === "horizontal" ? "H" : constraint.kind === "vertical" ? "V" : constraint.kind === "parallel" ? "∥" : constraint.kind === "perpendicular" ? "⊥" : constraint.kind === "fixed" ? "F" : constraint.kind === "concentric" ? "◎" : constraint.kind === "equal" ? "=" : constraint.kind === "coincident" ? "•" : constraint.kind === "midpoint" ? "M" : constraint.kind === "angle" ? "∠" : constraint.kind === "arc-length" ? "⌒" : constraint.kind === "perimeter" ? "P" : constraint.kind === "smooth" ? "G2" : constraint.kind === "pierce" ? "⊙" : constraint.kind === "refraction" ? "n" : constraint.kind.slice(0, 1).toUpperCase();
-  // Several relations on one curve fan out sideways instead of stacking on the same spot.
-  const x = point[0] + (12 + slot * 19) * px;
-  const y = -point[1] - 12 * px;
-  return <g className={`constraint-glyph${constraint.suppressed === true ? " relaxed" : ""}`}><circle cx={x} cy={y} r={8 * px} /><text x={x} y={y + 4 * px} style={{ fontSize: 11 * px }}>{label}</text></g>;
 }
 
 function entityAnchor(entity: SketchEntity): Vec2 {
