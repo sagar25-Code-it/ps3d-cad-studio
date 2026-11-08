@@ -180,6 +180,9 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
   for (const step of steps) {
     // A lone body is rebuilt whatever its state; the steps of a chain only while they are live.
     if (chained && !isFeatureActive(history, step.id)) continue;
+    // Edge flanges and jogs bend a flat plate; a lofted bend (or a standalone flange or hem) has no flat top face to bend them from.
+    if ((step.kind === "sheet-edge-flange" || step.kind === "sheet-jog") && base.kind === "sheet-lofted-bend") { outcomes.set(step.id, { featureId: step.id, message: "A lofted bend has no flat plate to bend flanges or jogs from; use a Sheet base or an extruded plate." }); continue; }
+    if (step.kind === "sheet-jog" && (base.kind === "sheet-flange" || base.kind === "sheet-hem")) { outcomes.set(step.id, { featureId: step.id, message: "A jog bends a flat plate; use a Sheet base or an extruded plate." }); continue; }
     // Edge flange: bend a flange up from a named top-face edge of the sheet this body started as.
     if (step.kind === "sheet-edge-flange") {
       if (current === undefined || baseBody === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sheet this flange bends from could not be built." }); continue; }

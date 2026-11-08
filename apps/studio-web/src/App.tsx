@@ -29,6 +29,7 @@ import {
   type AssemblyTemplateId,
   type CadCommandRecord,
   baseFeatureOf,
+  flangeEdgesOf,
   isFeatureActive,
   designOf,
   type ComponentInstance,
@@ -1243,7 +1244,7 @@ export function App(): React.JSX.Element {
     const length = Number.parseFloat(ask("Flange length after the bend (mm):", "20") ?? "");
     const angle = Number.parseFloat(ask("Bend angle (degrees, 1 to 180):", "90") ?? "");
     if (![radius, length, angle].every(Number.isFinite) || radius < 0 || length <= 0 || angle <= 0 || angle > 180) { setStatus("ready"); setStatusText("Edge flange: enter a bend radius of 0 or more, a flange length above 0 and an angle up to 180°."); return; }
-    const liveFlangeEdges = history.features.filter((candidate) => candidate.kind === "sheet-edge-flange" && candidate.bodyId === body.id && isFeatureActive(history, candidate.id)).map((candidate) => (candidate as DesignSolidFeature).flangeEdgeIndex ?? 0);
+    const liveFlangeEdges = history.features.filter((candidate) => candidate.kind === "sheet-edge-flange" && candidate.bodyId === body.id && isFeatureActive(history, candidate.id)).flatMap((candidate) => flangeEdgesOf(candidate as DesignSolidFeature));
     const meetsNeighbour = sharedFlangeEnds(frame, edgeIndex, liveFlangeEdges);
     const needsRelief = meetsNeighbour.start || meetsNeighbour.end;
     const relief = needsRelief ? Number.parseFloat(ask(`Edge ${edgeIndex} meets another flange at a corner. Corner relief (mm gap between the two flanges, 0 for none):`, frame.thicknessMm.toFixed(2)) ?? "") : 0;

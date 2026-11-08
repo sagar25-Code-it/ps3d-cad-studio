@@ -495,5 +495,57 @@ export const sheetMetalTimelineTests: readonly TestCase[] = [
       const lofted = step(sketch, "sheet-lofted-bend", "lofted", { profileIds: [], valueMm: 20, sheetThicknessMm: 1.5, loftTopScale: 2 });
       assert(describeFeature(history, lofted).startsWith("20 mm lofted bend · 1.5 mm sheet"), describeFeature(history, lofted));
     }
+  },
+  {
+    name: "a jog or an edge flange on a lofted bend or a standalone flange is reported instead of bending the wrong surface",
+    run: async () => {
+      const started = run(createWorkbenchProject("project:test-guard"), { kind: "commit-design-sketch", featureId: "feature:sketch-1", name: "Sketch 1" });
+      const sketch = designOf(started).features[0] as DesignSketchFeature;
+      const lofted = step(sketch, "sheet-lofted-bend", "lofted", { profileIds: ["profile:centered-bore-profile"], valueMm: 20, sheetThicknessMm: 1.5, loftTopScale: 3, bodyId: "general-body:lofted" });
+      const built = await rebuildSolidFeature(lofted, sketch);
+      assert(built.ok, "the lofted bend builds");
+      if (!built.ok) return;
+      const withLoft = run(started, { kind: "add-design-solid", feature: lofted, body: built.body });
+      const jog = step(sketch, "sheet-jog", "jog", { operation: "direct-edit", bodyId: "general-body:lofted", jogEdgeIndex: 0, jogPositionMm: 1, jogOffsetMm: 3, jogAngleDeg: 45, sheetBendRadiusMm: 1, valueMm: 3 });
+      const flange = step(sketch, "sheet-edge-flange", "flange", { operation: "direct-edit", bodyId: "general-body:lofted", flangeEdgeIndex: 0, sheetBendRadiusMm: 1, flangeLengthMm: 5, flangeAngleDeg: 90 });
+      for (const feature of [jog, flange]) {
+        const added = run(withLoft, { kind: "add-design-solid", feature, body: built.body });
+        const message = (await replayAllBodies(added)).find((result) => result.featureId === feature.id)?.message;
+        assert(message !== undefined && /lofted bend has no flat plate/u.test(message), `${feature.kind} on a lofted bend is reported: ${message ?? "applied"}`);
+      }
+      const plate = await sheetProject();
+      const hem = step(plate.sketch, "sheet-hem", "hem1", { sheetThicknessMm: 2, sheetBendRadiusMm: 1, flangeLengthMm: 6, hemStyle: "closed", valueMm: 20, bodyId: "general-body:hem1" });
+      const hemBuilt = await rebuildSolidFeature(hem, plate.sketch);
+      assert(hemBuilt.ok, "the hem builds");
+      if (!hemBuilt.ok) return;
+      const withHem = run(plate.project, { kind: "add-design-solid", feature: hem, body: hemBuilt.body });
+      const hemJog = step(plate.sketch, "sheet-jog", "jog2", { operation: "direct-edit", bodyId: "general-body:hem1", jogEdgeIndex: 0, jogPositionMm: 1, jogOffsetMm: 3, jogAngleDeg: 45, sheetBendRadiusMm: 1, valueMm: 3 });
+      const addedJog = run(withHem, { kind: "add-design-solid", feature: hemJog, body: hemBuilt.body });
+      const hemMessage = (await replayAllBodies(addedJog)).find((result) => result.featureId === hemJog.id)?.message;
+      assert(hemMessage !== undefined && /jog bends a flat plate/u.test(hemMessage), `a jog on a hem is reported: ${hemMessage ?? "applied"}`);
+    }
+  },
+  {
+    name: "a jog bends a sheet with a hole across the bend, keeps its volume, and unfolds with its two bends",
+    run: async () => {
+      const { project, sketch } = await sheetProject();
+      const hole = step(sketch, "hole", "drill", { operation: "direct-edit", bodyId: BODY, holeStyle: "simple", holePositionMm: [0, 0, 2], holeNormal: [0, 0, 1], holeDiameterMm: 8, holeDepthMm: 0 });
+      const drilled = await addAndReplay(project, hole);
+      assert(drilled.message === undefined, `the hole drills: ${drilled.message ?? ""}`);
+      const holed = solidMetrics(bodyOf(drilled.project).positionsMm, bodyOf(drilled.project).indices).volumeMm3;
+      // The jog starts 20 mm from the left edge (x = -10) and its strip reaches about x = 3.5, across the 8 mm hole at x = -4 to 4.
+      const jog = step(sketch, "sheet-jog", "jog", { operation: "direct-edit", bodyId: BODY, jogEdgeIndex: 0, jogPositionMm: 20, jogOffsetMm: 8, jogAngleDeg: 45, sheetBendRadiusMm: 2, valueMm: 8 });
+      const made = await addAndReplay(drilled.project, jog);
+      assert(made.message === undefined, `the jog applies across the hole: ${made.message ?? ""}`);
+      const body = bodyOf(made.project);
+      assert(isClosedAndOriented(body.indices), "closed with the hole bent through");
+      const metrics = solidMetrics(body.positionsMm, body.indices);
+      assert(metrics.outward, "outward");
+      near(metrics.volumeMm3, holed, holed * 0.007, "the holed sheet keeps its volume through the bends");
+      const flat = await flatPatternForBody(made.project, BODY);
+      assert(flat.ok, `flat pattern: ${flat.ok ? "" : flat.message}`);
+      if (!flat.ok) return;
+      assert(flat.bends.length === 2, "the pattern has its two jog bends");
+    }
   }
 ];
