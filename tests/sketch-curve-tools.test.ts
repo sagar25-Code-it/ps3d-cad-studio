@@ -268,10 +268,10 @@ export const sketchCurveToolTests: readonly TestCase[] = [
     run: () => {
       const shape = must(buildParabola([-10, 10], [10, 10], [0, -10], ids));
       const spline = splineOf(shape.entities[0]);
-      equal(spline.fitPoints.length, 24, "24 fit points");
+      equal(spline.fitPoints.length, 32, "32 fit points (crowded where the conic bends, see T13)");
       for (const point of spline.fitPoints) near(point[1], (point[0] * point[0]) / 10, 1e-9, "fit point on the parabola");
       near(spline.fitPoints[0]![0], -10, 1e-12, "starts at the first point");
-      near(spline.fitPoints[23]![0], 10, 1e-12, "ends at the second point");
+      near(spline.fitPoints[31]![0], 10, 1e-12, "ends at the second point");
       let worst = 0;
       for (const point of sampleSpline(spline.fitPoints, 12)) worst = Math.max(worst, Math.abs(point[1] - (point[0] * point[0]) / 10));
       assert(worst < 0.01, `the drawn curve stays within 0.01 mm of the parabola (worst ${worst.toFixed(4)})`);
@@ -513,8 +513,8 @@ export const sketchCurveToolTests: readonly TestCase[] = [
         assert(box.max[0] - box.min[0] > 0 || box.max[1] - box.min[1] > 0, `"${character}" has extent`);
       }
       assert(STROKE_FONT_CHARACTERS.includes("Z") && STROKE_FONT_CHARACTERS.includes("9"), "letters and digits are present");
-      equal(unsupportedTextCharacters("Hi~").join(""), "~", "unsupported characters are listed");
-      assert(!buildSketchText([0, 0], "a~b", { heightMm: 10 }, ids).ok, "text with an unsupported character is refused");
+      equal(unsupportedTextCharacters("Hi§").join(""), "§", "unsupported characters are listed");
+      assert(!buildSketchText([0, 0], "a§b", { heightMm: 10 }, ids).ok, "text with an unsupported character is refused");
       assert(!buildSketchText([0, 0], "   ", { heightMm: 10 }, ids).ok, "blank text is refused");
       assert(!buildSketchText([0, 0], "A", { heightMm: 0.1 }, ids).ok, "text under 0.5 mm is refused");
       assert(!buildSketchText([0, 0], "A".repeat(41), { heightMm: 10 }, ids).ok, "more than 40 characters is refused");
