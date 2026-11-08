@@ -1253,8 +1253,10 @@ export function App(): React.JSX.Element {
     const liveFlangeEdges = history.features.filter((candidate) => candidate.kind === "sheet-edge-flange" && candidate.bodyId === body.id && isFeatureActive(history, candidate.id)).map((candidate) => (candidate as DesignSolidFeature).flangeEdgeIndex ?? 0);
     const meetsNeighbour = sharedFlangeEnds(frame, edgeIndex, liveFlangeEdges);
     const needsRelief = meetsNeighbour.start || meetsNeighbour.end;
-    const relief = needsRelief ? Number.parseFloat(ask(`Edge ${edgeIndex} meets another flange at a corner. Corner relief (mm gap between the two flanges, 0 for none):`, frame.thicknessMm.toFixed(2)) ?? "") : 0;
+    const relief = needsRelief ? Number.parseFloat(ask(`Edge ${edgeIndex} meets another flange at a corner. Corner relief size (mm, 0 for none):`, frame.thicknessMm.toFixed(2)) ?? "") : 0;
     if (!Number.isFinite(relief) || relief < 0) { setStatus("ready"); setStatusText("Edge flange: enter a corner relief of 0 or more."); return; }
+    const shapeRaw = relief > 0 ? (ask("Corner relief shape (straight gap, square notch, round notch):", "square") ?? "").trim().toLowerCase() : "straight";
+    if (!["straight", "square", "round"].includes(shapeRaw)) { setStatus("ready"); setStatusText("Edge flange: enter straight, square or round for the corner relief."); return; }
     const feature: DesignSolidFeature = {
       id: `feature:sheet-edge-flange-${crypto.randomUUID()}`,
       name: `Edge flange ${edgeIndex} (${angle.toFixed(0)}°, ${length.toFixed(0)} mm)`,
@@ -1262,7 +1264,8 @@ export function App(): React.JSX.Element {
       sketchFeatureId: base.sketchFeatureId, profileIds: [],
       valueMm: Math.max(0.01, length), bodyId: body.id, operation: "direct-edit",
       flangeEdgeIndex: edgeIndex, sheetBendRadiusMm: radius, flangeLengthMm: length, flangeAngleDeg: angle,
-      ...(relief > 0 ? { flangeReliefMm: relief } : {})
+      ...(relief > 0 ? { flangeReliefMm: relief } : {}),
+      ...(relief > 0 && shapeRaw !== "straight" ? { flangeReliefShape: shapeRaw as "square" | "round" } : {})
     };
     void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
   };

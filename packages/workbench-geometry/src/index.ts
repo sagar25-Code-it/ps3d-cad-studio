@@ -12,6 +12,7 @@ export * from "./sheet-edge-flange.js";
 export * from "./hole.js";
 export * from "./hole-thread.js";
 export * from "./hole-thread-cut.js";
+export * from "./relief-notch.js";
 export * from "./plane-tilt.js";
 export * from "./sketch-placement.js";
 export * from "./flat-pattern.js";

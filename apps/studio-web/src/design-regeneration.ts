@@ -1,7 +1,7 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
-import { attachEdgeFlange, booleanMeshes, splitMeshPieces, threadBoreWall, flangeReliefs, holeCutter, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout, type HoleSpec } from "../../../packages/workbench-geometry/src/index.js";
+import { attachEdgeFlange, booleanMeshes, cutReliefNotch, reliefCorners, splitMeshPieces, threadBoreWall, flangeReliefs, holeCutter, snapToAxis, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BentStripSpec, type FlatLayout, type HoleSpec } from "../../../packages/workbench-geometry/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 
 /**
@@ -172,6 +172,9 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
   let baseBody: GeneralSolidBody | undefined;
   // A cut or hole that severs the body leaves several closed pieces: the largest carries on as the body, the rest are kept here.
   const pieces: GeneralSolidBody[] = [];
+  // Edge flanges already on the body, and the corners whose relief notch has been cut.
+  const attachedFlanges = new Set<number>();
+  const notchedCorners = new Set<string>();
   const keepPiece = (piece: GeneralSolidBody): void => { pieces.push({ ...piece, color: current?.color ?? piece.color }); };
   for (const step of steps) {
     // A lone body is rebuilt whatever its state; the steps of a chain only while they are live.
@@ -183,14 +186,27 @@ export async function replayBody(project: WorkbenchProject, bodyId: string): Pro
       const flatNormal = NORMALS[baseBody.feature?.plane ?? "xy"];
       const plateNormal = plateSketch === undefined ? flatNormal : placeDirection(flatNormal, plateSketch);
       const plateFrame = sheetFrameOf(baseBody, plateNormal);
-      const liveFlanges = steps.filter((other) => other.kind === "sheet-edge-flange" && isFeatureActive(history, other.id)).map((other) => ({ edgeIndex: other.flangeEdgeIndex ?? 0, reliefMm: other.flangeReliefMm ?? 0 }));
+      const liveFlanges = steps.filter((other) => other.kind === "sheet-edge-flange" && isFeatureActive(history, other.id)).map((other) => ({ edgeIndex: other.flangeEdgeIndex ?? 0, reliefMm: other.flangeReliefMm ?? 0, ...(other.flangeReliefShape === undefined ? {} : { shape: other.flangeReliefShape }) }));
       const relief = plateFrame === undefined ? { startMm: 0, endMm: 0 } : flangeReliefs(plateFrame, step.flangeEdgeIndex ?? 0, liveFlanges);
       const attached = attachEdgeFlange(current, baseBody, plateNormal, { edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0, reliefStartMm: relief.startMm, reliefEndMm: relief.endMm });
       if (!attached.ok) { outcomes.set(step.id, { featureId: step.id, message: attached.message }); continue; }
       const { brep: _faceNames, ...withoutFaces } = current;
       void _faceNames;
       current = { ...withoutFaces, positionsMm: [...attached.positionsMm], indices: [...attached.indices] };
-      outcomes.set(step.id, { featureId: step.id });
+      attachedFlanges.add(step.flangeEdgeIndex ?? 0);
+      // A corner relief cut as a notch is taken out of the plate once both flanges of the corner are on.
+      let notchProblem: string | undefined;
+      if (plateFrame !== undefined) {
+        for (const corner of reliefCorners(plateFrame, liveFlanges.filter((flange) => attachedFlanges.has(flange.edgeIndex)))) {
+          const key = `${corner.endEdge}>${corner.startEdge}`;
+          if (notchedCorners.has(key)) continue;
+          const notched = cutReliefNotch(current, plateFrame, corner);
+          if (!notched.ok) { notchProblem = notched.message; continue; }
+          notchedCorners.add(key);
+          current = { ...current, positionsMm: [...notched.positionsMm], indices: [...notched.indices] };
+        }
+      }
+      outcomes.set(step.id, notchProblem === undefined ? { featureId: step.id } : { featureId: step.id, message: notchProblem });
       continue;
     }
     // Hole: drill at a recorded point on a face, straight into the material.
@@ -454,7 +470,7 @@ export async function flatPatternForBody(project: WorkbenchProject, bodyId: stri
   if (frame === undefined) return { ok: false, message: "This body has no flat top face with a thickness to unfold." };
   const flanges = steps
     .filter((step) => step.kind === "sheet-edge-flange" && isFeatureActive(history, step.id))
-    .map((step) => ({ edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0, reliefMm: step.flangeReliefMm ?? 0 }));
+    .map((step) => ({ edgeIndex: step.flangeEdgeIndex ?? 0, innerRadiusMm: step.sheetBendRadiusMm ?? 0, flangeLengthMm: step.flangeLengthMm ?? 0, angleDeg: step.flangeAngleDeg ?? 0, reliefMm: step.flangeReliefMm ?? 0, ...(step.flangeReliefShape === undefined ? {} : { reliefShape: step.flangeReliefShape }) }));
   const pattern = flatPatternOfPlate(frame, plane, flanges);
   if ("error" in pattern) return { ok: false, message: pattern.error };
   const width = pattern.boundsMm.maxX - pattern.boundsMm.minX;

@@ -1,5 +1,5 @@
 import { DEFAULT_K_FACTOR, sheetBendAllowanceMm, sheetBendDeductionMm, type FlatPattern } from "./sheet-metal.js";
-import { flangeReliefs, type SheetFrame } from "./sheet-edge-flange.js";
+import { flangeReliefs, reliefCorners, type ReliefShape, type SheetFrame } from "./sheet-edge-flange.js";
 
 type Point2 = readonly [number, number];
 type Vec3 = readonly [number, number, number];
@@ -39,9 +39,13 @@ export interface PlateFlange {
   readonly angleDeg: number;
   /** Gap left between this flange and a neighbouring flange at a shared corner; each of the two gives up half. */
   readonly reliefMm?: number;
+  /** How the relief is cut at a corner shared with another flange: a straight gap (default) or a square or round notch in the plate's corner. */
+  readonly reliefShape?: ReliefShape;
 }
 
 const KEY_SCALE = 1e4;
+/** A round corner relief is drawn as this many chords. */
+export const NOTCH_ARC_SEGMENTS = 16;
 const keyOf = (point: Point2): string => `${Math.round(point[0] * KEY_SCALE)},${Math.round(point[1] * KEY_SCALE)}`;
 
 function loopArea(points: readonly Point2[]): number {
@@ -91,14 +95,17 @@ export function flatPatternOfPlate(frame: SheetFrame, plane: SheetPlane, flanges
   const bendLines: (readonly [Point2, Point2])[] = [];
   let totalAllowance = 0;
   let totalDeduction = 0;
-  const reliefFlanges = [...flangeByEdge.values()].map((flange) => ({ edgeIndex: flange.edgeIndex, reliefMm: flange.reliefMm ?? 0 }));
+  const reliefFlanges = [...flangeByEdge.values()].map((flange) => ({ edgeIndex: flange.edgeIndex, reliefMm: flange.reliefMm ?? 0, ...(flange.reliefShape === undefined ? {} : { shape: flange.reliefShape }) }));
+  // Corners cut as a notch: the blank has the notch's outline there instead of a gap that runs into the corner.
+  const notchAt = new Map(reliefCorners(frame, reliefFlanges).map((corner) => [corner.startEdge, corner] as const));
   let reliefApplied = false;
   const outlines = loops.map((loop) => {
     const points: Point2[] = [];
     for (const index of loop) {
       const edge = edges[index]!;
-      points.push(edge.a);
       const flange = flangeByEdge.get(index);
+      const notch = notchAt.get(index);
+      if (flange === undefined || notch === undefined) points.push(edge.a);
       if (flange === undefined) continue;
       const allowance = sheetBendAllowanceMm(flange.angleDeg, flange.innerRadiusMm, frame.thicknessMm, kFactor);
       const reach = allowance + flange.flangeLengthMm;
@@ -110,7 +117,23 @@ export function flatPatternOfPlate(frame: SheetFrame, plane: SheetPlane, flanges
       const from: Point2 = [edge.a[0] + dir[0] * reliefs.startMm, edge.a[1] + dir[1] * reliefs.startMm];
       const to: Point2 = [edge.b[0] - dir[0] * reliefs.endMm, edge.b[1] - dir[1] * reliefs.endMm];
       if (reliefs.startMm > 0 || reliefs.endMm > 0) reliefApplied = true;
-      if (reliefs.startMm > 0) points.push(from);
+      if (notch !== undefined && reliefs.startMm > 0) {
+        // The previous flange ends at corner + size * back; the next starts at corner + size * along. Between them the outline goes round the notch.
+        const along = planeCoordinates(notch.alongMm, plane);
+        const back = planeCoordinates(notch.backMm, plane);
+        if (notch.shape === "square") points.push([edge.a[0] + (along[0] + back[0]) * notch.sizeMm, edge.a[1] + (along[1] + back[1]) * notch.sizeMm]);
+        else {
+          const startAngle = Math.atan2(back[1], back[0]);
+          let sweep = Math.atan2(along[1], along[0]) - startAngle;
+          while (sweep > Math.PI) sweep -= Math.PI * 2;
+          while (sweep < -Math.PI) sweep += Math.PI * 2;
+          for (let step = 1; step < NOTCH_ARC_SEGMENTS; step += 1) {
+            const angle = startAngle + (sweep * step) / NOTCH_ARC_SEGMENTS;
+            points.push([edge.a[0] + Math.cos(angle) * notch.sizeMm, edge.a[1] + Math.sin(angle) * notch.sizeMm]);
+          }
+        }
+        points.push(from);
+      } else if (reliefs.startMm > 0) points.push(from);
       points.push([from[0] + edge.o[0] * reach, from[1] + edge.o[1] * reach], [to[0] + edge.o[0] * reach, to[1] + edge.o[1] * reach]);
       if (reliefs.endMm > 0) points.push(to);
       const mid = allowance / 2;
