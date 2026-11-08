@@ -145,6 +145,7 @@ import {
 } from "./workspaces/RenderStudioWorkspace.js";
 import { SurfaceInspector } from "./workspaces/SurfaceInspector.js";
 import { withCosmeticThreads } from "./hole-threads.js";
+import { runSurfaceAction, withFormCages, withSurfaceBodies, type SurfaceAction } from "./surface-actions.js";
 import { DrawingWorkspace } from "./workspaces/DrawingWorkspace.js";
 import { AutomateWorkspace } from "./workspaces/AutomateWorkspace.js";
 import { ElectricalWorkspace } from "./workspaces/ElectricalWorkspace.js";
@@ -338,9 +339,9 @@ export function App(): React.JSX.Element {
     : { ...project.assembly, explodeMm: assemblyExplodePreviewMm }, [assemblyExplodePreviewMm, project.assembly]);
   const assemblyExplodePercent = Math.round(Math.min(100, displayedAssembly.explodeMm / assemblyExplodeMaxMm * 100));
   const assemblyScene = useMemo(() => buildAssemblyPreview(displayedAssembly), [displayedAssembly]);
-  const partScene = useMemo(() => withCosmeticThreads(buildPartPreview(project.part), project), [project.part, project.design]);
+  const partScene = useMemo(() => withFormCages(withCosmeticThreads(buildPartPreview(project.part), project), project), [project.part, project.design]);
   const interferences = useMemo(() => findAssemblyInterference(displayedAssembly), [displayedAssembly]);
-  const surfacePreview = useMemo(() => buildSurfacePreview(project.surface), [project.surface]);
+  const surfacePreview = useMemo(() => { const base = buildSurfacePreview(project.surface); return { ...base, scene: withSurfaceBodies(base.scene, project) }; }, [project.surface, project.part.generalBodies]);
   const drawing = useMemo(() => createDrawingSvg(project.part, project.drawing), [project.part, project.drawing]);
   const electrical = useMemo(() => createElectricalSchematic(project.electrical), [project.electrical]);
   const vehiclePreview = useMemo(() => buildVehiclePreview(project.vehicle), [project.vehicle]);
@@ -1222,6 +1223,34 @@ export function App(): React.JSX.Element {
       resolve(point);
     };
   });
+
+  /**
+   * Surface workspace mesh-surface and SubD actions: asks for what they need, builds the plan with the surface planners and applies all
+   * of its operations as one undo step. Curves come from the timeline's sketches; nothing here has been exercised in the browser.
+   */
+  const handleSurfaceAction = (action: SurfaceAction): void => {
+    const before = projectRef.current;
+    const result = runSurfaceAction(action, { project: before, selectedId, ask: (label, defaultValue) => (typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue)) });
+    if ("cancelled" in result) return;
+    if (!result.ok) { setStatus("ready"); setStatusText(result.message); return; }
+    let next = before;
+    for (const intent of result.operations) {
+      const applied = applyWorkbenchOperation(next, { ...intent, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: next.revision } as WorkbenchOperation);
+      if (!applied.ok) {
+        const problem = applied.diagnostics[0];
+        setDiagnostic(problem === undefined ? undefined : { code: problem.code, message: problem.message, recovery: problem.recovery });
+        setStatus("error");
+        setStatusText(problem?.message ?? "The surface operation was rejected.");
+        return;
+      }
+      next = applied.value.project;
+    }
+    pushProject(next);
+    setSelectedId(result.bodyId);
+    setDiagnostic(undefined);
+    setStatus("ready");
+    setStatusText(result.summary);
+  };
 
   const handleEdgeFlange = async (): Promise<void> => {
     const current = projectRef.current;
@@ -3371,6 +3400,7 @@ export function App(): React.JSX.Element {
       onSurfaceMode={(mode) => applyProjectOperation({ kind: "set-surface-mode", mode })}
       onSurfaceParameter={(parameter, value) => applyProjectOperation({ kind: "set-surface-parameter", parameter, value })}
       onSurfacePreset={(preset) => applyProjectOperation({ kind: "apply-surface-preset", preset })}
+      onSurfaceAction={handleSurfaceAction}
       onDrawingSheet={(sheet) => applyProjectOperation({ kind: "set-drawing-sheet", sheet })}
       onDrawingProjection={(projection) => applyProjectOperation({ kind: "set-drawing-projection", projection })}
       onDrawingScale={(scale) => applyProjectOperation({ kind: "set-drawing-scale", scale })}

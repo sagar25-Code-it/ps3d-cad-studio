@@ -5,8 +5,10 @@ import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/inde
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, iconTone } from "./CommandIcon.js";
 import type { SketchEditToolId } from "../workspaces/SketchEditPanel.js";
+import type { SurfaceAction } from "../surface-actions.js";
 
 type SketchRibbonCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check";
+
 type SurfaceParameter = "widthMm" | "depthMm" | "crownMm" | "twistDeg" | "uSegments" | "vSegments";
 
 interface WorkbenchRibbonProps {
@@ -64,6 +66,7 @@ interface WorkbenchRibbonProps {
   readonly onSurfaceMode: (mode: SurfaceIntent["mode"]) => void;
   readonly onSurfaceParameter: (parameter: SurfaceParameter, value: number) => void;
   readonly onSurfacePreset: (preset: "flatten" | "canopy") => void;
+  readonly onSurfaceAction: (action: SurfaceAction) => void;
   readonly onDrawingSheet: (sheet: DrawingSettings["sheet"]) => void;
   readonly onDrawingProjection: (projection: DrawingSettings["projection"]) => void;
   readonly onDrawingScale: (scale: DrawingSettings["scale"]) => void;
@@ -310,6 +313,19 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       <RibbonGroup label="Surface creation">
         <RibbonButton icon="bezier" label="Bézier" hint="patch" active={props.project.surface.mode === "bezier"} onClick={() => props.onSurfaceMode("bezier")} />
         <RibbonButton icon="loft" label="Blended loft" hint="2 profiles" active={props.project.surface.mode === "loft"} onClick={() => props.onSurfaceMode("loft")} />
+      </RibbonGroup>
+      <RibbonGroup label="Mesh surfaces">
+        <RibbonButton icon="loft" label="Ruled" hint="2 curves" onClick={() => props.onSurfaceAction("ruled")} />
+        <RibbonButton icon="loft" label="Loft surface" hint="curves" onClick={() => props.onSurfaceAction("loft")} />
+        <RibbonButton icon="bezier" label="Patch" hint="closed loop" onClick={() => props.onSurfaceAction("patch")} />
+        <RibbonButton icon="projection" label="Extend" hint="open edge" onClick={() => props.onSurfaceAction("extend")} />
+        <RibbonButton icon="section" label="Trim" hint="plane · curve" onClick={() => props.onSurfaceAction("trim")} />
+        <RibbonButton icon="unite" label="Stitch" hint="to a solid" onClick={() => props.onSurfaceAction("stitch")} />
+      </RibbonGroup>
+      <RibbonGroup label="SubD form">
+        <RibbonButton icon="canopy" label="New form" hint="box cage" onClick={() => props.onSurfaceAction("form-new")} />
+        <RibbonButton icon="fit" label="Edit cage" hint="move · extrude · loop" onClick={() => props.onSurfaceAction("form-edit")} />
+        <RibbonButton icon="boolean" label="Finish Form" hint="to a solid" onClick={() => props.onSurfaceAction("form-finish")} />
       </RibbonGroup>
       <RibbonGroup label="Shape presets">
         <RibbonButton icon="flatten" label="Flatten" hint="C0" onClick={() => props.onSurfacePreset("flatten")} />

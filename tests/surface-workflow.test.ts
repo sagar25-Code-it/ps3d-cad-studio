@@ -7,6 +7,8 @@ import {
   formBodyOf, planBoundaryPatch, planCreateForm, planEditForm, planExtendSurface, planFinishForm, planLoftSurface, planRuledSurface, planStitch, planTrimSurface, sketchCurvesOf,
   type Planned, type SurfaceIntent
 } from "../apps/studio-web/src/surface-workflow.js";
+import { formCagePrimitives, runSurfaceAction, withFormCages, withSurfaceBodies, type SurfaceAction } from "../apps/studio-web/src/surface-actions.js";
+import { selectionMetrics } from "../apps/studio-web/src/selection-metrics.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 let serial = 0;
@@ -207,6 +209,56 @@ export const surfaceWorkflowTests: readonly TestCase[] = [
       const saved = JSON.parse(JSON.stringify(good.value.project)) as WorkbenchProject;
       const damaged = { ...saved, part: { ...saved.part, generalBodies: [{ ...saved.part.generalBodies![0]!, subd: { ...saved.part.generalBodies![0]!.subd!, faces: [[0, 1, 99]] } }] } } as WorkbenchProject;
       assert(!validateWorkbenchProject(damaged).ok, "a saved project with a damaged cage does not load");
+    }
+  },
+  {
+    name: "the Surface workspace buttons drive the planners from their prompts: curves picked by number, bad answers reported, cancel does nothing, and surfaces and forms read back with the right metrics and scene",
+    run: () => {
+      let project = createWorkbenchProject("project:test-surface-actions");
+      project = sketchWith(project, "datum:xy", 0, [{ id: "entity:a", kind: "line", start: [0, 0], end: [30, 0], construction: false }], "feature:sk-a");
+      project = sketchWith(project, "datum:xy", 0, [{ id: "entity:b", kind: "line", start: [0, 20], end: [30, 20], construction: false }], "feature:sk-b");
+      const answers = (...texts: (string | null)[]) => { let at = 0; return (): string | null => texts[at++] ?? null; };
+      const act = (action: SurfaceAction, selectedId: string | null, ...texts: (string | null)[]) => { const next = answers(...texts); return runSurfaceAction(action, { project, selectedId, ask: () => next() }); };
+      const ruled = act("ruled", null, "1, 2");
+      assert("ok" in ruled && ruled.ok, "ruled from curves 1 and 2");
+      if ("ok" in ruled && ruled.ok) project = ruled.operations.reduce<WorkbenchProject>((current, operation) => run(current, operation), project);
+      const bad = act("ruled", null, "1, 9");
+      assert("ok" in bad && !bad.ok && bad.message.includes("1 to 2"), "a curve number that does not exist is reported with the range");
+      assert("cancelled" in act("ruled", null, null), "cancelling the prompt does nothing");
+      const wrongCount = act("ruled", null, "1");
+      assert("ok" in wrongCount && !wrongCount.ok, "ruled needs two curves");
+      const surfaceId = "general-body:ruled-1";
+      const metrics = selectionMetrics(project, surfaceId);
+      assert(metrics !== undefined && metrics.metrics[0]!.includes("Surface (open mesh)") && metrics.metrics[0]!.includes("600"), "a surface reads as an open mesh with its area, not a volume");
+      const extend = act("extend", surfaceId, "5");
+      assert("ok" in extend && extend.ok, "extend from the selection and a distance");
+      assert("ok" in act("extend", surfaceId, "-3") && !(act("extend", surfaceId, "-3") as { ok: boolean }).ok, "a negative distance is reported");
+      const trim = act("trim", surfaceId, "plane", "x 10");
+      assert("ok" in trim && trim.ok, "trim by a plane at x 10");
+      if ("ok" in trim && trim.ok) near(((trim.operations[0] as { body: GeneralSolidBody }).body.feature?.valueMm) ?? 0, 400, 1e-6, "keeps the 20 x 20 side with larger x");
+      assert("ok" in act("trim", surfaceId, "plane", "q 10") && !(act("trim", surfaceId, "plane", "q 10") as { ok: boolean }).ok, "an unknown axis is reported");
+      const lone = act("trim", null, "plane", "x 10");
+      assert("ok" in lone && lone.ok, "with a single surface in the part, Trim uses it even when nothing is selected");
+      const stitch = act("stitch", null, "all");
+      assert("ok" in stitch && !stitch.ok && stitch.message.includes("do not close up"), "one open sheet cannot be stitched, and the message says so");
+
+      const form = act("form-new", null, "40, 30, 20");
+      assert("ok" in form && form.ok, "a box form from three sizes");
+      if ("ok" in form && form.ok) project = form.operations.reduce<WorkbenchProject>((current, operation) => run(current, operation), project);
+      const formId = "general-body:form-1";
+      const formMetrics = selectionMetrics(project, formId);
+      assert(formMetrics !== undefined && formMetrics.metrics[0]!.includes("SubD form") && formMetrics.metrics[0]!.includes("8 cage vertices"), "a form reads as a SubD form with its cage size");
+      const move = act("form-edit", formId, "move", "4, 5, 6, 7", "0, 0, 8");
+      assert("ok" in move && move.ok, "move cage vertices by prompt");
+      assert("ok" in act("form-edit", formId, "polish") && !(act("form-edit", formId, "polish") as { ok: boolean }).ok, "an unknown edit is reported");
+      const finish = act("form-finish", formId);
+      assert("ok" in finish && finish.ok, "finish the selected form");
+      assert(formCagePrimitives(project).length === 6, "the cage is drawn as six face loops");
+      const scene = { id: "s", kind: "surface" as const, primitives: [], boundsMm: { min: [0, 0, 0] as const, max: [1, 1, 1] as const, size: [1, 1, 1] as const } };
+      const surfaceScene = withSurfaceBodies(scene, project);
+      equal(surfaceScene.primitives.length, 8, "the Surface scene shows the sheet, the form and its six cage loops");
+      assert(surfaceScene.boundsMm.max[0] >= 30, "and its bounds grew to hold them");
+      equal(withFormCages({ ...scene, kind: "part" }, project).primitives.length, 6, "the Part scene gets the cage lines");
     }
   }
 ];
