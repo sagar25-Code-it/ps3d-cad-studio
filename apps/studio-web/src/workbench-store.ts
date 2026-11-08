@@ -10,7 +10,8 @@ export async function saveWorkbenchProject(project: WorkbenchProject): Promise<v
   if (!valid.ok) throw new Error(valid.diagnostics[0]?.message ?? "The workbench project is invalid.");
   const database = await openDatabase();
   try {
-    await transactionPromise(database, "readwrite", (store) => store.put(structuredClone(valid.value), KEY));
+    // validateWorkbenchProject already returned an independent copy and IndexedDB copies again on put.
+    await transactionPromise(database, "readwrite", (store) => store.put(valid.value, KEY));
   } finally {
     database.close();
   }

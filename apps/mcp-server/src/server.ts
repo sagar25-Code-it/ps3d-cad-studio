@@ -19,7 +19,7 @@ const projectSchema = z.object({
   revision: z.number().int().nonnegative(), unit: z.literal("mm"), activeWorkspace: workspaceSchema,
   sketch: z.record(z.string(), z.unknown()), part: z.record(z.string(), z.unknown()), assembly: z.record(z.string(), z.unknown()),
   surface: z.record(z.string(), z.unknown()), drawing: z.record(z.string(), z.unknown()), electrical: z.record(z.string(), z.unknown()),
-  vehicle: z.record(z.string(), z.unknown()), audit: z.array(z.record(z.string(), z.unknown())).max(500)
+  vehicle: z.record(z.string(), z.unknown()), audit: z.array(z.record(z.string(), z.unknown())).max(1000)
 }).strict();
 const operationSchema = z.object({
   operationId: z.string().regex(/^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u),

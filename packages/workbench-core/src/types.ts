@@ -1106,10 +1106,18 @@ export interface DrawingSettings {
 export interface OperationAuditEntry {
   readonly revision: number;
   readonly operationId: string;
-  readonly kind: WorkbenchOperation["kind"];
+  /** An operation kind, or "audit-checkpoint" for the entry that stands for the older operations folded out of the audit. */
+  readonly kind: WorkbenchOperation["kind"] | "audit-checkpoint";
   readonly intentKey: string;
   readonly summary: string;
   readonly changedIds: readonly string[];
+  /** Only on an "audit-checkpoint" entry (always the first one): what was folded into it. See audit-archive.ts. */
+  readonly checkpoint?: {
+    readonly firstRevision: number;
+    readonly lastRevision: number;
+    readonly operations: number;
+    readonly digest: string;
+  };
 }
 
 /** What a parametric history step is. Sketches keep a snapshot of the sketch; solids are rebuilt from a sketch feature. */

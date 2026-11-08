@@ -22,6 +22,7 @@ import {
   featureOfBody,
   isElectricalSheetPositionAvailable,
   parseWorkbenchProjectText,
+  serializeWorkbenchProject,
   sketchPlaneName,
   preferredElectromechanicalLayout,
   resolveWorkbenchContextCommands,
@@ -116,6 +117,7 @@ import {
 } from "../../../packages/viewport-three/src/index.js";
 import type { ModelSuccessResponse, WorkerResponse } from "../../../packages/worker-protocol/src/index.js";
 import { GeometryWorkerClient } from "./worker-client.js";
+import { createLatestWinsWriter } from "./latest-wins-writer.js";
 import { loadWorkbenchProject, saveWorkbenchProject } from "./workbench-store.js";
 import { createQualifiedPartDocument } from "./project-worker-sync.js";
 import {
@@ -371,7 +373,6 @@ export function App(): React.JSX.Element {
   const nativeInputRef = useRef<HTMLInputElement>(null);
   const engineeringDialogRef = useRef<HTMLElement>(null);
   const projectTransitionQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const projectPersistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const assemblyExplodeMaxMm = useMemo(() => assemblyExplodeLimitMm(project.assembly), [project.assembly]);
   const displayedAssembly = useMemo(() => assemblyExplodePreviewMm === null
@@ -442,11 +443,9 @@ export function App(): React.JSX.Element {
     )
     : { ok: false as const, diagnostics: [] }, [electrical.routing, electromechanicalReviewOpen, project.electrical, project.revision]);
 
-  const persistBroadProject = useCallback((next: WorkbenchProject): Promise<void> => {
-    const queued = projectPersistenceQueueRef.current.then(() => saveWorkbenchProject(next));
-    projectPersistenceQueueRef.current = queued.catch(() => undefined);
-    return queued;
-  }, []);
+  // Autosave coalesces: a burst of edits is one write behind the one in flight, so a large model does not slow every line drawn.
+  const persistWriter = useMemo(() => createLatestWinsWriter<WorkbenchProject>(saveWorkbenchProject, 200), []);
+  const persistBroadProject = useCallback((next: WorkbenchProject): Promise<void> => persistWriter.schedule(next), [persistWriter]);
 
   const syncTimelineState = useCallback((): void => {
     setLaneTimelineIndex(laneTimelineIndexRef.current);
@@ -2761,7 +2760,7 @@ export function App(): React.JSX.Element {
     return true;
   };
 
-  const serializeProjectText = (): string => `${JSON.stringify(projectRef.current, null, 2)}\n`;
+  const serializeProjectText = (): string => serializeWorkbenchProject(projectRef.current);
 
   const prepareQualifiedWorker = async (next: WorkbenchProject): Promise<PreparedQualifiedWorker | undefined> => {
     let active = false;
@@ -3486,7 +3485,7 @@ export function App(): React.JSX.Element {
     return () => window.removeEventListener("keydown", listener);
   }, [isThreeDimensional, masterCartOpen]);
 
-  const downloadProject = (): void => downloadBlob(new Blob([JSON.stringify(projectRef.current, null, 2)], { type: "application/json" }), exportFileName(projectRef.current.name, "", "workbench.json"));
+  const downloadProject = (): void => downloadBlob(new Blob([serializeWorkbenchProject(projectRef.current)], { type: "application/json" }), exportFileName(projectRef.current.name, "", "workbench.json"));
   const downloadDrawing = (): void => downloadBlob(new Blob([drawing.svg], { type: "image/svg+xml" }), exportFileName(projectRef.current.name, "drawing", "svg"));
   useEffect(() => {
     const listener = (event: KeyboardEvent): void => {

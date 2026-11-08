@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { WorkbenchProject, WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
+import { auditCapacity, type WorkbenchProject, type WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
 import { formatStorageSize, type PsCadWorkspaceStatus, type RecentProjectEntry } from "../file-workspace.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { useDialogFocus } from "./useDialogFocus.js";
@@ -175,7 +175,7 @@ function PropertiesSection({ project, workspaceStatus, onPrint }: { readonly pro
         <div><dt>Schema</dt><dd>{project.format} / {project.schemaVersion}</dd></div><div><dt>Application</dt><dd>{project.applicationVersion}</dd></div>
         <div><dt>Units</dt><dd>{project.unit}</dd></div><div><dt>Active workspace</dt><dd>{project.activeWorkspace}</dd></div>
         <div><dt>Sketch entities</dt><dd>{project.sketch.entities.length}</dd></div><div><dt>Assembly components</dt><dd>{project.assembly.components.length}</dd></div>
-        <div><dt>Audit entries</dt><dd>{project.audit.length}</dd></div><div><dt>Current file</dt><dd>{workspaceStatus.currentFileName ?? "Unsaved"}</dd></div>
+        <div><dt>History</dt><dd title="The oldest entries fold into a checkpoint automatically, so editing never stops; revision numbers are kept.">{auditCapacity(project).label}</dd></div><div><dt>Current file</dt><dd>{workspaceStatus.currentFileName ?? "Unsaved"}</dd></div>
       </dl>
       <button className="file-primary-action" onClick={onPrint}><CommandIcon name="drawing" />Print current workspace<kbd>Ctrl+P</kbd></button>
     </section>

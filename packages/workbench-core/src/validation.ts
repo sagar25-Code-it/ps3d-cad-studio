@@ -44,16 +44,24 @@ import {
 import { createVehicleTemplate, solveVehicleGeometry, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { validatePartFeatureStack } from "./part-features.js";
+import { MODEL_ENVELOPE, sketchEntityProblem } from "./envelope.js";
+import { AUDIT_CHECKPOINT_KIND, AUDIT_MAX_ENTRIES } from "./audit-archive.js";
 
 export const WORKBENCH_LIMITS = {
-  maxJsonBytes: 1_000_000,
+  /** A project file as Open and the validators accept it. Matches the 50 MB the file workspace allows Save to write. */
+  maxJsonBytes: 50_000_000,
+  /** What one MCP tool call may carry (the remote transport caps its body at 1 MB). */
+  maxMcpInputBytes: 1_000_000,
   maxEntities: 500,
   maxConstraints: 1_000,
   maxComponents: 100,
   maxMates: 200,
   maxElectricalNets: 200,
-  maxAuditEntries: 500,
+  /** Entries the audit holds before the oldest are folded into a checkpoint (see audit-archive.ts). */
+  maxAuditEntries: AUDIT_MAX_ENTRIES,
+  /** Component, assembly and electrical coordinates. Sketch geometry has its own, larger limit: see MODEL_ENVELOPE. */
   maxCoordinateMm: 10_000,
+  maxSketchCoordinateMm: MODEL_ENVELOPE.maxSketchCoordinateMm,
   minGeometryMm: 0.01,
   maxSurfaceSegments: 48
 } as const;
@@ -62,7 +70,12 @@ const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/iu;
 const WORKSPACES: readonly WorkspaceId[] = ["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"];
 
-export function validateWorkbenchProject(input: unknown): WorkbenchResult<WorkbenchProject> {
+/**
+ * Validates a project and returns an independent deep copy of it. With `share: true` the copy is not made: the result reuses the
+ * input's own objects (an operation reducer builds the next project from the previous one by structural sharing and does not need
+ * a second full copy of every mesh to check it).
+ */
+export function validateWorkbenchProject(input: unknown, options?: { readonly share?: boolean }): WorkbenchResult<WorkbenchProject> {
   const requiredRoot = [
     "format", "schemaVersion", "applicationVersion", "id", "name", "revision", "unit", "activeWorkspace",
     "sketch", "part", "assembly", "surface", "drawing", "audit"
@@ -103,6 +116,7 @@ export function validateWorkbenchProject(input: unknown): WorkbenchResult<Workbe
   if (Object.hasOwn(input, "design") && !validateDesignHistory(input.design, (candidate) => validateSketch(candidate).ok)) {
     return invalid("The design timeline is invalid: a feature, a sketch snapshot, a reference or the rollback marker is wrong.");
   }
+  if (options?.share === true) return { ok: true, value: { ...(input as unknown as WorkbenchProject), assembly: normalizedAssembly, electrical: electrical.value, vehicle: vehicle.value } };
   return { ok: true, value: { ...(structuredClone(input) as unknown as WorkbenchProject), assembly: structuredClone(normalizedAssembly), electrical: structuredClone(electrical.value), vehicle: structuredClone(vehicle.value) } };
 }
 
@@ -183,7 +197,7 @@ function validateVehicle(value: unknown): WorkbenchResult<VehicleIntent> {
 
 export function parseWorkbenchProjectText(text: string): WorkbenchResult<WorkbenchProject> {
   if (new TextEncoder().encode(text).byteLength > WORKBENCH_LIMITS.maxJsonBytes) {
-    return failure("RESOURCE_LIMIT", "The project exceeds the 1 MB preview limit.", [], "Open a smaller PS3D workbench project.");
+    return failure("RESOURCE_LIMIT", `The project file is larger than the ${WORKBENCH_LIMITS.maxJsonBytes / 1_000_000} MB limit.`, [], "Open a smaller PS3D workbench project, or delete bodies you no longer need and save it again.");
   }
   try {
     return validateWorkbenchProject(JSON.parse(text) as unknown);
@@ -227,7 +241,7 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
     || (optionalTilt.length > 0 && !validSketchPlaneTilt(value.planeTilt))
     || (optionalFrame.length > 0 && (!validSketchPlaneFrame(value.planeFrame) || value.plane !== "datum:xy" || optionalOffset.length > 0 || optionalTilt.length > 0))
     || value.id !== "sketch:primary-profile" || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(value.plane) || !shortText(value.name, 1, 120)
-    || (optionalOffset.length > 0 && !finiteRange(value.planeOffsetMm, -100_000, 100_000))
+    || (optionalOffset.length > 0 && !finiteRange(value.planeOffsetMm, -MODEL_ENVELOPE.maxPlaneOffsetMm, MODEL_ENVELOPE.maxPlaneOffsetMm))
     || !finiteRange(value.gridMm, 0.1, 100) || !finiteRange(value.snapToleranceMm, 0.01, 10)
     || !Array.isArray(value.entities) || value.entities.length > WORKBENCH_LIMITS.maxEntities
     || !Array.isArray(value.constraints) || value.constraints.length > WORKBENCH_LIMITS.maxConstraints) {
@@ -235,8 +249,11 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   }
   const entityIds = new Set<string>();
   for (const entity of value.entities) {
-    if (!validateEntity(entity) || entityIds.has(entity.id)) return invalid("A sketch entity is invalid or has a duplicate ID.");
-    entityIds.add(entity.id);
+    const problem = sketchEntityProblem(entity);
+    if (problem !== undefined) return failure(problem.code === "INVALID_OPERATION" ? "INVALID_PROJECT" : problem.code, problem.message, problem.entityId === undefined ? [] : [problem.entityId], "Fix or delete that sketch entity; sizes must stay within 0.01 mm and +/-100,000 mm.");
+    const id = (entity as SketchEntity).id;
+    if (entityIds.has(id)) return failure("INVALID_PROJECT", `Sketch entity ${id} appears twice; every entity needs its own ID.`, [id], "Give each sketch entity a unique ID.");
+    entityIds.add(id);
   }
   const constraintIds = new Set<string>();
   for (const constraint of value.constraints) {
@@ -246,46 +263,6 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
     constraintIds.add(constraint.id);
   }
   return { ok: true, value: value as unknown as WorkbenchSketch };
-}
-
-function validateEntity(value: unknown): value is SketchEntity {
-  if (!isRecord(value) || !stableId(value.id) || typeof value.construction !== "boolean"
-    || (Object.hasOwn(value, "visible") && typeof value.visible !== "boolean")) return false;
-  const optionalVisibility = Object.hasOwn(value, "visible") ? ["visible"] : [];
-  if (value.kind === "line") {
-    return exactKeys(value, ["id", "kind", "start", "end", "construction", ...optionalVisibility])
-      && vec2(value.start) && vec2(value.end) && distance(value.start, value.end) >= WORKBENCH_LIMITS.minGeometryMm;
-  }
-  if (value.kind === "rectangle") {
-    return exactKeys(value, ["id", "kind", "center", "widthMm", "heightMm", "rotationDeg", "construction", ...optionalVisibility])
-      && vec2(value.center) && finiteRange(value.widthMm, WORKBENCH_LIMITS.minGeometryMm, 20_000)
-      && finiteRange(value.heightMm, WORKBENCH_LIMITS.minGeometryMm, 20_000) && finiteRange(value.rotationDeg, -360, 360);
-  }
-  if (value.kind === "circle") {
-    return exactKeys(value, ["id", "kind", "center", "radiusMm", "construction", ...optionalVisibility])
-      && vec2(value.center) && finiteRange(value.radiusMm, WORKBENCH_LIMITS.minGeometryMm, 10_000);
-  }
-  if (value.kind === "ellipse") {
-    return exactKeys(value, ["id", "kind", "center", "majorRadiusMm", "minorRadiusMm", "rotationDeg", "construction", ...optionalVisibility])
-      && vec2(value.center) && finiteRange(value.majorRadiusMm, WORKBENCH_LIMITS.minGeometryMm, 10_000)
-      && finiteRange(value.minorRadiusMm, WORKBENCH_LIMITS.minGeometryMm, 10_000)
-      && (value.minorRadiusMm as number) <= (value.majorRadiusMm as number) + 1e-9
-      && finiteRange(value.rotationDeg, -360, 360);
-  }
-  if (value.kind === "arc") {
-    return exactKeys(value, ["id", "kind", "start", "mid", "end", "construction", ...optionalVisibility])
-      && vec2(value.start) && vec2(value.mid) && vec2(value.end)
-      && Math.abs(cross2(value.start, value.mid, value.end)) >= 1e-4;
-  }
-  if (value.kind === "point") {
-    return exactKeys(value, ["id", "kind", "point", "construction", ...optionalVisibility]) && vec2(value.point);
-  }
-  if (value.kind === "spline") {
-    return exactKeys(value, ["id", "kind", "fitPoints", "construction", ...optionalVisibility])
-      && Array.isArray(value.fitPoints) && value.fitPoints.length >= 3 && value.fitPoints.length <= 24
-      && value.fitPoints.every((point, index, all) => vec2(point) && (index === 0 || distance(all[index - 1] as readonly [number, number], point) >= WORKBENCH_LIMITS.minGeometryMm));
-  }
-  return false;
 }
 
 const CONSTRAINT_KINDS = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed", "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"];
@@ -338,8 +315,8 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   if (value.kind === "pierce" && (!hasPierce || value.entityIds.length !== 1)) return false;
   if (hasRatio && (value.kind !== "refraction" || !finiteRange(value.ratio, 0.05, 20))) return false;
   if (value.kind === "refraction" && (!hasRatio || value.entityIds.length !== 3)) return false;
-  if (hasValue && value.kind === "arc-length" || hasValue && value.kind === "perimeter") return finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, 40_000);
-  return !hasValue || finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, 20_000);
+  if (hasValue && value.kind === "arc-length" || hasValue && value.kind === "perimeter") return finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, MODEL_ENVELOPE.maxSketchLongMm);
+  return !hasValue || finiteRange(value.valueMm, WORKBENCH_LIMITS.minGeometryMm, MODEL_ENVELOPE.maxSketchSizeMm);
 }
 
 function validatePart(value: unknown): WorkbenchResult<PartIntent> {
@@ -987,18 +964,35 @@ function samePath(left: readonly (readonly number[])[], right: readonly (readonl
 }
 
 function validateAudit(value: unknown, revision: number): WorkbenchResult<readonly OperationAuditEntry[]> {
-  if (!Array.isArray(value) || value.length > WORKBENCH_LIMITS.maxAuditEntries || value.length !== revision) return invalid("The revision audit is incomplete or exceeds its limit.");
+  if (!Array.isArray(value) || value.length > WORKBENCH_LIMITS.maxAuditEntries) return invalid(`The revision audit is not a list or holds more than ${WORKBENCH_LIMITS.maxAuditEntries} entries.`);
   const ids = new Set<string>();
+  let expected = 1;
   for (let index = 0; index < value.length; index += 1) {
     const entry = value[index];
-    if (!isRecord(entry) || !exactKeys(entry, ["revision", "operationId", "kind", "intentKey", "summary", "changedIds"])
-      || entry.revision !== index + 1 || !stableId(entry.operationId) || ids.has(entry.operationId)
+    const checkpoint = index === 0 && isRecord(entry) && entry.kind === AUDIT_CHECKPOINT_KIND;
+    if (checkpoint) {
+      const folded = (entry as Record<string, unknown>).checkpoint;
+      if (!isRecord(folded) || !exactKeys(folded, ["firstRevision", "lastRevision", "operations", "digest"]) || !integerRange(folded.firstRevision, 1, 1_000_000_000)
+        || !integerRange(folded.lastRevision, 1, 1_000_000_000) || !integerRange(folded.operations, 1, 1_000_000_000) || (folded.operations as number) > (folded.lastRevision as number)
+        || (folded.lastRevision as number) < (folded.firstRevision as number) || typeof folded.digest !== "string" || !/^[0-9a-f]{64}$/u.test(folded.digest)
+        || (entry as Record<string, unknown>).revision !== folded.lastRevision) return invalid("The audit checkpoint is malformed: it needs the first and last folded revision, the operation count and a SHA-256 digest.");
+      expected = folded.lastRevision as number;
+    }
+    if (!isRecord(entry) || !exactKeys(entry, checkpoint ? ["revision", "operationId", "kind", "intentKey", "summary", "changedIds", "checkpoint"] : ["revision", "operationId", "kind", "intentKey", "summary", "changedIds"])
+      || entry.revision !== expected || !stableId(entry.operationId) || ids.has(entry.operationId)
       || typeof entry.kind !== "string" || !shortText(entry.intentKey, 1, 8_192) || !shortText(entry.summary, 1, 240)
-      || !Array.isArray(entry.changedIds) || entry.changedIds.length > WORKBENCH_LIMITS.maxMates + 1 || entry.changedIds.some((id) => !stableId(id))) return invalid("An audit entry is invalid or out of sequence.");
+      || !Array.isArray(entry.changedIds) || entry.changedIds.length > MAX_AUDIT_CHANGED_IDS || entry.changedIds.some((id) => !stableId(id))) {
+      return invalid(`Audit entry ${index + 1} is invalid or out of sequence (expected revision ${expected}).`);
+    }
     ids.add(entry.operationId);
+    expected += 1;
   }
+  if (expected - 1 !== revision) return invalid(`The revision audit ends at revision ${expected - 1}, but the project is at revision ${revision}.`);
   return { ok: true, value: value as unknown as readonly OperationAuditEntry[] };
 }
+
+/** An audit entry names at most this many changed IDs; a larger edit (a big paste or pattern) is recorded with its first IDs and a count in the summary. */
+export const MAX_AUDIT_CHANGED_IDS = 200;
 
 function invalid(message: string): WorkbenchResult<never> {
   return failure("INVALID_PROJECT", message, [], "Use a bounded PS3D workbench project created by this version.");

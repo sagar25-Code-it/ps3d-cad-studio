@@ -72,7 +72,7 @@ const PROJECT_SCHEMA = {
     id: { type: "string" }, name: { type: "string" }, revision: { type: "integer", minimum: 0 }, unit: { const: "mm" },
     activeWorkspace: { enum: ["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"] },
     sketch: { type: "object" }, part: { type: "object" }, assembly: { type: "object" }, surface: { type: "object" },
-    drawing: { type: "object" }, electrical: { type: "object" }, vehicle: { type: "object" }, audit: { type: "array", maxItems: 500 }
+    drawing: { type: "object" }, electrical: { type: "object" }, vehicle: { type: "object" }, audit: { type: "array", maxItems: 1000 }
   }
 } as const;
 const OPERATION_SCHEMA = {
@@ -287,7 +287,7 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
 ];
 
 export async function handleWorkbenchMcpTool(name: string, args: unknown): Promise<WorkbenchMcpResult> {
-  if (encodedSize(args) > WORKBENCH_LIMITS.maxJsonBytes) return error("RESOURCE_LIMIT", "The MCP tool input exceeds the 1 MB limit.");
+  if (encodedSize(args) > WORKBENCH_LIMITS.maxMcpInputBytes) return error("RESOURCE_LIMIT", "The MCP tool input exceeds the 1 MB limit.");
   if (name === "ps3d_guide") {
     if (!isRecord(args) || Object.keys(args).length !== 0) return error("INVALID_PARAMS", "ps3d_guide accepts no arguments.");
     const guide = await createPs3dCollaborationGuide();
@@ -738,7 +738,7 @@ export async function createPs3dCollaborationGuide(): Promise<Readonly<Record<st
       { step: 7, name: "Apply or import", action: "Call ps3d_apply_preview with the same guideAcknowledgement, project, operation, receipt, and confirmed:true; review and open/import the returned copy." }
     ],
     safety: {
-      maxInputBytes: WORKBENCH_LIMITS.maxJsonBytes,
+      maxInputBytes: WORKBENCH_LIMITS.maxMcpInputBytes,
       closedWorld: true,
       unavailableCapabilitiesCallable: false,
       previewReceipt: "Unkeyed deterministic SHA-256 integrity checksum; not authentication, a digital signature, or proof of approval.",
