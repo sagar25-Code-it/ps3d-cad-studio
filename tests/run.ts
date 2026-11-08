@@ -116,10 +116,12 @@ import { sketchPatternObjectTests } from "./sketch-pattern-objects.test.js";
 import { sketchExchangeTests } from "./sketch-exchange.test.js";
 import { sketchUnderlayTests } from "./sketch-underlay.test.js";
 import { sketchExchangeUiTests } from "./sketch-exchange-ui.test.js";
+import { sketchChromeTests } from "./sketch-chrome.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
+  ...sketchChromeTests,
   ...sketchTests,
   ...sketchRegionTests,
   ...sketchArrangementTests,

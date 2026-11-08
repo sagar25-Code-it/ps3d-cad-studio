@@ -3,6 +3,11 @@ import { fileURLToPath } from "node:url";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { productionGeometryBoundaryPlugin } from "../../scripts/production-boundary.mjs";
+import { buildInfoPlugin, resolveBuildInfo } from "../../scripts/build-info.mjs";
+
+// One build identity, compiled into the app and written to dist/version.json (see scripts/build-info.mjs).
+const rootPackage = JSON.parse(await readFile(fileURLToPath(new URL("../../package.json", import.meta.url)), "utf8"));
+const buildInfo = resolveBuildInfo({ version: rootPackage.version });
 
 const distDirectory = fileURLToPath(new URL("../../dist", import.meta.url));
 const handRuntimeDirectory = fileURLToPath(new URL("../../node_modules/.cache/ps3d-hand-runtime", import.meta.url));
@@ -84,7 +89,8 @@ export default defineConfig({
   // middleware above and production copies only the reviewed runtime files and
   // the owner-approved PS3D brand mark.
   publicDir: false,
-  plugins: [productionGeometryBoundaryPlugin(), handRuntimePlugin(), {
+  define: { __PS3D_BUILD_INFO__: JSON.stringify(buildInfo) },
+  plugins: [productionGeometryBoundaryPlugin(), handRuntimePlugin(), buildInfoPlugin(buildInfo), {
     name: "ps3d-project-license",
     apply: "build",
     async closeBundle() {

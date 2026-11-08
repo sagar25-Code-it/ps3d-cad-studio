@@ -110,6 +110,32 @@ for (const [relativePath, expectedHash] of handRuntimeFiles) {
   if (manifestAsset?.sha256 !== expectedHash) throw new Error(`Hand runtime manifest hash mismatch: ${relativePath}.`);
 }
 
+// version.json is the one deliberate extra file in the dist root: the build identity the running app polls to learn whether a newer
+// build is live (see scripts/build-info.mjs and apps/studio-web/src/build-info.ts). It must be well-formed, must carry the commit that
+// Vercel built, and the very same record (its build time) must be compiled into the shipped bundle, so the file cannot drift from the app.
+if (!distFiles.includes("version.json")) throw new Error("Production artifact must carry version.json (the build identity).");
+const buildRecord = JSON.parse(await readFile(resolve(distDirectory, "version.json"), "utf8"));
+const buildCommitOk = buildRecord.commit === "dev" || /^[0-9a-f]{7,64}$/u.test(buildRecord.commit);
+if (
+  buildRecord.schema !== "ps3d-build-info-v1"
+  || !buildCommitOk
+  || buildRecord.commitShort !== (buildRecord.commit === "dev" ? "dev" : buildRecord.commit.slice(0, 7))
+  || !Number.isFinite(Date.parse(buildRecord.builtAt))
+  || typeof buildRecord.version !== "string"
+  || !["vercel", "git", "dev"].includes(buildRecord.source)
+) {
+  throw new Error("version.json is not a well-formed build record.");
+}
+const vercelCommit = process.env.VERCEL_GIT_COMMIT_SHA?.trim().toLowerCase();
+if (process.env.VERCEL === "1" && vercelCommit !== undefined && vercelCommit !== "" && buildRecord.commit !== vercelCommit) {
+  throw new Error("version.json does not carry the commit Vercel is building.");
+}
+if (!scripts.some(({ source }) => source.includes(buildRecord.builtAt))) {
+  throw new Error("The build record in version.json is not compiled into the shipped bundle.");
+}
+const unexpectedRootFiles = distFiles.filter((path) => !path.includes("/") && !["index.html", "version.json", "ps3d-master-logo.png", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "third-party-licenses.txt"].includes(path));
+if (unexpectedRootFiles.length > 0) throw new Error(`Unexpected files in the production root: ${unexpectedRootFiles.join(", ")}.`);
+
 const licenses = await readFile(resolve(distDirectory, "third-party-licenses.txt"), "utf8");
 for (const bundled of ["react", "react-dom", "three", "@mediapipe/tasks-vision - 1.0.1 (Apache-2.0)"]) {
   if (!licenses.includes(bundled)) throw new Error(`Production license payload is missing ${bundled}.`);
@@ -150,6 +176,10 @@ if (htmlCache !== "no-cache, must-revalidate") throw new Error("HTML and SPA rou
 const assetHeaders = hosting.headers.find((entry) => entry.source === "/assets/(.*)")?.headers ?? [];
 if (assetHeaders.find((header) => header.key === "Cache-Control")?.value !== "public, max-age=31536000, immutable") {
   throw new Error("Content-hashed assets must retain immutable caching.");
+}
+const versionHeaders = hosting.headers.find((entry) => entry.source === "/version.json")?.headers ?? [];
+if (versionHeaders.find((header) => header.key === "Cache-Control")?.value !== "no-store") {
+  throw new Error("version.json must never be cached, or a stale tab could not learn a newer build exists.");
 }
 const handHeaders = hosting.headers.find((entry) => entry.source === "/mediapipe/(.*)")?.headers ?? [];
 if (

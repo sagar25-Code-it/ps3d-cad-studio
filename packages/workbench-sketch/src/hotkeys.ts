@@ -40,8 +40,10 @@ export type SketchHotkeyAction =
   | { readonly kind: "paste" }
   /** A digit, point or minus pressed while typed-input fields are showing: start typing into the first field. */
   | { readonly kind: "type-value"; readonly key: string }
-  /** Tab while typed-input fields are showing: move the focus into them. */
-  | { readonly kind: "focus-dynamic" }
+  /** Tab (or Shift+Tab, `backwards`) while typed-input fields are showing: move the focus into them, starting from the first (or last) field. */
+  | { readonly kind: "focus-dynamic"; readonly backwards: boolean }
+  /** Enter on the Line tool: end the chain being drawn. The segments already placed are kept; only the open end is dropped. */
+  | { readonly kind: "end-chain" }
   /** Enter on the canvas while typed values are waiting: place the point with them. */
   | { readonly kind: "commit-dynamic" }
   /** Tab over curves that overlap under the pointer: select the next one (Select Other). */
@@ -373,6 +375,39 @@ export function keyChipForTool(toolId: string, keymap: SketchKeymap = activeKeym
   return label === undefined ? undefined : shortKeyLabel(label);
 }
 
+type DrawingTool = Exclude<SketchTool, "select">;
+
+/**
+ * The tool variants that share one key. The first press picks the first tool; pressing the same key again while one of the family's
+ * tools is active steps to the next variant and wraps around (R: 2-point, centre, 3-point rectangle). Which key that is comes from the
+ * live keymap, so a rebound key cycles the same family.
+ */
+export const SKETCH_LETTER_FAMILIES: Readonly<Record<string, readonly DrawingTool[]>> = {
+  l: ["line"],
+  r: ["rectangle", "rectangle-center", "rectangle-three-point"],
+  c: ["circle", "circle-two-point", "circle-three-point"],
+  a: ["arc", "arc-center", "arc-tangent"],
+  e: ["ellipse"]
+};
+
+function familyOf(tool: SketchTool): readonly DrawingTool[] | undefined {
+  return Object.values(SKETCH_LETTER_FAMILIES).find((family) => family.includes(tool as DrawingTool));
+}
+
+/**
+ * The key text for a tool button from the live keymap: the tool's own key ("R", "⇧R"), else the first variant's key and how many
+ * presses reach it ("R ×3"); undefined for a tool that cannot be reached by a key. This is the chip the ribbon prints.
+ */
+export function sketchToolHotkeyChip(tool: SketchTool, keymap: SketchKeymap = activeKeymap): string | undefined {
+  const own = keyChipForTool(tool, keymap);
+  if (own !== undefined) return own;
+  if (tool === "select") return undefined;
+  const family = familyOf(tool);
+  if (family === undefined || family[0] === tool) return undefined;
+  const first = keyChipForTool(family[0]!, keymap);
+  return first === undefined ? undefined : `${first} ×${family.indexOf(tool as DrawingTool) + 1}`;
+}
+
 function actionForCommand(id: SketchCommandId): SketchHotkeyAction | undefined {
   if (id.startsWith("tool:")) return { kind: "tool", tool: id.slice(5) as Exclude<SketchTool, "select"> };
   if (id.startsWith("edit:")) return { kind: "edit-tool", tool: id.slice(5) as SketchEditHotkeyTool };
@@ -433,10 +468,11 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
   }
   if (key === "Enter") {
     if (context.dynamicFieldCount > 0 && context.dynamicTyped === true) return { kind: "commit-dynamic" };
+    if (context.tool === "line" && context.pendingPoints >= 1) return { kind: "end-chain" };
     return ((context.tool === "spline" || context.tool === "spline-control") && context.pendingPoints >= 3) || (context.tool === "profile" && context.pendingPoints >= 1) ? { kind: "finish" } : undefined;
   }
   if (key === "Tab") {
-    if (context.dynamicFieldCount > 0) return input.shift ? undefined : { kind: "focus-dynamic" };
+    if (context.dynamicFieldCount > 0) return { kind: "focus-dynamic", backwards: input.shift };
     if (context.tool === "select" && (context.overlapUnderCursor ?? 0) >= 2) return { kind: "select-other" };
     return undefined;
   }
@@ -445,7 +481,15 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
   const spec = keySpecOfInput(input);
   if (spec === undefined) return undefined;
   const command = keymap.commands.get(spec);
-  return command === undefined ? undefined : actionForCommand(command);
+  const action = command === undefined ? undefined : actionForCommand(command);
+  // Pressing the key of a family's first tool again while one of its tools is active steps to the next variant (R: 2-point, centre, 3-point).
+  if (action?.kind === "tool" && context.tool !== "select") {
+    const family = familyOf(action.tool);
+    if (family !== undefined && family[0] === action.tool && family.includes(context.tool as DrawingTool)) {
+      return { kind: "tool", tool: family[(family.indexOf(context.tool as DrawingTool) + 1) % family.length]! };
+    }
+  }
+  return action;
 }
 
 /** Human-readable shortcut rows for the help sheet, read from a keymap (the live one by default). */
@@ -457,11 +501,13 @@ export function sketchHotkeyHelp(keymap: SketchKeymap = activeKeymap): readonly 
   }
   return [
     ...rows,
-    { keys: "Tab / Shift+Tab", action: "Next / previous typed-input field; over overlapping curves, Select Other" },
-    { keys: "Enter", action: "Place the typed point; finish a spline or a profile" },
-    { keys: "Esc", action: "Cancel the pending point, then the tool, then the selection" },
-    { keys: "Backspace", action: "Remove the last placed point" },
-    { keys: "Delete", action: "Delete the selected curves" },
+    { keys: "Tab / Shift+Tab", action: "Move into the typed-input fields (first / last field); over overlapping curves, Select Other" },
+    { keys: "0-9 . -", action: "While typed-input fields show: start typing the first value" },
+    { keys: "Enter", action: "Place the typed point; end a line chain, finish a spline or profile" },
+    { keys: "Esc", action: "Backs out one level: a drag, the points being placed, a pick mode, the dimension or edit tool, the drawing tool, then the selection" },
+    { keys: "Backspace", action: "Remove the last placed point; with no points pending, delete the selected curves" },
+    { keys: "Delete", action: "Drop the points being placed (a line chain keeps its finished segments); with no points pending, delete the selected curves" },
+    { keys: "Press a tool's key again", action: "Step through its variants: R for 2-point, centre, 3-point rectangle; C for circles; A for arcs" },
     { keys: "Hold Ctrl", action: "Snapping off while held" },
     { keys: "Hold Shift", action: "Constrain to horizontal / vertical (square for rectangles)" },
     { keys: "Alt+click", action: "Select Other: cycle through overlapping curves" },

@@ -3,6 +3,7 @@ import type { SketchPlaneFaceRef, SketchPlaneFrame, SketchPlaneTilt } from "../.
 import { frameThroughPoints } from "../../../../packages/workbench-geometry/src/index.js";
 import type { SketchPlane } from "../general-modeling.js";
 import { CommandIcon } from "./CommandIcon.js";
+import type { ExistingSketchPlane } from "../sketch-plane-ui.js";
 import { useDialogFocus } from "./useDialogFocus.js";
 
 interface SketchPlaneOption {
@@ -64,8 +65,41 @@ interface SketchPlaneDialogProps {
   readonly framePlanes?: readonly SketchFrameOption[];
   /** Axis-aligned planar faces of the shown solids; picking one starts the sketch on that face. */
   readonly faces: readonly SketchFaceOption[];
+  /** Planes earlier timeline sketches sit on; picking one starts the sketch on the same plane. */
+  readonly existingPlanes?: readonly ExistingSketchPlane[];
+  /** "new" starts another sketch, "set" moves the working sketch. Only changes the wording. */
+  readonly mode?: "set" | "new";
+  /** "Sketch plane: Top (XY)", shown at the top so it is clear where the sketch is now. */
+  readonly currentPlaneChip?: string;
+  /** Present when the dialog was offered on entering Sketch: adds a "Continue with the current sketch" button that does not change anything. */
+  readonly onContinue?: () => void;
   readonly onConfirm: (plane: SketchPlane, offsetMm: number, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef) => void;
   readonly onClose: () => void;
+}
+
+/** A small isometric picture of the three datum planes. The chosen one is filled; clicking a plane in the picture chooses it. */
+function PlaneDiagram(props: { readonly plane: SketchPlane; readonly onPick: (plane: SketchPlane) => void }): React.JSX.Element {
+  const origin = [120, 104] as const;
+  const length = 66;
+  // Z-up isometric: X runs to the lower left, Y to the lower right, Z straight up (screen y grows downward).
+  const axis = { x: [-0.866, 0.5], y: [0.866, 0.5], z: [0, -1] } as const;
+  const at = (a: number, b: number, c: number): string => {
+    const x = origin[0] + length * (axis.x[0] * a + axis.y[0] * b + axis.z[0] * c);
+    const y = origin[1] + length * (axis.x[1] * a + axis.y[1] * b + axis.z[1] * c);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  };
+  const faces: readonly { readonly plane: SketchPlane; readonly points: string; readonly label: string; readonly labelAt: readonly [number, number] }[] = [
+    { plane: "yz", points: [at(0, 0, 0), at(0, 1, 0), at(0, 1, 1), at(0, 0, 1)].join(" "), label: "Right (YZ)", labelAt: [168, 62] },
+    { plane: "xz", points: [at(0, 0, 0), at(1, 0, 0), at(1, 0, 1), at(0, 0, 1)].join(" "), label: "Front (XZ)", labelAt: [12, 62] },
+    { plane: "xy", points: [at(0, 0, 0), at(1, 0, 0), at(1, 1, 0), at(0, 1, 0)].join(" "), label: "Top (XY)", labelAt: [92, 188] }
+  ];
+  return <svg className="sketch-plane-diagram" viewBox="0 0 240 198" role="group" aria-label="The three datum planes">
+    {faces.map((face) => <g key={face.plane} className={props.plane === face.plane ? "chosen" : ""} onClick={() => props.onPick(face.plane)}>
+      <polygon points={face.points} />
+      <text x={face.labelAt[0]} y={face.labelAt[1]}>{face.label}</text>
+    </g>)}
+    <circle className="origin" cx={origin[0]} cy={origin[1]} r="3" />
+  </svg>;
 }
 
 /** Asks where a sketch goes: a datum plane, the same offset along its normal, or a planar face of a solid. */
@@ -111,8 +145,10 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
 
   return <div className="dialog-backdrop save-project-backdrop" role="presentation" onMouseDown={props.onClose}>
     <section ref={dialogRef} tabIndex={-1} className="save-project-dialog new-project-dialog sketch-plane-dialog" role="dialog" aria-modal="true" aria-labelledby="sketch-plane-title" onMouseDown={(event) => event.stopPropagation()}>
-      <header><span><CommandIcon name="sketch" /></span><div><small>SKETCH / SELECT PLANE</small><h2 id="sketch-plane-title">Where do you want to sketch?</h2></div><button onClick={props.onClose} aria-label="Cancel plane selection">×</button></header>
+      <header><span><CommandIcon name="sketch" /></span><div><small>{props.mode === "new" ? "NEW SKETCH / CHOOSE PLANE" : "SKETCH / CHANGE PLANE"}</small><h2 id="sketch-plane-title">Where do you want to sketch?</h2></div><button onClick={props.onClose} aria-label="Cancel plane selection">×</button></header>
       <div className="save-project-content">
+        {props.currentPlaneChip !== undefined && <p className="sketch-plane-current">{props.mode === "new" ? `Now: ${props.currentPlaneChip}. Choosing a plane below finishes that sketch into the timeline and starts another.` : `${props.currentPlaneChip}. Choosing a plane below moves this sketch there.`}</p>}
+        <PlaneDiagram plane={plane} onPick={setPlane} />
         <div className="new-project-types sketch-plane-types" role="radiogroup" aria-label="Sketch plane">
           {SKETCH_PLANES.map((option) => <button
             key={option.plane}
@@ -165,6 +201,15 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
             <small>degrees, right-handed about the world axis, applied after the offset</small>
           </div>
         </label>
+        {(props.existingPlanes?.length ?? 0) > 0 && <div className="sketch-plane-faces">
+          <small className="sketch-plane-faces-title">Or sketch on the plane of an earlier sketch</small>
+          {props.existingPlanes!.map((option) => <button
+            key={option.featureId}
+            type="button"
+            className="sketch-plane-face"
+            onClick={() => props.onConfirm(option.sketchPlane, option.offsetMm, option.tilt, option.frame)}
+          ><CommandIcon name="sketch" /><span><strong>{option.name}</strong><small>{option.description}</small></span></button>)}
+        </div>}
         {(props.anglePlanes?.length ?? 0) > 0 && <div className="sketch-plane-faces">
           <small className="sketch-plane-faces-title">Or sketch on an angle plane of this part</small>
           {props.anglePlanes!.map((option, index) => <button
@@ -183,8 +228,8 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
             onClick={() => props.onConfirm("xy", 0, undefined, option.frame)}
           ><CommandIcon name="projection" /><span><strong>{option.label}</strong><small>{option.hint ?? "Through 3 points · the sketch starts at the first point"}</small></span></button>)}
         </div>}
-        <div className="sketch-plane-faces sketch-plane-points">
-          <small className="sketch-plane-faces-title">Or sketch on the plane through three points</small>
+        <details className="sketch-plane-faces sketch-plane-points">
+          <summary className="sketch-plane-faces-title">Or sketch on the plane through three points</summary>
           {pointTexts.map((text, index) => <label key={index} className="sketch-plane-offset">
             <span>{`Point ${index + 1} (x, y, z in mm)`}</span>
             <div className="feature-edit-field">
@@ -199,7 +244,7 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
             </div>
           </label>)}
           <button type="button" className="sketch-plane-face" onClick={confirmPoints}><CommandIcon name="projection" /><span><strong>Start sketch through these points</strong><small>The first point is the sketch origin, the second sets its X direction</small></span></button>
-        </div>
+        </details>
         {props.faces.length > 0 && <div className="sketch-plane-faces">
           <small className="sketch-plane-faces-title">Or sketch on a face of a solid</small>
           {props.faces.map((face, index) => <button
@@ -212,7 +257,7 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
         {problem !== "" && <div className="inline-warning" role="alert">{problem}</div>}
         <div className="save-project-note"><CommandIcon name="shield" /><span>The sketch opens face-on, looking at the {selected.view}. The plane and offset are saved with the sketch, and Create solid builds from it.</span></div>
       </div>
-      <footer><button onClick={props.onClose}>Cancel</button><button className="primary" onClick={() => confirm(plane, offsetText)}><CommandIcon name="sketch" />Start sketch</button></footer>
+      <footer><button onClick={props.onClose}>Cancel</button>{props.onContinue !== undefined && <button onClick={props.onContinue}>Continue with the current sketch</button>}<button className="primary" onClick={() => confirm(plane, offsetText)}><CommandIcon name="sketch" />{props.mode === "set" ? "Use this plane" : "Start sketch"}</button></footer>
     </section>
   </div>;
 }
