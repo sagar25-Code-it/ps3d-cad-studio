@@ -618,7 +618,6 @@ export function explicitObjectIds(edit: SketchObjectsEdit | undefined): Readonly
 /** The shift that maps entity `a` onto entity `b`, if they are the same shape moved without turning or resizing. */
 function translationBetween(a: SketchEntity, b: SketchEntity): Vec2 | undefined {
   if (a.kind !== b.kind) return undefined;
-  if (a.construction !== b.construction) return undefined;
   if (a.kind === "circle" && b.kind === "circle" && a.radiusMm !== b.radiusMm) return undefined;
   if (a.kind === "rectangle" && b.kind === "rectangle" && (a.widthMm !== b.widthMm || a.heightMm !== b.heightMm || a.rotationDeg !== b.rotationDeg)) return undefined;
   if (a.kind === "ellipse" && b.kind === "ellipse" && (a.majorRadiusMm !== b.majorRadiusMm || a.minorRadiusMm !== b.minorRadiusMm || a.rotationDeg !== b.rotationDeg)) return undefined;
@@ -657,8 +656,10 @@ export function reconcileSketchObjects(previous: WorkbenchSketch, next: Workbenc
     if (before.some((entity) => entity === undefined) || before.every((entity, index) => sameEntity(entity!, current[index]!))) { texts.push(text); continue; }
     const shifts = before.map((entity, index) => translationBetween(entity!, current[index]!));
     const first = shifts[0];
-    if (first !== undefined && shifts.every((shift) => shift !== undefined && Math.abs(shift[0] - first[0]) < 1e-6 && Math.abs(shift[1] - first[1]) < 1e-6)) {
-      texts.push({ ...text, originMm: [text.originMm[0] + first[0], text.originMm[1] + first[1]] });
+    // Moving every curve together, or switching them all to construction (or back), keeps the text editable.
+    const uniformFlag = current.every((entity) => entity!.construction === current[0]!.construction);
+    if (uniformFlag && first !== undefined && shifts.every((shift) => shift !== undefined && Math.abs(shift[0] - first[0]) < 1e-6 && Math.abs(shift[1] - first[1]) < 1e-6)) {
+      texts.push({ ...text, originMm: [text.originMm[0] + first[0], text.originMm[1] + first[1]], construction: current[0]!.construction });
     } else notes.push(`Text "${text.text}" was reshaped by hand and is now plain geometry.`);
   }
 

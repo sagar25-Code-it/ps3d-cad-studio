@@ -106,6 +106,7 @@ import { sketchTextObjectTests } from "./sketch-text-objects.test.js";
 import { sketchPatternObjectTests } from "./sketch-pattern-objects.test.js";
 import { sketchExchangeTests } from "./sketch-exchange.test.js";
 import { sketchUnderlayTests } from "./sketch-underlay.test.js";
+import { sketchExchangeUiTests } from "./sketch-exchange-ui.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -221,7 +222,8 @@ const tests: readonly TestCase[] = [
   ...sketchTextObjectTests,
   ...sketchPatternObjectTests,
   ...sketchExchangeTests,
-  ...sketchUnderlayTests
+  ...sketchUnderlayTests,
+  ...sketchExchangeUiTests
 ];
 let failures = 0;
 

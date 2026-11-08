@@ -181,6 +181,19 @@ export const sketchTextObjectTests: readonly TestCase[] = [
     }
   },
   {
+    name: "sketch text: turning all of its curves into construction (key X) keeps the text editable and re-draws as construction",
+    run: () => {
+      const placed = applyPlan(emptyProject(), must(planSketchText(context, [0, 0], SPEC)));
+      const text = placed.sketch.texts![0]!;
+      const toggled = applyPlan(placed, { label: "Toggled construction", removeEntityIds: [], updateEntities: placed.sketch.entities.map((entity) => ({ ...entity, construction: true })), addEntities: [], addConstraints: [] });
+      equal(toggled.sketch.texts?.[0]?.construction, true, "the text object follows (construction: true)");
+      const edited = applyPlan(toggled, must(planSketchTextEdit(context, toggled.sketch, text.id, textSpecOf(toggled.sketch.texts![0]!))));
+      assert(edited.sketch.entities.every((entity) => entity.construction), "and editing it later keeps drawing construction curves");
+      const one = applyPlan(placed, { label: "Toggled one", removeEntityIds: [], updateEntities: [{ ...placed.sketch.entities[0]!, construction: true }], addEntities: [], addConstraints: [] });
+      equal(one.sketch.texts, undefined, "but toggling a single curve ends the text object");
+    }
+  },
+  {
     name: "sketch text: delete removes the curves and the object; explode keeps the curves as plain geometry",
     run: () => {
       const placed = applyPlan(emptyProject(), must(planSketchText(context, [0, 0], SPEC)));
