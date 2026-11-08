@@ -1,4 +1,5 @@
 import { isFeatureActive, modifiesBody } from "./design.js";
+import { describePattern } from "./pattern.js";
 import { planeWorldCoordinate } from "./planar-faces.js";
 import type { DesignFeature, DesignHistory, DesignSolidFeature } from "./types.js";
 
@@ -36,6 +37,11 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
     const tilt = feature.sketch.planeTilt === undefined ? "" : `, tilted ${trimNumber(feature.sketch.planeTilt.angleDeg)}° about ${feature.sketch.planeTilt.axis.toUpperCase()}`;
     if (feature.sketch.planeFrame !== undefined) return `Plane through 3 points · ${curves} ${curves === 1 ? "curve" : "curves"}`;
     return `${sketchPlaneName(feature.sketch.plane)} plane${offset}${tilt} · ${curves} ${curves === 1 ? "curve" : "curves"}`;
+  }
+  if (feature.kind === "pattern" && feature.pattern !== undefined) {
+    const pattern = feature.pattern;
+    const repeated = (pattern.featureIds ?? []).map((id) => history.features.find((candidate) => candidate.id === id)?.name ?? "a deleted step");
+    return `${describePattern(pattern)}${repeated.length === 0 ? "" : ` · ${repeated.join(", ")}`}${pattern.copyIndex === undefined ? "" : ` · copy ${pattern.copyIndex}`}`;
   }
   const source = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
   const amount = feature.extent === "through-all" ? "through all"

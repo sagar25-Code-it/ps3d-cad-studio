@@ -12,3 +12,4 @@ export * from "./hole.js";
 export * from "./plane-tilt.js";
 export * from "./sketch-placement.js";
 export * from "./flat-pattern.js";
+export * from "./pattern.js";

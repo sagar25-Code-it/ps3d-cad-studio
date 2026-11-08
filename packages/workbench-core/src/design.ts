@@ -11,6 +11,7 @@ import type {
   WorkbenchProject,
   WorkbenchResult
 } from "./types.js";
+import { validPatternDefinition } from "./pattern.js";
 
 /**
  * The parametric history ("timeline"): an ordered list of sketch and solid features with a rollback marker. A sketch
@@ -54,6 +55,8 @@ export function modifiesBody(feature: DesignFeature): feature is DesignSolidFeat
   if (feature.kind === "sketch") return false;
   if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss") return true;
   if (feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole") return true;
+  // A pattern joined into its body, or of features in it, changes that body; a new-bodies pattern makes bodies of its own.
+  if (feature.kind === "pattern") return feature.pattern !== undefined && (feature.pattern.result === "join" || feature.pattern.featureIds !== undefined);
   return feature.operation === "join" || feature.operation === "cut";
 }
 
@@ -82,8 +85,9 @@ export function dependentsOf(history: DesignHistory, featureId: string): readonl
     for (const feature of history.features) {
       if (closure.has(feature.id) || feature.kind === "sketch") continue;
       const builtOnClosure = closure.has(feature.sketchFeatureId);
+      const copiesClosureBody = feature.kind === "pattern" && feature.pattern !== undefined && history.features.some((other) => closure.has(other.id) && other.kind !== "sketch" && !modifiesBody(other) && other.bodyId === feature.pattern!.sourceBodyId);
       const modifiesClosureBody = modifiesBody(feature) && history.features.some((other) => closure.has(other.id) && other.kind !== "sketch" && !modifiesBody(other) && other.bodyId === feature.bodyId);
-      if (builtOnClosure || modifiesClosureBody) { closure.add(feature.id); grew = true; }
+      if (builtOnClosure || modifiesClosureBody || copiesClosureBody) { closure.add(feature.id); grew = true; }
     }
   }
   return history.features.filter((feature) => feature.id !== featureId && closure.has(feature.id));
@@ -97,6 +101,11 @@ export function isFeatureActive(history: DesignHistory, featureId: string): bool
   if (feature.kind === "sketch") return true;
   const sketch = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
   if (sketch === undefined || sketch.suppressed) return false;
+  // A copy made by a pattern is only on while the step that made its source body is.
+  if (feature.kind === "pattern" && feature.pattern?.result === "new-bodies") {
+    const source = baseFeatureOf(history, feature.pattern.sourceBodyId);
+    if (source === undefined || history.features.indexOf(source) >= index || !isFeatureActive(history, source.id)) return false;
+  }
   if (!modifiesBody(feature)) return true;
   const base = baseFeatureOf(history, feature.bodyId);
   return base !== undefined && history.features.indexOf(base) < index && isFeatureActive(history, base.id);
@@ -184,6 +193,14 @@ function checkSolidFeature(history: DesignHistory, feature: DesignSolidFeature, 
   if (sketch === undefined || sketch.kind !== "sketch") return missing(feature.sketchFeatureId, "The feature must be built on a sketch feature in the timeline.");
   const duplicate = history.features.find((candidate) => (candidate.id === feature.id) !== replacing && candidate.id === feature.id);
   if (duplicate !== undefined) return fail("INVALID_OPERATION", "A timeline feature with this ID already exists.", [feature.id], "Use a new feature ID.");
+  if (feature.kind === "pattern" && feature.pattern !== undefined) {
+    const source = baseFeatureOf(history, feature.pattern.sourceBodyId);
+    const at = replacing ? history.features.findIndex((candidate) => candidate.id === feature.id) : history.rollbackIndex;
+    if (source === undefined || history.features.indexOf(source) >= at) return fail("INVALID_OPERATION", "A pattern needs a body that an earlier step made.", [feature.id, feature.pattern.sourceBodyId], "Pattern a body that was created earlier in the timeline.");
+    const repeated = feature.pattern.featureIds ?? [];
+    const missingStep = repeated.find((id) => { const found = history.features.findIndex((candidate) => candidate.id === id && candidate.kind !== "sketch" && candidate.bodyId === feature.pattern!.sourceBodyId); return found < 0 || found >= at; });
+    if (missingStep !== undefined) return fail("INVALID_OPERATION", "A pattern of features can only repeat earlier steps of the same body.", [feature.id, missingStep], "Pick holes or cuts that come before the pattern in the timeline.");
+  }
   if (modifiesBody(feature)) {
     const base = baseFeatureOf(history, feature.bodyId);
     const before = replacing ? history.features.findIndex((candidate) => candidate.id === feature.id) : history.rollbackIndex;
@@ -306,14 +323,14 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "pattern", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
   if (Object.hasOwn(value, "extent")) {
     // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
     if (!["distance", "through-all"].includes(String(value.extent))) return false;
     if (value.extent === "through-all" && (value.kind !== "extrude" || value.operation !== "cut")) return false;
   }
-  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "sheet-base", "sheet-flange", "sheet-hem", "sheet-edge-flange", "hole"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
+  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "sheet-base", "sheet-flange", "sheet-hem", "sheet-edge-flange", "hole", "pattern"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
   if (typeof value.valueMm !== "number" || !Number.isFinite(value.valueMm) || value.valueMm === 0 || Math.abs(value.valueMm) > 100_000) return false;
@@ -391,7 +408,16 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (value.kind === "helix") {
     if (!Object.hasOwn(value, "helixRadiusMm") || !Object.hasOwn(value, "helixPitchMm") || !Object.hasOwn(value, "helixTurns")) return false;
   }
-  if (value.operation === "direct-edit" && value.kind !== "move-body" && value.kind !== "scale-body" && value.kind !== "move-face" && value.kind !== "offset-face" && value.kind !== "emboss" && value.kind !== "sheet-edge-flange" && value.kind !== "hole") return false;
+  if (value.operation === "direct-edit" && value.kind !== "move-body" && value.kind !== "scale-body" && value.kind !== "move-face" && value.kind !== "offset-face" && value.kind !== "emboss" && value.kind !== "sheet-edge-flange" && value.kind !== "hole" && value.kind !== "pattern") return false;
+  if (Object.hasOwn(value, "pattern") && value.kind !== "pattern") return false;
+  if (value.kind === "pattern") {
+    // A new-bodies pattern builds a body of its own; a joined pattern and a pattern of features change the body they are in.
+    if (!validPatternDefinition(value.pattern)) return false;
+    const pattern = value.pattern;
+    if (value.operation !== (pattern.result === "new-bodies" ? "new-body" : "direct-edit")) return false;
+    if (pattern.result === "new-bodies" && value.bodyId === pattern.sourceBodyId) return false;
+    if (pattern.result !== "new-bodies" && value.bodyId !== pattern.sourceBodyId) return false;
+  }
   if (Object.hasOwn(value, "edgeEndSizeMm")) {
     if (value.kind !== "edge-fillet" || typeof value.edgeEndSizeMm !== "number" || !Number.isFinite(value.edgeEndSizeMm) || value.edgeEndSizeMm <= 0 || value.edgeEndSizeMm > 10_000) return false;
   }
@@ -526,6 +552,7 @@ export function validateDesignHistory(value: unknown, validSketch: (sketch: unkn
   const ids = new Set<string>();
   const sketchIds = new Set<string>();
   const bodyIds = new Set<string>();
+  const solidsOfBody = new Map<string, Set<string>>();
   for (const feature of features) {
     if (!isRecord(feature) || !stable(feature.id) || ids.has(feature.id)) return false;
     ids.add(feature.id);
@@ -534,6 +561,12 @@ export function validateDesignHistory(value: unknown, validSketch: (sketch: unkn
       sketchIds.add(feature.id);
     } else {
       if (!validSolidFeaturePayload(feature) || !sketchIds.has(feature.sketchFeatureId)) return false;
+      if (feature.kind === "pattern") {
+        // A pattern copies a body an earlier step made, and repeats only earlier steps of that body.
+        const pattern = (feature as unknown as DesignSolidFeature).pattern!;
+        if (!bodyIds.has(pattern.sourceBodyId)) return false;
+        if (pattern.featureIds !== undefined && pattern.featureIds.some((id) => !solidsOfBody.get(pattern.sourceBodyId)?.has(id))) return false;
+      }
       if (modifiesBody(feature)) {
         // A join or cut modifies a body an earlier step made.
         if (!bodyIds.has(feature.bodyId)) return false;
@@ -541,6 +574,8 @@ export function validateDesignHistory(value: unknown, validSketch: (sketch: unkn
         if (bodyIds.has(feature.bodyId)) return false;
         bodyIds.add(feature.bodyId);
       }
+      if (!solidsOfBody.has(feature.bodyId as string)) solidsOfBody.set(feature.bodyId as string, new Set());
+      solidsOfBody.get(feature.bodyId as string)!.add(feature.id);
     }
   }
   return value.editingSketchId === null || (typeof value.editingSketchId === "string" && sketchIds.has(value.editingSketchId));

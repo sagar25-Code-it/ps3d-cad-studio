@@ -229,7 +229,7 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       if (!keys(input, [...common, "feature", "body"]) || !validSolidFeaturePayload(input.feature) || !validGeneralSolidBodyPayload(input.body)) return invalidOperation("The solid feature or its body is invalid.");
       break;
     case "regenerate-design":
-      if (!keys(input, [...common, "results"]) || !boundedList(input.results, 64, isRecord)
+      if (!keys(input, [...common, "results"]) || !boundedList(input.results, 200, isRecord)
         || input.results.some((result) => !stableId(result.featureId) || Object.keys(result).some((key) => !["featureId", "body", "message"].includes(key))
           || (Object.hasOwn(result, "body") && !validGeneralSolidBodyPayload(result.body))
           // A result with neither a body nor a message means the step applied cleanly (a join or cut reports this: the
