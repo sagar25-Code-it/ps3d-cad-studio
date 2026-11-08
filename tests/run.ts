@@ -38,6 +38,7 @@ import { constructionAxesAndPointsTests } from "./construction-axes-and-points.t
 import { tangentLoftSweepPathTests } from "./tangent-loft-sweep-path.test.js";
 import { loftResampleRailTwistTests } from "./loft-resample-rail-twist.test.js";
 import { frenetTangencyDirectEditTests } from "./frenet-tangency-direct-edit.test.js";
+import { faceHelixDimStylesTests } from "./face-helix-dim-styles.test.js";
 import { constructionPlaneTests } from "./construction-planes.test.js";
 import { assemblyMeshTests } from "./assembly-mesh.test.js";
 import { assemblyMateTests } from "./assembly-mates.test.js";
@@ -98,6 +99,7 @@ const tests: readonly TestCase[] = [
   ...tangentLoftSweepPathTests,
   ...loftResampleRailTwistTests,
   ...frenetTangencyDirectEditTests,
+  ...faceHelixDimStylesTests,
   ...constructionPlaneTests,
   ...assemblyMeshTests,
   ...assemblyMateTests,

@@ -385,7 +385,7 @@ export interface GeneralSolidBody {
   /** Flat triangle vertex indices; length is a multiple of 3. */
   readonly indices: readonly number[];
   readonly feature?: {
-    readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft";
+    readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix";
     readonly plane: "xy" | "xz" | "yz";
     /** Extrusion height / revolve angle (degrees) / sweep distance / loft height / treatment size. */
     readonly valueMm: number;
@@ -907,6 +907,8 @@ export type DrawingViewPreset = "automatic-4-view" | "orthographic-3-view" | "fr
 export type DrawingDisplayStyle = "visible-edges" | "visible-hidden-edges";
 export type DrawingDraftingStandard = "ASME" | "ISO";
 export type DrawingDatumScheme = "none" | "plate-3-2-1";
+/** How linear dimensions are grouped on the sheet: individual callouts, chain (end-to-end), baseline (from a common origin), ordinate (coordinate readouts along one axis from a 0-datum). */
+export type DrawingDimensionStyle = "individual" | "chain" | "baseline" | "ordinate";
 
 export interface DrawingSettings {
   readonly id: "drawing:main-sheet";
@@ -928,6 +930,8 @@ export interface DrawingSettings {
   readonly showGdt?: boolean;
   /** Explicit datum reference frame template. `none` never invents datum references. */
   readonly datumScheme?: DrawingDatumScheme;
+  /** Linear-dimension grouping style. Omitted (or "individual") keeps the single-callout default. */
+  readonly dimensionStyle?: DrawingDimensionStyle;
   /** Explicit GD&T values. They are intentionally independent of the general tolerance. */
   readonly gdtPositionToleranceMm?: number;
   readonly gdtFlatnessToleranceMm?: number;
@@ -970,7 +974,7 @@ export interface DesignSketchFeature extends DesignFeatureBase {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
@@ -1045,6 +1049,26 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   readonly moveDeltaMm?: readonly [number, number, number];
   /** Direct-edit (scale-body) only: uniform scale factor about the target body's centroid. 1 is a no-op; 0 or negative are refused. */
   readonly scaleFactor?: number;
+  /**
+   * Direct-edit (move-face / offset-face) only: the brep face role to drive. Move-face translates all vertices of that
+   * face by `moveFaceDeltaMm`; offset-face translates them along the face's averaged normal by `offsetFaceMm`.
+   */
+  readonly targetFaceRole?: string;
+  /** Direct-edit (move-face) only: translation vector in millimetres applied to the vertices of `targetFaceRole`. */
+  readonly moveFaceDeltaMm?: readonly [number, number, number];
+  /** Direct-edit (offset-face) only: signed distance in mm along the face's average normal (positive pushes the face outward). */
+  readonly offsetFaceMm?: number;
+  /**
+   * Helix only: coil radius in millimetres (centerline radius of the swept profile's centroid about the helix axis).
+   * Combined with `helixPitchMm` and `helixTurns` to size a solid coil built from the sketch profile as its section.
+   */
+  readonly helixRadiusMm?: number;
+  /** Helix only: axial advance per turn in millimetres. Positive is required; handedness picks the direction. */
+  readonly helixPitchMm?: number;
+  /** Helix only: how many turns the coil winds. Positive, up to 100. */
+  readonly helixTurns?: number;
+  /** Helix only: coil handedness. "right" winds up with +Z as the rotation advances; "left" winds down. */
+  readonly helixHandedness?: "right" | "left";
   /** Shell only: which cap face to leave open. */
   readonly shellOpenFace?: "top" | "bottom" | "none";
   /** Shell only: the wall thickness in mm (the inset the inner cavity is offset by). */

@@ -50,13 +50,13 @@ export function isSolidFeature(feature: DesignFeature): feature is DesignSolidFe
 /** A join, cut, or direct-edit changes a body that an earlier step made; every other solid step makes a body of its own. */
 export function modifiesBody(feature: DesignFeature): feature is DesignSolidFeature & { readonly operation: "join" | "cut" | "direct-edit" } {
   if (feature.kind === "sketch") return false;
-  if (feature.kind === "move-body" || feature.kind === "scale-body") return true;
+  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face") return true;
   return feature.operation === "join" || feature.operation === "cut";
 }
 
 /** Direct-edit feature kinds that transform a body in place (not a sketch-driven rebuild). */
-export function isDirectEditFeature(feature: DesignFeature): feature is DesignSolidFeature & { readonly kind: "move-body" | "scale-body" } {
-  return feature.kind !== "sketch" && (feature.kind === "move-body" || feature.kind === "scale-body");
+export function isDirectEditFeature(feature: DesignFeature): feature is DesignSolidFeature & { readonly kind: "move-body" | "scale-body" | "move-face" | "offset-face" } {
+  return feature.kind !== "sketch" && (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face");
 }
 
 /** The step that made a body (its new-body step), if that step is still in the timeline. */
@@ -292,14 +292,14 @@ const hasOnly = (value: Record<string, unknown>, required: readonly string[], op
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
   if (Object.hasOwn(value, "extent")) {
     // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
     if (!["distance", "through-all"].includes(String(value.extent))) return false;
     if (value.extent === "through-all" && (value.kind !== "extrude" || value.operation !== "cut")) return false;
   }
-  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
+  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
   if (typeof value.valueMm !== "number" || !Number.isFinite(value.valueMm) || value.valueMm === 0 || Math.abs(value.valueMm) > 100_000) return false;
@@ -338,6 +338,29 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (Object.hasOwn(value, "scaleFactor")) {
     if (value.kind !== "scale-body" || typeof value.scaleFactor !== "number" || !Number.isFinite(value.scaleFactor) || value.scaleFactor <= 0 || value.scaleFactor > 100) return false;
   }
+  if (Object.hasOwn(value, "targetFaceRole")) {
+    if ((value.kind !== "move-face" && value.kind !== "offset-face") || typeof value.targetFaceRole !== "string" || value.targetFaceRole.length === 0 || value.targetFaceRole.length > 160) return false;
+  }
+  if (Object.hasOwn(value, "moveFaceDeltaMm")) {
+    if (value.kind !== "move-face") return false;
+    const delta = value.moveFaceDeltaMm;
+    if (!Array.isArray(delta) || delta.length !== 3 || delta.some((component) => typeof component !== "number" || !Number.isFinite(component) || Math.abs(component) > 100_000)) return false;
+  }
+  if (Object.hasOwn(value, "offsetFaceMm")) {
+    if (value.kind !== "offset-face" || typeof value.offsetFaceMm !== "number" || !Number.isFinite(value.offsetFaceMm) || value.offsetFaceMm === 0 || Math.abs(value.offsetFaceMm) > 100_000) return false;
+  }
+  if (Object.hasOwn(value, "helixRadiusMm")) {
+    if (value.kind !== "helix" || typeof value.helixRadiusMm !== "number" || !Number.isFinite(value.helixRadiusMm) || value.helixRadiusMm <= 0 || value.helixRadiusMm > 10_000) return false;
+  }
+  if (Object.hasOwn(value, "helixPitchMm")) {
+    if (value.kind !== "helix" || typeof value.helixPitchMm !== "number" || !Number.isFinite(value.helixPitchMm) || value.helixPitchMm <= 0 || value.helixPitchMm > 10_000) return false;
+  }
+  if (Object.hasOwn(value, "helixTurns")) {
+    if (value.kind !== "helix" || typeof value.helixTurns !== "number" || !Number.isFinite(value.helixTurns) || value.helixTurns <= 0 || value.helixTurns > 100) return false;
+  }
+  if (Object.hasOwn(value, "helixHandedness")) {
+    if (value.kind !== "helix" || !["right", "left"].includes(String(value.helixHandedness))) return false;
+  }
   // Direct-edit kinds carry operation "direct-edit" and act on an existing body.
   if (value.kind === "move-body") {
     if (value.operation !== "direct-edit" || !Object.hasOwn(value, "moveDeltaMm")) return false;
@@ -345,7 +368,16 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (value.kind === "scale-body") {
     if (value.operation !== "direct-edit" || !Object.hasOwn(value, "scaleFactor")) return false;
   }
-  if (value.operation === "direct-edit" && value.kind !== "move-body" && value.kind !== "scale-body") return false;
+  if (value.kind === "move-face") {
+    if (value.operation !== "direct-edit" || !Object.hasOwn(value, "moveFaceDeltaMm") || !Object.hasOwn(value, "targetFaceRole")) return false;
+  }
+  if (value.kind === "offset-face") {
+    if (value.operation !== "direct-edit" || !Object.hasOwn(value, "offsetFaceMm") || !Object.hasOwn(value, "targetFaceRole")) return false;
+  }
+  if (value.kind === "helix") {
+    if (!Object.hasOwn(value, "helixRadiusMm") || !Object.hasOwn(value, "helixPitchMm") || !Object.hasOwn(value, "helixTurns")) return false;
+  }
+  if (value.operation === "direct-edit" && value.kind !== "move-body" && value.kind !== "scale-body" && value.kind !== "move-face" && value.kind !== "offset-face") return false;
   if (Object.hasOwn(value, "loftRailEntityId")) {
     if (value.kind !== "loft" || typeof value.loftRailEntityId !== "string" || value.loftRailEntityId.length === 0 || value.loftRailEntityId.length > 160) return false;
   }

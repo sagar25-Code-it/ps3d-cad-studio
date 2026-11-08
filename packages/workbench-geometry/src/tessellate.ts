@@ -414,6 +414,59 @@ export function tessellateLoftTwoProfiles(bottom: readonly Point2[], top: readon
   return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };
 }
 
+/**
+ * Helical sweep of a closed profile around the sketch-plane normal axis. The profile centroid traces a circle of
+ * `radiusMm` in the sketch plane, advancing along the axis by `pitchMm` per full turn, for `turns` turns. Each ring
+ * is built in a Frenet-like frame: the profile's X axis points radially outward (away from the axis), the profile's
+ * Y axis follows the helix tangent's axial component. `handedness` picks the direction: "right" winds up with +Z,
+ * "left" winds down. Produces a tessellated tube with cap triangulation at both ends.
+ */
+export function tessellateHelix(profileMm: readonly Point2[], radiusMm: number, pitchMm: number, turns: number, handedness: "right" | "left", plane: TessellatePlane, segmentsPerTurn = 24): TessellatedMesh {
+  const profile = sanitizePolygon(profileMm);
+  if (profile.length < 3) return { positionsMm: [], indices: [] };
+  if (!Number.isFinite(radiusMm) || radiusMm <= 0) return { positionsMm: [], indices: [] };
+  if (!Number.isFinite(pitchMm) || pitchMm <= 0) return { positionsMm: [], indices: [] };
+  if (!Number.isFinite(turns) || turns <= 0) return { positionsMm: [], indices: [] };
+  const signedPitch = handedness === "left" ? -pitchMm : pitchMm;
+  const sampleCount = Math.max(2, Math.ceil(turns * Math.max(3, segmentsPerTurn)) + 1);
+  const count = profile.length;
+  const centroid = polygonCentroid(profile);
+  const positions: number[] = [];
+  for (let s = 0; s < sampleCount; s += 1) {
+    const t = s / (sampleCount - 1);
+    const theta = turns * 2 * Math.PI * t;
+    const z = signedPitch * turns * t;
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    // Radial outward unit vector in the sketch plane.
+    const centerX = radiusMm * cos;
+    const centerY = radiusMm * sin;
+    for (const [px, py] of profile) {
+      const dx = px - centroid[0];
+      const dy = py - centroid[1];
+      // Profile X → radial outward (cos, sin, 0), Profile Y → +Z axis.
+      positions.push(centerX + dx * cos, centerY + dx * sin, z + dy);
+    }
+  }
+  const capTriangles = triangulatePolygon(profile);
+  const indices: number[] = [];
+  // Bottom cap (reverse winding).
+  for (let i = 0; i < capTriangles.length; i += 3) indices.push(capTriangles[i]!, capTriangles[i + 2]!, capTriangles[i + 1]!);
+  // Top cap at the last ring.
+  const topBase = (sampleCount - 1) * count;
+  for (let i = 0; i < capTriangles.length; i += 3) indices.push(topBase + capTriangles[i]!, topBase + capTriangles[i + 1]!, topBase + capTriangles[i + 2]!);
+  // Side ribbons between consecutive rings.
+  for (let r = 0; r < sampleCount - 1; r += 1) {
+    const base = r * count;
+    const nextBase = (r + 1) * count;
+    for (let i = 0; i < count; i += 1) {
+      const next = (i + 1) % count;
+      indices.push(base + i, base + next, nextBase + next, base + i, nextBase + next, nextBase + i);
+    }
+  }
+  return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };
+}
+
 function polygonCentroid(polygon: readonly Point2[]): Point2 {
   let signed = 0;
   let cx = 0;

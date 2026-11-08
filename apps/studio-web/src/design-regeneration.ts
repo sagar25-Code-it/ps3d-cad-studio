@@ -38,8 +38,8 @@ function shifted(body: GeneralSolidBody, normal: readonly [number, number, numbe
 
 /** Builds the solid a feature describes from the sketch snapshot it is based on. For a join or cut this is the tool solid. */
 export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature, color = "#b9c2c8"): Promise<SolidRebuild> {
-  if (feature.kind === "move-body" || feature.kind === "scale-body") {
-    return { ok: false, message: "A direct-edit step (move-body / scale-body) is applied during timeline replay, not through the sketch-driven builder." };
+  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face") {
+    return { ok: false, message: "A direct-edit step is applied during timeline replay, not through the sketch-driven builder." };
   }
   const sketch = sketchFeature.sketch;
   const profiles = detectSketchProfiles(sketch);
@@ -86,6 +86,10 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     ...(feature.kind === "sweep" && feature.sweepTwistDeg !== undefined ? { sweepTwistDeg: feature.sweepTwistDeg } : {}),
     ...(feature.kind === "sweep" && feature.sweepFrameTransport !== undefined ? { sweepFrameTransport: feature.sweepFrameTransport } : {}),
     ...(feature.kind === "loft" && feature.loftTangencyWeight !== undefined ? { loftTangencyWeight: feature.loftTangencyWeight } : {}),
+    ...(feature.kind === "helix" && feature.helixRadiusMm !== undefined ? { helixRadiusMm: feature.helixRadiusMm } : {}),
+    ...(feature.kind === "helix" && feature.helixPitchMm !== undefined ? { helixPitchMm: feature.helixPitchMm } : {}),
+    ...(feature.kind === "helix" && feature.helixTurns !== undefined ? { helixTurns: feature.helixTurns } : {}),
+    ...(feature.kind === "helix" && feature.helixHandedness !== undefined ? { helixHandedness: feature.helixHandedness } : {}),
     ...(feature.kind === "shell" && feature.shellThicknessMm !== undefined ? { shellThicknessMm: feature.shellThicknessMm } : {}),
     ...(feature.kind === "shell" && feature.shellOpenFace !== undefined ? { shellOpenFace: feature.shellOpenFace } : {}),
     ...(feature.kind === "draft" && feature.draftAngleDeg !== undefined ? { draftAngleDeg: feature.draftAngleDeg } : {}),
@@ -198,31 +202,81 @@ export function hasModifiers(project: WorkbenchProject): boolean {
  * about the body's current centroid. Both operations leave the index buffer and face names untouched, so the step is
  * reversible: deleting the step rolls the body back to its previous shape.
  */
-export function applyDirectEdit(feature: DesignSolidFeature & { readonly kind: "move-body" | "scale-body" }, body: GeneralSolidBody): GeneralSolidBody {
+export function applyDirectEdit(feature: DesignSolidFeature & { readonly kind: "move-body" | "scale-body" | "move-face" | "offset-face" }, body: GeneralSolidBody): GeneralSolidBody {
   if (feature.kind === "move-body") {
     const delta = feature.moveDeltaMm ?? [0, 0, 0];
     if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) return body;
     const positionsMm = body.positionsMm.map((value, index) => value + delta[index % 3]!);
     return { ...body, positionsMm };
   }
-  const scale = feature.scaleFactor ?? 1;
-  if (scale === 1) return body;
-  // Centroid of all vertices (not area-weighted — a direct edit is a user action, not a solid-manifold operation).
-  let cx = 0;
-  let cy = 0;
-  let cz = 0;
-  const count = body.positionsMm.length / 3;
-  if (count === 0) return body;
-  for (let index = 0; index < body.positionsMm.length; index += 3) {
-    cx += body.positionsMm[index]!;
-    cy += body.positionsMm[index + 1]!;
-    cz += body.positionsMm[index + 2]!;
+  if (feature.kind === "scale-body") {
+    const scale = feature.scaleFactor ?? 1;
+    if (scale === 1) return body;
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    const count = body.positionsMm.length / 3;
+    if (count === 0) return body;
+    for (let index = 0; index < body.positionsMm.length; index += 3) {
+      cx += body.positionsMm[index]!;
+      cy += body.positionsMm[index + 1]!;
+      cz += body.positionsMm[index + 2]!;
+    }
+    cx /= count; cy /= count; cz /= count;
+    const positionsMm = body.positionsMm.map((value, index) => {
+      const axis = index % 3;
+      const center = axis === 0 ? cx : axis === 1 ? cy : cz;
+      return center + (value - center) * scale;
+    });
+    return { ...body, positionsMm };
   }
-  cx /= count; cy /= count; cz /= count;
-  const positionsMm = body.positionsMm.map((value, index) => {
-    const axis = index % 3;
-    const center = axis === 0 ? cx : axis === 1 ? cy : cz;
-    return center + (value - center) * scale;
-  });
+  // move-face / offset-face: translate the vertices of one brep face.
+  const role = feature.targetFaceRole;
+  const brep = body.brep;
+  if (role === undefined || brep === undefined) return body;
+  const faceIndex = brep.faces.findIndex((face) => face.role === role);
+  if (faceIndex < 0) return body;
+  const faceTriangles = brep.faceTriangles ?? [];
+  const faceVertexIndices = new Set<number>();
+  for (let triangle = 0; triangle < faceTriangles.length; triangle += 1) {
+    if (faceTriangles[triangle] !== faceIndex) continue;
+    faceVertexIndices.add(body.indices[triangle * 3]!);
+    faceVertexIndices.add(body.indices[triangle * 3 + 1]!);
+    faceVertexIndices.add(body.indices[triangle * 3 + 2]!);
+  }
+  if (faceVertexIndices.size === 0) return body;
+  let delta: readonly [number, number, number];
+  if (feature.kind === "move-face") {
+    delta = feature.moveFaceDeltaMm ?? [0, 0, 0];
+  } else {
+    // Offset along the face's average triangle normal.
+    let nx = 0; let ny = 0; let nz = 0;
+    for (let triangle = 0; triangle < faceTriangles.length; triangle += 1) {
+      if (faceTriangles[triangle] !== faceIndex) continue;
+      const a = body.indices[triangle * 3]! * 3;
+      const b = body.indices[triangle * 3 + 1]! * 3;
+      const c = body.indices[triangle * 3 + 2]! * 3;
+      const ux = body.positionsMm[b]! - body.positionsMm[a]!;
+      const uy = body.positionsMm[b + 1]! - body.positionsMm[a + 1]!;
+      const uz = body.positionsMm[b + 2]! - body.positionsMm[a + 2]!;
+      const vx = body.positionsMm[c]! - body.positionsMm[a]!;
+      const vy = body.positionsMm[c + 1]! - body.positionsMm[a + 1]!;
+      const vz = body.positionsMm[c + 2]! - body.positionsMm[a + 2]!;
+      nx += uy * vz - uz * vy;
+      ny += uz * vx - ux * vz;
+      nz += ux * vy - uy * vx;
+    }
+    const length = Math.hypot(nx, ny, nz);
+    if (length < 1e-9) return body;
+    const offset = feature.offsetFaceMm ?? 0;
+    delta = [(nx / length) * offset, (ny / length) * offset, (nz / length) * offset];
+  }
+  if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) return body;
+  const positionsMm = [...body.positionsMm];
+  for (const vertex of faceVertexIndices) {
+    positionsMm[vertex * 3] = positionsMm[vertex * 3]! + delta[0];
+    positionsMm[vertex * 3 + 1] = positionsMm[vertex * 3 + 1]! + delta[1];
+    positionsMm[vertex * 3 + 2] = positionsMm[vertex * 3 + 2]! + delta[2];
+  }
   return { ...body, positionsMm };
 }

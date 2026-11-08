@@ -141,7 +141,7 @@ interface SketchWorkspaceProps {
   readonly onCreateSolid: (
     profileIds: readonly string[],
     plane: PlaneKey,
-    operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft",
+    operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix",
     valueMm: number,
     edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number },
     direction?: "one-side" | "symmetric" | "flipped",
@@ -160,6 +160,10 @@ interface SketchWorkspaceProps {
       readonly shellOpenFace?: "top" | "bottom" | "none";
       readonly draftAngleDeg?: number;
       readonly draftNeutralFace?: "top" | "bottom";
+      readonly helixRadiusMm?: number;
+      readonly helixPitchMm?: number;
+      readonly helixTurns?: number;
+      readonly helixHandedness?: "right" | "left";
     }
   ) => void;
   /** The solids a join or cut can modify. */
@@ -241,7 +245,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [selectionBox, setSelectionBox] = useState<{ readonly start: Vec2; readonly end: Vec2 } | undefined>(undefined);
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
-  const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft">("extrude");
+  const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix">("extrude");
   const [solidValue, setSolidValue] = useState("10");
   const [sweepDx, setSweepDx] = useState("0");
   const [sweepDy, setSweepDy] = useState("0");
@@ -255,6 +259,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [loftTangencyWeight, setLoftTangencyWeight] = useState("1");
   const [sweepTwist, setSweepTwist] = useState("0");
   const [sweepFrameTransport, setSweepFrameTransport] = useState(false);
+  const [helixRadius, setHelixRadius] = useState("20");
+  const [helixPitch, setHelixPitch] = useState("5");
+  const [helixTurns, setHelixTurns] = useState("4");
+  const [helixHandedness, setHelixHandedness] = useState<"right" | "left">("right");
   const [modifierEdgeSize, setModifierEdgeSize] = useState("1");
   const [shellThickness, setShellThickness] = useState("2");
   const [shellOpenFace, setShellOpenFace] = useState<"top" | "bottom" | "none">("top");
@@ -1144,7 +1152,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <div className="sketch-make-solid" aria-label="Create a solid from a profile">
           <span className="make-solid-title">Create solid</span>
           <div className="make-solid-row">
-            <select aria-label="Operation" value={solidOp} onChange={(event) => { const next = event.target.value as "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft"; setSolidOp(next); setSolidValue(next === "revolve" ? "360" : "20"); }}>
+            <select aria-label="Operation" value={solidOp} onChange={(event) => { const next = event.target.value as "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix"; setSolidOp(next); setSolidValue(next === "revolve" ? "360" : next === "helix" ? "20" : "20"); }}>
               <option value="extrude">Extrude</option>
               <option value="revolve">Revolve</option>
               <option value="sweep">Sweep (linear)</option>
@@ -1153,6 +1161,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="edge-chamfer">Chamfer extrude</option>
               <option value="shell">Shell (hollow)</option>
               <option value="draft">Draft (tapered)</option>
+              <option value="helix">Helix / Coil</option>
             </select>
             <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? "Sweep distance in millimetres" : "Height in millimetres"} type="number" min={solidOp === "revolve" ? 1 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : 1} value={solidValue} disabled={cutThroughAll} onChange={(event) => setSolidValue(event.target.value)} />
             <small>{solidOp === "revolve" ? "°" : "mm"}</small>
@@ -1259,6 +1268,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="none">Fully closed</option>
             </select>
           </div>}
+          {solidOp === "helix" && <div className="make-solid-row" aria-label="Helix parameters">
+            <small>Radius</small>
+            <input aria-label="Helix coil radius in millimetres" type="number" min={0.1} step={0.5} value={helixRadius} onChange={(event) => setHelixRadius(event.target.value)} />
+            <small>mm · pitch</small>
+            <input aria-label="Helix pitch in millimetres" type="number" min={0.1} step={0.5} value={helixPitch} onChange={(event) => setHelixPitch(event.target.value)} />
+            <small>mm · turns</small>
+            <input aria-label="Helix turns" type="number" min={0.1} max={100} step={0.5} value={helixTurns} onChange={(event) => setHelixTurns(event.target.value)} />
+            <select aria-label="Helix handedness" value={helixHandedness} onChange={(event) => setHelixHandedness(event.target.value === "left" ? "left" : "right")}>
+              <option value="right">Right-handed</option>
+              <option value="left">Left-handed</option>
+            </select>
+          </div>}
           {solidOp === "draft" && <div className="make-solid-row" aria-label="Draft parameters">
             <small>Angle</small>
             <input aria-label="Draft angle in degrees" type="number" min={0.5} max={75} step={0.5} value={draftAngle} onChange={(event) => setDraftAngle(event.target.value)} />
@@ -1296,7 +1317,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
                   ? { shellThicknessMm: Number(shellThickness), shellOpenFace }
                   : solidOp === "draft"
                     ? { draftAngleDeg: Number(draftAngle), draftNeutralFace }
-                    : undefined;
+                    : solidOp === "helix"
+                      ? { helixRadiusMm: Number(helixRadius), helixPitchMm: Number(helixPitch), helixTurns: Number(helixTurns), helixHandedness }
+                      : undefined;
             const effectiveProfileIds = solidOp === "loft" && loftMode === "two-profile" && selectedProfileIds.length >= 2
               ? selectedProfileIds.slice(0, 1)
               : selectedProfileIds;

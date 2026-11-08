@@ -50,7 +50,7 @@ interface WorkbenchRibbonProps {
   readonly onAddConstructionPlane: (mode: "offset" | "angle" | "three-points" | "midplane" | "tangent-to-cylinder") => void;
   readonly onAddConstructionAxis: (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis") => void;
   readonly onAddConstructionPoint: (mode: "xyz" | "midpoint" | "axis-plane-intersection") => void;
-  readonly onDirectEdit: (mode: "move-body" | "scale-body") => void;
+  readonly onDirectEdit: (mode: "move-body" | "scale-body" | "move-face" | "offset-face") => void;
   readonly onHoleWizard: () => void;
   readonly onInsertComponent: (shape: "box" | "cylinder") => void;
   readonly onDeleteComponent: (componentId: string) => void;
@@ -230,6 +230,8 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       <RibbonGroup label="Direct editing">
         <RibbonButton icon="move" label="Move Body" hint="dx · dy · dz" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("move-body")} />
         <RibbonButton icon="scale" label="Scale Body" hint="×factor" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("scale-body")} />
+        <RibbonButton icon="move" label="Move Face" hint="pick role" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("move-face")} />
+        <RibbonButton icon="scale" label="Offset Face" hint="±mm · normal" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("offset-face")} />
       </RibbonGroup>
       <RibbonGroup label="Detail features">
         <RibbonButton icon="edge-blend" label="Edge Blend" hint="vertical chain" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("edge-blend", "Edge Blend")} />

@@ -1,5 +1,5 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { booleanMeshes, revolveAxisRelation, tessellateExtrude, tessellateLoft, tessellateLoftTwoProfiles, tessellateRevolve, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
+import { booleanMeshes, revolveAxisRelation, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateRevolve, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism, evaluateProfileRevolution, stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { profileOutlineMm, stableEntityToken, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
@@ -80,7 +80,7 @@ function rotateLocalToPlane(point: WorldPoint, plane: SketchPlane): WorldPoint {
 export interface CreateGeneralSolidRequest {
   readonly profile: SketchProfile;
   readonly plane: SketchPlane;
-  readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft";
+  readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix";
   /** Extrusion height / revolve angle (deg) / sweep distance / loft height, in millimetres (angle: degrees). For edge-fillet/chamfer, shell and draft this is still the extrusion height. */
   readonly valueMm: number;
   readonly bodyId: string;
@@ -116,6 +116,14 @@ export interface CreateGeneralSolidRequest {
   readonly draftAngleDeg?: number;
   /** Draft only: which cap stays fixed. */
   readonly draftNeutralFace?: "top" | "bottom";
+  /** Helix only: coil radius (centerline of the swept profile) in millimetres. */
+  readonly helixRadiusMm?: number;
+  /** Helix only: axial advance per turn in millimetres. */
+  readonly helixPitchMm?: number;
+  /** Helix only: how many turns to wind. */
+  readonly helixTurns?: number;
+  /** Helix only: winding handedness. */
+  readonly helixHandedness?: "right" | "left";
 }
 
 /** Maps a hole profile to the kernel's hole loop; the id comes from its sketch entities so wall names survive edits. */
@@ -215,6 +223,18 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     // Fall through to the extrude path below by treating operation as extrude. We can't just reassign since operation is readonly,
     // so delegate to a nested call with operation swapped.
     return createGeneralSolidBody({ ...request, operation: "extrude" });
+  }
+  if (request.operation === "helix") {
+    const radius = request.helixRadiusMm;
+    const pitch = request.helixPitchMm;
+    const turns = request.helixTurns;
+    const handedness = request.helixHandedness ?? "right";
+    if (radius === undefined || !Number.isFinite(radius) || radius <= 0) return { ok: false, message: "Helix needs a positive coil radius." };
+    if (pitch === undefined || !Number.isFinite(pitch) || pitch <= 0) return { ok: false, message: "Helix needs a positive pitch." };
+    if (turns === undefined || !Number.isFinite(turns) || turns <= 0) return { ok: false, message: "Helix needs a positive number of turns." };
+    const mesh = tessellateHelix(polygonMm, radius, pitch, turns, handedness, request.plane);
+    if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be wound into a helix." };
+    return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
   if (request.operation === "sweep") {
     const twist = request.sweepTwistDeg ?? 0;

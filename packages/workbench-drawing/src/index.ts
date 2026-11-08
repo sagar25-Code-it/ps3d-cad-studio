@@ -1,5 +1,6 @@
 import type {
   DrawingDatumScheme,
+  DrawingDimensionStyle,
   DrawingDisplayStyle,
   DrawingDraftingStandard,
   DrawingSettings,
@@ -9,7 +10,7 @@ import type {
 
 export type DrawingViewId = "front" | "top" | "right" | "section-a" | "isometric";
 export type DrawingViewRole = "base" | "projected" | "section" | "pictorial";
-export type DrawingDimensionKind = "linear" | "diameter" | "basic";
+export type DrawingDimensionKind = "linear" | "diameter" | "basic" | "linear-chain" | "linear-baseline" | "ordinate";
 export type GdtCharacteristic = "position" | "flatness" | "perpendicularity";
 
 export interface DrawingViewRecord {
@@ -55,6 +56,7 @@ export interface DrawingGenerationPlan {
   readonly displayStyle: DrawingDisplayStyle;
   readonly sectionViewEnabled: boolean;
   readonly datumScheme: DrawingDatumScheme;
+  readonly dimensionStyle: DrawingDimensionStyle;
   readonly views: readonly DrawingViewRecord[];
   readonly dimensions: readonly DrawingDimensionRecord[];
   readonly gdtFrames: readonly DrawingGdtFrameRecord[];
@@ -97,6 +99,7 @@ interface NormalizedDrawingSettings {
   readonly draftingStandard: DrawingDraftingStandard;
   readonly showGdt: boolean;
   readonly datumScheme: DrawingDatumScheme;
+  readonly dimensionStyle: DrawingDimensionStyle;
   readonly positionToleranceMm: number;
   readonly flatnessToleranceMm: number;
   readonly perpendicularityToleranceMm: number;
@@ -125,12 +128,44 @@ export function createAutomaticDrawingPlan(part: PartIntent, settings: DrawingSe
   const hasDatumFrame = normalized.showGdt && normalized.datumScheme === "plate-3-2-1" && hasTop;
   const dimensions: DrawingDimensionRecord[] = [];
   if (settings.showDimensions) {
-    dimensions.push(
-      dimension("dimension:overall-width", "linear", part.widthMm, "general", "part:mounting-plate", "front"),
-      dimension("dimension:overall-height", "linear", part.heightMm, "general", "part:mounting-plate", "front"),
-      dimension("dimension:centered-bore-diameter", "diameter", part.holeDiameterMm, "general", "feature:centered-bore", "front")
-    );
-    if (hasTop) dimensions.push(dimension("dimension:thickness", "linear", part.thicknessMm, "general", "feature:base-extrusion", "top"));
+    // Pick the linear-dimension kind by style: chain / baseline / ordinate replace the single-callout "linear" kind.
+    const linearKind: DrawingDimensionKind = normalized.dimensionStyle === "chain"
+      ? "linear-chain"
+      : normalized.dimensionStyle === "baseline"
+        ? "linear-baseline"
+        : normalized.dimensionStyle === "ordinate"
+          ? "ordinate"
+          : "linear";
+    if (normalized.dimensionStyle === "chain") {
+      // Chain style splits the overall width into two chained halves that meet at the bore centreline.
+      dimensions.push(
+        dimension("dimension:width-left-half", linearKind, part.widthMm / 2, "general", "part:mounting-plate", "front"),
+        dimension("dimension:width-right-half", linearKind, part.widthMm / 2, "general", "part:mounting-plate", "front"),
+        dimension("dimension:overall-height", linearKind, part.heightMm, "general", "part:mounting-plate", "front")
+      );
+    } else if (normalized.dimensionStyle === "baseline") {
+      // Baseline style tracks half-width and overall width both from the left edge as a common origin.
+      dimensions.push(
+        dimension("dimension:width-to-bore", linearKind, part.widthMm / 2, "general", "feature:centered-bore", "front"),
+        dimension("dimension:overall-width", linearKind, part.widthMm, "general", "part:mounting-plate", "front"),
+        dimension("dimension:overall-height", linearKind, part.heightMm, "general", "part:mounting-plate", "front")
+      );
+    } else if (normalized.dimensionStyle === "ordinate") {
+      // Ordinate style: three coordinate readouts from the lower-left corner of the front view.
+      dimensions.push(
+        dimension("dimension:ord-bore-x", linearKind, part.widthMm / 2, "general", "feature:centered-bore", "front"),
+        dimension("dimension:ord-bore-y", linearKind, part.heightMm / 2, "general", "feature:centered-bore", "front"),
+        dimension("dimension:ord-width", linearKind, part.widthMm, "general", "part:mounting-plate", "front"),
+        dimension("dimension:ord-height", linearKind, part.heightMm, "general", "part:mounting-plate", "front")
+      );
+    } else {
+      dimensions.push(
+        dimension("dimension:overall-width", linearKind, part.widthMm, "general", "part:mounting-plate", "front"),
+        dimension("dimension:overall-height", linearKind, part.heightMm, "general", "part:mounting-plate", "front")
+      );
+    }
+    dimensions.push(dimension("dimension:centered-bore-diameter", "diameter", part.holeDiameterMm, "general", "feature:centered-bore", "front"));
+    if (hasTop) dimensions.push(dimension("dimension:thickness", linearKind, part.thicknessMm, "general", "feature:base-extrusion", "top"));
     if (hasDatumFrame) {
       dimensions.push(
         dimension("dimension:bore-center-x", "basic", part.widthMm / 2, "basic", "feature:centered-bore", "front"),
@@ -158,6 +193,7 @@ export function createAutomaticDrawingPlan(part: PartIntent, settings: DrawingSe
     displayStyle: normalized.displayStyle,
     sectionViewEnabled: baseViewIds.includes("section-a"),
     datumScheme: hasDatumFrame ? "plate-3-2-1" : "none",
+    dimensionStyle: normalized.dimensionStyle,
     views,
     dimensions,
     gdtFrames,
@@ -238,6 +274,7 @@ function normalizeSettings(settings: DrawingSettings): NormalizedDrawingSettings
     draftingStandard: settings.draftingStandard ?? "ASME",
     showGdt: settings.showGdt ?? false,
     datumScheme: settings.datumScheme ?? "none",
+    dimensionStyle: settings.dimensionStyle ?? "individual",
     positionToleranceMm: bounded(settings.gdtPositionToleranceMm, 0.001, 10, 0.2),
     flatnessToleranceMm: bounded(settings.gdtFlatnessToleranceMm, 0.001, 10, 0.1),
     perpendicularityToleranceMm: bounded(settings.gdtPerpendicularityToleranceMm, 0.001, 10, 0.1),
@@ -311,10 +348,42 @@ function renderDimensions(plan: DrawingGenerationPlan, part: PartIntent, factor:
   const front = positions.front;
   const top = positions.top;
   const byId = new Map(plan.dimensions.map((record) => [record.id, record]));
-  const widthDimension = byId.get("dimension:overall-width");
-  if (widthDimension !== undefined) markup.push(horizontalDimension(widthDimension, front.x - geometry.width / 2, front.x + geometry.width / 2, front.y + geometry.height / 2, front.y + geometry.height / 2 + 12));
+  if (plan.dimensionStyle === "chain") {
+    // Two halves of the width are chained end-to-end through the bore centreline.
+    const left = byId.get("dimension:width-left-half");
+    const right = byId.get("dimension:width-right-half");
+    if (left !== undefined) markup.push(horizontalDimension(left, front.x - geometry.width / 2, front.x, front.y + geometry.height / 2, front.y + geometry.height / 2 + 12));
+    if (right !== undefined) markup.push(horizontalDimension(right, front.x, front.x + geometry.width / 2, front.y + geometry.height / 2, front.y + geometry.height / 2 + 12));
+  } else if (plan.dimensionStyle === "baseline") {
+    // Both horizontal dimensions start at the left edge: one to the bore, one to the right edge.
+    const toBore = byId.get("dimension:width-to-bore");
+    const toRight = byId.get("dimension:overall-width");
+    if (toBore !== undefined) markup.push(horizontalDimension(toBore, front.x - geometry.width / 2, front.x, front.y + geometry.height / 2, front.y + geometry.height / 2 + 12));
+    if (toRight !== undefined) markup.push(horizontalDimension(toRight, front.x - geometry.width / 2, front.x + geometry.width / 2, front.y + geometry.height / 2, front.y + geometry.height / 2 + 20));
+  } else if (plan.dimensionStyle === "ordinate") {
+    // Coordinate readouts from the lower-left corner of the front view.
+    const originX = front.x - geometry.width / 2;
+    const originY = front.y + geometry.height / 2;
+    const ordLabels = ["dimension:ord-bore-x", "dimension:ord-width"];
+    const ordY = ["dimension:ord-bore-y", "dimension:ord-height"];
+    ordLabels.forEach((id, index) => {
+      const record = byId.get(id);
+      if (record === undefined) return;
+      const xTarget = originX + record.nominalMm * factor;
+      markup.push(ordinateDimension(record, xTarget, originY, originY + 12 + index * 6, "horizontal"));
+    });
+    ordY.forEach((id, index) => {
+      const record = byId.get(id);
+      if (record === undefined) return;
+      const yTarget = originY - record.nominalMm * factor;
+      markup.push(ordinateDimension(record, originX - 12 - index * 6, originX, yTarget, "vertical"));
+    });
+  } else {
+    const widthDimension = byId.get("dimension:overall-width");
+    if (widthDimension !== undefined) markup.push(horizontalDimension(widthDimension, front.x - geometry.width / 2, front.x + geometry.width / 2, front.y + geometry.height / 2, front.y + geometry.height / 2 + 12));
+  }
   const heightDimension = byId.get("dimension:overall-height");
-  if (heightDimension !== undefined) markup.push(verticalDimension(heightDimension, front.y - geometry.height / 2, front.y + geometry.height / 2, front.x - geometry.width / 2, front.x - geometry.width / 2 - 12));
+  if (heightDimension !== undefined && plan.dimensionStyle !== "ordinate") markup.push(verticalDimension(heightDimension, front.y - geometry.height / 2, front.y + geometry.height / 2, front.x - geometry.width / 2, front.x - geometry.width / 2 - 12));
   const thicknessDimension = byId.get("dimension:thickness");
   if (thicknessDimension !== undefined) {
     const thicknessClamped = part.thicknessMm * factor < 3;
@@ -330,7 +399,18 @@ function renderDimensions(plan: DrawingGenerationPlan, part: PartIntent, factor:
   if (centerX !== undefined) markup.push(horizontalDimension(centerX, front.x - geometry.width / 2, front.x, front.y - geometry.height / 2, front.y - geometry.height / 2 - 11, true));
   const centerY = byId.get("dimension:bore-center-y");
   if (centerY !== undefined) markup.push(verticalDimension(centerY, front.y, front.y + geometry.height / 2, front.x + geometry.width / 2, front.x + geometry.width / 2 + 12, true));
-  return `<g class="drawing-dimensions" data-dimension-strategy="selective-model-derived">${markup.join("")}</g>`;
+  return `<g class="drawing-dimensions" data-dimension-strategy="${plan.dimensionStyle}-model-derived">${markup.join("")}</g>`;
+}
+
+function ordinateDimension(record: DrawingDimensionRecord, a: number, b: number, c: number, axis: "horizontal" | "vertical"): string {
+  // Ordinate: a single leader from the datum origin to the target point, labelled with the coordinate value.
+  const label = escapeXml(record.label);
+  if (axis === "horizontal") {
+    // a = target x, b = origin y (baseline), c = label y (below baseline).
+    return `<g class="drawing-dimension ordinate" data-dimension-id="${record.id}" data-source-id="${record.sourceId}" data-view-id="${record.viewId}" data-tolerance-source="${record.toleranceSource}" fill="#173346" stroke="#173346" stroke-width="0.35" font-family="ui-monospace,monospace" font-size="3"><path class="extension-line" d="M${n(a)} ${n(b)}V${n(c + 1)}" fill="none"/><circle cx="${n(a)}" cy="${n(b)}" r="0.6" fill="#173346"/><text x="${n(a)}" y="${n(c + 3)}" stroke="none" text-anchor="middle">${label}</text></g>`;
+  }
+  // axis === "vertical": a = label x (left of origin), b = origin x, c = target y.
+  return `<g class="drawing-dimension ordinate" data-dimension-id="${record.id}" data-source-id="${record.sourceId}" data-view-id="${record.viewId}" data-tolerance-source="${record.toleranceSource}" fill="#173346" stroke="#173346" stroke-width="0.35" font-family="ui-monospace,monospace" font-size="3"><path class="extension-line" d="M${n(b)} ${n(c)}H${n(a - 1)}" fill="none"/><circle cx="${n(b)}" cy="${n(c)}" r="0.6" fill="#173346"/><text x="${n(a - 3)}" y="${n(c + 1)}" stroke="none" text-anchor="end">${label}</text></g>`;
 }
 
 function horizontalDimension(record: DrawingDimensionRecord, x1: number, x2: number, objectY: number, dimensionY: number, basic = false): string {

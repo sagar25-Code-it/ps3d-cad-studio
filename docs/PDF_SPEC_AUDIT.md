@@ -81,7 +81,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Horizontal / Vertical / Aligned distance | Have | Distance dimension |
 | Radius, Diameter, Half-Diameter | Have | `radius` plus `distance` |
 | Angle, Arc length, Perimeter | Partial | Angle via distance shim; true arc-length and perimeter dimensions missing |
-| Chain, Baseline, Ordinate | Missing | |
+| Chain, Baseline, Ordinate | Shipped | `DrawingSettings.dimensionStyle` ships `"individual"` (the legacy single-callout default), `"chain"` (two or more end-to-end linear dimensions), `"baseline"` (several dimensions from a common origin) and `"ordinate"` (coordinate readouts along both axes from the view's lower-left datum). `DrawingDimensionKind` gains `"linear-chain"`, `"linear-baseline"` and `"ordinate"` so saved plans tag the style of each dimension record |
 | Driving vs Driven (Reference), Deactivate, Equations | Partial | `DimensionMode = "driving" \| "driven"` is wired on constraints; Suppress (Deactivate) is wired on every constraint; `fx` expression binding across features is still out |
 
 ## 5. Part / solid features (PDF Section 4)
@@ -92,7 +92,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Revolve (One / Two / Symmetric / Thin, To-first / To-last) | Partial | Base revolve shipped; thin wall and "to" terminations missing |
 | Sweep (section along path with twist control) | Shipped | Linear sweep (`sweepDirectionMm`), path-guided sweep along a sketch line/arc/spline (`sweepPathEntityId`), twist control (`sweepTwistDeg`, degrees across the whole sweep about the profile centroid) and perpendicular-to-tangent frame transport (`sweepFrameTransport`, central-differenced tangent per sample so the profile sits ⟂ to the path) are all shipped |
 | Loft / Boundary (G0/G1/G2 continuity, rails, tangency weight) | Shipped | Scaled-top loft (`loftTopScale`) and two-profile loft (`loftSecondaryProfileIds`) are shipped with G0 / G1 / G2 continuity (linear / smoothstep / smootherstep), auto-resampling across mismatched vertex counts, an optional guide-curve rail (`loftRailEntityId`) that bends ring centroids away from the straight interpolation, and tangency-weight control (`loftTangencyWeight`, 0 → linear / 1 → full G1/G2 / 2 → punchy middle) |
-| Helix / Coil / Thread | Missing | |
+| Helix / Coil / Thread | Partial | `DesignSolidFeature.kind: "helix"` winds a sketch profile around the plane normal by coil radius (`helixRadiusMm`), pitch per turn (`helixPitchMm`), number of turns (`helixTurns`) and handedness (`helixHandedness: "right" \| "left"`); `tessellateHelix` produces the tessellated coil with ring-aligned caps. A separate Thread feature (helical boss / cut along an existing cylindrical face) still needs face-picking |
 | Rib, Web, Emboss, Wrap | Missing | |
 | Solid primitives (Box, Cylinder, Sphere, Cone, Torus, Ellipsoid, Prism, Wedge, Spiral, Tube) | Partial | Box, Cylinder, Sphere, Cone and Torus shipped (see `PartPreviewBodyShape` and `torusMesh`); Ellipsoid / Prism / Wedge / Spiral / Tube still missing |
 | Hole / Hole Wizard (counterbore, countersink, threaded) | Missing | `set-part-parameter:holeDiameterMm` on the template plate only; no hole wizard |
@@ -104,7 +104,7 @@ This audit holds the PDF "Architectural Blueprint and Feature Specification for 
 | Draft | Partial | `DesignSolidFeature.kind: "draft"` produces a tapered prism with `draftAngleDeg` and `draftNeutralFace`; per-face selection is still out — the taper applies uniformly to every side face |
 | Linear / Circular / Mirror pattern | Partial | `pattern-part-feature` and `mirror-part-feature` on the template plate; no general-body pattern |
 | Surface / Patch tools, T-Splines | Missing | Surface workspace is a bezier preview, not a full surfacing layer |
-| Synchronous direct editing (Move / Pull / Offset region / Replace face) | Partial | Move Body and Scale Body direct-edit feature kinds (`kind: "move-body"` / `"scale-body"`, `operation: "direct-edit"`) are shipped as first-class timeline steps that replay in order against the current body — Move translates every vertex by a stored (dx, dy, dz) delta, Scale uniformly scales about the body's current centroid. Pull/Offset face and Replace face still need a face picker and face-normal propagation |
+| Synchronous direct editing (Move / Pull / Offset region / Replace face) | Partial | Move Body, Scale Body, Move Face and Offset Face direct-edit feature kinds (`kind: "move-body" \| "scale-body" \| "move-face" \| "offset-face"`, `operation: "direct-edit"`) are shipped as first-class timeline steps that replay in order against the current body. Move Face and Offset Face pick a brep face role from the target body's `brep.faces`, collect the vertex indices referenced by that face's triangles via `brep.faceTriangles`, and translate only those vertices — Offset Face uses the face's averaged triangle normal. Replace face and Delete face still need a boundary-rebuild pass |
 
 ## 6. Construction geometry (datums)
 

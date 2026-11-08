@@ -1102,15 +1102,59 @@ export function App(): React.JSX.Element {
     setStatusText(`Created ${point.name} (point ${ordinal}).`);
   };
 
-  const handleDirectEdit = (mode: "move-body" | "scale-body"): void => {
+  const handleDirectEdit = (mode: "move-body" | "scale-body" | "move-face" | "offset-face"): void => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
     const body = bodies.find((candidate) => candidate.id === selectedId) ?? bodies[0];
-    if (body === undefined) { setStatus("ready"); setStatusText(`${mode === "move-body" ? "Move body" : "Scale body"}: create or select a solid body first.`); return; }
+    const niceName = mode === "move-body" ? "Move body" : mode === "scale-body" ? "Scale body" : mode === "move-face" ? "Move face" : "Offset face";
+    if (body === undefined) { setStatus("ready"); setStatusText(`${niceName}: create or select a solid body first.`); return; }
     const history = designOf(current);
     const base = baseFeatureOf(history, body.id);
-    if (base === undefined) { setStatus("ready"); setStatusText(`${mode === "move-body" ? "Move body" : "Scale body"}: this body is not in the timeline, so a direct edit cannot be recorded.`); return; }
+    if (base === undefined) { setStatus("ready"); setStatusText(`${niceName}: this body is not in the timeline, so a direct edit cannot be recorded.`); return; }
     const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
+    if (mode === "move-face" || mode === "offset-face") {
+      const roles = body.brep?.faces.map((face) => face.role) ?? [];
+      if (roles.length === 0) { setStatus("ready"); setStatusText(`${niceName}: this body has no named faces to target. Rebuild it through the extrude kernel first.`); return; }
+      const roleRaw = ask(`Face role (one of: ${roles.join(", ")}):`, roles[0]!);
+      if (roleRaw === null) return;
+      const role = roleRaw.trim();
+      if (!roles.includes(role)) { setStatus("ready"); setStatusText(`${niceName}: that face role is not on this body.`); return; }
+      if (mode === "move-face") {
+        const raw = ask("Face translation (dx, dy, dz in mm):", "0, 0, 5");
+        if (raw === null) return;
+        const parts = raw.split(/[,\s]+/).map((part) => Number.parseFloat(part.trim())).filter((value) => Number.isFinite(value));
+        if (parts.length !== 3) { setStatus("ready"); setStatusText("Move face: enter three numbers in millimetres."); return; }
+        const delta: [number, number, number] = [parts[0]!, parts[1]!, parts[2]!];
+        if (delta[0] === 0 && delta[1] === 0 && delta[2] === 0) { setStatus("ready"); setStatusText("Move face: delta is zero."); return; }
+        const feature: DesignSolidFeature = {
+          id: `feature:move-face-${crypto.randomUUID()}`,
+          name: `Move face ${role} (${delta.map((value) => value.toFixed(1)).join(", ")} mm)`,
+          kind: "move-face", suppressed: false,
+          sketchFeatureId: base.sketchFeatureId, profileIds: [],
+          valueMm: Math.max(0.01, Math.hypot(delta[0], delta[1], delta[2])),
+          bodyId: body.id, operation: "direct-edit",
+          targetFaceRole: role, moveFaceDeltaMm: delta
+        };
+        void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
+        return;
+      }
+      // offset-face
+      const offsetRaw = ask("Face offset along its normal (mm, signed):", "2");
+      if (offsetRaw === null) return;
+      const offset = Number.parseFloat(offsetRaw);
+      if (!Number.isFinite(offset) || offset === 0) { setStatus("ready"); setStatusText("Offset face: enter a non-zero distance in millimetres."); return; }
+      const feature: DesignSolidFeature = {
+        id: `feature:offset-face-${crypto.randomUUID()}`,
+        name: `Offset face ${role} ${offset.toFixed(2)} mm`,
+        kind: "offset-face", suppressed: false,
+        sketchFeatureId: base.sketchFeatureId, profileIds: [],
+        valueMm: Math.max(0.01, Math.abs(offset)),
+        bodyId: body.id, operation: "direct-edit",
+        targetFaceRole: role, offsetFaceMm: offset
+      };
+      void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) setSelectedId(body.id); });
+      return;
+    }
     if (mode === "move-body") {
       const raw = ask("Translation (dx, dy, dz in mm):", "10, 0, 0");
       if (raw === null) return;
@@ -1797,7 +1841,7 @@ export function App(): React.JSX.Element {
   const createGeneralSolid = async (
     selectedProfileIds: readonly string[],
     _plane: SketchPlane,
-    operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft",
+    operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix",
     valueMm: number,
     edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number },
     direction: "one-side" | "symmetric" | "flipped" = "one-side",
@@ -1812,6 +1856,10 @@ export function App(): React.JSX.Element {
       readonly loftContinuity?: "position" | "tangent" | "curvature";
       readonly loftRailEntityId?: string;
       readonly loftTangencyWeight?: number;
+      readonly helixRadiusMm?: number;
+      readonly helixPitchMm?: number;
+      readonly helixTurns?: number;
+      readonly helixHandedness?: "right" | "left";
       readonly shellThicknessMm?: number;
       readonly shellOpenFace?: "top" | "bottom" | "none";
       readonly draftAngleDeg?: number;
@@ -1848,7 +1896,7 @@ export function App(): React.JSX.Element {
     }
     if (detectSketchProfiles(projectRef.current.sketch).length === 0) { setStatus("error"); setStatusText("Draw or select a closed profile before creating a solid."); return; }
     setStatus("working");
-    setStatusText(`Building ${operation === "extrude" ? "extruded" : operation === "revolve" ? "revolved" : operation === "sweep" ? "swept" : operation === "loft" ? "lofted" : operation === "edge-fillet" ? "filleted" : operation === "edge-chamfer" ? "chamfered" : operation === "shell" ? "shelled" : "drafted"} solid…`);
+    setStatusText(`Building ${operation === "extrude" ? "extruded" : operation === "revolve" ? "revolved" : operation === "sweep" ? "swept" : operation === "loft" ? "lofted" : operation === "edge-fillet" ? "filleted" : operation === "edge-chamfer" ? "chamfered" : operation === "shell" ? "shelled" : operation === "helix" ? "helical" : "drafted"} solid…`);
     const sketchId = await commitWorkingSketch();
     const sketchFeature = designOf(projectRef.current).features.find((feature) => feature.id === sketchId);
     // A refused commit has already reported why (status and diagnostic); keep that message.
@@ -1866,7 +1914,8 @@ export function App(): React.JSX.Element {
               : operation === "edge-fillet" ? "Fillet"
                 : operation === "edge-chamfer" ? "Chamfer"
                   : operation === "shell" ? "Shell"
-                    : "Draft")
+                    : operation === "helix" ? "Helix"
+                      : "Draft")
       : target.mode === "cut" ? "Cut" : "Join";
     const feature: DesignSolidFeature = {
       id: `feature:${operation}-${crypto.randomUUID()}`,
@@ -1887,6 +1936,10 @@ export function App(): React.JSX.Element {
       ...(operation === "sweep" && advancedParams?.sweepFrameTransport === true ? { sweepFrameTransport: true } : {}),
       ...(operation === "loft" && advancedParams?.loftRailEntityId !== undefined && advancedParams.loftRailEntityId !== "" ? { loftRailEntityId: advancedParams.loftRailEntityId } : {}),
       ...(operation === "loft" && advancedParams?.loftTangencyWeight !== undefined ? { loftTangencyWeight: advancedParams.loftTangencyWeight } : {}),
+      ...(operation === "helix" && advancedParams?.helixRadiusMm !== undefined ? { helixRadiusMm: advancedParams.helixRadiusMm } : {}),
+      ...(operation === "helix" && advancedParams?.helixPitchMm !== undefined ? { helixPitchMm: advancedParams.helixPitchMm } : {}),
+      ...(operation === "helix" && advancedParams?.helixTurns !== undefined ? { helixTurns: advancedParams.helixTurns } : {}),
+      ...(operation === "helix" && advancedParams?.helixHandedness !== undefined ? { helixHandedness: advancedParams.helixHandedness } : {}),
       ...(operation === "loft" && advancedParams?.loftTopScale !== undefined ? { loftTopScale: advancedParams.loftTopScale } : {}),
       ...(operation === "loft" && advancedParams?.loftSecondaryProfileIds !== undefined && advancedParams.loftSecondaryProfileIds.length > 0 ? { loftSecondaryProfileIds: advancedParams.loftSecondaryProfileIds } : {}),
       ...(operation === "loft" && advancedParams?.loftContinuity !== undefined ? { loftContinuity: advancedParams.loftContinuity } : {}),
