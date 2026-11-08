@@ -41,7 +41,7 @@ import { DEFAULT_REACH, buildReach, isReachTarget, type ReachSettings } from "..
 import { SketchGrid } from "./sketch/SketchGrid.js";
 import { ConstraintExtras, ExtraDimensionMarks, type ConstraintExtrasBridge, type SetDimensionRequest } from "./sketch/ConstraintExtras.js";
 import { angleDimensionLayout, type DimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
-import { angleBetweenLinesDeg, entityLengthMm } from "../../../../packages/workbench-core/src/sketch-measure.js";
+import { angleBetweenLinesDeg, entityLengthMm, measureDimensionConstraint } from "../../../../packages/workbench-core/src/sketch-measure.js";
 import { useSketchCamera } from "./sketch/useSketchCamera.js";
 import { useSketchHotkeys } from "./sketch/useSketchHotkeys.js";
 import { ConstraintDisplayPanel, ConstraintGlyphLayer, ConstraintRecordList } from "./sketch/ConstraintGlyphs.js";
@@ -93,6 +93,19 @@ interface DirectSketchDimension {
 }
 
 type PlaneKey = "xy" | "xz" | "yz";
+
+/** The inline dimension editor: which dimension it edits, where it opens, and the stored value it started from. */
+interface DimensionEditState {
+  readonly entityId: string;
+  readonly dimension: DrivingDimension;
+  readonly anchor: Vec2;
+  readonly label: string;
+  readonly secondEntityId?: string;
+  /** The value the editor started from, in millimetres (degrees for an angle; a circle's diameter), so Enter without typing changes nothing. */
+  readonly storedValue: number | undefined;
+  /** True when the dimension was already a reference one when the editor opened. */
+  readonly wasReference: boolean;
+}
 
 /** A defining point of an entity that Coincident and Midpoint can be anchored to. */
 interface RelationPoint {
@@ -280,8 +293,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [pickRelation, setPickRelation] = useState<"coincident" | "midpoint" | null>(null);
   const [pickedPoint, setPickedPoint] = useState<RelationPoint | undefined>(undefined);
   // The in-place value editor for a driving dimension (opened from Sketch Dimension, or by clicking a dimension's text).
-  const [dimensionEdit, setDimensionEdit] = useState<{ readonly entityId: string; readonly dimension: DrivingDimension; readonly anchor: Vec2; readonly label: string; readonly secondEntityId?: string } | undefined>(undefined);
+  const [dimensionEdit, setDimensionEdit] = useState<DimensionEditState | undefined>(undefined);
   const [dimensionText, setDimensionText] = useState("");
+  // The editor's Reference checkbox: a reference dimension is measured and never moves the geometry.
+  const [dimensionReference, setDimensionReference] = useState(false);
   const [polygonSides, setPolygonSides] = useState(String(POLYGON_DEFAULT_SIDES));
   // The extra curve tools (rounded rectangle, conics, blend, profile, text ...): their palette numbers, and the Profile chain being drawn.
   const [curveFields, setCurveFields] = useState(DEFAULT_CURVE_OPTION_FIELDS);
@@ -524,6 +539,50 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
   const newConstraintId = (): string => `constraint:user-${crypto.randomUUID()}`;
   const entityLabels = useMemo(() => entityOrdinalLabels(props.sketch.entities), [props.sketch.entities]);
+  const redundantIds = useMemo(() => redundantConstraintIds(workingSketch.constraints, analysis), [workingSketch.constraints, analysis]);
+  const constraintTitles = useMemo(() => new Map(props.sketch.constraints.map((constraint) => [constraint.id, describeConstraint(constraint, entityLabels)] as const)), [props.sketch.constraints, entityLabels]);
+  const glyphs = useMemo(() => layoutConstraintGlyphs(
+    constraintsToDraw(visibleSketch.constraints, showConstraints ? constraintDisplay : { ...constraintDisplay, level: "none" }, { selectedEntityIds: selectionIds, hoveredEntityId: hoverId, selectedConstraintIds, hoveredConstraintId: hoverConstraintId, alwaysShowIds: redundantIds }),
+    visibleEntities,
+    { mmPerPx: px, redundant: redundantIds, ...(coarsePointer ? { radiusPx: hitSizes.glyphPx } : {}) }
+  ), [visibleSketch.constraints, visibleEntities, showConstraints, constraintDisplay, selectionIds, hoverId, selectedConstraintIds, hoverConstraintId, redundantIds, px, coarsePointer, hitSizes.glyphPx]);
+  // The curves a hovered or selected relation relates light up.
+  const relatedIds = useMemo(() => {
+    const focus = hoverConstraintId !== null ? [hoverConstraintId] : selectedConstraintIds;
+    return new Set(props.sketch.constraints.filter((constraint) => focus.includes(constraint.id)).flatMap((constraint) => constraint.entityIds));
+  }, [props.sketch.constraints, hoverConstraintId, selectedConstraintIds]);
+  const recordRows = useMemo(() => constraintRows(props.sketch.constraints, entityLabels), [props.sketch.constraints, entityLabels]);
+  const constraintKinds = useMemo(() => constraintKindsPresent(props.sketch.constraints), [props.sketch.constraints]);
+  // Driving dimensions: stacked so labels never overlap, at the stand-off the person dragged them to.
+  const dimensionViews = useMemo(() => {
+    const requests = drivingDimensions.map((view) => {
+      const id = view.constraint.id;
+      return {
+        id,
+        layoutAt: (offsetPx: number) => dimensionLayout(view.entity, view.dimension, view.constraint.valueMm ?? 0, px, { offsetPx, format: (value) => formatLengthLabel(value, dimensionDisplay) }),
+        userOffsetPx: dimensionDragOffset?.constraintId === id ? dimensionDragOffset.offsetPx : dimensionOffsets[id]
+      };
+    });
+    return stackDimensionLabels(requests, px).flatMap((entry) => {
+      const view = drivingDimensions.find((candidate) => candidate.constraint.id === entry.id);
+      const request = requests.find((candidate) => candidate.id === entry.id);
+      return view === undefined || request === undefined ? [] : [{ ...entry, view, layoutAt: request.layoutAt }];
+    });
+  }, [drivingDimensions, px, dimensionDisplay, dimensionOffsets, dimensionDragOffset]);
+  const selectionTotal = sketchSelectionTotal({ curves: selectionIds.length, profiles: selectedProfileIds.length, constraints: selectedConstraintIds.length });
+  useEffect(() => { props.onSelectionCount?.(selectionTotal); }, [selectionTotal]);
+  // Relations that no longer exist cannot stay selected.
+  useEffect(() => {
+    setSelectedConstraintIds((current) => current.every((id) => props.sketch.constraints.some((constraint) => constraint.id === id)) ? current : current.filter((id) => props.sketch.constraints.some((constraint) => constraint.id === id)));
+    setHoverConstraintId((current) => current !== null && props.sketch.constraints.some((constraint) => constraint.id === current) ? current : null);
+  }, [props.sketch.constraints]);
+  useEffect(() => {
+    setActiveFit((current) => {
+      if (current === undefined) return current;
+      const spline = props.sketch.entities.find((entity) => entity.id === current.entityId);
+      return spline?.kind === "spline" && current.index < spline.fitPoints.length ? current : undefined;
+    });
+  }, [props.sketch.entities]);
   const editContext = () => ({ sketch: props.sketch, newId: (prefix: "entity" | "constraint"): string => `${prefix}:user-${crypto.randomUUID()}` });
   /** Puts the clipboard on the system clipboard as text too, so it can be pasted into another window; failure is harmless. */
   const shareClipboardText = (clipboard: SketchClipboard): void => {
@@ -834,8 +893,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     props.onMessage(`Added profile ${entity.kind} ${next.segments}. Keep clicking, click the start to close it, or press Esc to stop.`);
   };
 
-  /** Opens the value editor next to a curve's dimension: the length of a line, the diameter of a circle, the width or height of a rectangle. */
-  const openDimensionEditor = (entity: SketchEntity, requested: DrivingDimension): void => {
+  /** Opens the value editor at a curve's dimension (or at the click): the length of a line, the diameter of a circle, the width or height of a rectangle. */
+  const openDimensionEditor = (entity: SketchEntity, requested: DrivingDimension, anchorOverride?: Vec2): void => {
     // An arc is dimensioned by its length and an ellipse by its perimeter.
     const dimension: DrivingDimension = entity.kind === "arc" ? "arc-length" : entity.kind === "ellipse" ? "perimeter" : requested;
     const current = entity.kind === "line" ? Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1])
@@ -843,51 +902,81 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         : entity.kind === "rectangle" ? (dimension === "height" ? entity.heightMm : entity.widthMm)
           : entity.kind === "arc" || entity.kind === "ellipse" ? entityLengthMm(entity) : undefined;
     if (current === undefined) { props.onMessage("Only lines, circles, rectangles, arcs and ellipses take a driving dimension here; splines are reference only (see Angle, arc length, perimeter)."); return; }
-    const existing = props.sketch.constraints.find((constraint) => constraint.entityIds.length === 1 && constraint.entityIds[0] === entity.id && constraint.valueMm !== undefined && constraint.driven !== true
-      && (dimension === "arc-length" ? constraint.kind === "arc-length" : dimension === "perimeter" ? constraint.kind === "perimeter" : constraint.dimension === dimension));
-    const shown = existing?.valueMm === undefined ? current : (entity.kind === "circle" ? existing.valueMm * 2 : existing.valueMm);
+    const matches = (constraint: WorkbenchSketchConstraint): boolean => constraint.entityIds.length === 1 && constraint.entityIds[0] === entity.id
+      && (dimension === "arc-length" ? constraint.kind === "arc-length" : dimension === "perimeter" ? constraint.kind === "perimeter" : constraint.dimension === dimension || (constraint.kind === "radius" && dimension === "radius"));
+    const driving = props.sketch.constraints.find((constraint) => matches(constraint) && constraint.valueMm !== undefined && constraint.driven !== true);
+    const wasReference = driving === undefined && props.sketch.constraints.some((constraint) => matches(constraint) && constraint.driven === true);
+    const shown = driving?.valueMm === undefined ? current : (entity.kind === "circle" ? driving.valueMm * 2 : driving.valueMm);
     const layout = dimensionLayout(entity, dimension, entity.kind === "circle" ? shown / 2 : shown, px);
-    const next = {
+    const next: DimensionEditState = {
       entityId: entity.id,
       dimension,
-      anchor: layout?.textAt ?? entityAnchor(entity),
-      label: dimension === "arc-length" ? "Arc length" : dimension === "perimeter" ? "Perimeter" : entity.kind === "circle" ? "Diameter" : dimension === "width" ? "Width" : dimension === "height" ? "Height" : "Length"
+      anchor: anchorOverride ?? layout?.textAt ?? entityAnchor(entity),
+      label: dimension === "arc-length" ? "Arc length" : dimension === "perimeter" ? "Perimeter" : entity.kind === "circle" ? "Diameter" : dimension === "width" ? "Width" : dimension === "height" ? "Height" : "Length",
+      storedValue: driving === undefined ? undefined : shown,
+      wasReference
     };
     // Opened after the press has finished: the browser moves focus off the editor on mouse-down, which would close it again at once.
     window.setTimeout(() => {
       setDimensionEdit(next);
+      setDimensionReference(wasReference);
       // A dimension bound to an expression shows the expression, so it can be edited as text; a circle shows its diameter.
-      const bound = existing?.expression === undefined ? undefined : entity.kind === "circle" ? unhalvedExpression(existing.expression) : existing.expression;
-      setDimensionText(bound ?? String(Number(shown.toFixed(3))));
+      const bound = driving?.expression === undefined ? undefined : entity.kind === "circle" ? unhalvedExpression(driving.expression) : driving.expression;
+      setDimensionText(bound ?? dimensionEditText(shown, dimensionDisplay));
     }, 0);
   };
 
-  /** Opens the value editor for an existing angle, arc-length or perimeter dimension, from a click on its text. */
+  /** Opens the value editor for an existing angle, arc-length or perimeter dimension (or a reference length, width, height or radius), from a double-click on its text. */
   const openExtraDimensionEditor = (constraint: WorkbenchSketchConstraint, anchor: Vec2): void => {
-    const name: DrivingDimension = constraint.kind === "angle" ? "angle" : constraint.kind === "arc-length" ? "arc-length" : "perimeter";
-    const value = constraint.kind === "angle" ? constraint.valueDeg : constraint.valueMm;
+    const reference = constraint.driven === true;
+    const name: DrivingDimension = constraint.kind === "angle" ? "angle" : constraint.kind === "arc-length" ? "arc-length" : constraint.kind === "perimeter" ? "perimeter" : constraint.kind === "radius" ? "radius" : (constraint.dimension ?? "length");
+    const measured = reference ? measureDimensionConstraint(props.sketch, constraint) : undefined;
+    const value = reference ? measured : constraint.kind === "angle" ? constraint.valueDeg : constraint.valueMm;
     if (value === undefined) return;
-    const next = { entityId: constraint.entityIds[0]!, dimension: name, anchor, label: name === "angle" ? "Angle (degrees)" : name === "arc-length" ? "Arc length" : "Perimeter", ...(constraint.entityIds[1] === undefined ? {} : { secondEntityId: constraint.entityIds[1] }) };
-    window.setTimeout(() => { setDimensionEdit(next); setDimensionText(String(Number(value.toFixed(3)))); }, 0);
+    const owner = props.sketch.entities.find((entity) => entity.id === constraint.entityIds[0]);
+    const diameter = owner?.kind === "circle" && name === "radius";
+    const shown = diameter ? value * 2 : value;
+    const label = name === "angle" ? "Angle (degrees)" : name === "arc-length" ? "Arc length" : name === "perimeter" ? "Perimeter" : diameter ? "Diameter" : name === "width" ? "Width" : name === "height" ? "Height" : name === "radius" ? "Radius" : "Length";
+    const next: DimensionEditState = { entityId: constraint.entityIds[0]!, dimension: name, anchor, label, storedValue: reference ? undefined : shown, wasReference: reference, ...(constraint.entityIds[1] === undefined ? {} : { secondEntityId: constraint.entityIds[1] }) };
+    window.setTimeout(() => {
+      setDimensionEdit(next);
+      setDimensionReference(reference);
+      setDimensionText(name === "angle" ? String(Number(shown.toPrecision(12))) : dimensionEditText(shown, dimensionDisplay));
+    }, 0);
   };
 
   const commitDimensionEdit = (): void => {
     const edit = dimensionEdit;
     if (edit === undefined) return;
-    const typed = parseDynamicNumber(dimensionText);
     const entity = props.sketch.entities.find((candidate) => candidate.id === edit.entityId);
+    const second = edit.secondEntityId === undefined ? undefined : { secondEntityId: edit.secondEntityId };
+    // Reference: the dimension is measured and never moves the geometry.
+    if (dimensionReference) {
+      if (edit.wasReference) { props.onMessage("This is already a reference dimension. Untick Reference to make it drive the geometry."); setDimensionEdit(undefined); return; }
+      props.onSetDimension(edit.entityId, edit.dimension, 1, { driven: true, ...(second ?? {}) });
+      setDimensionEdit(undefined);
+      return;
+    }
+    const angle = edit.dimension === "angle";
+    const text = dimensionText.trim();
+    const typed = angle ? parseDynamicNumber(text) : parseDimensionInput(text, dimensionDisplay);
     // Text that is not a number is an expression (plate_w / 2): the dimension is bound to it. The project checks it and says what is wrong.
-    if (typed === undefined && dimensionText.trim() !== "" && dimensionText.trim() !== "-") {
-      const text = dimensionText.trim();
+    if (typed === undefined && text !== "" && text !== "-") {
       // Only a plain length, width, height or radius can follow an expression; an angle, an arc length and a perimeter take numbers.
-      if (!["length", "width", "height", "radius"].includes(edit.dimension)) { props.onMessage(edit.dimension === "angle" ? "Type an angle from 0 up to 360 degrees." : "Type a size greater than zero."); return; }
+      if (!["length", "width", "height", "radius"].includes(edit.dimension)) { props.onMessage(angle ? "Type an angle from 0 up to 360 degrees." : "Type a size greater than zero."); return; }
       props.onSetDimension(edit.entityId, edit.dimension, 1, { expression: entity?.kind === "circle" ? halvedExpression(text) : text });
       setDimensionEdit(undefined);
       return;
     }
-    if (typed === undefined || (edit.dimension === "angle" ? typed < 0 || typed >= 360 : typed <= 0)) { props.onMessage(edit.dimension === "angle" ? "Type an angle from 0 up to 360 degrees." : "Type a size greater than zero."); return; }
+    if (typed === undefined || (angle ? typed < 0 || typed >= 360 : typed <= 0)) { props.onMessage(angle ? "Type an angle from 0 up to 360 degrees." : "Type a size greater than zero."); return; }
+    // Enter without typing changes nothing: the editor starts from the exact stored value, so there is nothing to re-drive.
+    if (!edit.wasReference && edit.storedValue !== undefined && sameDimensionValue(typed, edit.storedValue)) {
+      props.onMessage("The dimension already has that value; nothing changed.");
+      setDimensionEdit(undefined);
+      return;
+    }
     // A circle is dimensioned by its diameter on the canvas; the model stores the radius.
-    props.onSetDimension(edit.entityId, edit.dimension, entity?.kind === "circle" && edit.dimension === "radius" ? typed / 2 : typed, edit.secondEntityId === undefined ? undefined : { secondEntityId: edit.secondEntityId });
+    props.onSetDimension(edit.entityId, edit.dimension, entity?.kind === "circle" && edit.dimension === "radius" ? typed / 2 : typed, second);
     setDimensionEdit(undefined);
   };
 
@@ -937,6 +1026,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const selectEntity = (id: string, additive: boolean): void => {
     if (pickRelation === "midpoint" && pickedPoint !== undefined) { completeMidpoint(id); return; }
     if (pickRelation !== null) return;
+    if (!additive) setSelectedConstraintIds([]);
+    if (activeFit !== undefined && activeFit.entityId !== id) setActiveFit(undefined);
     if (props.viewportState.selectionFilter === "profile") {
       const profile = profiles.find((candidate) => candidate.entityIds.includes(id));
       if (profile !== undefined) selectProfile(profile, additive);
@@ -971,9 +1062,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           const dy = cursor[1] - entity.center[1];
           const localX = dx * Math.cos(radians) + dy * Math.sin(radians);
           const localY = -dx * Math.sin(radians) + dy * Math.cos(radians);
-          openDimensionEditor(entity, Math.abs(Math.abs(localY) - entity.heightMm / 2) <= Math.abs(Math.abs(localX) - entity.widthMm / 2) ? "width" : "height");
+          openDimensionEditor(entity, Math.abs(Math.abs(localY) - entity.heightMm / 2) <= Math.abs(Math.abs(localX) - entity.widthMm / 2) ? "width" : "height", cursor);
         } else if (entity !== undefined) {
-          openDimensionEditor(entity, entity.kind === "circle" ? "radius" : "length");
+          openDimensionEditor(entity, entity.kind === "circle" ? "radius" : "length", cursor);
         }
         props.onMessage("Type the value and press Enter. Esc closes the editor; pick two blue points instead for a reference distance.");
       }
@@ -1006,11 +1097,20 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       ? dimensionPoints.filter((candidate) => candidate.id !== point.id)
       : dimensionPoints.length < 2 ? [...dimensionPoints, point] : [point];
     setDimensionPoints(next);
+    const resolved = next.length === 2 ? resolveDirectSketchDimension(next) : undefined;
+    const target = resolved?.driving === undefined ? undefined : props.sketch.entities.find((entity) => entity.id === resolved.driving!.entityId);
+    if (resolved !== undefined && target !== undefined) {
+      openDimensionEditor(target, resolved.driving!.dimension, [(resolved.first.point[0] + resolved.second.point[0]) / 2, (resolved.first.point[1] + resolved.second.point[1]) / 2]);
+      props.onMessage(`${resolved.label}: type the value and press Enter.`);
+      return;
+    }
     props.onMessage(next.length === 0
       ? "Definition point cleared. Pick a point to start a dimension."
       : next.length === 1
         ? `${next[0]!.label} selected. Pick a second definition point.`
-        : "Point-to-point dimension selected; edit it when it maps to a supported driving parameter.");
+        : resolved === undefined
+          ? "Point-to-point dimension selected."
+          : `Reference distance ${formatLengthLabel(resolved.valueMm, dimensionDisplay)} (ΔX ${formatLengthLabel(resolved.delta[0], dimensionDisplay)}, ΔY ${formatLengthLabel(resolved.delta[1], dimensionDisplay)}). A driving distance between two different curves needs the two-curve dimension; this is measured only.`);
   };
 
   const selectProfile = (profile: SketchProfile, additive: boolean): void => {

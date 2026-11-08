@@ -101,6 +101,8 @@ export interface GlyphFocus {
   readonly hoveredEntityId: string | null;
   readonly selectedConstraintIds: readonly string[];
   readonly hoveredConstraintId: string | null;
+  /** Relations drawn whatever the level or hidden kinds say (redundant ones), unless the level is "none". */
+  readonly alwaysShowIds?: ReadonlySet<string>;
 }
 
 /**
@@ -116,7 +118,9 @@ export function constraintsToDraw(constraints: readonly WorkbenchSketchConstrain
     if (isDimensionKind(constraint.kind)) return false;
     const picked = selectedConstraints.has(constraint.id) || focus.hoveredConstraintId === constraint.id;
     if (picked) return true;
-    if (hiddenKinds.has(constraint.kind) || settings.level === "none") return false;
+    if (settings.level === "none") return false;
+    if (focus.alwaysShowIds?.has(constraint.id) === true) return true;
+    if (hiddenKinds.has(constraint.kind)) return false;
     if (settings.level === "all") return true;
     return constraint.entityIds.some((id) => selectedEntities.has(id) || id === focus.hoveredEntityId);
   });
