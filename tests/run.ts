@@ -68,6 +68,7 @@ import { publicReleaseTests } from "./public-release.test.js";
 import { fileWorkspaceTests } from "./file-workspace.test.js";
 import { cameraLandmarkTests } from "./camera-landmarks.test.js";
 import { topologyNamingTests } from "./topology-naming.test.js";
+import { extentTerminationTests } from "./extent-terminations.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -140,7 +141,8 @@ const tests: readonly TestCase[] = [
   ...workbenchMcpTests,
   ...fileWorkspaceTests,
   ...publicReleaseTests,
-  ...topologyNamingTests
+  ...topologyNamingTests,
+  ...extentTerminationTests
 ];
 let failures = 0;
 

@@ -12,3 +12,6 @@ export * from "./hole.js";
 export * from "./plane-tilt.js";
 export * from "./sketch-placement.js";
 export * from "./flat-pattern.js";
+export * from "./extent-distance.js";
+export * from "./vertex-pick.js";
+export * from "./polygon-offset.js";

@@ -305,19 +305,64 @@ const shortText = (value: unknown, maximum: number): value is string => typeof v
 const hasOnly = (value: Record<string, unknown>, required: readonly string[], optional: readonly string[]): boolean =>
   required.every((key) => Object.hasOwn(value, key)) && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
-export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
-  if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
-  if (Object.hasOwn(value, "extent")) {
-    // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
-    if (!["distance", "through-all"].includes(String(value.extent))) return false;
-    if (value.extent === "through-all" && (value.kind !== "extrude" || value.operation !== "cut")) return false;
+const TRIPLE = (candidate: unknown): boolean => Array.isArray(candidate) && candidate.length === 3 && candidate.every((entry) => typeof entry === "number" && Number.isFinite(entry) && Math.abs(entry) <= 1_000_000);
+
+/** The reach of a feature: distance, through-all, or a "to" extent with the target it measures. */
+function validExtent(value: Record<string, unknown>): boolean {
+  const hasExtent = Object.hasOwn(value, "extent");
+  const hasTarget = Object.hasOwn(value, "extentTarget");
+  if (!hasExtent) return !hasTarget;
+  const extent = String(value.extent);
+  if (!["distance", "through-all", "to-face", "to-body", "to-vertex", "to-first", "to-last"].includes(extent)) return false;
+  // Through-all only makes sense for an extruded cut: the tool is stretched across the body it cuts.
+  if (extent === "through-all") return value.kind === "extrude" && value.operation === "cut" && !hasTarget;
+  if (extent === "distance") return !hasTarget;
+  const revolveTo = extent === "to-first" || extent === "to-last";
+  if (value.kind !== (revolveTo ? "revolve" : "extrude") || !hasTarget || !isRecord(value.extentTarget)) return false;
+  const target = value.extentTarget;
+  if (!hasOnly(target, ["kind", "bodyId"], ["faceRole", "pointMm", "normal"]) || !stable(target.bodyId)) return false;
+  const wanted = extent === "to-body" ? "body" : extent === "to-vertex" ? "vertex" : "face";
+  if (target.kind !== wanted) return false;
+  if (Object.hasOwn(target, "pointMm") && !TRIPLE(target.pointMm)) return false;
+  if (target.kind === "vertex" && !Object.hasOwn(target, "pointMm")) return false;
+  if (Object.hasOwn(target, "faceRole") && (target.kind !== "face" || typeof target.faceRole !== "string" || target.faceRole.length === 0 || target.faceRole.length > 160)) return false;
+  if (Object.hasOwn(target, "normal")) {
+    if (target.kind !== "face" || !TRIPLE(target.normal)) return false;
+    const normal = target.normal as readonly number[];
+    if (Math.hypot(normal[0]!, normal[1]!, normal[2]!) < 1e-6) return false;
   }
+  // A face needs a name or a point to be found again by; a "to" reach has one end only, so it cannot straddle the plane.
+  if (target.kind === "face" && !Object.hasOwn(target, "faceRole") && !Object.hasOwn(target, "pointMm")) return false;
+  if (value.direction === "symmetric") return false;
+  if (revolveTo && value.direction === "two-side") return false;
+  return true;
+}
+
+/** Direction, the second distance of a two-side feature, and the thin-wall options of a revolve. */
+function validDirectionAndThin(value: Record<string, unknown>): boolean {
+  const sweptKind = value.kind === "extrude" || value.kind === "revolve";
+  if (Object.hasOwn(value, "direction") && (!sweptKind || !["one-side", "symmetric", "flipped", "two-side"].includes(String(value.direction)))) return false;
+  const hasSecond = Object.hasOwn(value, "secondValueMm");
+  if (hasSecond !== (value.direction === "two-side")) return false;
+  if (hasSecond && (typeof value.secondValueMm !== "number" || !Number.isFinite(value.secondValueMm) || value.secondValueMm <= 0 || value.secondValueMm > 100_000)) return false;
+  if (value.kind === "revolve" && typeof value.valueMm === "number" && value.valueMm > 360) return false;
+  if (value.kind === "revolve" && hasSecond && (value.valueMm as number) + (value.secondValueMm as number) > 360) return false;
+  if (Object.hasOwn(value, "thinWallMm")) {
+    if (value.kind !== "revolve" || typeof value.thinWallMm !== "number" || !Number.isFinite(value.thinWallMm) || value.thinWallMm <= 0 || value.thinWallMm > 10_000) return false;
+  }
+  if (Object.hasOwn(value, "thinSide") && (!Object.hasOwn(value, "thinWallMm") || !["inside", "outside", "center"].includes(String(value.thinSide)))) return false;
+  return true;
+}
+
+export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg"])) return false;
+  if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
+  if (!validExtent(value)) return false;
   if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "sheet-base", "sheet-flange", "sheet-hem", "sheet-edge-flange", "hole"].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
   if (typeof value.valueMm !== "number" || !Number.isFinite(value.valueMm) || value.valueMm === 0 || Math.abs(value.valueMm) > 100_000) return false;
-  if (Object.hasOwn(value, "direction") && (value.kind !== "extrude" || !["one-side", "symmetric", "flipped"].includes(String(value.direction)))) return false;
+  if (!validDirectionAndThin(value)) return false;
   if (Object.hasOwn(value, "edge")) {
     const edge = value.edge;
     if (!["extrude", "edge-fillet", "edge-chamfer"].includes(String(value.kind)) || !isRecord(edge) || !hasOnly(edge, ["kind", "sizeMm"], []) || !["chamfer", "fillet"].includes(String(edge.kind))

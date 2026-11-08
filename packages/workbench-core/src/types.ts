@@ -1030,16 +1030,44 @@ export interface DesignSketchFeature extends DesignFeatureBase {
   readonly sketch: WorkbenchSketch;
 }
 
+/**
+ * What a "to" termination reaches: a face, a whole body or a vertex of a body. The geometry is looked up again at every
+ * rebuild, so the extrusion follows the target when it moves. The stored point (and face direction) is the fallback that
+ * finds the target again when the face name no longer exists, and the feature's own `valueMm` is the last-resort distance.
+ */
+export interface DesignExtentTarget {
+  readonly kind: "face" | "body" | "vertex";
+  /** The body the target belongs to. It may be the body the feature itself modifies. */
+  readonly bodyId: string;
+  /** Face target: the face's stable role name in the body's B-rep. */
+  readonly faceRole?: string;
+  /** Face target: a point on the face when it was picked. Vertex target: the vertex position. Body target: where it was picked. */
+  readonly pointMm?: readonly [number, number, number];
+  /** Face target: the face's outward direction when it was picked (unit vector). */
+  readonly normal?: readonly [number, number, number];
+}
+
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole";
+  readonly kind:"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
   readonly profileIds: readonly string[];
   /** Extrusion distance in mm, or revolve angle in degrees, or sweep distance along direction, or loft bottom-to-top distance. For modifier kinds (edge-fillet/chamfer/shell/draft) this is the treatment's size (radius/distance/thickness/angle). */
   readonly valueMm: number;
-  /** Extrude only: which way from the sketch plane. */
-  readonly direction?: "one-side" | "symmetric" | "flipped";
+  /**
+   * Extrude and revolve: which way from the sketch plane. "symmetric" straddles the plane (a revolve: half the angle each way),
+   * "flipped" goes the other way, and "two-side" goes `valueMm` one way and `secondValueMm` the other.
+   */
+  readonly direction?: "one-side" | "symmetric" | "flipped" | "two-side";
+  /** Two-side extrude (distance in mm) or revolve (angle in degrees): how far the feature goes on the second side. */
+  readonly secondValueMm?: number;
+  /** Revolve only: builds a wall of this thickness along the profile outline instead of a solid, which leaves the inside hollow. */
+  readonly thinWallMm?: number;
+  /** Revolve with a thin wall: which side of the profile outline the wall grows to. Absent means "inside". */
+  readonly thinSide?: "inside" | "outside" | "center";
+  /** What the "to" extents reach. Present exactly when `extent` is one of the "to" values. */
+  readonly extentTarget?: DesignExtentTarget;
   /**
    * What the feature does with the solid it builds. Absent (or "new-body") makes a body of its own. A "join" or "cut"
    * adds to or removes from the body named by `bodyId`, which an earlier new-body step made, and replays in timeline order.
@@ -1049,10 +1077,13 @@ export interface DesignSolidFeature extends DesignFeatureBase {
    */
   readonly operation?: "new-body" | "join" | "cut" | "direct-edit";
   /**
-   * How far an extruded cut reaches. Absent (or "distance") uses `valueMm`; "through-all" ignores the distance and
-   * cuts through the whole body on both sides of the sketch plane, however the body later changes size.
+   * How far the feature reaches. Absent (or "distance") uses `valueMm`; "through-all" (an extruded cut) ignores the distance and
+   * cuts through the whole body on both sides of the sketch plane, however the body later changes size. The "to" extents
+   * measure the distance from `extentTarget` at every rebuild, so `valueMm` only keeps the last measured value as a fallback:
+   * "to-face", "to-body" and "to-vertex" end an extrusion at a face, a body or a vertex; "to-first" and "to-last" revolve
+   * until the profile first (or last) reaches a face.
    */
-  readonly extent?: "distance" | "through-all";
+  readonly extent?: "distance" | "through-all" | "to-face" | "to-body" | "to-vertex" | "to-first" | "to-last";
   /** The body this feature owns in `part.generalBodies` (for a join or cut: the body it modifies). */
   readonly bodyId: string;
   readonly edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number };
