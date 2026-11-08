@@ -164,5 +164,34 @@ export const holeTests: readonly TestCase[] = [
       const sink = holeStep(sketch, "sink", { holeStyle: "countersink", holeSinkDiameterMm: 16, holeSinkAngleDeg: 90 });
       assert(validSolidFeaturePayload(sink) && !validSolidFeaturePayload({ ...sink, holeSinkAngleDeg: 5 }), "a countersink needs a sensible angle");
     }
+  },
+  {
+    name: "A body the user hid stays hidden through later timeline edits, and suppressing its step still hides and shows it",
+    run: async () => {
+      const { project, sketch } = withSketch();
+      const base = step(sketch, "sheet-base", "plate", { sheetThicknessMm: 6, valueMm: 6 });
+      const built = await rebuildSolidFeature(base, sketch);
+      assert(built.ok, "plate builds");
+      if (!built.ok) return;
+      const bodyId = "general-body:plate";
+      const visibleOf = (candidate: WorkbenchProject): boolean | undefined => candidate.part.generalBodies?.find((body) => body.id === bodyId)?.visible;
+      let current = run(project, { kind: "add-design-solid", feature: base, body: built.body });
+      assert(visibleOf(current) === true, "a new body is shown");
+      current = run(current, { kind: "toggle-general-body-visibility", bodyId });
+      assert(visibleOf(current) === false, "the user hides it");
+      const hole = holeStep(sketch, "later", { bodyId, holePositionMm: [0, 0, 6], holeNormal: [0, 0, 1], holeDiameterMm: 4 });
+      const added = run(current, { kind: "add-design-solid", feature: hole, body: current.part.generalBodies!.find((body) => body.id === bodyId)! });
+      assert(visibleOf(added) === false, "adding a step to a hidden body leaves it hidden");
+      const replayed = run(added, { kind: "regenerate-design", results: await replayAllBodies(added) });
+      assert(visibleOf(replayed) === false, "a rebuild leaves it hidden");
+      const renamed = run(replayed, { kind: "rename-design-feature", featureId: hole.id, name: "Renamed hole" });
+      assert(visibleOf(renamed) === false, "renaming a step leaves it hidden");
+      const off = run(renamed, { kind: "set-design-feature-suppressed", featureId: base.id, suppressed: true });
+      assert(visibleOf(off) === false, "suppressing the body's own step hides it");
+      const on = run(off, { kind: "set-design-feature-suppressed", featureId: base.id, suppressed: false });
+      assert(visibleOf(on) === true, "unsuppressing it shows it again");
+      const rolledBack = run(on, { kind: "set-design-rollback", index: 0 });
+      assert(visibleOf(rolledBack) === false, "rolling back before its step hides it");
+    }
   }
 ];

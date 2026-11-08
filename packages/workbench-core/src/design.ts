@@ -116,12 +116,21 @@ export function pruneOrphanedSolidFeatures(project: WorkbenchProject): { readonl
   return { project: withHistory(project, next), removed: orphans.map((feature) => feature.name) };
 }
 
-/** Shows each feature's solid exactly when the feature is active, and records the new history. */
+/**
+ * Shows a feature's solid while the feature is live, and records the new history. A body is only shown or hidden when its step
+ * is new or its live state changed (suppressed, unsuppressed, rolled back or forward), so a body the user hid stays hidden through
+ * any other timeline edit.
+ */
 function withHistory(project: WorkbenchProject, history: DesignHistory): WorkbenchProject {
+  const previous = project.design;
   const owned = new Map<string, boolean>();
   for (const feature of history.features) {
     // A body is shown while the step that made it is live; its joins and cuts change its shape, not whether it is shown.
-    if (feature.kind !== "sketch" && !modifiesBody(feature)) owned.set(feature.bodyId, isFeatureActive(history, feature.id));
+    if (feature.kind === "sketch" || modifiesBody(feature)) continue;
+    const live = isFeatureActive(history, feature.id);
+    const existed = previous !== undefined && previous.features.some((candidate) => candidate.id === feature.id);
+    if (existed && isFeatureActive(previous, feature.id) === live) continue;
+    owned.set(feature.bodyId, live);
   }
   const bodies = project.part.generalBodies ?? [];
   const synced = owned.size === 0 ? bodies : bodies.map((body) => owned.has(body.id) && body.visible !== owned.get(body.id) ? { ...body, visible: owned.get(body.id)! } : body);
