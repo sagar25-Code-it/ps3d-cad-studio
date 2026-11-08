@@ -69,6 +69,7 @@ import { fileWorkspaceTests } from "./file-workspace.test.js";
 import { cameraLandmarkTests } from "./camera-landmarks.test.js";
 import { topologyNamingTests } from "./topology-naming.test.js";
 import { edgeBlendKernelTests, edgeBlendRimTests } from "./edge-blend.test.js";
+import { edgeBlendStepTests } from "./edge-blend-steps.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -143,7 +144,8 @@ const tests: readonly TestCase[] = [
   ...publicReleaseTests,
   ...topologyNamingTests,
   ...edgeBlendKernelTests,
-  ...edgeBlendRimTests
+  ...edgeBlendRimTests,
+  ...edgeBlendStepTests
 ];
 let failures = 0;
 

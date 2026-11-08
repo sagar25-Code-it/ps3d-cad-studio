@@ -14,6 +14,7 @@ export * from "./validation.js";
 export * from "./operations.js";
 export * from "./constraint-fit.js";
 export * from "./design.js";
+export * from "./edge-blend.js";
 export * from "./solid-metrics.js";
 export * from "./design-labels.js";
 export * from "./planar-faces.js";

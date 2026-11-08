@@ -131,6 +131,8 @@ export interface EdgeTreatmentOptions {
   readonly strict?: boolean;
   /** The face index to give the treatment's own surfaces when the input carries face indices. Default: one past the largest. */
   readonly newFaceIndex?: number;
+  /** The body to check that a size fits against, when the input has already been treated by an earlier step of the same feature. Default: the input. */
+  readonly fitAgainst?: ModifyMeshInput;
 }
 
 /** A straight edge of the mesh a click can land on, tagged with the smooth run (chain) of edges it belongs to. */
@@ -791,7 +793,7 @@ function assembleChains(picks: readonly ChosenEdge[]): Chain[] {
   return chains;
 }
 
-function treatChains(body: ModifyMeshInput, chains: readonly Chain[], spec: TreatmentSpec, newFaceIndex: number | undefined): TreatOutcome {
+function treatChains(body: ModifyMeshInput, chains: readonly Chain[], spec: TreatmentSpec, newFaceIndex: number | undefined, fitBody: ModifyMeshInput = body): TreatOutcome {
   let positionsMm = Array.from(body.positionsMm);
   let indices = Array.from(body.indices);
   let faceTriangles = body.faceTriangles === undefined ? undefined : Array.from(body.faceTriangles);
@@ -805,7 +807,7 @@ function treatChains(body: ModifyMeshInput, chains: readonly Chain[], spec: Trea
     const frames = chain.edges.map((edge) => edgeFrameOf(edge, spec.flip));
     if (frames.some((frame) => frame === undefined)) { fail("an edge is too short, or its two faces are too nearly flat, to treat"); continue; }
     const known = frames as EdgeFrame[];
-    if (!chainFits(body, chain, known, spec)) { fail("the size reaches past the face beside the edge"); continue; }
+    if (!chainFits(fitBody, chain, known, spec)) { fail("the size reaches past the face beside the edge"); continue; }
     // A Boolean now and then trips over a cutter whose facets land exactly on the body's own vertices; the same cutter a hair larger or smaller does not.
     let cutterBuilt = false;
     let step: ReturnType<typeof booleanMeshes> | undefined;
@@ -917,7 +919,7 @@ export function meshChamfer(body: ModifyMeshInput, options: EdgeTreatmentOptions
     sizeAt: () => size,
     reach: (frame) => { const second = secondOf(frame); return second === undefined ? undefined : [size, second]; }
   };
-  const outcome = treatChains(body, assembleChains(picks), spec, options.newFaceIndex);
+  const outcome = treatChains(body, assembleChains(picks), spec, options.newFaceIndex, options.fitAgainst);
   return finishTreatment(outcome, "Chamfer", picks.length, options.strict === true, "try a smaller distance", options.newFaceIndex);
 }
 
@@ -963,7 +965,7 @@ export function meshFillet(body: ModifyMeshInput, options: EdgeTreatmentOptions)
     sizeAt: (position) => runLengthMm < 1e-9 ? radius : Math.max(smallest * 0.25, radius + (last - radius) * (position / runLengthMm)),
     reach: (frame, size) => { const tangent = size * frame.cosHalf / frame.sinHalf; return [tangent, tangent]; }
   };
-  const outcome = treatChains(body, assembleChains(picks), spec, options.newFaceIndex);
+  const outcome = treatChains(body, assembleChains(picks), spec, options.newFaceIndex, options.fitAgainst);
   return finishTreatment(outcome, "Fillet", picks.length, options.strict === true, "try a smaller radius", options.newFaceIndex);
 }
 

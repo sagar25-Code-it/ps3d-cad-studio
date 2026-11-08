@@ -1,5 +1,5 @@
 import type { DesignSolidFeature } from "../../../packages/workbench-core/src/index.js";
-import { validSolidFeaturePayload } from "../../../packages/workbench-core/src/index.js";
+import { edgeBlendTitle, validSolidFeaturePayload } from "../../../packages/workbench-core/src/index.js";
 
 /**
  * The editable parameters of every solid step in the timeline. The edit dialog renders `parameterFieldsOf(feature)` and
@@ -136,6 +136,27 @@ export function parameterFieldsOf(feature: DesignSolidFeature): readonly Paramet
         number("sinkAngle", "Countersink angle", "°", (f) => f.holeSinkAngleDeg, (f, v) => ({ ...f, holeSinkAngleDeg: v }), { min: 10, max: 170 })
       ] : [])
     ];
+    case "edge-blend": return feature.blendType === "chamfer" ? [
+      number("size", "First distance", "mm", (f) => f.valueMm, (f, v) => ({ ...f, valueMm: v }), { ...positive, max: 10_000 }),
+      number("second", "Second distance", "mm", (f) => f.blendSecondSizeMm ?? 0, (f, v) => {
+        const { blendSecondSizeMm: _drop, ...rest } = f; void _drop;
+        return v === 0 || v === f.valueMm ? rest : { ...rest, blendSecondSizeMm: v };
+      }, { min: 0, max: 10_000, hint: "0 or the same as the first for an even chamfer; ignored when an angle is set" }),
+      number("angle", "Angle with the first face", "°", (f) => f.blendAngleDeg ?? 0, (f, v) => {
+        const { blendAngleDeg: _drop, ...rest } = f; void _drop;
+        if (v === 0) return rest;
+        const { blendSecondSizeMm: _second, ...withoutSecond } = rest; void _second;
+        return { ...withoutSecond, blendAngleDeg: v };
+      }, { min: 0, max: 179, hint: "0 uses the distances; otherwise the first distance and this angle define the bevel" }),
+      { id: "side", label: "Sides", unit: "", input: "select", options: [{ value: "normal", label: "First distance on the upper face" }, { value: "flipped", label: "First distance on the other face" }],
+        read: (f) => f.blendFlip === true ? "flipped" : "normal", write: (f, v) => { const { blendFlip: _drop, ...rest } = f; void _drop; return v === "flipped" ? { ...rest, blendFlip: true } : rest; } }
+    ] : [
+      number("size", "Radius", "mm", (f) => f.valueMm, (f, v) => ({ ...f, valueMm: v }), { ...positive, max: 10_000 }),
+      number("endSize", "End radius", "mm", (f) => f.blendEndSizeMm ?? 0, (f, v) => {
+        const { blendEndSizeMm: _drop, ...rest } = f; void _drop;
+        return v === 0 || v === f.valueMm ? rest : { ...rest, blendEndSizeMm: v };
+      }, { min: 0, max: 10_000, hint: "0 or the same as the radius for a constant fillet; otherwise the radius changes evenly along each picked edge" })
+    ];
     case "move-body": return [
       vector("delta", "Move by", (f) => f.moveDeltaMm, (f, v) => ({ ...f, moveDeltaMm: v, valueMm: Math.max(0.01, Math.hypot(v[0], v[1], v[2])) }))
     ];
@@ -203,6 +224,7 @@ export function refreshedName(feature: DesignSolidFeature): string {
     case "sheet-edge-flange":
       return name.replace(/^Edge flange \d+/u, `Edge flange ${feature.flangeEdgeIndex ?? 0}`).replace(/\(\d+(?:\.\d+)?°, \d+(?:\.\d+)? mm\)$/u, `(${(feature.flangeAngleDeg ?? 0).toFixed(0)}°, ${(feature.flangeLengthMm ?? 0).toFixed(0)} mm)`);
     case "hole": return name.replace(/Ø\s?\d+(?:\.\d+)?/u, `Ø${(feature.holeDiameterMm ?? 0).toFixed(2)}`);
+    case "edge-blend": return name.replace(/^(?:Fillet|Chamfer) [^(]*?(?= \(|$)/u, edgeBlendTitle(feature));
     case "move-body": return name.replace(/\([^()]*mm\)$/u, `(${vectorText(feature.moveDeltaMm)} mm)`);
     case "move-face": return name.replace(/\([^()]*mm\)$/u, `(${vectorText(feature.moveFaceDeltaMm)} mm)`);
     case "scale-body": return name.replace(/×[\d.]+$/u, `×${(feature.scaleFactor ?? 1).toFixed(3)}`);

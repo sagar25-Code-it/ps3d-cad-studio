@@ -1030,8 +1030,17 @@ export interface DesignSketchFeature extends DesignFeatureBase {
   readonly sketch: WorkbenchSketch;
 }
 
+/** One edge run picked for an edge-blend step: its segments in order along the run (end points, millimetres), and what finds the same physical edge again after a rebuild. */
+export interface EdgeBlendGroup {
+  readonly segments: readonly (readonly [readonly [number, number, number], readonly [number, number, number]])[];
+  /** The keys of the two faces beside the edge, from the body's B-rep when it had one. They survive edits that move the edge. */
+  readonly faceKeys?: readonly [string, string];
+  /** An inside corner: the blend adds material instead of removing it. */
+  readonly concave?: boolean;
+}
+
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "edge-blend";
   /** The sketch feature whose closed profiles this feature turns into a solid. */
   readonly sketchFeatureId: string;
   /** Profiles to use, by their stable IDs; empty means the outermost profile with the profiles inside it as holes. */
@@ -1202,6 +1211,18 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   readonly flangeAngleDeg?: number;
   /** Sheet-hem only: hem style — "closed" folds the flange back against the base, "open" leaves a gap of sheetThicknessMm. */
   readonly hemStyle?: "closed" | "open";
+  /** Edge-blend only: round the picked edges (`valueMm` is the radius) or bevel them (`valueMm` is the first distance). */
+  readonly blendType?: "fillet" | "chamfer";
+  /** Edge-blend only: the picked edge runs, re-found on the rebuilt body by their face keys or, without those, by position. */
+  readonly blendEdges?: readonly EdgeBlendGroup[];
+  /** Edge-blend fillet only: the radius at the end of each picked run, which makes the radius vary evenly from `valueMm` at its start. */
+  readonly blendEndSizeMm?: number;
+  /** Edge-blend chamfer only: the distance along the second face (the first face is the one pointing more toward +Z, then +Y, then +X). */
+  readonly blendSecondSizeMm?: number;
+  /** Edge-blend chamfer only: the angle the bevel makes with the first face, instead of a second distance. */
+  readonly blendAngleDeg?: number;
+  /** Edge-blend chamfer only: give `valueMm` to the second face instead of the first. */
+  readonly blendFlip?: boolean;
 }
 
 export type DesignFeature = DesignSketchFeature | DesignSolidFeature;
