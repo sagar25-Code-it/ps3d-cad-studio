@@ -202,7 +202,8 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       if (!keys(input, [...common, "entityId"]) || !stableId(input.entityId)) return invalidOperation("The sketch entity ID is invalid.");
       break;
     case "apply-sketch-edit":
-      if (!keys(input, [...common, "removeEntityIds", "updateEntities", "addEntities", "addConstraints", "label"])
+      if (!keys(input, [...common, "removeEntityIds", "updateEntities", "addEntities", "addConstraints", "label", ...(Object.hasOwn(input, "removeConstraintIds") ? ["removeConstraintIds"] : [])])
+        || (Object.hasOwn(input, "removeConstraintIds") && !boundedList(input.removeConstraintIds, 400, stableId))
         || !boundedList(input.removeEntityIds, 200, stableId) || !boundedList(input.updateEntities, 200, isRecord)
         || !boundedList(input.addEntities, 200, isRecord) || !boundedList(input.addConstraints, 400, isRecord)
         || typeof input.label !== "string" || input.label.length < 1 || input.label.length > 80) return invalidOperation("The sketch edit payload is invalid.");
@@ -1287,8 +1288,10 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   if (new Set(addedIds).size !== addedIds.length || addedIds.some((id) => existing.has(id))) return invalidOperation("A new sketch entity reuses an existing ID.");
   const entities = [...sketch.entities.filter((entity) => !removed.has(entity.id)).map((entity) => updates.get(entity.id) ?? entity), ...operation.addEntities];
   if (entities.length > WORKBENCH_LIMITS.maxEntities) return failure("RESOURCE_LIMIT", "The sketch would exceed its entity limit.", [sketch.id], "Delete entities or use a smaller pattern count.");
+  const removedConstraints = new Set(operation.removeConstraintIds ?? []);
+  for (const id of removedConstraints) if (!sketch.constraints.some((constraint) => constraint.id === id)) return broken(id, "A sketch constraint to remove does not exist.");
   const dropped = sketch.constraints.filter((constraint) => constraint.entityIds.some((id) => removed.has(id)));
-  const constraints = [...sketch.constraints.filter((constraint) => !constraint.entityIds.some((id) => removed.has(id))), ...operation.addConstraints];
+  const constraints = [...sketch.constraints.filter((constraint) => !constraint.entityIds.some((id) => removed.has(id)) && !removedConstraints.has(constraint.id)), ...operation.addConstraints];
   if (constraints.length > WORKBENCH_LIMITS.maxConstraints) return failure("RESOURCE_LIMIT", "The sketch reached its constraint record limit.", [sketch.id], "Delete a constraint before applying this edit.");
   if (new Set(constraints.map((constraint) => constraint.id)).size !== constraints.length) return invalidOperation("A new constraint reuses an existing ID.");
   const next = { ...sketch, entities, constraints };
@@ -1303,7 +1306,8 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
       "Use Relax Relations on the affected geometry, then repeat the edit."
     );
   }
-  const droppedNote = dropped.length === 0 ? "" : ` Removed ${dropped.length} dependent constraint${dropped.length === 1 ? "" : "s"}.`;
+  const gone = new Set([...dropped.map((constraint) => constraint.id), ...removedConstraints]).size;
+  const droppedNote = gone === 0 ? "" : ` Removed ${gone} constraint${gone === 1 ? "" : "s"}.`;
   const unsolvedNote = solved.unsolved.length === 0 ? "" : ` Recorded, not solved: ${solved.unsolved.map((entry) => entry.reason).join(" ")}`;
   return changed(
     { ...project, sketch: next },

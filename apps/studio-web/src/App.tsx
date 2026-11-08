@@ -2850,7 +2850,7 @@ export function App(): React.JSX.Element {
     setViewportNavigation("select");
     setViewportSelectionFilter("sketch-curve");
     setSketchEditTool(tool);
-    const how = tool === "trim" ? "click a curve where you want it cut" : tool === "extend" ? "click a line near the end to lengthen" : "select the geometry (Shift-click for more), set the values in the right panel, then Apply";
+    const how = tool === "trim" ? "click a curve where you want it cut" : tool === "extend" ? "click a line near the end to lengthen" : tool === "split" ? "click a curve where you want it cut in two" : tool === "jog" ? "set the step in the right panel, then click a line" : tool === "delete-curve" ? "click a curve to delete it and heal the gap" : tool === "make-path" ? "select the curves of the path to see how they chain" : tool === "dynamic-mirror" ? "select the mirror line, then Start in the right panel" : "select the geometry (Shift-click for more), set the values in the right panel, then Apply";
     setStatusText(`${SKETCH_EDIT_TOOL_LABELS[tool]} active ${source}: ${how}.`);
   };
 

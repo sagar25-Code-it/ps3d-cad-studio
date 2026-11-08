@@ -16,9 +16,26 @@ import {
   type SketchEditPlan,
   type SketchEditResult
 } from "../../../../packages/workbench-sketch/src/edit-tools.js";
+import { resolveMirrorAxis } from "../../../../packages/workbench-sketch/src/dynamic-mirror.js";
+import { describePath, healPathGaps, makePath, pathToSpline } from "../../../../packages/workbench-sketch/src/make-path.js";
+import { offsetMoveEntities } from "../../../../packages/workbench-sketch/src/offset-move.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 
-export type SketchEditToolId = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "stretch" | "corner" | "fillet" | "chamfer" | "trim" | "extend";
+export type SketchEditToolId = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "stretch" | "corner" | "fillet" | "chamfer" | "trim" | "extend"
+  | "split" | "jog" | "delete-curve" | "offset-move" | "make-path" | "dynamic-mirror";
+
+/** The tools that act on a click on a curve rather than on the selection, so the canvas must not start a selection box for them. */
+export function isClickEditTool(tool: SketchEditToolId | null): tool is "trim" | "extend" | "split" | "jog" | "delete-curve" {
+  return tool === "trim" || tool === "extend" || tool === "split" || tool === "jog" || tool === "delete-curve";
+}
+
+/** Jog values as typed, shared with the canvas so a click on a line uses them. */
+export interface JogParams {
+  readonly offset: string;
+  readonly width: string;
+}
+
+export const DEFAULT_JOG_PARAMS: JogParams = { offset: "3", width: "6" };
 
 export const SKETCH_EDIT_TOOL_LABELS: Readonly<Record<SketchEditToolId, string>> = {
   offset: "Offset",
@@ -32,7 +49,13 @@ export const SKETCH_EDIT_TOOL_LABELS: Readonly<Record<SketchEditToolId, string>>
   fillet: "Fillet",
   chamfer: "Chamfer",
   trim: "Trim",
-  extend: "Extend"
+  extend: "Extend",
+  split: "Split",
+  jog: "Jog",
+  "delete-curve": "Delete Curve",
+  "offset-move": "Offset Move",
+  "make-path": "Make Path",
+  "dynamic-mirror": "Dynamic Mirror"
 };
 
 const INSTRUCTIONS: Readonly<Record<SketchEditToolId, string>> = {
@@ -47,7 +70,13 @@ const INSTRUCTIONS: Readonly<Record<SketchEditToolId, string>> = {
   fillet: "Select two lines (or one rectangle), set the radius, then Apply. The lines are shortened to the tangent points and an arc joins them.",
   chamfer: "Select two lines (or one rectangle), set the distance, then Apply. The lines are shortened and a straight cut joins them.",
   trim: "Click a curve where you want it cut: the part between its neighbouring crossings is removed. A circle becomes the arc that remains.",
-  extend: "Click a line near the end you want to lengthen. It runs on to the first curve it reaches."
+  extend: "Click a line near the end you want to lengthen. It runs on to the first curve it reaches.",
+  split: "Click a curve where you want it cut in two. Near a crossing with another curve it snaps to the crossing. A circle becomes two arcs; a rectangle becomes five lines.",
+  jog: "Set the step and its width, then click a line. The line steps out and back by the offset over the width (centred on your click); a width of 0 makes a single step and shifts the rest of the line.",
+  "delete-curve": "Click a curve to delete it and heal the gap: the two curves that met it are extended or trimmed to meet each other.",
+  "offset-move": "Select a chain or a closed region, then Apply. Offset mode moves each curve along its normal (positive is left of the first line's direction; a closed region grows) and stretches the lines attached to it. Vector mode moves the selection by X and Y and the attached curves follow.",
+  "make-path": "Select the curves of a path. They are chained end to end from a free end; gaps, branches and curves that do not connect are listed. Close the gaps, or join the path into one spline so a sweep can follow it.",
+  "dynamic-mirror": "Select the mirror line, then Start. Everything you draw afterwards is created together with its mirror image, linked by a symmetry relation, until you Stop."
 };
 
 /** The Stretch window in sketch millimetres: opposite corners, x1 <= x2 and y1 <= y2 when drawn. */
@@ -69,6 +98,12 @@ interface SketchEditPanelProps {
   readonly onApply: (plan: SketchEditPlan) => void;
   readonly onMessage: (message: string) => void;
   readonly onClose: () => void;
+  /** Jog: the values typed here are read by the canvas when a line is clicked. */
+  readonly jog?: JogParams;
+  readonly onJog?: (params: JogParams) => void;
+  /** Dynamic Mirror: the axis line in use (null when off) and how to change it. */
+  readonly dynamicMirrorAxis?: string | null;
+  readonly onDynamicMirror?: (axisId: string | null) => void;
 }
 
 /** Options and Apply for the selection-driven sketch edit tools. Trim and Extend act directly on canvas clicks. */
@@ -97,7 +132,10 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   const [windowX2, setWindowX2] = useState("10");
   const [windowY2, setWindowY2] = useState("10");
   const [chamferMode, setChamferMode] = useState<"equal" | "asymmetric" | "distance-angle">("equal");
-  const interactive = props.tool !== "trim" && props.tool !== "extend";
+  const [moveMode, setMoveMode] = useState<"offset" | "vector">("offset");
+  const interactive = !isClickEditTool(props.tool) && props.tool !== "make-path" && props.tool !== "dynamic-mirror";
+  const jog = props.jog ?? DEFAULT_JOG_PARAMS;
+  const pathResult = useMemo(() => (props.tool === "make-path" && props.selectionIds.length > 0 ? makePath(props.sketch, props.selectionIds) : undefined), [props.tool, props.sketch, props.selectionIds]);
   const { stretchWindow, onStretchWindow } = props;
 
   // A window drawn on the canvas fills the fields; a typed window is drawn on the canvas.
@@ -128,6 +166,7 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
       case "move": result = transformEntities(context, ids, { kind: "move", dxMm: Number(moveX), dyMm: Number(moveY) }, copyMode); break;
       case "rotate": result = transformEntities(context, ids, { kind: "rotate", angleDeg: Number(rotateAngle), center: [Number(centerX), Number(centerY)] }, copyMode); break;
       case "scale": result = transformEntities(context, ids, { kind: "scale", factor: Number(scaleFactor), center: [Number(centerX), Number(centerY)] }, copyMode); break;
+      case "offset-move": result = offsetMoveEntities(context, ids, moveMode === "offset" ? { kind: "offset", distanceMm: Number(offset) } : { kind: "vector", dxMm: Number(moveX), dyMm: Number(moveY) }); break;
       case "stretch": result = stretchEntities(context, ids, { x1: Number(windowX1), y1: Number(windowY1), x2: Number(windowX2), y2: Number(windowY2) }, Number(moveX), Number(moveY)); break;
       case "pattern":
         result = patternEntities(context, ids, layout === "rectangular"
@@ -148,6 +187,42 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
     <header><strong>{SKETCH_EDIT_TOOL_LABELS[props.tool]}</strong><span>{props.selectionIds.length} selected</span></header>
     <p className="profile-help">{INSTRUCTIONS[props.tool]}</p>
     {props.tool === "offset" && field("Distance", offset, setOffset, "mm")}
+    {props.tool === "offset-move" && <>
+      <label><span>Move by</span><select aria-label="Offset move mode" value={moveMode} onChange={(event) => setMoveMode(event.target.value as "offset" | "vector")}><option value="offset">Offset along the normal</option><option value="vector">X and Y distance</option></select></label>
+      {moveMode === "offset" ? field("Distance", offset, setOffset, "mm") : <>{field("Distance X", moveX, setMoveX, "mm")}{field("Distance Y", moveY, setMoveY, "mm")}</>}
+    </>}
+    {props.tool === "jog" && <>
+      {field("Offset (step)", jog.offset, (next) => props.onJog?.({ ...jog, offset: next }), "mm")}
+      {field("Width (0 = single step)", jog.width, (next) => props.onJog?.({ ...jog, width: next }), "mm")}
+    </>}
+    {props.tool === "make-path" && <div className="make-path-report" aria-label="Path report">
+      {pathResult === undefined && <p className="profile-help">Select the curves of the path.</p>}
+      {pathResult !== undefined && !pathResult.ok && <p className="profile-help">{pathResult.diagnostics[0]?.message}</p>}
+      {pathResult?.ok === true && <>
+        <ul className="sketch-check-list">{describePath(pathResult.value).map((text, index) => <li key={index} className={index === 0 ? "check-info" : "check-warning"}><b>{index === 0 ? "Path" : "Note"}</b><span>{text}</span></li>)}</ul>
+        {pathResult.value.gaps.length > 0 && <button className="palette-action" onClick={() => {
+          const context = { sketch: props.sketch, newId: (prefix: "entity" | "constraint"): string => `${prefix}:user-${crypto.randomUUID()}` };
+          const result = healPathGaps(context, pathResult.value);
+          if (!result.ok) { props.onMessage(result.diagnostics[0]?.message ?? "The gaps could not be closed."); return; }
+          props.onApply(result.value);
+        }}><CommandIcon name="coincident" />Close {pathResult.value.gaps.length} gap{pathResult.value.gaps.length === 1 ? "" : "s"}</button>}
+        <button className="palette-action" onClick={() => {
+          const context = { sketch: props.sketch, newId: (prefix: "entity" | "constraint"): string => `${prefix}:user-${crypto.randomUUID()}` };
+          const result = pathToSpline(context, pathResult.value);
+          if (!result.ok) { props.onMessage(result.diagnostics[0]?.message ?? "The path could not be joined."); return; }
+          props.onApply(result.value);
+        }}><CommandIcon name="spline" />Join into one spline (sweep path)</button>
+      </>}
+    </div>}
+    {props.tool === "dynamic-mirror" && <>
+      <p className="profile-help">{props.dynamicMirrorAxis == null ? "Not mirroring." : `Mirroring about ${props.dynamicMirrorAxis.replace(/^entity:/u, "")}. New curves are drawn with their mirror image.`}</p>
+      <button className="palette-action primary" onClick={() => {
+        const axis = resolveMirrorAxis(props.sketch, props.selectionIds);
+        if (axis === undefined) { props.onMessage("Select the mirror line first, then press Start."); return; }
+        props.onDynamicMirror?.(axis.id);
+      }}><CommandIcon name="mirror" />Start with the selected line</button>
+      {props.dynamicMirrorAxis != null && <button className="palette-action" onClick={() => props.onDynamicMirror?.(null)}><CommandIcon name="cancel" />Stop mirroring</button>}
+    </>}
     {props.tool === "move" && <>{field("Distance X", moveX, setMoveX, "mm")}{field("Distance Y", moveY, setMoveY, "mm")}</>}
     {props.tool === "stretch" && <>
       {field("Window X1", windowX1, setWindowX1, "mm")}{field("Window Y1", windowY1, setWindowY1, "mm")}

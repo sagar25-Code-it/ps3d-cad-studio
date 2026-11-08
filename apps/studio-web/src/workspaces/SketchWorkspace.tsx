@@ -20,6 +20,9 @@ import { gridSteps, sketchToScreen } from "../../../../packages/workbench-sketch
 import { dynamicFieldsFor, measureFromCursor, parseDynamicNumber, pointFromDynamicInput, type DynamicFieldId, type DynamicValues } from "../../../../packages/workbench-sketch/src/dynamic-input.js";
 import { sketchCurvatureCombs } from "../../../../packages/workbench-sketch/src/curvature-comb.js";
 import { constraintsOnEntities, extendAt, nearestEntityId, trimAt, type SketchEditPlan } from "../../../../packages/workbench-sketch/src/edit-tools.js";
+import { deleteCurveHeal, jogLine, splitAt } from "../../../../packages/workbench-sketch/src/split-jog.js";
+import { mirrorImages, withDynamicMirror } from "../../../../packages/workbench-sketch/src/dynamic-mirror.js";
+import { copySketchSelection, cutSketchSelection, nextPasteNumber, parseClipboard, pasteSketchClipboard, readSketchClipboard, serializeClipboard, storeSketchClipboard, type SketchClipboard } from "../../../../packages/workbench-sketch/src/sketch-clipboard.js";
 import { SKETCH_HOTKEY_HELP, type SketchHotkeyAction } from "../../../../packages/workbench-sketch/src/hotkeys.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
 import { autoConstraintsFor, dropConstraintFor, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
@@ -31,7 +34,8 @@ import { extendProfileChain, startProfileChain, type ProfileChain } from "../../
 import { DEFAULT_CURVE_OPTION_FIELDS, SketchCurveOptionsPanel, curveOptionsFromFields } from "./SketchCurveOptions.js";
 import { createBlockLibrary, makeSketchBlock } from "../../../../packages/workbench-sketch/src/sketch-blocks.js";
 import { entitiesInSelectionBox, selectionBoxMode, selectionRect, type SketchSelectionBoxMode } from "../../../../packages/workbench-sketch/src/selection.js";
-import { SketchCheckPanel, SketchEditPanel, SketchRelationList, type SketchEditToolId, type StretchWindowRect } from "./SketchEditPanel.js";
+import { DEFAULT_JOG_PARAMS, SKETCH_EDIT_TOOL_LABELS, SketchEditPanel, SketchRelationList, isClickEditTool, type JogParams, type SketchEditToolId, type StretchWindowRect } from "./SketchEditPanel.js";
+import { SketchRepairPanel } from "./SketchRepairPanel.js";
 import { SketchGrid } from "./sketch/SketchGrid.js";
 import { useSketchCamera } from "./sketch/useSketchCamera.js";
 import { useSketchHotkeys } from "./sketch/useSketchHotkeys.js";
@@ -271,6 +275,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const setStretchWindow = useCallback((next: StretchWindowRect | undefined): void => {
     setStretchWindowState((current) => (current !== undefined && next !== undefined && current.x1 === next.x1 && current.y1 === next.y1 && current.x2 === next.x2 && current.y2 === next.y2) || (current === undefined && next === undefined) ? current : next);
   }, []);
+  /** Jog values typed in the Jog panel, read when a line is clicked. */
+  const [jogParams, setJogParams] = useState<JogParams>(DEFAULT_JOG_PARAMS);
+  /** Dynamic Mirror: the line new curves are mirrored about, or null when off. It outlives the edit panel so drawing tools can use it. */
+  const [dynamicMirrorAxis, setDynamicMirrorAxis] = useState<string | null>(null);
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [solidOp, setSolidOp] = useState<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem">("extrude");
@@ -440,6 +448,71 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const built = buildShape(props.tool, [...pending, cursor]);
     return built.ok ? built.value : undefined;
   }, [props.tool, pending, cursor, polygonSides, curveFields, props.sketch.entities]);
+  const dynamicMirrorEntity = useMemo(() => {
+    const axis = props.sketch.entities.find((entity) => entity.id === dynamicMirrorAxis);
+    return axis?.kind === "line" ? axis : undefined;
+  }, [props.sketch.entities, dynamicMirrorAxis]);
+  useEffect(() => {
+    if (dynamicMirrorAxis !== null && dynamicMirrorEntity === undefined) { setDynamicMirrorAxis(null); props.onMessage("Dynamic mirror stopped: its mirror line is gone."); }
+  }, [dynamicMirrorAxis, dynamicMirrorEntity]);
+  const mirrorGhosts = useMemo(
+    () => (dynamicMirrorEntity === undefined ? [] : mirrorImages(dynamicMirrorEntity, [...(previewEntity === undefined ? [] : [previewEntity]), ...(previewShape?.entities ?? [])])),
+    [dynamicMirrorEntity, previewEntity, previewShape]
+  );
+  /** Applies a drawing edit; with Dynamic Mirror on, the mirror images of what was drawn go in the same edit. */
+  const applyDrawn = (plan: SketchEditPlan): boolean | void => {
+    if (dynamicMirrorAxis === null) return props.onApplyEdit(plan);
+    const outcome = withDynamicMirror({ sketch: props.sketch, newId: (prefix) => `${prefix}:user-${crypto.randomUUID()}` }, dynamicMirrorAxis, plan);
+    if (outcome.mirrored > 0) props.onMessage(`Mirrored ${outcome.mirrored} curve${outcome.mirrored === 1 ? "" : "s"} about ${dynamicMirrorAxis.replace(/^entity:/u, "")}${outcome.withoutRelations ? " (as exact copies; the solver would not take the symmetry relations)" : ""}.`);
+    return props.onApplyEdit(outcome.plan);
+  };
+  const addDrawn = (entity: SketchEntity): void => {
+    if (dynamicMirrorAxis === null) { props.onAddEntity(entity); return; }
+    applyDrawn({ label: `Added ${entity.kind}`, removeEntityIds: [], updateEntities: [], addEntities: [entity], addConstraints: [] });
+  };
+  const editContext = () => ({ sketch: props.sketch, newId: (prefix: "entity" | "constraint"): string => `${prefix}:user-${crypto.randomUUID()}` });
+  /** Puts the clipboard on the system clipboard as text too, so it can be pasted into another window; failure is harmless. */
+  const shareClipboardText = (clipboard: SketchClipboard): void => {
+    void Promise.resolve(globalThis.navigator?.clipboard?.writeText(serializeClipboard(clipboard))).catch(() => undefined);
+  };
+  const copySelection = (cut: boolean): void => {
+    if (cut) {
+      const result = cutSketchSelection(editContext(), selectionIds, props.sketch.name);
+      if (!result.ok) { props.onMessage(result.diagnostics[0]?.message ?? "Nothing to cut."); return; }
+      if (props.onApplyEdit(result.value.plan) === false) return;
+      storeSketchClipboard(result.value.clipboard);
+      shareClipboardText(result.value.clipboard);
+      setSelectionIds([]);
+      props.onSelect(null);
+      props.onMessage(`Cut ${result.value.clipboard.entities.length} curve${result.value.clipboard.entities.length === 1 ? "" : "s"} with ${result.value.clipboard.constraints.length} relation${result.value.clipboard.constraints.length === 1 ? "" : "s"}. Ctrl+V pastes them, here or in another sketch.`);
+      return;
+    }
+    const result = copySketchSelection(props.sketch, selectionIds, props.sketch.name);
+    if (!result.ok) { props.onMessage(result.diagnostics[0]?.message ?? "Nothing to copy."); return; }
+    storeSketchClipboard(result.value);
+    shareClipboardText(result.value);
+    props.onMessage(`Copied ${result.value.entities.length} curve${result.value.entities.length === 1 ? "" : "s"} with ${result.value.constraints.length} relation${result.value.constraints.length === 1 ? "" : "s"}${result.value.leftBehind > 0 ? ` (${result.value.leftBehind} relation${result.value.leftBehind === 1 ? "" : "s"} to other curves left behind)` : ""}. Ctrl+V pastes them, here or in another sketch.`);
+  };
+  const pasteFrom = (clipboard: SketchClipboard): void => {
+    const result = pasteSketchClipboard(editContext(), clipboard, { pasteNumber: nextPasteNumber() });
+    if (!result.ok) { props.onMessage(result.diagnostics[0]?.message ?? "The paste was rejected."); return; }
+    if (props.onApplyEdit(result.value) === false) return;
+    setSelectionIds(result.value.addEntities.map((entity) => entity.id));
+    props.onSelect(result.value.addEntities.at(-1)?.id ?? null);
+  };
+  const pasteClipboard = (): void => {
+    const stored = readSketchClipboard();
+    if (stored !== undefined) { pasteFrom(stored); return; }
+    // Nothing copied in this session: the system clipboard may hold sketch curves copied from another window.
+    const reader = globalThis.navigator?.clipboard?.readText;
+    if (reader === undefined) { props.onMessage("The sketch clipboard is empty. Select curves and press Ctrl+C first."); return; }
+    void globalThis.navigator.clipboard.readText().then((text) => {
+      const parsed = parseClipboard(text);
+      if (!parsed.ok) { props.onMessage("The sketch clipboard is empty. Select curves and press Ctrl+C first."); return; }
+      storeSketchClipboard(parsed.value);
+      pasteFrom(parsed.value);
+    }).catch(() => props.onMessage("The sketch clipboard is empty. Select curves and press Ctrl+C first."));
+  };
 
   useEffect(() => {
     dragGesture.current = undefined;
@@ -497,11 +570,15 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setCursor(snapped.point);
     setInference(placing ? result : undefined);
     if (!commit) return;
-    if ((props.editTool === "trim" || props.editTool === "extend") && props.tool === "select") {
+    if (isClickEditTool(props.editTool) && props.tool === "select") {
       const target = nearestEntityId(props.sketch, point, PICK_PIXELS * px);
-      if (target === undefined) { props.onMessage(`${props.editTool === "trim" ? "Trim" : "Extend"}: click directly on a curve.`); return; }
+      if (target === undefined) { props.onMessage(`${SKETCH_EDIT_TOOL_LABELS[props.editTool]}: click directly on a curve.`); return; }
       const context = { sketch: props.sketch, newId: (prefix: "entity" | "constraint"): string => `${prefix}:user-${crypto.randomUUID()}` };
-      const result = props.editTool === "trim" ? trimAt(context, target, point) : extendAt(context, target, point);
+      const result = props.editTool === "trim" ? trimAt(context, target, point)
+        : props.editTool === "extend" ? extendAt(context, target, point)
+        : props.editTool === "split" ? splitAt(context, target, point, { snapMm: PICK_PIXELS * px })
+        : props.editTool === "delete-curve" ? deleteCurveHeal(context, target)
+        : jogLine(context, target, point, { offsetMm: Number(jogParams.offset), widthMm: Number(jogParams.width) });
       if (!result.ok) { props.onMessage(result.diagnostics[0]?.message ?? "The sketch edit was rejected."); return; }
       props.onApplyEdit(result.value);
       setSelectionIds([]);
@@ -568,7 +645,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         props.onMessage(`${shape.diagnostics[0]?.message ?? "The shape was rejected."} Place the last point somewhere else, or press Esc to start over.`);
         return;
       }
-      const accepted = props.onApplyEdit({ label: `Added ${sketchToolLabel(props.tool).toLowerCase()} (${shape.value.entities.length} curves, ${shape.value.constraints.length} relations)`, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shape.value.constraints });
+      const accepted = applyDrawn({ label: `Added ${sketchToolLabel(props.tool).toLowerCase()} (${shape.value.entities.length} curves, ${shape.value.constraints.length} relations)`, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shape.value.constraints });
       if (accepted === false) return;
       setPending([]);
       props.onMessage(`Added ${sketchToolLabel(props.tool).toLowerCase()} with ${shape.value.entities.length} curve${shape.value.entities.length === 1 ? "" : "s"} and ${shape.value.constraints.length} relation${shape.value.constraints.length === 1 ? "" : "s"}.`);
@@ -584,10 +661,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const relations = autoConstrain ? autoConstraintsFor({ tool: props.tool, entity: built.value, placed, sketch: props.sketch, newId: () => `constraint:auto-${crypto.randomUUID()}` }) : [];
     let accepted: boolean | void = undefined;
     if (relations.length > 0) {
-      accepted = props.onApplyEdit({ label: `Added ${sketchToolLabel(props.tool)} with ${relations.length} relation${relations.length === 1 ? "" : "s"}`, removeEntityIds: [], updateEntities: [], addEntities: [built.value], addConstraints: relations });
+      accepted = applyDrawn({ label: `Added ${sketchToolLabel(props.tool)} with ${relations.length} relation${relations.length === 1 ? "" : "s"}`, removeEntityIds: [], updateEntities: [], addEntities: [built.value], addConstraints: relations });
     }
     // If the solver refused the relations, the shape itself is still drawn.
-    if (relations.length === 0 || accepted === false) props.onAddEntity(built.value);
+    if (relations.length === 0 || accepted === false) addDrawn(built.value);
     const relationNote = relations.length > 0 && accepted !== false ? ` with ${relations.length} automatic relation${relations.length === 1 ? "" : "s"} (${[...new Set(relations.map((relation) => relation.kind))].join(", ")})` : "";
     if (props.tool === "line") {
       // A line carries on from where it ended, like a polyline, until Esc. Ending on the first point closes the loop.
@@ -632,7 +709,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const finishSpline = (points: readonly Vec2[]): void => {
     const built = buildSketchEntity("spline", points, `entity:user-${crypto.randomUUID()}`);
     if (!built.ok) { props.onMessage(built.diagnostics[0]?.message ?? "The spline was rejected."); setPending([]); return; }
-    props.onAddEntity(built.value);
+    addDrawn(built.value);
     setPending([]);
     props.onMessage(`Added fit-point spline with ${points.length} points and stable ID ${built.value.id}.`);
   };
@@ -955,6 +1032,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         if (first !== undefined) requestFieldFocus(first.id);
         return;
       }
+      case "copy": copySelection(false); return;
+      case "cut": copySelection(true); return;
+      case "paste": pasteClipboard(); return;
       case "select-all": {
         const ids = visibleEntities.map((entity) => entity.id);
         setSelectionIds(ids);
@@ -1080,7 +1160,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const handleCanvasPointerDown = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (event.button !== 0) return;
     if (pickRelation !== null) return;
-    const selecting = props.tool === "select" && props.editTool !== "trim" && props.editTool !== "extend" && !props.dimensionMode;
+    const selecting = props.tool === "select" && !isClickEditTool(props.editTool) && !props.dimensionMode;
     if (selecting) {
       event.currentTarget.setPointerCapture(event.pointerId);
       boxGesture.current = {
@@ -1145,7 +1225,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     else pointer(event, true);
   };
 
-  const interactive = props.tool === "select" && props.viewportState.navigationMode !== "pan" && !camera.spaceHeld && props.editTool !== "trim" && props.editTool !== "extend";
+  const interactive = props.tool === "select" && props.viewportState.navigationMode !== "pan" && !camera.spaceHeld && !isClickEditTool(props.editTool);
   const box = camera.viewBox;
   const canvasClasses = [
     "sketch-canvas",
@@ -1201,6 +1281,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         </g>)}
         {previewEntity !== undefined && <SketchEntityShape entity={previewEntity} px={px} selected={false} hovered={false} preview />}
         {previewShape?.entities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
+        {mirrorGhosts.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
         {showDimensions && drivingDimensions.map((view) => <DimensionMarks key={view.constraint.id} entity={view.entity} dimension={view.dimension} valueMm={view.constraint.valueMm ?? 0} relaxed={view.constraint.suppressed === true} px={px} {...(interactive ? { onEdit: () => openDimensionEditor(view.entity, view.dimension) } : {})} />)}
         {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r={4 * px} className="pending-point" />)}
         {props.tool !== "select" && pointerInside && !camera.panning && inference !== undefined && <InferenceMarks inference={inference} px={px} />}
@@ -1573,8 +1654,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       </section>
       {analysis.conflicts.length > 0 && <div className="inline-warning">{analysis.conflicts[0]}</div>}
 
-      {props.editTool !== null && <SketchEditPanel tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
-      {props.checkOpen && <SketchCheckPanel sketch={props.sketch} onClose={props.onCloseCheck} />}
+      {dynamicMirrorEntity !== undefined && props.editTool !== "dynamic-mirror" && <div className="inline-warning movable-note" role="status" aria-label="Dynamic mirror active">
+        Dynamic mirror is on: what you draw is mirrored about {dynamicMirrorEntity.id.replace(/^entity:/u, "")}. <button className="palette-action" onClick={() => { setDynamicMirrorAxis(null); props.onMessage("Dynamic mirror stopped."); }}><CommandIcon name="cancel" />Stop</button>
+      </div>}
+      {props.editTool !== null && <SketchEditPanel tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} jog={jogParams} onJog={setJogParams} dynamicMirrorAxis={dynamicMirrorAxis} onDynamicMirror={(axisId) => { setDynamicMirrorAxis(axisId); props.onMessage(axisId === null ? "Dynamic mirror stopped." : `Dynamic mirror on: pick a drawing tool; everything you draw is mirrored about ${axisId.replace(/^entity:/u, "")}.`); }} />}
+      {props.checkOpen && <SketchRepairPanel sketch={props.sketch} onApplyEdit={props.onApplyEdit} onSetSuppressed={props.onSetSuppressed} onSelect={(ids) => { setSelectionIds(ids); props.onSelect(ids.at(-1) ?? null); }} onMessage={props.onMessage} onClose={props.onCloseCheck} />}
       {props.showMovable && <div className="inline-warning movable-note">{movableIds.size === 0 ? "Show Movable: every entity is fully constrained." : `Show Movable: ${movableIds.size} entit${movableIds.size === 1 ? "y has" : "ies have"} estimated degrees of freedom (amber).`}</div>}
       <section className="inspector-section point-relations"><header><strong>Point relations</strong><span>{pickRelation === null ? "pick points" : pickRelation}</span></header>
         <div className="constraint-buttons">

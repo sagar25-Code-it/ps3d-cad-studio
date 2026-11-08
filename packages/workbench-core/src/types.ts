@@ -1260,6 +1260,8 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly updateEntities: readonly SketchEntity[];
       readonly addEntities: readonly SketchEntity[];
       readonly addConstraints: readonly WorkbenchSketchConstraint[];
+      /** Constraints to delete by ID, so an edit can re-point or drop relations that no longer hold. Absent means none. */
+      readonly removeConstraintIds?: readonly string[];
       readonly label: string;
     }
   | { readonly kind: "set-sketch-constraints-suppressed"; readonly constraintIds: readonly string[]; readonly suppressed: boolean }

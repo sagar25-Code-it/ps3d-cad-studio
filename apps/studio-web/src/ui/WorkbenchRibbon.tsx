@@ -198,12 +198,20 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="rectangle" label="Convert face" hint="pick a face" onClick={() => props.onSketchCommand("convert-face")} />
         <RibbonButton icon="construction" label="As reference" hint="construction" active={props.sketchProjectReference} onClick={() => props.onSketchCommand("project-reference")} />
       </RibbonGroup>
+      <RibbonGroup label="Split, path & repair">
+        <RibbonButton icon="trim" label="Split" hint="click a curve" active={props.sketchEditTool === "split"} onClick={() => props.onSketchEditTool("split")} />
+        <RibbonButton icon="line" label="Jog" hint="step · width" active={props.sketchEditTool === "jog"} onClick={() => props.onSketchEditTool("jog")} />
+        <RibbonButton icon="trash" label="Delete Curve" hint="heals the gap" active={props.sketchEditTool === "delete-curve"} onClick={() => props.onSketchEditTool("delete-curve")} />
+        <RibbonButton icon="move" label="Offset Move" hint="chain / region" active={props.sketchEditTool === "offset-move"} onClick={() => props.onSketchEditTool("offset-move")} />
+        <RibbonButton icon="spline" label="Make Path" hint="chain curves" active={props.sketchEditTool === "make-path"} onClick={() => props.onSketchEditTool("make-path")} />
+        <RibbonButton icon="mirror" label="Dynamic Mirror" hint="axis, then draw" active={props.sketchEditTool === "dynamic-mirror"} onClick={() => props.onSketchEditTool("dynamic-mirror")} />
+      </RibbonGroup>
       <RibbonGroup label="Include & solve">
         <RibbonButton icon="fixed" label="Fix Curve" hint="pin selection" onClick={() => props.onSketchCommand("fix-curve")} />
         <RibbonButton icon="inspect" label="Show Movable" hint="free geometry" active={props.sketchShowMovable} onClick={() => props.onSketchCommand("show-movable")} />
         <RibbonButton icon="dimension" label="Relax Dimensions" hint="toggle selection" onClick={() => props.onSketchCommand("relax-dimensions")} />
         <RibbonButton icon="constraint" label="Relax Relations" hint="toggle selection" onClick={() => props.onSketchCommand("relax-relations")} />
-        <RibbonButton icon="shield" label="Sketch Checking" hint="diagnostics" active={props.sketchCheckOpen} onClick={() => props.onSketchCommand("sketch-check")} />
+        <RibbonButton icon="shield" label="Sketch Checking" hint="validate · repair" active={props.sketchCheckOpen} onClick={() => props.onSketchCommand("sketch-check")} />
         <RibbonButton icon="display" label="Options" hint="palette" onClick={props.onOpenSketchOptions} />
       </RibbonGroup>
     </>}
