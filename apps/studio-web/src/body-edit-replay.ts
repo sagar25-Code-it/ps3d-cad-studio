@@ -1,5 +1,6 @@
-import type { BodyEditSpec, DesignHistory, DesignSolidFeature, GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { draftFaces, flexBody, offsetRegion, replaceFaces, shellBody, type FaceEditResult, type FlexResult } from "../../../packages/workbench-geometry/src/index.js";
+import type { BodyEditSpec, DesignHistory, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
+import { addWebs, draftFaces, flexBody, offsetRegion, replaceFaces, shellBody, type FaceEditResult, type FlexResult, type WebResult } from "../../../packages/workbench-geometry/src/index.js";
+import { openChains, sketchPlaneNormal, sketchPointToWorld } from "./web-profile.js";
 
 /**
  * Applies one body-edit step (general shell, draft, offset region, replace face, ...) to the body a timeline replay has built so
@@ -15,13 +16,24 @@ export interface BodyEditContext {
   readonly history: DesignHistory;
 }
 
-function meshEdit(spec: BodyEditSpec, body: GeneralSolidBody): FaceEditResult | FlexResult | undefined {
+/** A rib / web is built from the open curves of the sketch the step names. */
+function webEdit(step: DesignSolidFeature, spec: Extract<BodyEditSpec, { readonly kind: "web" }>, body: GeneralSolidBody, context: BodyEditContext): WebResult {
+  const sketchFeature = context.history.features.find((feature): feature is DesignSketchFeature => feature.id === step.sketchFeatureId && feature.kind === "sketch");
+  if (sketchFeature === undefined) return { ok: false, message: "The sketch this rib was drawn in is no longer in the timeline." };
+  const chains = openChains(sketchFeature.sketch, spec.entityIds);
+  if (chains.length === 0) return { ok: false, message: "The curves this rib was drawn from are no longer in its sketch." };
+  const world = chains.map((chain) => chain.map((point) => sketchPointToWorld(sketchFeature.sketch, point)));
+  return addWebs({ positionsMm: body.positionsMm, indices: body.indices }, world, { thicknessMm: spec.thicknessMm, direction: spec.direction, extendToBody: spec.extendToBody, flip: spec.flip, normal: sketchPlaneNormal(sketchFeature.sketch) });
+}
+
+function meshEdit(step: DesignSolidFeature, spec: BodyEditSpec, body: GeneralSolidBody, context: BodyEditContext): FaceEditResult | FlexResult | WebResult | undefined {
   const mesh = { positionsMm: body.positionsMm, indices: body.indices };
   switch (spec.kind) {
     case "shell": return shellBody(mesh, { thicknessMm: spec.thicknessMm, side: spec.side, openFaces: spec.openFaces });
     case "draft": return draftFaces(mesh, { angleDeg: spec.angleDeg, pullDirection: spec.pullDirection, neutralPointMm: spec.neutralPointMm, faces: spec.faces });
     case "offset-region": return offsetRegion(mesh, { distanceMm: spec.distanceMm, faces: spec.faces });
     case "replace-face": return replaceFaces(mesh, { faces: spec.faces, toFace: spec.toFace, toPlane: spec.toPlane });
+    case "web": return webEdit(step, spec, body, context);
     case "flex": return flexBody(mesh, { mode: spec.mode, angleDeg: spec.angleDeg, axisPointMm: spec.axisPointMm, axisDirectionMm: spec.axisDirectionMm, lengthDirectionMm: spec.lengthDirectionMm, zoneLengthMm: spec.zoneLengthMm });
     default: return undefined;
   }
@@ -34,10 +46,10 @@ export function withGeometry(body: GeneralSolidBody, positionsMm: readonly numbe
   return { ...rest, positionsMm: [...positionsMm], indices: [...indices] };
 }
 
-export async function applyBodyEdit(step: DesignSolidFeature, body: GeneralSolidBody, _context: BodyEditContext): Promise<BodyEditOutcome> {
+export async function applyBodyEdit(step: DesignSolidFeature, body: GeneralSolidBody, context: BodyEditContext): Promise<BodyEditOutcome> {
   const spec = step.bodyEdit;
   if (spec === undefined) return { ok: false, message: "This step has no body edit recorded." };
-  const result = meshEdit(spec, body);
+  const result = meshEdit(step, spec, body, context);
   if (result === undefined) return { ok: false, message: `${spec.kind} is not available yet.` };
   if (!result.ok) return { ok: false, message: result.message };
   return { ok: true, body: withGeometry(body, result.positionsMm, result.indices), notes: result.notes };
