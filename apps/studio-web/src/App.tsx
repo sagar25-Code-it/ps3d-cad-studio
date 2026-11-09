@@ -31,7 +31,7 @@ import {
   sketchPlaneName,
   preferredElectromechanicalLayout,
   resolveWorkbenchContextCommands,
-  previewDimensionExpression,
+  previewSketchDimensionExpression,
   usesExpressions,
   validateWorkbenchProject,
   type AssemblyTemplateId,
@@ -169,7 +169,9 @@ import { useBuildUpdate } from "./ui/useBuildUpdate.js";
 import { formatBuildLabel } from "./build-info.js";
 import { dimensionModeStatus } from "./sketch-help-text.js";
 import { INITIAL_PLANE_OFFER, decidePlaneOffer, describeSketchPlane, existingSketchPlanes, planeOfferAfterFinish } from "./sketch-plane-ui.js";
-import { SKETCH_HOTKEY_HELP } from "../../../packages/workbench-sketch/src/hotkeys.js";
+import { ShortcutsOverlay } from "./ui/ShortcutsOverlay.js";
+import { shortcutGroupsFor } from "./ui/sketch-shortcut-items.js";
+import { useSketchKeymap } from "./workspaces/sketch/useSketchKeymap.js";
 import { friendlySketchText } from "../../../packages/workbench-core/src/sketch-names.js";
 import { WorkbenchContextMenu } from "./ui/WorkbenchContextMenu.js";
 import { MarkingMenu } from "./ui/MarkingMenu.js";
@@ -278,7 +280,8 @@ const SHORTCUT_GROUPS: readonly { readonly title: string; readonly items: readon
   },
   {
     title: "Sketch canvas",
-    items: SKETCH_HOTKEY_HELP.map((entry) => ({ keys: [entry.keys], label: entry.action }))
+    // Filled from the live keymap when the list opens (shortcutGroupsFor), so a rebound key shows under its new key.
+    items: []
   },
   {
     title: "Panels",
@@ -333,6 +336,7 @@ export function App(): React.JSX.Element {
   const [exchangeOpen, setExchangeOpen] = useState(false);
   const [designHealthOpen, setDesignHealthOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const sketchKeymap = useSketchKeymap();
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [sketchPlaneDialogOpen, setSketchPlaneDialogOpen] = useState(false);
   /** The plane-through-two-edges / plane-along-path dialog, and whether it has stepped aside for a viewport click. */
@@ -2788,7 +2792,7 @@ export function App(): React.JSX.Element {
   const setSketchDimension = (entityId: string, dimension: SketchDimensionName, valueMm: number, extra?: { readonly secondEntityId?: string; readonly driven?: boolean; readonly expression?: string }): void => {
     const { expression, ...rest } = extra ?? {};
     if (expression === undefined) { applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm, ...rest }); return; }
-    const preview = previewDimensionExpression(projectRef.current, expression);
+    const preview = previewSketchDimensionExpression(projectRef.current, dimension, expression);
     if (!preview.ok) { setStatus("error"); setStatusText(`That dimension expression does not work: ${preview.message}${preview.position === undefined ? "" : ` (character ${preview.position + 1})`}`); return; }
     applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm: preview.value, expression, ...rest });
   };
@@ -4074,15 +4078,7 @@ export function App(): React.JSX.Element {
       onApply={applyPatternRequest}
       onCancel={() => setPatternDialog(null)} />}
     <CommandPalette open={paletteOpen} workspace={project.activeWorkspace} onClose={() => setPaletteOpen(false)} onCommand={executeCadCommand} />
-    {shortcutsOpen && <div className="shortcuts-overlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={() => setShortcutsOpen(false)}>
-      <div className="shortcuts-panel" onClick={(event) => event.stopPropagation()}>
-        <header><strong>Keyboard shortcuts</strong><button onClick={() => setShortcutsOpen(false)} aria-label="Close keyboard shortcuts">×</button></header>
-        <div className="shortcuts-grid">
-          {SHORTCUT_GROUPS.map((group) => <section key={group.title}><h4>{group.title}</h4><dl>{group.items.map((item) => <div key={item.label}><dt>{item.keys.map((k) => <kbd key={k}>{k}</kbd>)}</dt><dd>{item.label}</dd></div>)}</dl></section>)}
-        </div>
-        <footer>Press <kbd>?</kbd> anytime to open this list · <kbd>Esc</kbd> to close</footer>
-      </div>
-    </div>}
+    <ShortcutsOverlay open={shortcutsOpen} groups={shortcutGroupsFor(SHORTCUT_GROUPS, sketchKeymap)} onClose={() => setShortcutsOpen(false)} />
     <ExchangeCenter open={exchangeOpen} busy={exchangeBusy} hasScene={!masterCartOpen && isThreeDimensional} exportContents={exchangeExportContents} activeImport={activeImport} feedback={exchangeFeedback} onClose={() => setExchangeOpen(false)} onImport={(files, unit) => void importExchangeFiles(files, unit)} onExport={(format, unit) => void exportExchangeFormat(format, unit)} onPdfPackage={() => void exportPdfPackage()} onInteractivePdf={(file) => void exportInteractivePdf(file)} onClearImport={clearActiveImport} />
     {designHealthOpen && <DesignHealthCenter report={designHealth} onClose={() => setDesignHealthOpen(false)} onWorkspace={switchWorkspace} />}
     <SaveProjectDialog open={saveDialogMode !== undefined} mode={saveDialogMode ?? "save-as"} projectName={project.name} workspaceStatus={fileWorkspaceStatus} onConfirm={(fileName) => void confirmSaveDialog(fileName)} onClose={() => setSaveDialogMode(undefined)} />

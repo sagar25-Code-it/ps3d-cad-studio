@@ -17,7 +17,8 @@ import { nextClickPrompt } from "../../../../packages/workbench-sketch/src/tool-
 const EXTRA_DRAW_TOOLS: readonly CadSketchTool[] = [
   "ellipse", "arc-center", "arc-tangent", "slot-straight",
   "line-midpoint", "centerline", "parallelogram", "rectangle-rounded", "slot-arc-three-point", "slot-arc-center",
-  "spline-control", "parabola", "hyperbola", "conic", "conic-five", "blend", "profile", "text", "block"
+  "spline-control", "parabola", "hyperbola", "conic", "conic-five", "blend", "profile", "text", "block",
+  "ellipse-arc", "circle-tangent-3", "circle-tangent-2"
 ];
 
 const EXTRA_EDIT_TOOLS: readonly { readonly tool: CadSketchEditTool; readonly name: string; readonly description: string; readonly keywords: readonly string[] }[] = [
@@ -26,7 +27,11 @@ const EXTRA_EDIT_TOOLS: readonly { readonly tool: CadSketchEditTool; readonly na
   { tool: "delete-curve", name: "Delete Curve", description: "Click a curve to delete it and heal the gap by extending its neighbours to meet.", keywords: ["remove", "heal", "erase"] },
   { tool: "offset-move", name: "Offset Move", description: "Offset a chain or region of curves and move it as one.", keywords: ["chain", "region", "translate"] },
   { tool: "make-path", name: "Make Path", description: "Chain connected curves into one path for a sweep, a loft rail or a wrap.", keywords: ["chain", "join", "rail"] },
-  { tool: "dynamic-mirror", name: "Dynamic Mirror", description: "Pick a mirror axis, then draw: everything you draw is mirrored across it as you go.", keywords: ["symmetry", "axis", "live"] }
+  { tool: "dynamic-mirror", name: "Dynamic Mirror", description: "Pick a mirror axis, then draw: everything you draw is mirrored across it as you go.", keywords: ["symmetry", "axis", "live"] },
+  { tool: "break", name: "Sketch Break", description: "Cut every curve into separate pieces wherever it crosses another, so each piece can be deleted or kept on its own.", keywords: ["intersections", "divide", "cut", "pieces"] },
+  { tool: "import-drawing", name: "Import DXF / SVG", description: "Bring the curves of a DXF or SVG file into the sketch; choose the file in the right panel and confirm the scale.", keywords: ["dxf", "svg", "import", "insert", "drawing", "file", "laser", "cnc"] },
+  { tool: "export-drawing", name: "Export DXF / SVG", description: "Save the sketch as a DXF or SVG file; choose the format in the right panel, then download.", keywords: ["dxf", "svg", "export", "save", "drawing", "file", "laser", "cnc"] },
+  { tool: "underlay", name: "Picture", description: "Place a PNG or JPEG under the sketch, calibrate its scale with two points and trace over it.", keywords: ["image", "picture", "underlay", "trace", "calibrate", "photo", "png", "jpeg"] }
 ];
 
 const EXTRA_COMMANDS: readonly { readonly command: CadSketchCommand; readonly name: string; readonly description: string; readonly keywords: readonly string[] }[] = [

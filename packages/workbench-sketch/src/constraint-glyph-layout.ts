@@ -205,6 +205,22 @@ export function glyphAnchor(constraint: WorkbenchSketchConstraint, entity: Sketc
   return { point: entity.mid, away: [DIAGONAL, -DIAGONAL] };
 }
 
+/**
+ * Where a relation is attached when it may name the sketch origin or an axis, which are not in the entity list. A relation that holds a
+ * point on the origin is drawn at the origin (that is where the point is held, so an anchored sketch shows its anchor); any other
+ * relation is drawn at the first curve it names that exists, with the point reference that belongs to that curve.
+ */
+export function constraintAnchor(constraint: WorkbenchSketchConstraint, byId: ReadonlyMap<string, SketchEntity>): GlyphAnchor | undefined {
+  if ((constraint.kind === "coincident" || constraint.kind === "midpoint") && constraint.entityIds.includes(SKETCH_ORIGIN_ID)) return { point: [0, 0], away: [DIAGONAL, -DIAGONAL] };
+  for (let index = 0; index < constraint.entityIds.length; index += 1) {
+    const entity = byId.get(constraint.entityIds[index] ?? "");
+    if (entity === undefined) continue;
+    const shifted: WorkbenchSketchConstraint = index === 0 || constraint.points === undefined ? constraint : { ...constraint, points: constraint.points.slice(index) };
+    return glyphAnchor(shifted, entity);
+  }
+  return undefined;
+}
+
 /** Pushes the glyph of a line to the upper side of the line, whatever its direction. */
 function lineAway(start: Vec2, end: Vec2): Vec2 {
   const dx = end[0] - start[0];
@@ -288,9 +304,8 @@ export function layoutConstraintGlyphs(constraints: readonly WorkbenchSketchCons
   };
   const placed: PlacedGlyph[] = [];
   for (const constraint of constraints) {
-    const entity = byId.get(constraint.entityIds[0] ?? "");
-    if (entity === undefined) continue;
-    const anchor = glyphAnchor(constraint, entity);
+    const anchor = constraintAnchor(constraint, byId);
+    if (anchor === undefined) continue;
     const baseX = anchor.point[0] + anchor.away[0] * standoffPx * px;
     const baseY = anchor.point[1] - anchor.away[1] * standoffPx * px;
     let chosen: Vec2 = [baseX, baseY];

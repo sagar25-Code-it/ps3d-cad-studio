@@ -6,7 +6,8 @@ import { isSketchDatumEntityId } from "../../../../../packages/workbench-core/sr
 import { ellipseRadiusLayout, isEllipseRadiusConstraint, isPointDistanceConstraint, pointDistanceLayout } from "../../../../../packages/workbench-sketch/src/point-distance-layout.js";
 import type { DimensionOffsets } from "../../../../../packages/workbench-sketch/src/dimension-display.js";
 import { describeLength, formatLength, getDimensionLabelUnit } from "../../../../../packages/workbench-sketch/src/sketch-units.js";
-import { parseLengthField } from "../../../../../packages/workbench-sketch/src/edit-fields.js";
+import { BoundDimensionField } from "./BoundDimensionField.js";
+import { applyOf, boundExpressionOf } from "./dimension-requests.js";
 import { splineEndFrame, type SplinePoint } from "../../../../../packages/workbench-core/src/spline-curvature.js";
 import type { SketchEditPlan } from "../../../../../packages/workbench-sketch/src/edit-tools.js";
 import {
@@ -187,29 +188,35 @@ function ExtraDimensionSection(props: ExtrasProps): React.JSX.Element {
   const labelUnit = getDimensionLabelUnit();
   /** A measured value as the field's text: degrees for an angle, the display unit for a length. */
   const textOf = (value: number): string => (target?.name === "angle" ? format(value) : formatLength(value, labelUnit));
-  const [text, setText] = useState(() => (measured === undefined ? "" : textOf(measured)));
   const key = target === undefined ? "" : `${target.name}:${probe!.entityIds.join("|")}:${labelUnit}`;
-  useEffect(() => { setText(measured === undefined ? "" : textOf(measured)); }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const bound = target === undefined ? undefined : boundExpressionOf(props.sketch, { entityId: target.first.id, dimension: target.name, ...(target.second === undefined ? {} : { secondEntityId: target.second.id }) });
   const existing = props.sketch.constraints.filter((constraint) => (constraint.kind === "angle" || constraint.kind === "arc-length" || constraint.kind === "perimeter") && constraint.entityIds.some((id) => props.selected.some((entity) => entity.id === id)));
   const drivingAllowed = target !== undefined && !(target.name === "arc-length" && target.first.kind !== "arc");
   return <section className="inspector-section extra-dimension-controller">
     <header><strong>Angle, arc length, perimeter</strong><span>{target === undefined ? "select" : target.unit}</span></header>
     {target === undefined
       ? <p className="empty-copy">Select two lines for an angle, an arc for its length, or a circle, rectangle or ellipse for its perimeter. Reference dimensions measure and never move anything.</p>
-      : <form className="dimension-field" onSubmit={(event) => {
-        event.preventDefault();
-        const value = target.name === "angle" ? Number(text.trim()) : parseLengthField(text, labelUnit);
-        if (!Number.isFinite(value) || (target.name !== "angle" && value <= 0)) { props.onMessage(target.name === "angle" ? "Type an angle in degrees, 0 up to 360." : "Type a length greater than zero."); return; }
-        props.onSetDimension(target.first.id, target.name, value, { ...(target.second === undefined ? {} : { secondEntityId: target.second.id }) });
-      }}>
-        <label><span>{target.label}</span><div>
-          <input aria-label={`${target.label} (${target.unit})`} inputMode="decimal" value={text} disabled={!drivingAllowed} onChange={(event) => setText(event.target.value)} />
-          <small>{target.unit}</small>
-          <button type="submit" disabled={!drivingAllowed} title="Drive the geometry to this value and hold it">Drive</button>
-          <button type="button" title="Measure only: a reference dimension never moves the geometry" onClick={() => props.onSetDimension(target.first.id, target.name, measured ?? 1, { driven: true, ...(target.second === undefined ? {} : { secondEntityId: target.second.id }) })}>Reference</button>
-        </div></label>
+      : <div className="dimension-field-group">
+        <BoundDimensionField
+          key={key}
+          label={target.label}
+          subject={target.label.toLowerCase()}
+          ariaLabel={`${target.label} (${target.unit})`}
+          valueText={measured === undefined ? "" : textOf(measured)}
+          boundExpression={bound}
+          unit={labelUnit}
+          unitLabel={target.unit}
+          angle={target.name === "angle"}
+          submitLabel="Drive"
+          submitDisabled={!drivingAllowed}
+          onMessage={props.onMessage}
+          onSubmit={(read) => {
+            const request = applyOf(target.name, read);
+            props.onSetDimension(target.first.id, target.name, request.valueMm, { ...(target.second === undefined ? {} : { secondEntityId: target.second.id }), ...(request.expression === undefined ? {} : { expression: request.expression }) });
+          }}
+        ><button type="button" title="Measure only: a reference dimension never moves the geometry" onClick={() => props.onSetDimension(target.first.id, target.name, measured ?? 1, { driven: true, ...(target.second === undefined ? {} : { secondEntityId: target.second.id }) })}>Reference</button></BoundDimensionField>
         {measured !== undefined && <small className="extra-measure">Now measures {textOf(measured)} {target.unit}.</small>}
-      </form>}
+      </div>}
     {existing.length > 0 && <ul className="extra-dimension-list">{existing.map((constraint) => {
       const value = measureDimensionConstraint(props.sketch, constraint);
       const unit = constraint.kind === "angle" ? "°" : "";

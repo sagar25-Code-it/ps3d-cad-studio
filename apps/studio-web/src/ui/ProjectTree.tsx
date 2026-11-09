@@ -6,7 +6,8 @@ import { analyzeWorkbenchSketch, detectSketchProfiles } from "../../../../packag
 import { friendlySketchText, sketchConstraintNames, sketchEntityNames, type WorkbenchSketch } from "../../../../packages/workbench-core/src/index.js";
 import { evaluateConstructionPlane, resolveBinder } from "../../../../packages/workbench-geometry/src/index.js";
 import { describeBinderKind } from "../construction-ui.js";
-import { RELATIONS_EMPTY_HELP } from "../sketch-help-text.js";
+import { relationsEmptyHelp } from "../sketch-help-text.js";
+import { useSketchKeymap } from "../workspaces/sketch/useSketchKeymap.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, inferCommandIcon } from "./CommandIcon.js";
 
@@ -226,6 +227,7 @@ function SketchNavigator({ project, sketchProfiles, selectedId, onSelect }: {
   readonly selectedId: string | null;
   readonly onSelect: (id: string | null) => void;
 }): React.JSX.Element {
+  const sketchKeymap = useSketchKeymap();
   const [tab, setTab] = useState<"curves" | "relations" | "refs" | "issues">("curves");
   const analysis = analyzeWorkbenchSketch(project.sketch);
   const curves = project.sketch.entities;
@@ -251,7 +253,7 @@ function SketchNavigator({ project, sketchProfiles, selectedId, onSelect }: {
         {sketchProfiles.map((profile, index) => <TreeItem key={profile.id} kind="sketch" id={profile.id} label={`Profile P${index + 1}`} meta={`${profile.boundary.kind.replaceAll("-", " ")} · ${formatArea(profile.areaMm2)} mm²`} selectedId={selectedId} onSelect={onSelect} indent />)}
       </>}
       {tab === "relations" && <>
-        {relations.length === 0 && <p className="tree-empty">{RELATIONS_EMPTY_HELP}</p>}
+        {relations.length === 0 && <p className="tree-empty">{relationsEmptyHelp(sketchKeymap)}</p>}
         {relations.map((constraint) => <TreeItem key={constraint.id} kind="sketch" id={constraint.id} label={relationNames.get(constraint.id) ?? constraint.kind.replaceAll("-", " ")} meta={`${constraint.entityIds.map((id) => entityNames.get(id) ?? "a curve").join(" + ")}${constraint.valueMm !== undefined ? ` · ${constraint.valueMm} mm` : ""}${constraint.suppressed === true ? " · suppressed" : ""}`} selectedId={selectedId} onSelect={onSelect} indent />)}
       </>}
       {tab === "refs" && <>
