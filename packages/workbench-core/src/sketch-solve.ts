@@ -2,6 +2,8 @@ import { solveAnalyticSketch } from "../../parametric-sketch-core/src/solver.js"
 import type { SketchRelationSet } from "../../parametric-sketch-core/src/types.js";
 import { explainOrientationCollapse, ORIENTATION_RECOVERY } from "./sketch-orientation-explain.js";
 import { applyExtraConstraints } from "./sketch-solve-extras.js";
+import { friendlySolveMessage } from "./sketch-messages.js";
+import { livePointOf } from "./sketch-measure.js";
 import { toSolverAnchors, type LiveAnchor } from "./sketch-anchors.js";
 import { turnAcrossLines } from "./sketch-quarter-turn.js";
 import { refractionRefusal, seedRefractions } from "./sketch-refraction.js";
@@ -54,6 +56,13 @@ export interface LiveSolveOptions {
    * as little as they can, which keeps untouched vertices where they are (a joined polygon never flattens).
    */
   readonly keepChains?: boolean;
+  /**
+   * Drag only: the entities the previous pointer position produced. Every drag step is solved from the sketch the gesture began with, so
+   * it depends only on where the pointer is now; when that answer jumps far from the previous one (the pointer passed over an opposite
+   * edge, so the nearest solution is on the other branch) or fails, the step is solved again from the previous solution instead, which
+   * moves the sketch continuously.
+   */
+  readonly continueFrom?: readonly SketchEntity[];
 }
 
 const MOVE_TOLERANCE_MM = 1e-9;
@@ -85,8 +94,48 @@ export interface LiveDragTarget {
  * from reaching the pointer it goes as near as the relations allow.
  */
 export function dragLiveSketch(sketch: WorkbenchSketch, target: LiveDragTarget, options: LiveSolveOptions = {}): LiveSketchSolveReport {
-  return runLiveSolve(sketch, [target.entityId], target, options);
+  const fresh = runLiveSolve(sketch, [target.entityId], target, options);
+  const previous = options.continueFrom;
+  if (previous === undefined) return fresh;
+  if (fresh.ok && !jumped(fresh.entities, previous, target)) return fresh;
+  // Continue from where the last pointer position left the sketch.
+  const byId = new Map(previous.map((entity) => [entity.id, entity] as const));
+  const resumed: WorkbenchSketch = { ...sketch, entities: sketch.entities.map((entity) => { const earlier = byId.get(entity.id); return earlier !== undefined && earlier.kind === entity.kind ? earlier : entity; }) };
+  const second = runLiveSolve(resumed, [target.entityId], target, options);
+  if (!second.ok) return fresh;
+  if (fresh.ok && displacement(second.entities, previous) >= displacement(fresh.entities, previous)) return fresh;
+  return second;
 }
+
+/** The pointer moved this many times its own step before a solution counts as a jump, but never less than this many millimetres. */
+const JUMP_FACTOR = 6;
+const JUMP_FLOOR_MM = 1;
+
+function jumped(next: readonly SketchEntity[], previous: readonly SketchEntity[], target: LiveDragTarget): boolean {
+  const earlier = previous.find((entity) => entity.id === target.entityId);
+  const held = earlier === undefined ? undefined : livePointOf(earlier, target.point);
+  const step = held === undefined ? 0 : Math.hypot(target.positionMm[0] - held[0], target.positionMm[1] - held[1]);
+  return displacement(next, previous) > Math.max(JUMP_FLOOR_MM, JUMP_FACTOR * step);
+}
+
+/** The largest distance any defining point of an entity travelled between two lists of the same entities. */
+function displacement(next: readonly SketchEntity[], previous: readonly SketchEntity[]): number {
+  const before = new Map(previous.map((entity) => [entity.id, entity] as const));
+  let largest = 0;
+  for (const entity of next) {
+    const earlier = before.get(entity.id);
+    if (earlier === undefined || earlier === entity || earlier.kind !== entity.kind) continue;
+    for (const ref of DISPLACEMENT_REFS) {
+      const a = livePointOf(entity, ref);
+      const b = livePointOf(earlier, ref);
+      if (a !== undefined && b !== undefined) largest = Math.max(largest, Math.hypot(a[0] - b[0], a[1] - b[1]));
+    }
+    if (entity.kind === "circle" && earlier.kind === "circle") largest = Math.max(largest, Math.abs(entity.radiusMm - earlier.radiusMm));
+  }
+  return largest;
+}
+
+const DISPLACEMENT_REFS: readonly SketchPointRef[] = ["start", "end", "mid", "center", "self", "corner-0", "corner-2"];
 
 function runLiveSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[] | undefined, drag: LiveDragTarget | undefined, options: LiveSolveOptions): LiveSketchSolveReport {
   const base = runSimultaneousSolve(sketch, focusEntityIds, drag, options);
@@ -138,7 +187,7 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
     const first = errors[0];
     const related = [...new Set(errors.flatMap((diagnostic) => diagnostic.relatedIds).map(liveConstraintId))].sort();
     // One group of contradicting relations is named; a second sentence would repeat part of the first.
-    const message = errors.length === 0 ? "The sketch constraints could not be solved." : errors[0]!.message;
+    const message = errors.length === 0 || first === undefined ? "The sketch constraints could not be solved." : friendlySolveMessage(sketch, first);
     const orientation = errors.some((diagnostic) => /collapse|shrink/u.test(diagnostic.message)) ? explainOrientationCollapse(sketch, related) : undefined;
     if (orientation !== undefined) return { ok: false, message: orientation, relatedIds: related, recovery: ORIENTATION_RECOVERY };
     return { ok: false, message, relatedIds: related.length === 0 ? [sketch.id] : related, recovery: first?.recovery ?? "Remove or change one of the conflicting constraints." };

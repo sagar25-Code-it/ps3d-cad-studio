@@ -1,10 +1,12 @@
 import { dragLiveSketch, solveLiveSketch } from "../packages/workbench-core/src/index.js";
+import { dragSketchHandle } from "../packages/workbench-sketch/src/drag.js";
+import { buildPolygon, buildSlot } from "../packages/workbench-sketch/src/shapes.js";
 import { analyzeWorkbenchSketch } from "../packages/workbench-sketch/src/index.js";
 import { refractionAngles } from "../packages/workbench-core/src/sketch-solve-extras.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import {
-  addConstraint, analysis, apply, circle, get, ident, line, lengthOf, projectWith, refuse, rel, run, setDimension,
-  type Line
+  addConstraint, analysis, apply, circle, get, ident, line, lengthOf, lineRing, projectWith, refuse, rel, run, setDimension,
+  type Line, type Vec
 } from "./sketch-solver-kit.js";
 import type { SketchEntity, WorkbenchProject, WorkbenchSketchConstraint } from "../packages/workbench-core/src/index.js";
 
@@ -205,6 +207,78 @@ export const sketchSolverWave3Tests: readonly TestCase[] = [
       const fixed = projectWith([line("a", [0, 0], [10, 0]), spline], [{ id: "constraint:fx", kind: "fixed", entityIds: ["entity:s"] }]);
       const message = refuse(fixed, { kind: "add-sketch-constraint", constraint: { id: "constraint:sm", kind: "smooth", entityIds: ["entity:a", "entity:s"], points: ["end", "start"] } });
       assert(/Smooth/u.test(message) && /Fixed/u.test(message) && /spline s/u.test(message), `the refusal names Smooth, the spline and the Fix: ${message}`);
+    }
+  }
+,
+  {
+    name: "Wave3 R2-5: dragging a rectangle corner past the opposite edge moves the sketch continuously when the previous step is passed on (was a 30 mm teleport in a 0.35 mm step)",
+    run: () => {
+      const ring = lineRing(0, 0, 50, 30);
+      const project = projectWith(ring.entities, ring.constraints);
+      const from: Vec = [50, 0];
+      let previous: readonly SketchEntity[] | undefined;
+      let last: readonly SketchEntity[] = project.sketch.entities;
+      let worst = 0;
+      for (let step = 0; step <= 140; step += 1) {
+        const target: Vec = [from[0] - 0.35 * step, from[1] + 0.35 * step];
+        const result = dragSketchHandle(project.sketch, "entity:b", { kind: "point", ref: "end" }, from, target, previous);
+        assert(result.ok, `step ${step} is accepted: ${result.ok ? "" : result.message}`);
+        if (!result.ok) return;
+        result.entities.forEach((entity, index) => {
+          const earlier = last[index];
+          if (entity.kind === "line" && earlier?.kind === "line") worst = Math.max(worst, Math.hypot(entity.start[0] - earlier.start[0], entity.start[1] - earlier.start[1]), Math.hypot(entity.end[0] - earlier.end[0], entity.end[1] - earlier.end[1]));
+        });
+        previous = result.entities;
+        last = result.entities;
+      }
+      assert(worst < 2, `no step moved a corner by more than 2 mm (worst ${worst.toFixed(2)} mm)`);
+      const b = last[0];
+      assert(b?.kind === "line" && Math.abs(b.end[0] - (50 - 0.35 * 140)) < 1e-6 && Math.abs(b.end[1] - 0.35 * 140) < 1e-6, "and the dragged corner is under the pointer at the end");
+    }
+  },
+  {
+    name: "Wave3 R2-5: a hexagon vertex dragged inward past the centre does not jump (was a 17 mm jump), and a failed first step names the curve instead of a raw id",
+    run: () => {
+      let counter = 0;
+      const ids = { entity: () => `entity:h${(counter += 1)}`, constraint: () => `constraint:h${(counter += 1)}` };
+      const hexagon = buildPolygon([0, 0], [20, 0], 6, ids);
+      assert(hexagon.ok, "the hexagon builds");
+      if (!hexagon.ok) return;
+      const project = projectWith(hexagon.value.entities, hexagon.value.constraints);
+      const first = project.sketch.entities[0];
+      assert(first?.kind === "line", "the first side is a line");
+      if (first?.kind !== "line") return;
+      const from = first.end;
+      let previous: readonly SketchEntity[] | undefined;
+      let last: readonly SketchEntity[] | undefined;
+      let worst = 0;
+      for (let step = 0; step <= 125; step += 1) {
+        const target: Vec = [from[0] - 0.3 * step, from[1] - 0.4 * step];
+        const result = dragSketchHandle(project.sketch, first.id, { kind: "point", ref: "end" }, from, target, previous);
+        assert(result.ok, `step ${step}: ${result.ok ? "" : result.message}`);
+        if (!result.ok) return;
+        if (last !== undefined) {
+          result.entities.forEach((entity, index) => {
+            const earlier = last![index];
+            if (entity.kind === "circle" && earlier?.kind === "circle") worst = Math.max(worst, Math.hypot(entity.center[0] - earlier.center[0], entity.center[1] - earlier.center[1]));
+          });
+        }
+        previous = result.entities;
+        last = result.entities;
+      }
+      assert(worst < 4, `the guide circle never jumped (worst step ${worst.toFixed(2)} mm)`);
+
+      let slotCounter = 0;
+      const slotIds = { entity: () => `entity:s${(slotCounter += 1)}`, constraint: () => `constraint:s${(slotCounter += 1)}` };
+      const slot = buildSlot([0, 0], [40, 0], [20, 5], slotIds);
+      assert(slot.ok, "the slot builds");
+      if (!slot.ok) return;
+      const slotProject = projectWith(slot.value.entities, slot.value.constraints);
+      const slotLine = slotProject.sketch.entities[0];
+      if (slotLine?.kind !== "line") throw new Error("the slot starts with a line");
+      const far = dragSketchHandle(slotProject.sketch, slotLine.id, { kind: "point", ref: "start" }, slotLine.start, [slotLine.start[0] + 70.7, slotLine.start[1] - 70.7]);
+      assert(!far.ok, "the far one-shot drag collapses the cap arc");
+      if (!far.ok) assert(!/entity:/u.test(far.message) && /Arc 1/u.test(far.message), `the message names the curve: ${far.message}`);
     }
   }
 ];

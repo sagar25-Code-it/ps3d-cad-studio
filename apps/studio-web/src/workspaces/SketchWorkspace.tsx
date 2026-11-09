@@ -1726,7 +1726,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const target = snap?.point ?? raw;
     setCursor(target);
     setInference(snap);
-    const result = dragSketchHandle(gesture.base, gesture.entityId, gesture.handle, gesture.startMm, target);
+    const result = dragSketchHandle(gesture.base, gesture.entityId, gesture.handle, gesture.startMm, target, dragLatest.current?.preview.entities);
     if (!result.ok) {
       if (dragMessage.current !== result.message) { dragMessage.current = result.message; props.onMessage(result.message); }
       return;
