@@ -1,7 +1,9 @@
 import { applyWorkbenchOperation, type SketchEntity, type Vec2, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { analyzeWorkbenchSketch } from "../packages/workbench-sketch/src/index.js";
 import { dragSketchHandle } from "../packages/workbench-sketch/src/drag.js";
-import { cornerByClick, filletCorners } from "../packages/workbench-sketch/src/corner-tools.js";
+import { planPattern } from "../packages/workbench-sketch/src/pattern-path.js";
+import { transformEntities } from "../packages/workbench-sketch/src/edit-tools.js";
+import { chamferCorners, cornerByClick, filletCorners } from "../packages/workbench-sketch/src/corner-tools.js";
 import { splitAt } from "../packages/workbench-sketch/src/split-jog.js";
 import { trimAt } from "../packages/workbench-sketch/src/trim-extend.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
@@ -217,6 +219,38 @@ export const sketchEdit3RepairTests: readonly TestCase[] = [
       both = run(both, { kind: "set-sketch-dimension", entityId: "entity:a", dimension: "radius", valueMm: 5 });
       both = run(both, { kind: "set-sketch-dimension", entityId: "entity:a", dimension: "diameter", valueMm: 10 });
       equal(analyzeSketch(ctx(both)).errors, 0, "a radius and the matching diameter on one circle are redundant, not conflicting");
+    }
+  }
+];
+
+export const sketchEdit3PatternTests: readonly TestCase[] = [
+  {
+    name: "Wave 3 edit R2-3: fillet, chamfer, trim, split and move on copies of an associative pattern are refused with the way out, never reported OK with a stray arc",
+    run: () => {
+      const base = projectWith([line("a", [0, 0], [30, 0]), line("b", [30, 0], [30, 20])], [con("k", "coincident", ["a", "b"], { points: ["end", "start"] })]);
+      const planned = planPattern(ctx(base), ["entity:a", "entity:b"], { kind: "rectangular", countX: 2, countY: 1, dxMm: 60, dyMm: 0, angleDeg: 0, extent: false });
+      if (!planned.ok) throw new Error(planned.diagnostics[0]?.message);
+      const patterned = applyOk(base, planned);
+      const copies = patterned.sketch.entities.filter((entity) => entity.id.startsWith("entity:pat.")).map((entity) => entity.id);
+      equal(copies.length, 2, "two copies");
+      const refuse = (name: string, result: ReturnType<typeof filletCorners>): void => {
+        assert(!result.ok, `${name}: refused instead of reporting OK`);
+        if (!result.ok) assert(/pattern/u.test(result.diagnostics[0]!.message) && /source|dissolve/iu.test(result.diagnostics[0]!.message), `${name}: the message names the pattern and the way out`);
+      };
+      refuse("fillet", filletCorners(ctx(patterned), copies, 5));
+      refuse("chamfer", chamferCorners(ctx(patterned), copies, 4));
+      refuse("move", transformEntities(ctx(patterned), [copies[0]!], { kind: "move", dxMm: 5, dyMm: 5 }, false));
+      const crossing = { ...patterned, sketch: { ...patterned.sketch, entities: [...patterned.sketch.entities, line("x", [75, -5], [75, 25])] } };
+      refuse("trim", trimAt(ctx(crossing), copies[0]!, [65, 0]));
+      refuse("split", splitAt(ctx(patterned), copies[0]!, [70, 0]));
+      // The sketch is exactly as it was: no stray arc, every relation holds.
+      equal(patterned.sketch.entities.filter((entity) => entity.kind === "arc").length, 0, "no stray arc");
+      equal(problems(patterned).join("; "), "", "and the sketch is consistent");
+      // Editing the source is still how a pattern is changed, and moving sources and copies together is allowed.
+      const moved = applyOk(patterned, transformEntities(ctx(patterned), [...copies, "entity:a", "entity:b"], { kind: "move", dxMm: 5, dyMm: 5 }, false));
+      equal(problems(moved).join("; "), "", "moving the sources together with their copies stays consistent");
+      const longer = run(patterned, { kind: "set-sketch-dimension", entityId: "entity:a", dimension: "length", valueMm: 40 });
+      equal(problems(longer).join("; "), "", "editing the source length still updates the copies");
     }
   }
 ];
