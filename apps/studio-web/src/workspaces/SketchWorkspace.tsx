@@ -49,6 +49,8 @@ import { isEllipseRadiusConstraint, isPointDistanceConstraint } from "../../../.
 import { convertLengthField, parseLengthField } from "../../../../packages/workbench-sketch/src/edit-fields.js";
 import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
+import { profileSnapRelations, shapeSnapRelations } from "../../../../packages/workbench-sketch/src/shape-snap-relations.js";
+import { typedShapeIntent } from "../../../../packages/workbench-sketch/src/typed-shape-intent.js";
 import { inferTypedPoint } from "../../../../packages/workbench-sketch/src/typed-inference.js";
 import { autoConstraintsFor, dropConstraintFor, inheritedTangentDirection, tangentArcPoints, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
@@ -332,6 +334,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // The extra curve tools (rounded rectangle, conics, blend, profile, text ...): their palette numbers, and the Profile chain being drawn.
   const [curveFields, setCurveFields] = useSketchPref("curveFields", DEFAULT_CURVE_OPTION_FIELDS);
   const profileChain = useRef<ProfileChain | undefined>(undefined);
+  const profileStartSnap = useRef<PlacedPointInference | undefined>(undefined);
   // Reusable sketch blocks live in the browser (not in the project file); a blocked or missing localStorage just keeps them in memory.
   const [blockLibrary] = useState(() => createBlockLibrary((() => { try { return window.localStorage; } catch { return undefined; } })()));
   const [blockNames, setBlockNames] = useState<readonly string[]>(() => blockLibrary.list().map((block) => block.name));
@@ -971,7 +974,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     lastPlaced.current = point;
     // What typed input did that the user may not expect (a negative size flipped, an angle wrapped) is appended to the status line once.
     const say = (message: string): void => { const notes = typedNotes.current; typedNotes.current = []; props.onMessage(notes.length === 0 ? message : `${message} ${notes.join(" ")}`); };
-    if (props.tool === "profile") { placeProfilePoint(point); return; }
+    if (props.tool === "profile") { placeProfilePoint(point, found); return; }
     const points = [...pending, point];
     const previous = pending.at(-1);
     const placed: readonly PlacedPointInference[] = [
@@ -1008,8 +1011,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       }
       // A polygon whose centre was snapped to the origin or to other geometry is located by it.
       const centreRelations = autoConstrain && props.tool === "polygon" ? keepResolvableConstraints(polygonCentreRelations(shape.value, polygonMode, placed, props.sketch, () => `constraint:auto-${crypto.randomUUID()}`), props.sketch.entities.map((entity) => entity.id), shape.value.entities.map((entity) => entity.id)).kept : [];
-      const shapeRelations = [...shape.value.constraints, ...centreRelations];
-      const accepted = applyDrawn({ label: `Added ${sketchToolLabel(props.tool).toLowerCase()} (${shape.value.entities.length} curves, ${shapeRelations.length} relations)`, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shapeRelations });
+      // Every other click that was snapped to geometry joins the matching point of the shape, and a size that was typed is kept as its dimension.
+      const newShapeId = (): string => `constraint:auto-${crypto.randomUUID()}`;
+      const snapRelations = autoConstrain ? keepResolvableConstraints(shapeSnapRelations({ tool: props.tool, shape: shape.value, placed, sketch: props.sketch, newId: newShapeId, ...(props.tool === "polygon" && polygonMode !== "edge" ? { skip: new Set([0]) } : {}) }), props.sketch.entities.map((entity) => entity.id), shape.value.entities.map((entity) => entity.id)).kept : [];
+      const typedShapeRelations = typedShapeIntent({ tool: props.tool, shape: shape.value, typed: typedTrail.current, newId: newShapeId });
+      typedTrail.current = {};
+      const extraRelations = [...centreRelations, ...snapRelations, ...typedShapeRelations];
+      const shapeRelations = [...shape.value.constraints, ...extraRelations];
+      const shapeLabel = `Added ${sketchToolLabel(props.tool).toLowerCase()} (${shape.value.entities.length} curves, ${shapeRelations.length} relations)`;
+      let accepted = applyDrawn({ label: shapeLabel, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shapeRelations });
+      // If the solver refuses the snap or typed-size relations, the shape itself is still drawn with the relations that make it what it is.
+      if (accepted === false && extraRelations.length > 0) accepted = applyDrawn({ label: shapeLabel, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shape.value.constraints });
       if (accepted === false) return;
       setPending([]);
       say(`Added ${sketchToolLabel(props.tool).toLowerCase()} with ${shape.value.entities.length} curve${shape.value.entities.length === 1 ? "" : "s"} and ${shape.value.constraints.length} relation${shape.value.constraints.length === 1 ? "" : "s"}.`);
@@ -1127,10 +1139,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
 
   /** One click of the Profile tool: the first click starts the chain, each later click adds a line or a tangent arc; ending on the start closes the loop. */
-  const placeProfilePoint = (point: Vec2): void => {
+  const placeProfilePoint = (point: Vec2, found?: InferenceResult): void => {
     const chain = profileChain.current;
+    const snapOf = (at: Vec2): PlacedPointInference | undefined => found?.primary === undefined ? undefined : { point: at, primary: found.primary, guides: found.guides };
     if (chain === undefined) {
       profileChain.current = startProfileChain(point);
+      profileStartSnap.current = snapOf(point);
       setPending([point]);
       props.onMessage("Profile: start placed. Click the next point; pick Tangent arc in the Sketch palette to curve into it, click the start again to close, Esc to stop.");
       return;
@@ -1138,11 +1152,19 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
     const step = extendProfileChain(chain, point, curveFields.profileMode, PICK_PIXELS * px, ids);
     if (!step.ok) { props.onMessage(`${step.diagnostics[0]?.message ?? "The segment was rejected."} Place the point somewhere else, or press Esc to stop.`); return; }
-    const { constraints, chain: next, closed } = step.value;
+    const { chain: next, closed } = step.value;
     const entity = entityForDrawMode(step.value.entity, drawAsConstruction);
+    // The start of the first segment and the end of any segment that were snapped to other geometry are joined to it, like any drawn curve's.
+    const snapPlaced = [chain.segments === 0 ? profileStartSnap.current : undefined, closed ? undefined : snapOf(next.tail)].filter((entry): entry is PlacedPointInference => entry !== undefined);
+    const snapRelations = autoConstrain && snapPlaced.length > 0
+      ? keepResolvableConstraints(profileSnapRelations({ entity, placed: snapPlaced, own: step.value.constraints, sketch: props.sketch, newId: () => `constraint:auto-${crypto.randomUUID()}` }), props.sketch.entities.map((existing) => existing.id), [entity.id]).kept
+      : [];
+    const constraints = [...step.value.constraints, ...snapRelations];
     let accepted: boolean | void = undefined;
     if (constraints.length > 0) accepted = props.onApplyEdit({ label: `Added profile ${entity.kind} ${next.segments}`, removeEntityIds: [], updateEntities: [], addEntities: [entity], addConstraints: constraints });
-    // If the solver refused the relations, the segment itself is still drawn.
+    // If the solver refused the snap relations, the segment is drawn with the joints that hold the outline together.
+    if (accepted === false && snapRelations.length > 0 && step.value.constraints.length > 0) accepted = props.onApplyEdit({ label: `Added profile ${entity.kind} ${next.segments}`, removeEntityIds: [], updateEntities: [], addEntities: [entity], addConstraints: step.value.constraints });
+    // If the solver refused the relations altogether, the segment itself is still drawn.
     if (constraints.length === 0 || accepted === false) props.onAddEntity(entity);
     if (closed) {
       profileChain.current = undefined;

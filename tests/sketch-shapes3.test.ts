@@ -5,7 +5,11 @@ import { assistedInference, DEFAULT_SNAP_ASSIST } from "../packages/workbench-sk
 import { dynamicFieldsFor } from "../packages/workbench-sketch/src/dynamic-input.js";
 import { parseFieldEntry, plainEvaluator, resolveDynamicEntry } from "../packages/workbench-sketch/src/dynamic-entry.js";
 import { buildEdgePolygon, buildPolygon } from "../packages/workbench-sketch/src/shapes.js";
-import { PROFILE_CHAINS, typedLineChain, arcSlotProblem, addShape, drawEntity, emptyProject3, tryAdd, profileProject, stressProblem, wholeProblem } from "./sketch-shapes3-kit.js";
+import { buildSketchEntity } from "../packages/workbench-sketch/src/index.js";
+import { extendProfileChain, startProfileChain } from "../packages/workbench-sketch/src/blend-profile.js";
+import { profileSnapRelations } from "../packages/workbench-sketch/src/shape-snap-relations.js";
+import { typedIntentConstraints } from "../packages/workbench-sketch/src/typed-intent.js";
+import { PROFILE_CHAINS, autoId, drawShape, inferPlaced, typedLineChain, arcSlotProblem, addShape, drawEntity, emptyProject3, tryAdd, profileProject, stressProblem, wholeProblem } from "./sketch-shapes3-kit.js";
 import { arcRadius, dimension, shapeIds } from "./sketch-shape-kit.js";
 
 /**
@@ -316,6 +320,112 @@ export const sketchTypedEntry3Tests: readonly TestCase[] = [
       assert(!grouped.ok && grouped.message.includes("1000.5"), "1,000.5 is offered as 1000.5");
       const european = parseFieldEntry("1.000,5", field);
       assert(!european.ok && european.message.includes("1000.5"), "1.000,5 is offered as 1000.5");
+    }
+  }
+];
+
+const originCoincident = (project: WorkbenchProject, entityId: string, ref: string): boolean => project.sketch.constraints.some((constraint) => constraint.kind === "coincident" && constraint.entityIds[0] === "sketch:origin" && constraint.entityIds[1] === entityId && constraint.points?.[1] === ref);
+
+export const sketchShapeSnaps3Tests: readonly TestCase[] = [
+  {
+    name: "Curve creation F9: a slot whose centres snap to the origin and to a line end is joined there",
+    run: () => {
+      const seed = addShape(emptyProject3(), { entities: [line("entity:seed", [30, 0], [50, 10])], constraints: [] });
+      const drawn = drawShape("slot", seed, [[0.2, 0.1], [30.1, 0.1], [15, 5]]);
+      const arcs = drawn.project.sketch.entities.filter((entity) => entity.kind === "arc");
+      assert(drawn.extra.length >= 2, `relations for both snapped centres (${drawn.extra.map((relation) => relation.kind).join(",")})`);
+      assert(originCoincident(drawn.project, arcs[1]!.id, "center") || originCoincident(drawn.project, arcs[0]!.id, "center"), "a cap's centre is Coincident with the origin");
+      assert(drawn.project.sketch.constraints.some((constraint) => constraint.kind === "coincident" && constraint.entityIds.includes("entity:seed") && constraint.points?.includes("center") === true), "the other cap's centre is Coincident with the line start");
+      equal(wholeProblem(drawn.project), undefined, "the slot is whole");
+    }
+  },
+  ...(["slot-straight", "slot"] as const).map((tool): TestCase => ({
+    name: `Curve creation F9: a ${tool} started on the origin is Coincident with the sketch origin and stays whole through every edit and drag`,
+    run: () => {
+      const drawn = drawShape(tool, emptyProject3(), tool === "slot" ? [[0.2, 0.1], [30, 0], [15, 5]] : [[0.1, 0.1], [40, 0], [20, 6]]);
+      const arcs = drawn.project.sketch.entities.filter((entity) => entity.kind === "arc");
+      assert(arcs.some((arc) => originCoincident(drawn.project, arc.id, tool === "slot" ? "center" : "mid")), `joined to the origin (${drawn.extra.map((relation) => `${relation.kind}:${relation.points?.join("/")}`).join(", ")})`);
+      // A cap pinned to the origin can only be dragged by its radius; the solver may then turn that arc over (a cusp), so a drag is held to closed joints, not to tangency.
+      equal(stressProblem(drawn.project, 1, null, false), undefined, "the slot through every edit and drag");
+    }
+  })),
+  ...(["inscribed", "circumscribed", "edge"] as const).map((mode): TestCase => ({
+    name: `Curve creation F9: a polygon (${mode}) whose snapped points land on other geometry is joined to it`,
+    run: () => {
+      const seed = addShape(emptyProject3(), { entities: [line("entity:seed", [20, 0], [20, 30])], constraints: [] });
+      // Inscribed: the corner click on the seed's start; circumscribed has no corner click to join; edge: both side ends on seed ends.
+      const pointers: readonly Vec2[] = mode === "edge" ? [[20.1, 0.1], [20.1, 30.05]] : mode === "inscribed" ? [[0.2, 0.1], [20.1, 0.1]] : [[0.2, 0.1], [10, 0]];
+      const drawn = drawShape("polygon", seed, pointers, { polygonMode: mode });
+      const joined = drawn.project.sketch.constraints.filter((constraint) => constraint.kind === "coincident" && constraint.entityIds.includes("entity:seed")).length;
+      if (mode === "circumscribed") equal(joined, 0, "no corner is clicked in circumscribed mode");
+      else equal(joined, mode === "edge" ? 2 : 1, "the clicked corner(s) are joined to the seed line");
+      assert(mode === "edge" || drawn.project.sketch.constraints.some((constraint) => constraint.kind === "coincident" && constraint.entityIds[0] === "sketch:origin"), "the centre is on the origin");
+      equal(wholeProblem(drawn.project), undefined, "the polygon is whole");
+    }
+  })),
+  {
+    name: "Curve creation F9: a midpoint line, a centerline, a parallelogram and an arc slot are joined to the points their clicks were snapped to",
+    run: () => {
+      const seed = addShape(emptyProject3(), { entities: [line("entity:seed", [30, 0], [50, 10])], constraints: [] });
+      const midLine = drawShape("line-midpoint", seed, [[0.2, 0.1], [20, 10]]);
+      assert(midLine.project.sketch.constraints.some((constraint) => constraint.kind === "coincident" && constraint.entityIds[0] === "sketch:origin"), "the midpoint line's centre point is on the origin");
+      const center = drawShape("centerline", seed, [[30.1, 0.1], [60, 20]]);
+      assert(center.project.sketch.constraints.some((constraint) => constraint.kind === "coincident" && constraint.entityIds.includes("entity:seed") && constraint.points?.includes("curve") === true), "the centerline passes through the seed's start");
+      const para = drawShape("parallelogram", seed, [[50.1, 10.1], [70, 10], [78, 25]]);
+      assert(para.project.sketch.constraints.some((constraint) => constraint.kind === "coincident" && constraint.entityIds.includes("entity:seed")), "the parallelogram's first corner is joined to the seed's end");
+      equal(stressProblem(para.project), undefined, "the parallelogram through every edit and drag");
+      const arcSlot = drawShape("slot-arc-three-point", emptyProject3(), [[0.2, 0.1], [10, 6], [20, 0], [10, 9]]);
+      assert(arcSlot.extra.some((relation) => relation.kind === "coincident"), "the arc slot's start is on the origin");
+      equal(stressProblem(arcSlot.project, 1, null, false), undefined, "the arc slot through every edit and drag");
+    }
+  },
+  {
+    name: "Curve creation F9: a Profile segment whose start and end were snapped to other geometry is joined to it",
+    run: () => {
+      const seed = addShape(emptyProject3(), { entities: [line("entity:seed", [0, 0], [0, 20]), line("entity:seed2", [30, 0], [30, 20])], constraints: [] });
+      const first = inferPlaced("profile", seed, [[0.1, 0.1], [30.1, 0.1]]);
+      const step = extendProfileChain(startProfileChain(first.points[0]!), first.points[1]!, "line", 0.5, shapeIds());
+      assert(step.ok, "builds");
+      const relations = profileSnapRelations({ entity: step.value.entity, placed: [first.placed[0]!, first.placed[1]!], own: step.value.constraints, sketch: seed.sketch, newId: autoId });
+      equal(relations.filter((relation) => relation.kind === "coincident").length, 2, "both ends joined");
+      const added = tryAdd(seed, { entities: [step.value.entity], constraints: [...step.value.constraints, ...relations] });
+      assert(added.ok, `accepted: ${added.ok ? "" : added.message}`);
+    }
+  },
+  ...([
+    ["polygon (inscribed)", "polygon", [[0, 0], [10, 0]], { radius: 10 }, "inscribed", 1],
+    ["polygon (circumscribed)", "polygon", [[0, 0], [10, 0]], { radius: 10 }, "circumscribed", 1],
+    ["polygon (edge)", "polygon", [[0, 0], [10, 0]], { radius: 10 }, "edge", 1],
+    ["slot", "slot", [[0, 0], [30, 0], [15, 4]], { length: 30, width: 8 }, "inscribed", 2],
+    ["overall slot", "slot-straight", [[-4, 0], [34, 0], [15, 4]], { length: 38, width: 8 }, "inscribed", 2],
+    ["midpoint line", "line-midpoint", [[0, 0], [10, 0]], { length: 10 }, "inscribed", 1]
+  ] as const).map(([name, tool, pointers, typed, mode, expected]): TestCase => ({
+    name: `Curve creation T17: typed ${name} sizes are recorded as driving dimensions`,
+    run: () => {
+      const drawn = drawShape(tool, emptyProject3(), pointers as unknown as Vec2[], { typed, polygonMode: mode });
+      const dims = drawn.project.sketch.constraints.filter((constraint) => (constraint.kind === "distance" || constraint.kind === "radius") && constraint.valueMm !== undefined);
+      equal(dims.length, expected, `${expected} dimension(s) (found ${dims.map((constraint) => `${constraint.kind}:${constraint.dimension}=${constraint.valueMm}`).join(", ")})`);
+      if (tool !== "line-midpoint") equal(wholeProblem(drawn.project), undefined, "whole");
+    }
+  })),
+  {
+    name: "Curve creation T17: a typed arc radius and sweep, and typed ellipse axes, are recorded as dimensions",
+    run: () => {
+      const arc = buildSketchEntity("arc-center", [[0, 0], [10, 0], [0, 10]], "entity:t17-arc");
+      assert(arc.ok, "arc builds");
+      const arcDims = typedIntentConstraints({ tool: "arc-center", entity: arc.value, typed: { radius: 10, sweep: 90 }, newId: autoId });
+      equal(arcDims.map((dimension) => dimension.kind).join(","), "radius,arc-length", "radius and arc length");
+      near(arcDims[1]!.valueMm ?? NaN, (10 * Math.PI) / 2, 1e-6, "the arc length of a 90 degree sweep of radius 10");
+      const withDims = addShape(emptyProject3(), { entities: [arc.value], constraints: arcDims });
+      assert(withDims.sketch.constraints.length === 2, "accepted by the project");
+      const ellipseBuilt = buildSketchEntity("ellipse", [[0, 0], [10, 0], [0, 4]], "entity:t17-ellipse");
+      assert(ellipseBuilt.ok, "ellipse builds");
+      const axes = typedIntentConstraints({ tool: "ellipse", entity: ellipseBuilt.value, typed: { major: 10, minor: 4 }, newId: autoId });
+      equal(axes.map((dimension) => `${dimension.dimension}=${dimension.valueMm}`).join(","), "major-radius=10,minor-radius=4", "both axes");
+      const withAxes = addShape(emptyProject3(), { entities: [ellipseBuilt.value], constraints: axes });
+      assert(withAxes.sketch.constraints.length === 2, "accepted by the project");
+      const resized = dimension(withAxes, { entityId: "entity:t17-ellipse", dimension: "major-radius", valueMm: 14 });
+      assert(resized.ok, `the major axis can be edited: ${resized.ok ? "" : resized.message}`);
     }
   }
 ];

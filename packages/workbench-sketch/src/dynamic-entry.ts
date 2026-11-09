@@ -55,6 +55,8 @@ export function mixedSeparatorMessage(body: string): string {
   const sign = number.startsWith("-") ? "-" : "";
   const digits = number.replace(/^[+-]/u, "");
   const plain = groupedWithComma ? sign + digits.replace(/,/gu, "") : sign + digits.replace(/\./gu, "").replace(",", ".");
+  // A comma that groups digits in threes (1,000.5) is a thousands comma, which this input does not take.
+  if (groupedWithComma && /^\d{1,3}(,\d{3})+\.\d+$/u.test(digits)) return "Write " + plain + (unit === "" ? "" : " " + unit) + " without the thousands comma: a comma here is a decimal comma (7,5 is 7.5).";
   const reading = /^-?\d+(\.\d+)?$/u.test(plain) ? "Did you mean " + plain + (unit === "" ? "" : " " + unit) + "? " : "";
   return number + " mixes a decimal point and a comma. " + reading + "Write one decimal mark only (a point, as in 7.5, or a comma, as in 7,5) and no thousands separators.";
 }

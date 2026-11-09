@@ -20,6 +20,8 @@ export interface AutoConstraintInput {
   /** The sketch before the new shape was added. */
   readonly sketch: WorkbenchSketch;
   readonly newId: () => string;
+  /** The new shape is an arc whose stored mid is the middle of its sweep (a half-circle slot cap): a point placed there is joined to that exact point, not just put on the arc. */
+  readonly exactArcMid?: boolean;
 }
 
 const SAME = 1e-7;
@@ -43,7 +45,7 @@ function circleThrough(a: Vec2, b: Vec2, c: Vec2): { readonly center: Vec2; read
 }
 
 /** Where a defining point of the entity is, if it has that point. */
-function refLocation(entity: SketchEntity, ref: SketchPointRef): Vec2 | undefined {
+export function refLocation(entity: SketchEntity, ref: SketchPointRef): Vec2 | undefined {
   switch (entity.kind) {
     case "line": return ref === "start" ? entity.start : ref === "end" ? entity.end : ref === "mid" ? [(entity.start[0] + entity.end[0]) / 2, (entity.start[1] + entity.end[1]) / 2] : undefined;
     case "arc":
@@ -64,7 +66,7 @@ function refLocation(entity: SketchEntity, ref: SketchPointRef): Vec2 | undefine
 }
 
 /** The defining point of an entity at a position, in the order centre, ends, corners. A line's middle is not a placed point. */
-function refAt(entity: SketchEntity, point: Vec2): SketchPointRef | undefined {
+export function refAt(entity: SketchEntity, point: Vec2): SketchPointRef | undefined {
   const order: readonly SketchPointRef[] = ["center", "start", "end", "self", "corner-0", "corner-1", "corner-2", "corner-3", "mid"];
   for (const ref of order) {
     if (entity.kind === "line" && ref === "mid") continue;
@@ -76,7 +78,7 @@ function refAt(entity: SketchEntity, point: Vec2): SketchPointRef | undefined {
 }
 
 /** The defining point an inference landed on in an existing entity, if the live solver can move it. */
-function pointRefOf(entity: SketchEntity, candidate: Pick<InferenceCandidate, "selector" | "point">): SketchPointRef | undefined {
+export function pointRefOf(entity: SketchEntity, candidate: Pick<InferenceCandidate, "selector" | "point">): SketchPointRef | undefined {
   const selector: InferenceSelector | undefined = candidate.selector;
   let ref: SketchPointRef | undefined;
   if (entity.kind === "line") ref = selector === "start" ? "start" : selector === "end" ? "end" : selector === "mid" ? "mid" : undefined;
@@ -181,7 +183,7 @@ export function autoConstraintsFor(input: AutoConstraintInput): readonly Workben
     const inference = placed[index];
     const primary = inference?.primary;
     if (ownRef === undefined || inference === undefined) return;
-    const throughPoint = isArcMid(entity, ownRef);
+    const throughPoint = input.exactArcMid !== true && isArcMid(entity, ownRef);
     if (primary?.kind === "origin" && primary.entityId === undefined) {
       add(throughPoint ? { kind: "coincident", entityIds: [SKETCH_ORIGIN_ID, entity.id], points: ["self", "curve"] } : { kind: "coincident", entityIds: [SKETCH_ORIGIN_ID, entity.id], points: ["self", ownRef] });
       return;

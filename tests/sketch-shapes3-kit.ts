@@ -67,17 +67,17 @@ export function tangencyProblem(sketch: WorkbenchSketch): string | undefined {
 }
 
 /** Whether the project is still one closed outline with every Coincident joint closed and every Tangent relation tangent. */
-export function wholeProblem(project: WorkbenchProject, profiles: number | null = 1): string | undefined {
+export function wholeProblem(project: WorkbenchProject, profiles: number | null = 1, tangency = true): string | undefined {
   const count = detectSketchProfiles(project.sketch).length;
   if (profiles !== null && count !== profiles) return `${count} profiles (expected ${profiles})`;
   const gap = worstJointGap(project.sketch);
   if (gap > 1e-6) return `a joint is open by ${gap.toExponential(2)} mm`;
-  return tangencyProblem(project.sketch);
+  return tangency ? tangencyProblem(project.sketch) : undefined;
 }
 
 /** Every dimension edit and every handle drag of a project: each accepted one must leave it whole. Returns the first problem. */
 /** `dragProfiles` is the profile count required after a drag (null: not checked, for outlines a big drag can legitimately make cross themselves). */
-export function stressProblem(project: WorkbenchProject, profiles = 1, dragProfiles: number | null = profiles): string | undefined {
+export function stressProblem(project: WorkbenchProject, profiles = 1, dragProfiles: number | null = profiles, dragTangency = true): string | undefined {
   const problem0 = wholeProblem(project, profiles);
   if (problem0 !== undefined) return `as built: ${problem0}`;
   for (const entity of project.sketch.entities) {
@@ -102,7 +102,7 @@ export function stressProblem(project: WorkbenchProject, profiles = 1, dragProfi
     for (const delta of [[2.5, -1.5], [-3, 2], [0.5, 4]] as const) {
       const result = dragAndCommit(project, grab.entityId, grab.handle, grab.point, [grab.point[0] + delta[0], grab.point[1] + delta[1]]);
       if (!result.ok) continue;
-      const problem = wholeProblem(result.project, dragProfiles);
+      const problem = wholeProblem(result.project, dragProfiles, dragTangency);
       if (problem !== undefined) return `after dragging ${grab.label} of ${grab.entityId} by ${delta.join(",")}: ${problem}`;
     }
   }
@@ -209,4 +209,42 @@ export function typedLineChain(project: WorkbenchProject, steps: readonly TypedS
     previous = { point: found.point, inference: { point: found.point, primary: { kind: "endpoint", point: found.point, entityId: id, selector: "end", distanceMm: 0 } } };
   }
   return { project: current, ids };
+}
+
+// ---------------------------------------------------------------- drawing a whole shape the way the canvas does
+
+import { DEFAULT_CURVE_TOOL_OPTIONS, buildCurveTool, isFixedCurveTool } from "../packages/workbench-sketch/src/curve-tools.js";
+import { buildPolygonByMode, polygonCentreRelations } from "../packages/workbench-sketch/src/polygon-modes.js";
+import { buildSlot, buildSlotOverall } from "../packages/workbench-sketch/src/shapes.js";
+import { shapeSnapRelations } from "../packages/workbench-sketch/src/shape-snap-relations.js";
+import { typedShapeIntent } from "../packages/workbench-sketch/src/typed-shape-intent.js";
+import type { PolygonMode } from "../packages/workbench-sketch/src/regular-polygon.js";
+
+export interface DrawnShape {
+  readonly shape: SketchShape;
+  readonly extra: readonly WorkbenchSketchConstraint[];
+  readonly placed: readonly PlacedPointInference[];
+  readonly points: readonly Vec2[];
+  readonly project: WorkbenchProject;
+}
+
+/** Infers every pointer, builds the shape with its tool, adds the snap and typed-size relations and applies the whole thing as one edit. */
+export function drawShape(tool: SketchTool, project: WorkbenchProject, pointers: readonly Vec2[], options: { readonly polygonMode?: PolygonMode; readonly sides?: number; readonly typed?: DynamicValues; readonly tolerance?: number } = {}): DrawnShape {
+  const { points, placed } = inferPlaced(tool, project, pointers, options.tolerance === undefined ? {} : { tolerance: options.tolerance });
+  const ids = shapeIds();
+  let built;
+  if (tool === "polygon") built = buildPolygonByMode(points[0]!, points[1]!, options.sides ?? 6, options.polygonMode ?? "inscribed", ids);
+  else if (tool === "slot") built = buildSlot(points[0]!, points[1]!, points[2]!, ids);
+  else if (tool === "slot-straight") built = buildSlotOverall(points[0]!, points[1]!, points[2]!, ids);
+  else if (isFixedCurveTool(tool)) built = buildCurveTool(tool, points, DEFAULT_CURVE_TOOL_OPTIONS, ids);
+  else throw new Error(`${tool} is not a shape tool`);
+  if (!built.ok) throw new Error(`the ${tool} did not build: ${built.diagnostics[0]?.message}`);
+  const polygonMode = options.polygonMode ?? "inscribed";
+  const centre = tool === "polygon" ? polygonCentreRelations(built.value, polygonMode, placed, project.sketch, autoId) : [];
+  const snaps = shapeSnapRelations({ tool, shape: built.value, placed, sketch: project.sketch, newId: autoId, ...(tool === "polygon" && polygonMode !== "edge" ? { skip: new Set([0]) } : {}) });
+  const typed = typedShapeIntent({ tool, shape: built.value, typed: options.typed ?? {}, newId: autoId });
+  const extra = [...centre, ...snaps, ...typed];
+  const added = tryAdd(project, { entities: built.value.entities, constraints: [...built.value.constraints, ...extra] });
+  if (!added.ok) throw new Error(`the ${tool} and its relations were refused: ${added.message}`);
+  return { shape: built.value, extra, placed, points, project: added.project };
 }
