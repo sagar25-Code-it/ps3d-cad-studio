@@ -68,13 +68,16 @@ export const sketchEditCornerTests: readonly TestCase[] = [
       const project = projectWith([rect("r", [0, 0], 20, 10)], [con("w", "distance", ["r"], { valueMm: 20, dimension: "width" })]);
       const rounded = applyOk(project, filletCorners(ctx(project), ids("r"), 2));
       deepProblems(rounded);
-      equal(rounded.sketch.entities.length, 8, "four lines and four arcs");
+      equal(rounded.sketch.entities.filter((entity) => entity.kind === "line" || entity.kind === "arc").length, 8, "four lines and four arcs");
+      equal(rounded.sketch.entities.filter((entity) => entity.kind === "point" && entity.construction).length, 2, "two virtual corners keep the width dimension (wave 3: the part keeps its size)");
       equal(relationsOf(rounded, "tangent").length, 8, "every arc end is tangent");
       equal(relationsOf(rounded, "radius").length, 1, "one radius dimension drives the corner size");
       equal(relationsOf(rounded, "equal").length, 3, "the other three arcs are equal to it");
       equal(relationsOf(rounded, "horizontal").length, 2, "the top and bottom stay horizontal");
       equal(relationsOf(rounded, "vertical").length, 2, "the sides stay vertical");
-      equal(relationsOf(rounded, "distance").length, 0, "the stale width dimension is removed, not left holding the old 20");
+      const widths = relationsOf(rounded, "distance");
+      equal(widths.length, 1, "the width dimension is kept, as a distance between the two virtual corners, instead of being removed");
+      assert(widths[0]!.dimension === "aligned" && widths[0]!.valueMm === 20, "it still reads 20");
       const rotated = projectWith([rect("r", [3, 4], 20, 10, 30)]);
       const turned = applyOk(rotated, chamferCorners(ctx(rotated), ids("r"), 2));
       deepProblems(turned);

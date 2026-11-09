@@ -70,6 +70,7 @@ import { MAX_BODY_MESH_NUMBERS } from "./envelope-limits.js";
 import { firstNonFinitePath, MODEL_ENVELOPE, rebuildResultProblem, sketchEntityProblem, solidEnvelopeProblem, type EnvelopeProblem } from "./envelope.js";
 import { AUDIT_KEEP_FULL, compactAudit } from "./audit-archive.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
+import { lostDimensionsNote } from "./sketch-edit-summary.js";
 import { applySketchObjectsEdit, explicitObjectIds, reconcileSketchObjects, validSketchObjectsEdit } from "./sketch-objects.js";
 import { unpackMeshes } from "./mesh-pack.js";
 import { conventionFields } from "./plane-convention.js";
@@ -1488,7 +1489,9 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   const droppedNote = gone === 0 ? "" : ` Removed ${gone} constraint${gone === 1 ? "" : "s"}.`;
   // The audit entry holds at most 240 characters of summary and 201 IDs; a big edit (a rounded rectangle, a pattern) must not trip that.
   const unsolvedNote = solved.unsolved.length === 0 ? "" : ` Recorded, not solved: ${[...new Set(solved.unsolved.map((entry) => entry.reason))].join(" ")}`;
-  const summary = `${operation.label}.${droppedNote}${unsolvedNote}`;
+  // A dimension the edit lets go of is named, never dropped silently.
+  const lostNote = lostDimensionsNote(sketch, [...dropped, ...sketch.constraints.filter((constraint) => removedConstraints.has(constraint.id))], operation.addConstraints, removed);
+  const summary = `${operation.label}.${droppedNote}${lostNote}${unsolvedNote}`;
   return changed(
     { ...project, sketch: next },
     [...removed, ...updates.keys(), ...addedIds, ...operation.addConstraints.map((constraint) => constraint.id)].slice(0, 200),

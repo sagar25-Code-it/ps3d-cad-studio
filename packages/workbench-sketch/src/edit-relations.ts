@@ -16,6 +16,7 @@ import { arcShape, isDimensionConstraint, measureDimensionConstraint } from "../
 import { applyPlanToSketch, pinnedAmong } from "./sketch-clone.js";
 import { editPlan, type SketchEditContext, type SketchEditPlan, type SketchEditResult } from "./edit-tools.js";
 import { pruneRedundantAdditions } from "./edit-prune.js";
+import { patternCopyProblem } from "./pattern-guard.js";
 
 /**
  * What every sketch edit does around its geometry: it builds the relations the result should carry (joints, tangents, radius
@@ -307,6 +308,8 @@ export function finishPlan(context: SketchEditContext, plan: SketchEditPlan, opt
     const before = byId.get(entity.id);
     return before === undefined || !sameEntity(before, entity);
   });
+  const copyProblem = patternCopyProblem(sketch, { ...plan, updateEntities: updates }, (id) => nameOf(id, sketch));
+  if (copyProblem !== undefined) return failure("INVALID_OPERATION", copyProblem, updates.map((entity) => entity.id), "Edit the source curves of the pattern, or use Dissolve on the pattern, then repeat the edit.");
   const moved = [...updates.map((entity) => entity.id), ...plan.removeEntityIds];
   const pinned = pinnedAmong(sketch, moved).filter((id) => !(options.allowPinned ?? []).includes(id));
   if (pinned.length > 0) {

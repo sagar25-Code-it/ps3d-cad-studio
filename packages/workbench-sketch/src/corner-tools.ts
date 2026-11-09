@@ -1,6 +1,7 @@
 import { failure, type SketchEntity, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
 import { entityPoints } from "./index.js";
 import type { SketchEditContext, SketchEditPlan, SketchEditResult } from "./edit-tools.js";
+import { keepRelationsAtCorner, carryRectangleRelations } from "./corner-keep.js";
 import { carriedRelations, diffPlan, finishPlan, jointRelation, pairRelation, radiusDimensionRelation, sketchAfter } from "./edit-relations.js";
 
 /**
@@ -494,14 +495,24 @@ function planCorner(context: SketchEditContext, firstId: string, secondId: strin
   };
   handle(cutA, firstEdge);
   handle(cutB, secondEdge);
+  // A fillet or chamfer keeps the part's dimensions, its anchor and the curves joined at the corner by leaving a virtual sharp at the old corner.
+  let keptRelations = 0;
+  const releasedRelations: string[] = [];
+  if (spec.kind !== "corner" && !cutA.interior && !cutB.interior) {
+    const keep = keepRelationsAtCorner(context, sketch, [{ id: first.id, end: cutA.cutEnd }, { id: second.id, end: cutB.cutEnd }], meeting);
+    additions.push(...keep.addEntities);
+    constraints.push(...keep.addConstraints);
+    releasedRelations.push(...keep.removeConstraintIds);
+    keptRelations = keep.kept;
+  }
   if (spec.kind === "corner") {
     const already = sketch.constraints.some((constraint) => constraint.kind === "coincident" && constraint.suppressed !== true && constraint.entityIds.includes(first.id) && constraint.entityIds.includes(second.id));
     if (!already) constraints.push(jointRelation(context, first.id, cutA.cutEnd, second.id, cutB.cutEnd));
     const unchanged = updates.every((entity, index) => JSON.stringify(entity) === JSON.stringify(index === 0 ? first : second));
     if (unchanged) return "The two curves already meet at that corner.";
   }
-  const note = leftOver > 0 ? `; ${leftOver} crossing piece${leftOver === 1 ? "" : "s"} kept` : "";
-  return { plan: { label: `${label}${note}`, removeEntityIds: removals, updateEntities: updates, addEntities: additions, addConstraints: constraints }, madeId };
+  const note = (leftOver > 0 ? `; ${leftOver} crossing piece${leftOver === 1 ? "" : "s"} kept` : "") + (keptRelations > 0 ? `; ${keptRelations} relation${keptRelations === 1 ? "" : "s"} kept at the corner` : "");
+  return { plan: { label: `${label}${note}`, removeEntityIds: removals, updateEntities: updates, addEntities: additions, addConstraints: constraints, ...(releasedRelations.length === 0 ? {} : { removeConstraintIds: releasedRelations }) }, madeId };
 }
 
 /** One corner between two curves, settled against the sketch's relations. */
@@ -541,7 +552,9 @@ export function explodeRectangle(context: SketchEditContext, rectangle: Rectangl
     const target = constraint.dimension === "height" ? lineIds[1]! : lineIds[0]!;
     constraints.push({ id: context.newId("constraint"), kind: "distance", entityIds: [target], valueMm: constraint.valueMm, dimension: "length" });
   }
-  return { plan: { label: "Explode rectangle", removeEntityIds: [rectangle.id], updateEntities: [], addEntities: lines, addConstraints: constraints }, lineIds };
+  // The other relations of the rectangle (a corner pinned to the origin, a line joined to a corner, a hole measured from the centre) move onto the sides.
+  const carried = carryRectangleRelations(context, context.sketch, rectangle, { cornerLine: lineIds, lines: lines as readonly Line[] });
+  return { plan: { label: "Explode rectangle", removeEntityIds: [rectangle.id], updateEntities: [], addEntities: [...lines, ...carried.addEntities], addConstraints: [...constraints, ...carried.addConstraints] }, lineIds };
 }
 
 // ---------------------------------------------------------------------------------------------

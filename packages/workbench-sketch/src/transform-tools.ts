@@ -155,7 +155,8 @@ export function mirrorEntities(context: SketchEditContext, ids: readonly string[
   if (typeof cloned === "string") return reject(cloned);
   // About a line axis every line, circle and point copy is tied to its source by a symmetry relation, which already fixes its size and its
   // joints. Copying the source's dimensions and joints as well would make the sketch over-defined: editing the source dimension would
-  // then contradict the copy's own value. (An arc, rectangle, ellipse or spline copy keeps its relations: symmetry does not solve those.)
+  // then contradict the copy's own value. Symmetry solves every kind of copy (arcs by their ends and middle, rectangles by centre, size and a corner,
+  // ellipses by centre, size and turn, splines point by point), so a mirrored half-profile keeps its joints and follows its source.
   const determined = new Set(axisEntity === undefined ? [] : sources.filter((source) => SYMMETRY_DETERMINED_KINDS.has(source.kind)).map((source) => cloned.idMap.get(source.id)!));
   const constraints = cloned.constraints.filter((relation) => relation.entityIds.length === 0 || !relation.entityIds.every((id) => determined.has(id)));
   if (axisEntity !== undefined) {

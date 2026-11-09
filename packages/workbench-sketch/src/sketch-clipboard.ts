@@ -4,14 +4,13 @@ import {
   failure,
   MODEL_ENVELOPE,
   WORKBENCH_LIMITS,
-  type SketchConstraintKind,
   type SketchEntity,
-  type SketchPointRef,
   type Vec2,
   type WorkbenchResult,
   type WorkbenchSketch,
   type WorkbenchSketchConstraint
 } from "../../workbench-core/src/index.js";
+import { isValidSketchConstraint } from "../../workbench-core/src/validation.js";
 import { entityExtents } from "./index.js";
 import { editPlan, type SketchEditContext, type SketchEditPlan, type SketchEditResult } from "./edit-tools.js";
 import { cloneWithRelations, internalRelations, planHolds } from "./sketch-clone.js";
@@ -111,11 +110,6 @@ export function serializeClipboard(clipboard: SketchClipboard): string {
   return JSON.stringify(clipboard);
 }
 
-const CONSTRAINT_KINDS: readonly SketchConstraintKind[] = [
-  "horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed",
-  "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"
-];
-const POINT_REFS: readonly SketchPointRef[] = ["start", "end", "mid", "center", "self"];
 /** The project's own coordinate limit: nothing the sketch would refuse can travel through the clipboard. */
 const MAX_COORDINATE = MODEL_ENVELOPE.maxSketchCoordinateMm;
 
@@ -148,30 +142,16 @@ function cleanEntity(value: unknown): SketchEntity | undefined {
 }
 
 /**
- * A clean copy of a valid relation, or undefined. Every relation kind round-trips, with its value, angle, ratio, driven flag and pierce
- * reference; a parameter expression is dropped (its parameters belong to the project it came from), keeping the number it last gave.
+ * A clean copy of a valid relation, or undefined. A relation is read with exactly the rule the project applies to its own sketch relations,
+ * so every kind, dimension name (diameter, aligned, horizontal, vertical, point-line, line-line, major and minor radius, ...), point reference
+ * (curve, corner-N, ...), value, angle, ratio, driven flag and pierce reference round-trips; a parameter expression is dropped (its parameters
+ * belong to the project it came from), keeping the number it last gave.
  */
 function cleanConstraint(value: unknown, entityIds: ReadonlySet<string>): WorkbenchSketchConstraint | undefined {
-  if (!isRecord(value) || typeof value.id !== "string" || value.id.length === 0 || value.id.length > 128) return undefined;
-  if (!CONSTRAINT_KINDS.includes(value.kind as SketchConstraintKind)) return undefined;
-  if (!onlyKeys(value, ["id", "kind", "entityIds", "points", "valueMm", "dimension", "valueDeg", "driven", "pierce", "ratio", "expression", "suppressed"])) return undefined;
-  const maxEntities = value.kind === "perimeter" ? 64 : value.kind === "symmetry" || value.kind === "refraction" ? 3 : 2;
-  if (!Array.isArray(value.entityIds) || value.entityIds.length === 0 || value.entityIds.length > maxEntities || !value.entityIds.every((id) => typeof id === "string" && entityIds.has(id))) return undefined;
-  if (value.points !== undefined && !(Array.isArray(value.points) && value.points.length <= 4 && value.points.every((ref) => POINT_REFS.includes(ref as SketchPointRef)))) return undefined;
-  if (value.valueMm !== undefined && !finite(value.valueMm, 40_000)) return undefined;
-  if (value.valueDeg !== undefined && !(finite(value.valueDeg, 360) && value.valueDeg >= 0 && value.valueDeg < 360)) return undefined;
-  if (value.ratio !== undefined && !(finite(value.ratio, 20) && value.ratio >= 0.05)) return undefined;
-  if (value.dimension !== undefined && !["length", "width", "height", "radius"].includes(value.dimension as string)) return undefined;
-  if (value.driven !== undefined && typeof value.driven !== "boolean") return undefined;
-  if (value.suppressed !== undefined && typeof value.suppressed !== "boolean") return undefined;
-  if (value.expression !== undefined && typeof value.expression !== "string") return undefined;
-  if (value.pierce !== undefined) {
-    const pierce = value.pierce;
-    const ok = isRecord(pierce) && ((pierce.kind === "axis" && typeof pierce.axisId === "string" && onlyKeys(pierce, ["kind", "axisId"])) || (pierce.kind === "body-edge" && typeof pierce.bodyId === "string" && Number.isInteger(pierce.chain) && onlyKeys(pierce, ["kind", "bodyId", "chain"])));
-    if (!ok) return undefined;
-  }
-  const { expression: _expression, ...rest } = value;
-  return rest as unknown as WorkbenchSketchConstraint;
+  if (!isRecord(value)) return undefined;
+  const { expression, ...rest } = value;
+  if (expression !== undefined && typeof expression !== "string") return undefined;
+  return isValidSketchConstraint(rest, entityIds) && Array.isArray(rest.entityIds) && rest.entityIds.every((id) => typeof id === "string" && entityIds.has(id)) ? (rest as unknown as WorkbenchSketchConstraint) : undefined;
 }
 
 /** Reads clipboard text produced by `serializeClipboard`, refusing anything that is not exactly that. */

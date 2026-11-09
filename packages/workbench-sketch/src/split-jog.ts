@@ -9,6 +9,7 @@ import {
 import { entityPoints, sampleSpline } from "./index.js";
 import { pinnedAmong } from "./sketch-clone.js";
 import { finishPlan } from "./edit-relations.js";
+import { carryRectangleRelations } from "./corner-keep.js";
 import {
   arcEntity,
   arcFrame,
@@ -188,6 +189,16 @@ function splitLine(context: SketchEditContext, line: Line, pick: Vec2, boundarie
   });
 }
 
+/** Whether the line's end is joined (Coincident) to the other curve. */
+function touchesAtEnd(sketch: WorkbenchSketch, lineId: string, otherId: string | undefined): boolean {
+  if (otherId === undefined) return false;
+  return sketch.constraints.some((candidate) => {
+    if (candidate.kind !== "coincident" || candidate.suppressed === true || !candidate.entityIds.includes(lineId) || !candidate.entityIds.includes(otherId)) return false;
+    const index = candidate.entityIds.indexOf(lineId);
+    return candidate.points?.[index] === "end";
+  });
+}
+
 /** Which relations on a split line survive on its first piece, move to the second piece, or stop being true. */
 function migrateLineSplit(context: SketchEditContext, line: Line, secondId: string): { readonly add: WorkbenchSketchConstraint[]; readonly remove: string[]; readonly note: string } {
   const add: WorkbenchSketchConstraint[] = [];
@@ -201,6 +212,11 @@ function migrateLineSplit(context: SketchEditContext, line: Line, secondId: stri
     } else if (constraint.kind === "coincident" || constraint.kind === "midpoint") {
       if (ref === "end") { remove.push(constraint.id); add.push(repoint(context, constraint, line.id, secondId)); }
       else if (ref === "mid" || (constraint.kind === "midpoint" && index === 1)) { remove.push(constraint.id); dropped += 1; }
+    } else if (constraint.kind === "tangent" && touchesAtEnd(context.sketch, line.id, constraint.entityIds.find((id) => id !== line.id))) {
+      // The tangent is held where the line meets the curve: that is the end of the second piece now, so the tangency goes with it
+      // (left on the first piece it would only be a distance to the carrier line, which the solver cannot tell from a collinear joint).
+      remove.push(constraint.id);
+      add.push(repoint(context, constraint, line.id, secondId));
     } else if (constraint.kind === "equal" || constraint.kind === "distance" || constraint.kind === "symmetry") {
       remove.push(constraint.id);
       dropped += 1;
@@ -314,7 +330,9 @@ function splitRectangle(context: SketchEditContext, rectangle: Rectangle, pick: 
   if (t * length < MIN_PIECE_MM || (1 - t) * length < MIN_PIECE_MM) return reject("Pick a point between the corners of the rectangle side.", [rectangle.id]);
   const at: Vec2 = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
   const chain: Vec2[] = [];
+  const cornerAt: number[] = [];
   for (let index = 0; index < 4; index += 1) {
+    cornerAt[index] = chain.length;
     chain.push(corners[index]!);
     if (index === side) chain.push(at);
   }
@@ -336,11 +354,29 @@ function splitRectangle(context: SketchEditContext, rectangle: Rectangle, pick: 
     });
   }
   const carried = relationsOn(context.sketch, rectangle.id).filter((constraint) => constraint.kind === "fixed").flatMap((constraint) => lines.map((line) => repoint(context, constraint, rectangle.id, line.id)));
-  const lost = relationsOn(context.sketch, rectangle.id).filter((constraint) => constraint.kind !== "fixed").length;
+  // Width and height stay driven: the side that was split is measured between its two corners, the others by their line.
+  const cornerLine = cornerAt.map((index) => lines[index]!.id);
+  const sizes: WorkbenchSketchConstraint[] = [];
+  if (!pinnedRectangle) {
+    for (const constraint of relationsOn(context.sketch, rectangle.id)) {
+      if (constraint.kind !== "distance" || constraint.driven === true || constraint.suppressed === true || constraint.valueMm === undefined || constraint.entityIds[0] !== rectangle.id) continue;
+      if (constraint.dimension !== "width" && constraint.dimension !== "height") continue;
+      const sideIndex = constraint.dimension === "height" ? 1 : 0;
+      const keepExpression = constraint.expression === undefined ? {} : { expression: constraint.expression };
+      if (sideIndex === side) {
+        sizes.push({ id: context.newId("constraint"), kind: "distance", dimension: "aligned", entityIds: [cornerLine[sideIndex]!, cornerLine[(sideIndex + 1) % 4]!], points: ["start", "start"], valueMm: constraint.valueMm, ...keepExpression });
+      } else {
+        sizes.push({ id: context.newId("constraint"), kind: "distance", dimension: "length", entityIds: [cornerLine[sideIndex]!], valueMm: constraint.valueMm, ...keepExpression });
+      }
+    }
+  }
+  // A corner pinned to the origin, a line joined to a corner or a hole measured from the centre moves onto the sides.
+  const points = pinnedRectangle ? { addEntities: [] as SketchEntity[], addConstraints: [] as WorkbenchSketchConstraint[], lost: [] as WorkbenchSketchConstraint[] } : carryRectangleRelations(context, context.sketch, rectangle, { cornerLine, lines });
+  const lost = points.lost.length;
   return editPlan(`Split rectangle side at (${fmt(at[0])}, ${fmt(at[1])}); the rectangle is now ${lines.length} lines${lost === 0 ? "" : ` (${lost} rectangle relation${lost === 1 ? "" : "s"} removed)`}`, {
     removeEntityIds: [rectangle.id],
-    addEntities: lines,
-    addConstraints: [...constraints, ...carried]
+    addEntities: [...lines, ...points.addEntities],
+    addConstraints: [...constraints, ...carried, ...sizes, ...points.addConstraints]
   });
 }
 

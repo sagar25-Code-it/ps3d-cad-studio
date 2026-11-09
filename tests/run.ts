@@ -138,6 +138,11 @@ import { pipeline3TimelineTests } from "./pipeline3-timeline.test.js";
 import { pipeline3UnitTests } from "./pipeline3-units.test.js";
 import { pipeline3SweepPathTests } from "./pipeline3-sweep-path.test.js";
 import { pipeline3PlaneTests } from "./pipeline3-plane.test.js";
+import { sketchEdit3Tests, sketchEdit3RepairTests, sketchEdit3PatternTests, sketchEdit3SummaryTests } from "./sketch-edit3.test.js";
+import { sketchEdit3MirrorTests } from "./sketch-edit3-mirror.test.js";
+import { sketchEdit3ClipboardTests } from "./sketch-edit3-clipboard.test.js";
+import { sketchEdit3RedundancyTests } from "./sketch-edit3-redundancy.test.js";
+import { sketchEdit3OffsetTests } from "./sketch-edit3-offset.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import { regionWave3Tests } from "./region-wave3.test.js";
@@ -293,6 +298,14 @@ const tests: readonly TestCase[] = [
   ...pipeline3UnitTests,
   ...pipeline3SweepPathTests,
   ...pipeline3PlaneTests,
+  ...sketchEdit3Tests,
+  ...sketchEdit3RepairTests,
+  ...sketchEdit3PatternTests,
+  ...sketchEdit3SummaryTests,
+  ...sketchEdit3MirrorTests,
+  ...sketchEdit3ClipboardTests,
+  ...sketchEdit3RedundancyTests,
+  ...sketchEdit3OffsetTests,
 ];
 let failures = 0;
 

@@ -19,7 +19,7 @@ const MAX_ANALYSED_RELATIONS = 1_500;
 const MAX_ROUNDS = 6;
 
 /** Entity kinds whose copy is completely determined by a symmetry relation to its source (see constraintFit "symmetry"). */
-export const SYMMETRY_DETERMINED_KINDS: ReadonlySet<SketchEntity["kind"]> = new Set(["line", "circle", "point"]);
+export const SYMMETRY_DETERMINED_KINDS: ReadonlySet<SketchEntity["kind"]> = new Set(["line", "circle", "point", "arc", "rectangle", "ellipse", "spline"]);
 
 /** A one-entity size dimension (a line's length, a circle's or arc's radius or diameter, a rectangle's width or height). */
 export function isSizeDimension(constraint: WorkbenchSketchConstraint): boolean {
@@ -30,21 +30,14 @@ export function isSizeDimension(constraint: WorkbenchSketchConstraint): boolean 
 
 const MAX_CONFIRMATIONS = 40;
 
-/** The candidates whose removal leaves the sketch's rank (its number of independent equations) unchanged. */
-function confirmed(sketch: WorkbenchSketch, rank: number, candidates: readonly string[]): readonly string[] {
-  const rankWithout = (ids: ReadonlySet<string>): number | undefined => {
-    try {
-      return analyzeLiveSketch({ ...sketch, constraints: sketch.constraints.filter((constraint) => !ids.has(constraint.id)) }).rank;
-    } catch {
-      return undefined;
-    }
-  };
-  if (rankWithout(new Set(candidates)) === rank) return candidates;
-  const accepted: string[] = [];
-  for (const id of candidates.slice(0, MAX_CONFIRMATIONS)) {
-    if (rankWithout(new Set([...accepted, id])) === rank) accepted.push(id);
+/** The rank of the sketch with the given relations removed, or undefined when it cannot be analysed. */
+function confirmedRank(sketch: WorkbenchSketch, removed: readonly string[]): number | undefined {
+  const ids = new Set(removed);
+  try {
+    return analyzeLiveSketch({ ...sketch, constraints: sketch.constraints.filter((constraint) => !ids.has(constraint.id)) }).rank;
+  } catch {
+    return undefined;
   }
-  return accepted;
 }
 
 /** Removes from `plan.addConstraints` every relation the analysis shows the rest of the sketch already implies. Returns the plan unchanged when nothing is redundant. */
@@ -62,21 +55,27 @@ export function pruneRedundantAdditions(sketch: WorkbenchSketch, plan: SketchEdi
     }
     if (analysis.redundant.length === 0) return current;
     const added = new Map(current.addConstraints.map((constraint) => [constraint.id, constraint] as const));
-    const drop = new Set<string>();
+    // Each redundant set names the relation the others imply, but when that relation carries equations nothing else supplies, dropping it would
+    // remove freedom (the closed loop of an offset slot: a joint is partly implied). Another relation of the set that is wholly implied (the
+    // offset line's Parallel next to its Concentric arcs and joints) is dropped instead.
+    const accepted: string[] = [];
+    const rankWith = (ids: readonly string[]): number | undefined => confirmedRank(applied.sketch, ids);
+    let budget = MAX_CONFIRMATIONS;
     for (const set of analysis.redundant) {
-      if (set.constraintIds.some((id) => drop.has(id))) continue;
+      if (set.constraintIds.some((id) => accepted.includes(id))) continue;
       const candidates = set.constraintIds.filter((id) => {
         const constraint = added.get(id);
         return constraint !== undefined && !NEVER_PRUNED.has(constraint.kind);
       });
       if (candidates.length === 0) continue;
       const implied = set.impliedConstraintId;
-      drop.add(implied !== undefined && candidates.includes(implied) ? implied : candidates[candidates.length - 1]!);
+      const order = [...(implied !== undefined && candidates.includes(implied) ? [implied] : []), ...[...candidates].reverse().filter((id) => id !== implied)];
+      for (const id of order) {
+        if (budget <= 0) break;
+        budget -= 1;
+        if (rankWith([...accepted, id]) === analysis.rank) { accepted.push(id); break; }
+      }
     }
-    if (drop.size === 0) return current;
-    // The analysis calls a relation redundant when some of its equations are implied (Collinear next to a Coincident joint still removes
-    // the direction); only a relation whose removal leaves the rank of the whole sketch unchanged is really dropped.
-    const accepted = confirmed(applied.sketch, analysis.rank, [...drop]);
     if (accepted.length === 0) return current;
     const gone = new Set(accepted);
     current = { ...current, addConstraints: current.addConstraints.filter((constraint) => !gone.has(constraint.id)) };

@@ -169,9 +169,9 @@ export function constraintFit(kind: SketchConstraintKind, kinds: readonly (Sketc
     case "symmetry":
       if (kinds.length < 3) return no("Symmetric needs two entities and an axis line (select the axis last).");
       if (kinds.length > 3 || !lineLike(third)) return no("Symmetric needs an axis line as the last selection.");
-      return (first === "line" && second === "line") || (first === "circle" && second === "circle") || (first === "point" && second === "point")
+      return first === second && (first === "line" || first === "circle" || first === "point" || first === "arc" || first === "rectangle" || first === "ellipse" || first === "spline")
         ? FITS
-        : no("Symmetric solves two lines, two circles or two points about a line axis; arcs and mixed pairs are not supported.");
+        : no("Symmetric solves two curves of the same kind (lines, circles, arcs, rectangles, ellipses, splines or points) about a line axis; mixed pairs are not supported.");
     default:
       return no("This relation is not supported.");
   }

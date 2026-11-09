@@ -1,4 +1,5 @@
 import { arcShape } from "./sketch-measure.js";
+import { applySymmetryExtras } from "./sketch-solve-mirror.js";
 import { adaptSplineEnd, splineEndFrame, type SplinePoint } from "./spline-curvature.js";
 import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 
@@ -7,6 +8,7 @@ import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSket
  * model (rectangles, ellipses, fit-point splines) or need a closed-form step of their own:
  *
  *  - Smooth (G2): a spline end that continues a line, arc or spline with matching position, tangent and curvature.
+ *  - Symmetric, for a spline and its image, and for the turn of an ellipse and its image (sketch-solve-mirror.ts).
  *
  * (Refraction, a line bent at an interface by Snell's law, used to be applied here after the solve and silently overrode the other
  * relations; it is now one of the simultaneous solver's relations. See sketch-refraction.ts.) Smooth runs on the geometry the analytic
@@ -33,7 +35,7 @@ const JOIN_TOLERANCE_MM = 1e-6;
 
 type Line = Extract<SketchEntity, { kind: "line" }>;
 
-export function applyExtraConstraints(sketch: Pick<WorkbenchSketch, "entities" | "constraints">, inComponent: (id: string) => boolean): ExtraPassResult {
+export function applyExtraConstraints(sketch: Pick<WorkbenchSketch, "entities" | "constraints">, inComponent: (id: string) => boolean, focus: ReadonlySet<string> = new Set()): ExtraPassResult {
   const entities = new Map(sketch.entities.map((entity) => [entity.id, entity] as const));
   const moved = new Set<string>();
   const notes: string[] = [];
@@ -46,6 +48,12 @@ export function applyExtraConstraints(sketch: Pick<WorkbenchSketch, "entities" |
   };
 
   for (const constraint of active) {
+    if (constraint.kind === "symmetry") {
+      const outcome = applySymmetryExtras(constraint, entities, focus);
+      if (typeof outcome === "string") unsolved.push({ constraintId: constraint.id, reason: outcome });
+      else if (outcome !== undefined) { put(outcome.entity); notes.push(outcome.note); }
+      continue;
+    }
     if (constraint.kind === "smooth") {
       const outcome = applySmooth(constraint, entities, active);
       if (typeof outcome === "string") unsolved.push({ constraintId: constraint.id, reason: outcome });

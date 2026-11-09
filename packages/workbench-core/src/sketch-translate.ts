@@ -277,6 +277,16 @@ function reflectPoint(point: Vec2, axis: { readonly start: Vec2; readonly end: V
   return [2 * foot[0] - point[0], 2 * foot[1] - point[1]];
 }
 
+/** Corner `index` (0 to 3, counter-clockwise from the lower left before the turn) of a rectangle entity. */
+function rectangleCorner(rectangle: Extract<SketchEntity, { kind: "rectangle" }>, index: number): Vec2 {
+  const sx = index === 0 || index === 3 ? -0.5 : 0.5;
+  const sy = index === 0 || index === 1 ? -0.5 : 0.5;
+  const radians = (rectangle.rotationDeg * Math.PI) / 180;
+  const dx = sx * rectangle.widthMm;
+  const dy = sy * rectangle.heightMm;
+  return [rectangle.center[0] + dx * Math.cos(radians) - dy * Math.sin(radians), rectangle.center[1] + dx * Math.sin(radians) + dy * Math.cos(radians)];
+}
+
 const distanceSquared = (a: Vec2, b: Vec2): number => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
 
 function translateConstraint(constraint: WorkbenchSketchConstraint, entities: ReadonlyMap<string, SketchEntity>, present: ReadonlySet<string>): Translated {
@@ -382,6 +392,8 @@ function translateSymmetry(constraint: WorkbenchSketchConstraint, entities: Read
   const b = entities.get(second);
   const axisEntity = entities.get(axisId);
   if (a === undefined || b === undefined || (axisEntity?.kind !== "line" && !isSketchDatumEntityId(axisId))) return none("Symmetric needs an axis line as the last selection.");
+  // A spline is not an analytic curve: the image of a spline follows its source in the closed-form pass after the solve (sketch-solve-mirror.ts).
+  if (a.kind === "spline" && b.kind === "spline") return NOTHING;
   if (![first, second, axisId].every((id) => isSketchDatumEntityId(id) || present.has(id))) return none("The mirrored entities are not solved by the live solver.");
   const axis: { readonly start: Vec2; readonly end: Vec2 } = axisEntity?.kind === "line" ? axisEntity : axisGeometry(axisId);
   const axisRef = lineRef(axisId);
@@ -405,7 +417,45 @@ function translateSymmetry(constraint: WorkbenchSketchConstraint, entities: Read
     };
   }
   if (a.kind === "point" && b.kind === "point") return { constraints: [mirror(constraint.id, point(first, "self"), point(second, "self"))], dimensions: [] };
-  return none("Symmetric solves two lines, two circles or two points about a line axis; arcs and mixed pairs are not supported.");
+  if (a.kind === "arc" && b.kind === "arc") {
+    // Both ends and the middle pin the image arc exactly; the ends are paired the way they are nearer once mirrored, so a drawn image keeps its direction.
+    const straight = distanceSquared(reflectPoint(a.start, axis), b.start) + distanceSquared(reflectPoint(a.end, axis), b.end);
+    const crossed = distanceSquared(reflectPoint(a.start, axis), b.end) + distanceSquared(reflectPoint(a.end, axis), b.start);
+    const startMate: "start" | "end" = straight <= crossed ? "start" : "end";
+    const endMate: "start" | "end" = startMate === "start" ? "end" : "start";
+    return {
+      constraints: [
+        mirror(`${constraint.id}#start`, point(first, "start"), point(second, startMate)),
+        mirror(`${constraint.id}#end`, point(first, "end"), point(second, endMate)),
+        mirror(`${constraint.id}#mid`, point(first, "midpoint"), point(second, "midpoint"))
+      ],
+      dimensions: []
+    };
+  }
+  if (a.kind === "rectangle" && b.kind === "rectangle") {
+    // Centre, size and the corner that lands on the image's nearest corner fix the image rectangle, turn included.
+    const target = reflectPoint(rectangleCorner(a, 0), axis);
+    const nearest = [0, 1, 2, 3].map((index) => ({ index, gap: distanceSquared(target, rectangleCorner(b, index)) })).sort((x, y) => x.gap - y.gap)[0]!.index;
+    return {
+      constraints: [
+        mirror(`${constraint.id}#centre`, point(first, "center"), point(second, "center")),
+        { id: `${constraint.id}#size`, suppressed: false, kind: "equal", first: whole(first), second: whole(second) },
+        mirror(`${constraint.id}#corner`, point(first, "corner-0"), point(second, `corner-${nearest}` as GeometryReference["selector"]))
+      ],
+      dimensions: []
+    };
+  }
+  if (a.kind === "ellipse" && b.kind === "ellipse") {
+    // Centre and size here; the turn of the image follows its source in the closed-form pass after the solve.
+    return {
+      constraints: [
+        mirror(`${constraint.id}#centre`, point(first, "center"), point(second, "center")),
+        { id: `${constraint.id}#size`, suppressed: false, kind: "equal", first: whole(first), second: whole(second) }
+      ],
+      dimensions: []
+    };
+  }
+  return none("Symmetric solves two lines, circles, arcs, rectangles, ellipses, splines or points about a line axis; mixed pairs are not supported.");
 }
 
 /** Strips the part suffix a decomposed relation carries, giving the ID of the constraint the user made. */
@@ -490,7 +540,7 @@ export function translateSketch(sketch: WorkbenchSketch, options: TranslateOptio
  * A live arc runs start, middle, end in the order it was drawn; the solver's arc always runs counter-clockwise. For an arc drawn
  * clockwise the solver's start is the live end, so a reference to one of its ends has to name the other one.
  */
-function swapReversedArcEnds<T>(value: T, reversedArcs: ReadonlySet<string>): T {
+export function swapReversedArcEnds<T>(value: T, reversedArcs: ReadonlySet<string>): T {
   if (Array.isArray(value)) return value.map((item) => swapReversedArcEnds(item, reversedArcs)) as unknown as T;
   if (typeof value !== "object" || value === null) return value;
   const record = value as Record<string, unknown>;
