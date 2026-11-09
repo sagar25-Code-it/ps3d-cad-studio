@@ -536,7 +536,7 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
     }
     issues.push({
       id: `region:${problem.code}:${[...problem.entityIds].sort().join("|")}:${problem.at === undefined ? "" : `${fmt(problem.at[0])},${fmt(problem.at[1])}`}`,
-      category: "region", severity: problem.severity, title: problem.code === "crossing" ? "Curves cross: the regions are split" : problem.code === "junction" ? "Curves meet at a junction" : problem.code === "overlap" ? "Curves overlap" : problem.code === "self-crossing" ? "A curve crosses itself" : problem.code === "short" ? "A curve stops short of another" : "A curve is ignored",
+      category: "region", severity: problem.severity, title: problem.code === "crossing" ? "Curves cross: the regions are split" : problem.code === "junction" ? "Curves meet at a junction" : problem.code === "overlap" ? "Curves overlap" : problem.code === "near-meet" ? "Curves nearly meet: intersections were merged" : problem.code === "self-crossing" ? "A curve crosses itself" : problem.code === "short" ? "A curve stops short of another" : "A curve is ignored",
       detail: problem.message, entityIds: problem.entityIds, constraintIds: [], fixes: []
     });
   }

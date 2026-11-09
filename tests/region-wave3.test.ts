@@ -1,9 +1,11 @@
 import { rebuildSolidFeature } from "../apps/studio-web/src/design-regeneration.js";
 import { triangulateLoops } from "../packages/occt-kernel-adapter/src/polygon.js";
 import { detectSketchProfiles, type SketchProfile } from "../packages/workbench-sketch/src/index.js";
+import { analyzeSketch } from "../packages/workbench-sketch/src/sketch-repair.js";
+import * as editKit from "./sketch-edit-kit.js";
 import type { SketchEntity } from "../packages/workbench-core/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
-import { circ, rect, sketchFeatureOf, sketchOf, solidFeature } from "./region-wave2-kit.js";
+import { circ, line, rect, sketchFeatureOf, sketchOf, solidFeature } from "./region-wave2-kit.js";
 import { meshReport } from "./region-wave3-kit.js";
 import { applyWorkbenchOperation, designOf, solidEnvelopeProblem, type DesignSketchFeature, type GeneralSolidBody, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { commitWorkingSketchAtomically } from "../apps/studio-web/src/sketch-session.js";
@@ -296,6 +298,34 @@ export const regionWave3Tests: readonly TestCase[] = [
       const flatProfile = [...detectSketchProfiles(flat.sketch)].sort((a: SketchProfile, b: SketchProfile) => b.areaMm2 - a.areaMm2).find((candidate: SketchProfile) => (candidate.holes?.length ?? 0) > 0)!;
       const flatBody = solidOf(await buildSolid(flat, "sweep", { sweepDirectionMm: [0, 0, 1], valueMm: 50, profileIds: [flatProfile.ref!] }));
       near(meshReport(flatBody.positionsMm, flatBody.indices).signedVolume, area * 50, area * 50 * 0.01, "on a plain datum plane the direction is unchanged");
+    }
+  },
+  {
+    name: "region R2-02: a line a few microns off the crossing of two circles keeps every face (x = 6.007 gave 2 faces and half the area), and Validate says the intersections were merged",
+    run: () => {
+      const circles = [circ("a", [0, 0], 10), circ("b", [12, 0], 10)];
+      const exact = detectSketchProfiles(sketchOf([...circles, line("l", [6, -15], [6, 15])]));
+      const total = exact.reduce((sum, profile) => sum + profile.areaMm2, 0);
+      equal(exact.length, 4, "the exactly concurrent scene has four faces");
+      for (const x of [6.001, 6.003, 6.004, 6.005, 6.006, 6.007, 6.008, 6.0085, 6.009, 6.0095, 6.01, 6.012, 6.02]) {
+        const profiles = detectSketchProfiles(sketchOf([...circles, line("l", [x, -15], [x, 15])]));
+        assert(profiles.length === 4 || profiles.length === 6, `x = ${x}: four faces (merged) or six (apart), got ${profiles.length}`);
+        near(profiles.reduce((sum, profile) => sum + profile.areaMm2, 0), total, 0.6, `x = ${x}: the faces still cover the same area`);
+      }
+      const report = analyzeSketch(editKit.context(editKit.projectWith([editKit.circle("a", [0, 0], 10), editKit.circle("b", [12, 0], 10), editKit.line("l", [6.004, -15], [6.004, 15])])));
+      assert(report.issues.some((issue) => issue.category === "region" && /only [0-9.]+ mm apart/u.test(issue.detail)), `Validate reports the merged intersections: ${report.issues.map((issue) => issue.title).join(" | ")}`);
+      const clean = analyzeSketch(editKit.context(editKit.projectWith([editKit.circle("a", [0, 0], 10), editKit.circle("b", [12, 0], 10), editKit.line("l", [6, -15], [6, 15])])));
+      assert(!clean.issues.some((issue) => /only [0-9.]+ mm apart/u.test(issue.detail)), "an exact concurrency is not reported");
+    }
+  },
+  {
+    name: "region R2-02: a circle that passes 0.013 mm from a rectangle corner keeps its three faces (the order of curves leaving a vertex was decided by a direction measured a millimetre away)",
+    run: () => {
+      const profiles = detectSketchProfiles(sketchOf([circ("c", [-7.262, -23.823], 5.457), { ...rect("r", [-16.94, -22.33], 19.679, 13.869) }]));
+      equal(profiles.length, 3, "rectangle minus circle, circle inside the rectangle and the bulge outside it");
+      const union = 19.679 * 13.869 + Math.PI * 5.457 ** 2;
+      const covered = profiles.reduce((sum, profile) => sum + profile.areaMm2, 0);
+      assert(covered < union && covered > union - 100, `the faces cover the union (${covered.toFixed(1)})`);
     }
   }
 ];

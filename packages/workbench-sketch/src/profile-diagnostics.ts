@@ -8,7 +8,7 @@ import { profileGapToleranceOf } from "./profile-regions.js";
  * junctions, overlaps and curves that cross themselves, each with the curves named and the point on the canvas.
  */
 
-export type ProfileProblemCode = "gap" | "short" | "open-end" | "crossing" | "junction" | "overlap" | "self-crossing" | "skipped";
+export type ProfileProblemCode = "gap" | "short" | "open-end" | "crossing" | "junction" | "overlap" | "self-crossing" | "skipped" | "near-meet";
 
 export interface ProfileProblem {
   readonly code: ProfileProblemCode;
@@ -126,6 +126,12 @@ export function diagnoseArrangement(arrangement: Arrangement, sketch: Pick<Workb
   }
   for (const overlap of arrangement.overlaps) {
     problems.push({ code: "overlap", severity: "warning", entityIds: overlap.entityIds, at: overlap.at, message: `${names(overlap.entityIds)} run over each other near ${at(overlap.at)}; the shared stretch counts once. Delete one of them if it is a leftover.` });
+  }
+  for (const near of arrangement.snapped ?? []) {
+    problems.push({
+      code: "near-meet", severity: "warning", entityIds: near.entityIds, at: near.point, distanceMm: near.spreadMm,
+      message: `${names(near.entityIds)} meet at ${at(near.point)} in intersections only ${fmt(near.spreadMm)} mm apart; they were merged into one point (curves closer than ${fmt(tolerance)} mm count as touching). If you meant them to cross apart, move one by more than ${fmt(tolerance)} mm; if not, make them meet exactly.`
+    });
   }
   for (const own of arrangement.selfCrossings) {
     problems.push({ code: "self-crossing", severity: "warning", entityIds: [own.entityId], at: own.at, message: `${label(own.entityId)} crosses itself at ${at(own.at)}; the loop it makes is a separate region.` });
