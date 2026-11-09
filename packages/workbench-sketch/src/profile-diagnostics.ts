@@ -137,7 +137,7 @@ export function diagnoseArrangement(arrangement: Arrangement, sketch: Pick<Workb
     if (arrangement.edges.length === 0 && arrangement.skipped.length === 0) noProfileReasons.push("There are no curves to enclose a region. Draw a closed shape.");
     else {
       for (const problem of open.slice(0, 3)) noProfileReasons.push(problem.message);
-      if (open.length > 3) noProfileReasons.push(`${open.length - 3} more open ends.`);
+      if (open.length > 3) noProfileReasons.push(`${open.length - 3} more open end${open.length - 3 === 1 ? "" : "s"}.`);
       if (open.length === 0) noProfileReasons.push(arrangement.edges.length === 0 ? "Every curve was skipped as degenerate." : "The curves meet but do not enclose any area.");
     }
   }

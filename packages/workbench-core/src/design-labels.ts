@@ -92,6 +92,14 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
   return `${verb}${amount} · from ${source === undefined ? "a deleted sketch" : source.name}`;
 }
 
+/** Begins a health message that is a note about a step that was applied (see isHealthNote), as opposed to the reason it could not be. */
+export const HEALTH_NOTE_PREFIX = "Note: ";
+
+/** Whether a feature's health message is a note: the step was applied, and the message says something about the solid it made. */
+export function isHealthNote(message: string | undefined): boolean {
+  return message?.startsWith(HEALTH_NOTE_PREFIX) === true;
+}
+
 export function featureStatus(history: DesignHistory, feature: DesignFeature): DesignFeatureStatus {
   if (feature.health !== undefined) return "error";
   if (feature.suppressed) return "suppressed";

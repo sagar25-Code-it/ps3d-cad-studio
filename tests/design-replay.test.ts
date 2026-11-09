@@ -1,6 +1,6 @@
 import type { DesignSolidFeature, SketchEntity, WorkbenchOperation, WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { applyWorkbenchOperation, createWorkbenchProject, designOf, validateWorkbenchProject, validSolidFeaturePayload } from "../packages/workbench-core/src/index.js";
-import { replayAllBodies, replayBody, type RebuildResult } from "../apps/studio-web/src/design-regeneration.js";
+import { replayAllBodies, replayBody, type RebuildResult, isRebuildFailure, isRebuildNote } from "../apps/studio-web/src/design-regeneration.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
 let serial = 0;
@@ -61,12 +61,12 @@ export const designReplayTests: readonly TestCase[] = [
       near(bodyVolume(project), PLATE_MINUS_BORE, PLATE_MINUS_BORE * 0.03, "before the replay the body is the plate");
       const results = await replayBody(project, BODY);
       equal(results.length, 2, "one result per live step of the body");
-      assert(results.every((result) => result.message === undefined), "nothing failed");
+      assert(results.every((result) => !isRebuildFailure(result)), "nothing failed");
       const replayed = apply(project, results);
       const expected = PLATE_MINUS_BORE - Math.PI * 4 ** 2 * 10;
       near(bodyVolume(replayed), expected, expected * 0.03, "the plate lost the volume of the new hole");
       equal((replayed.part.generalBodies ?? []).length, 1, "still one body");
-      assert(designOf(replayed).features.every((feature) => feature.health === undefined), "no step is flagged");
+      assert(designOf(replayed).features.every((feature) => feature.health === undefined || isRebuildNote(feature.health.message)), "no step is flagged");
     }
   },
   {
@@ -107,7 +107,7 @@ export const designReplayTests: readonly TestCase[] = [
       split = withCut(split);
       const results = await replayBody(split, BODY);
       const cutResult = results.find((result) => result.featureId === "feature:cut-1");
-      assert(cutResult?.message === undefined, "the cut that severs the plate is applied, not refused");
+      assert(cutResult === undefined || !isRebuildFailure(cutResult), "the cut that severs the plate is applied, not refused");
       split = apply(split, results);
       equal((split.part.generalBodies ?? []).length, 2, "the plate became two bodies");
       near(bodyVolume(split), 25 * 40 * 10, 25 * 40 * 10 * 0.01, "the body keeps one half");
@@ -141,7 +141,7 @@ export const designReplayTests: readonly TestCase[] = [
       project = apply(project, await replayBody(project, BODY));
       const expected = PLATE_MINUS_BORE - Math.PI * 4 ** 2 * 10;
       near(bodyVolume(project), expected, expected * 0.03, "a 1 mm through-all cut removes the full-depth hole");
-      assert(designOf(project).features.every((feature) => feature.health === undefined), "nothing failed");
+      assert(designOf(project).features.every((feature) => feature.health === undefined || isRebuildNote(feature.health.message)), "nothing failed");
     }
   },
   {

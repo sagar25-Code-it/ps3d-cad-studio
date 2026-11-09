@@ -1,4 +1,5 @@
 import type { Vec3 } from "../../workbench-core/src/index.js";
+import { alignLoopStart } from "./loft-align.js";
 
 /**
  * Browser-safe analytic tessellator for general sketch-profile solids.
@@ -20,7 +21,7 @@ export interface TessellatedMesh {
 type Point2 = readonly [number, number];
 
 /** Sketch-plane placement expressed as the same X/Y/Z rotation the Manifold adapter applies. */
-const PLANE_ROTATION_DEG: Record<TessellatePlane, Vec3> = {
+export const PLANE_ROTATION_DEG: Record<TessellatePlane, Vec3> = {
   xy: [0, 0, 0],
   xz: [90, 0, 0],
   yz: [0, 90, 0]
@@ -106,7 +107,7 @@ function signedMeshVolume(positions: readonly number[], indices: readonly number
 }
 
 /** Turns every triangle inside out when the mesh encloses a negative volume (a profile drawn the other way round, or on the other side of the axis). */
-function outwardIndices(positions: readonly number[], indices: readonly number[]): number[] {
+export function outwardIndices(positions: readonly number[], indices: readonly number[]): number[] {
   const result = [...indices];
   if (signedMeshVolume(positions, result) >= 0) return result;
   for (let index = 0; index + 2 < result.length; index += 3) { const swap = result[index + 1]!; result[index + 1] = result[index + 2]!; result[index + 2] = swap; }
@@ -443,6 +444,7 @@ export function tessellateLoftTwoProfiles(bottom: readonly Point2[], top: readon
     topClean = resampleClosedPolygon(topClean, targetCount);
     if (bottomClean.length !== topClean.length) return { positionsMm: [], indices: [] };
   }
+  topClean = [...alignLoopStart(bottomClean, topClean)];
   const height = Math.abs(heightMm);
   // A rail forces at least `rings` ring samples so the bend is visible even in the position mode.
   const sampleCount = (continuity === "position" && railSamples === undefined) ? 2 : Math.max(2, rings);
@@ -572,7 +574,7 @@ function polygonCentroid(polygon: readonly Point2[]): Point2 {
 }
 
 /** Remove a duplicated closing vertex and any zero-length segments so triangulation stays robust. */
-function sanitizePolygon(polygon: readonly Point2[]): readonly Point2[] {
+export function sanitizePolygon(polygon: readonly Point2[]): readonly Point2[] {
   const cleaned: Point2[] = [];
   for (const point of polygon) {
     const previous = cleaned[cleaned.length - 1];
@@ -645,7 +647,7 @@ function pointInTriangle(point: Point2, a: Point2, b: Point2, c: Point2): boolea
   return !(hasNegative && hasPositive);
 }
 
-function rotatePositions(positions: readonly number[], rotationDeg: Vec3): readonly number[] {
+export function rotatePositions(positions: readonly number[], rotationDeg: Vec3): readonly number[] {
   if (rotationDeg[0] === 0 && rotationDeg[1] === 0 && rotationDeg[2] === 0) return positions;
   const [rx, ry, rz] = rotationDeg.map((value) => (value * Math.PI) / 180) as unknown as Vec3;
   const ca = Math.cos(rx); const sa = Math.sin(rx);

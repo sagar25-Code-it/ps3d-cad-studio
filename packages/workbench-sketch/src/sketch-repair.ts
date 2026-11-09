@@ -526,12 +526,37 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
 
   // Regions: what the curves split into, what stops them closing, and what is doubled or crossed.
   const diagnosis = diagnoseProfiles(sketch);
+  // Crossings and junctions are handled, not faults; a grid of lines has hundreds, so each kind is one entry that counts them.
+  const handled = new Map<"crossing" | "junction", typeof diagnosis.problems[number][]>();
   for (const problem of diagnosis.problems) {
     if (problem.code === "gap" || problem.code === "open-end") continue; // the gap and open-chain checks above already say it, with fixes
+    if (problem.severity === "info" && (problem.code === "crossing" || problem.code === "junction")) {
+      handled.set(problem.code, [...(handled.get(problem.code) ?? []), problem]);
+      continue;
+    }
     issues.push({
       id: `region:${problem.code}:${[...problem.entityIds].sort().join("|")}:${problem.at === undefined ? "" : `${fmt(problem.at[0])},${fmt(problem.at[1])}`}`,
       category: "region", severity: problem.severity, title: problem.code === "crossing" ? "Curves cross: the regions are split" : problem.code === "junction" ? "Curves meet at a junction" : problem.code === "overlap" ? "Curves overlap" : problem.code === "self-crossing" ? "A curve crosses itself" : problem.code === "short" ? "A curve stops short of another" : "A curve is ignored",
       detail: problem.message, entityIds: problem.entityIds, constraintIds: [], fixes: []
+    });
+  }
+  for (const [code, group] of handled) {
+    if (group.length === 1) {
+      const only = group[0]!;
+      issues.push({
+        id: `region:${code}:${[...only.entityIds].sort().join("|")}:${only.at === undefined ? "" : `${fmt(only.at[0])},${fmt(only.at[1])}`}`,
+        category: "region", severity: "info", title: code === "crossing" ? "Curves cross: the regions are split" : "Curves meet at a junction",
+        detail: only.message, entityIds: only.entityIds, constraintIds: [], fixes: []
+      });
+      continue;
+    }
+    const listed = group.slice(0, 4).map((problem) => problem.at === undefined ? "" : `(${fmt(problem.at[0])}, ${fmt(problem.at[1])})`).filter((place) => place !== "").join(", ");
+    const entityIds = [...new Set(group.flatMap((problem) => problem.entityIds))].slice(0, 200);
+    issues.push({
+      id: `region:${code}`, category: "region", severity: "info",
+      title: code === "crossing" ? `Curves cross at ${group.length} places: the regions are split` : `Curves meet at ${group.length} junctions`,
+      detail: `${code === "crossing" ? "The regions are split where curves cross or meet" : "The regions on each side of every curve are separate at junctions"}: ${listed}${group.length > 4 ? ` and ${group.length - 4} more` : ""}. This is handled; nothing needs fixing.`,
+      entityIds, constraintIds: [], fixes: []
     });
   }
   const noRegionExplained = issues.some((issue) => issue.category === "gap" || issue.category === "open-chain" || issue.category === "region" && issue.severity === "warning");
@@ -551,7 +576,7 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
   const summary = [
     valid ? "No errors." : `${errors} error${errors === 1 ? "" : "s"} to fix before this sketch is dependable.`,
     warnings === 0 ? "No warnings." : `${warnings} warning${warnings === 1 ? "" : "s"}: ${fixable} with a one-click fix.`,
-    `${profiles.length} closed profile${profiles.length === 1 ? "" : "s"} ${usableForSolid ? "ready for a solid feature" : profiles.length === 0 ? `(a solid feature needs at least one closed profile)${diagnosis.noProfileReasons.length === 0 ? "" : `: ${diagnosis.noProfileReasons.join(" ")}`}` : "(resolve the errors first)"}.`,
+    `${profiles.length} closed profile${profiles.length === 1 ? "" : "s"} ${usableForSolid ? "ready for a solid feature" : profiles.length === 0 ? `(a solid feature needs at least one closed profile)${diagnosis.noProfileReasons.length === 0 ? "" : `: ${diagnosis.noProfileReasons.join(" ").replace(/[.s]+$/u, "")}`}` : "(resolve the errors first)"}.`,
     `${analysis.degreesOfFreedom} degree${analysis.degreesOfFreedom === 1 ? "" : "s"} of freedom left (${analysis.classification}).`,
     solves ? "All recorded relations solve together." : "The recorded relations cannot all be solved together."
   ];

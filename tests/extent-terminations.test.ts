@@ -1,7 +1,7 @@
 import type { DesignExtentTarget, DesignSolidFeature, WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { applyWorkbenchOperation, describeFeature, designOf, validateWorkbenchProject, validSolidFeaturePayload } from "../packages/workbench-core/src/index.js";
 import { facePlaneOf } from "../packages/workbench-geometry/src/index.js";
-import { rebuildDependents, replayAllBodies } from "../apps/studio-web/src/design-regeneration.js";
+import { rebuildDependents, replayAllBodies, isRebuildNote } from "../apps/studio-web/src/design-regeneration.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { BLOCK, PLATE, apply, bodyOf, boundsOf, isClosedManifold, plateAndBlock, run, step, volumeOf, withSketch, withStep } from "./extent-kit.js";
 
@@ -27,7 +27,7 @@ export const extentTerminationTests: readonly TestCase[] = [
       near(boundsOf(plate).max[2]!, 40, 1e-3, "the peg ends exactly on the block's bottom face");
       near(volumeOf(plate) - plateBefore, PEG_AREA * gap, PEG_AREA * gap * 0.01, "the peg added a cylinder as tall as the gap");
       assert(isClosedManifold(plate), "plate and peg are one closed manifold solid");
-      assert(designOf(project).features.every((feature) => feature.health === undefined), "no step is flagged");
+      assert(designOf(project).features.every((feature) => feature.health === undefined || isRebuildNote(feature.health.message)), "no step is flagged");
       assert(validateWorkbenchProject(JSON.parse(JSON.stringify(project)) as unknown).ok, "the project validates after a save and reload");
       const label = describeFeature(designOf(project), designOf(project).features.find((feature) => feature.id === "feature:join-face")!);
       assert(label.startsWith("Join to face (") && label.includes("when picked"), `the timeline says it reaches a face: ${label}`);
@@ -95,7 +95,7 @@ export const extentTerminationTests: readonly TestCase[] = [
       const top = boundsOf(plate).max[2]!;
       assert(top > zAt(12, 12) && top < zAt(12, 12) + 3 * Math.abs(plane.normal[0] / plane.normal[2]) + 0.1, "the peg top is slanted: its highest point is a little above the centre height");
       assert(isClosedManifold(plate), "the trimmed peg joins into a closed solid");
-      assert(designOf(project).features.every((feature) => feature.health === undefined), "nothing is flagged");
+      assert(designOf(project).features.every((feature) => feature.health === undefined || isRebuildNote(feature.health.message)), "nothing is flagged");
     }
   },
   {

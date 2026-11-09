@@ -1,5 +1,5 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
-import { dependentsOf, designOf, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
+import { dependentsOf, designOf, HEALTH_NOTE_PREFIX, isHealthNote, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, lostProfileRefs, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
 import { attachEdgeFlange, attachMiterFlange, booleanMeshes, cutReliefNotch, developBend, flangeReliefs, holeCutter, jogSheetMesh, reliefCorners, snapToAxis, splitMeshPieces, threadBoreWall, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BendRecord, type BentStripSpec, type FlatLayout, type HoleSpec } from "../../../packages/workbench-geometry/src/index.js";
 import { flangeEdgesOf } from "../../../packages/workbench-core/src/index.js";
@@ -70,14 +70,15 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   const profiles = detectSketchProfiles(sketch);
   const lost = lostProfileRefs(profiles, feature.profileIds);
   if (lost.length > 0) return { ok: false, message: `${feature.name}: a profile this feature was built on no longer exists in its sketch (${lost.join("; ")}). Edit the sketch to close it again, or delete the feature.` };
-  const region = resolveProfileRegion(profiles, feature.profileIds, { includeIslands: feature.kind === "extrude" && feature.edge === undefined });
+  // The holes of a region are holes in every solid built from it (a thin-wall revolve follows the outline alone, and the other kinds take the outline only).
+  const region = resolveProfileRegion(profiles, feature.profileIds, { includeIslands: feature.kind === "extrude" || feature.kind === "sweep" || feature.kind === "loft" || (feature.kind === "revolve" && feature.thinWallMm === undefined) });
   if (!region.ok) return { ok: false, message: `${feature.name}: ${region.diagnostics[0]?.message ?? "The sketch has no closed profile for this feature."}` };
   const groups = region.value.groups;
   if (groups.length > 1 && feature.kind !== "extrude" && feature.kind !== "revolve") {
     return { ok: false, message: `${feature.name}: a ${feature.kind} is built from one region, but ${groups.length} separate regions are selected. Select a single region, or use an extrude or revolve for several.` };
   }
   if (groups.length > 1 && feature.kind === "revolve" && feature.thinWallMm !== undefined) return { ok: false, message: `${feature.name}: a thin revolve follows one outline. Select a single region.` };
-  const warnings = region.value.warnings;
+  const warnings = [...region.value.warnings, ...(feature.edge !== undefined && groups.some((group) => group.holes.length > 0) ? ["The chamfer or fillet is applied to the outline; the holes keep their sharp edges."] : [])];
   const plane = planeKeyOf(sketch.plane);
   if (feature.kind === "sheet-lofted-bend") {
     const lofted = loftedBendBody(feature, profiles, region.value.outer, plane, color);
@@ -177,6 +178,21 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   const placed = shifted(started, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0));
   // A sketch on an angle or three-point plane is built on its datum plane and then moved onto that plane, which keeps the face names.
   return { ok: true, body: isPlaced(sketch) ? { ...placed, positionsMm: placePositions(placed.positionsMm, sketch) } : placed, ...(warnings.length === 0 ? {} : { warnings }) };
+}
+
+/**
+ * Begins a rebuild message that is a note about a step that WAS applied (a hole of the region was left out, a circle crossing its outline
+ * did not become a hole), as opposed to the reason a step could not be rebuilt. Both are stored as the feature's health message.
+ */
+export const REBUILD_NOTE_PREFIX = HEALTH_NOTE_PREFIX;
+
+export function isRebuildNote(message: string | undefined): boolean {
+  return isHealthNote(message);
+}
+
+/** Whether a rebuild result says its step could not be applied (a note alone does not). */
+export function isRebuildFailure(result: { readonly message?: string | undefined }): boolean {
+  return result.message !== undefined && !isRebuildNote(result.message);
 }
 
 /** A rebuild message the `regenerate-design` operation accepts (at most 400 characters). */
@@ -424,7 +440,10 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
     let built = await rebuildSolidFeature(modifies ? { ...sized, bodyId: `${step.id}:tool` } : sized, sketchFeature, existing?.color, sketchLookupOf(history));
     if (!built.ok) { outcomes.set(step.id, { featureId: step.id, message: built.message }); continue; }
     const notes = [followed.warning, warning, built.warning].filter((note): note is string => note !== undefined);
-    const applied: RebuildResult = { featureId: step.id, ...(notes.length === 0 ? {} : { message: clipMessage(notes.join(" ")) }), ...(followed.movedToOffsetMm === undefined ? {} : { sketchPlaneOffsetMm: followed.movedToOffsetMm }) };
+    // What the region detector said (a hole left out, a curve that crosses the outline) changes the solid, so it is kept on the feature too.
+    const regionNotes = built.warnings ?? [];
+    const noteText = regionNotes.length === 0 ? notes.join(" ") : `${REBUILD_NOTE_PREFIX}${[...notes, ...regionNotes].join(" ")}`;
+    const applied: RebuildResult = { featureId: step.id, ...(noteText === "" ? {} : { message: clipMessage(noteText) }), ...(followed.movedToOffsetMm === undefined ? {} : { sketchPlaneOffsetMm: followed.movedToOffsetMm }) };
     if (trim !== undefined) {
       const trimmedTool = await trimToFace(built.body, trim);
       if (!trimmedTool.ok) { outcomes.set(step.id, { featureId: step.id, message: trimmedTool.message }); continue; }

@@ -1,6 +1,6 @@
 import type { WorkbenchOperation, WorkbenchProject, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
 import { applyWorkbenchOperation, designOf } from "../../../packages/workbench-core/src/index.js";
-import { rebuildDependents, type RebuildResult } from "./design-regeneration.js";
+import { isRebuildFailure, isRebuildNote, rebuildDependents, type RebuildResult } from "./design-regeneration.js";
 
 /**
  * The life of a working sketch against the timeline: finishing it, cancelling it, and reopening another sketch while this one has
@@ -50,6 +50,8 @@ export interface CommitOutcome {
   readonly sketchFeatureId: string | undefined;
   readonly rebuilt: readonly RebuildResult[];
   readonly failed: readonly RebuildResult[];
+  /** What the region detector said about steps that were rebuilt (a hole left out, a curve crossing an outline): the step was applied. */
+  readonly notes: readonly string[];
   /** True when the project changed at all. */
   readonly changed: boolean;
   readonly summary: string;
@@ -93,8 +95,9 @@ export async function commitWorkingSketchAtomically(
     summary = applied.value.summary;
     changed = true;
   }
-  const failed = rebuilt.filter((result) => result.message !== undefined);
-  return { ok: true, value: { project: current, sketchFeatureId, rebuilt, failed, changed, summary } };
+  const failed = rebuilt.filter(isRebuildFailure);
+  const notes = rebuilt.flatMap((result) => (isRebuildNote(result.message) ? [result.message!] : []));
+  return { ok: true, value: { project: current, sketchFeatureId, rebuilt, failed, notes, changed, summary } };
 }
 
 export type CancelOutcome =

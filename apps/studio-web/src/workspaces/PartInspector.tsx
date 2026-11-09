@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ModelSuccessResponse } from "../../../../packages/worker-protocol/src/index.js";
 import type { ViewportShadingMode } from "../../../../packages/viewport-three/src/index.js";
-import { describeFeature, featureOfBody, featureStatus, featureStatusText, isNewPrimitiveShape, normalizePrimitiveSize, primitiveSizeLabels, solidMetrics, validPrimitiveBody, type DesignHistory, type DesignSolidFeature, type GeneralSolidBody, type PartIntent, type PartPreviewBody, type PartPreviewBodyShape, type PartPrimitiveParams, type Vec3 } from "../../../../packages/workbench-core/src/index.js";
+import { describeFeature, featureOfBody, isHealthNote, featureStatus, featureStatusText, isNewPrimitiveShape, normalizePrimitiveSize, primitiveSizeLabels, solidMetrics, validPrimitiveBody, type DesignHistory, type DesignSolidFeature, type GeneralSolidBody, type PartIntent, type PartPreviewBody, type PartPreviewBodyShape, type PartPrimitiveParams, type Vec3 } from "../../../../packages/workbench-core/src/index.js";
 import { CapabilityBadge } from "../ui/CapabilityBadge.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
 import { PartAppearanceControls } from "../ui/PartAppearanceControls.js";
@@ -155,7 +155,7 @@ function SolidCard(props: {
     <p className="solid-source">{feature === undefined
       ? "This body is not driven by the timeline (it came from Combine, or was saved before the timeline existed), so editing a sketch does not change it."
       : `${describeFeature(history, feature)}${status === "" ? "" : ` · ${status}`}. Edit the step, or edit its sketch, and this solid rebuilds.`}</p>
-    {feature?.health !== undefined && <p className="solid-warning" role="alert">{feature.health.message}</p>}
+    {feature?.health !== undefined && <p className={isHealthNote(feature.health.message) ? "solid-warning note" : "solid-warning"} role={isHealthNote(feature.health.message) ? "status" : "alert"}>{feature.health.message}</p>}
     {steps.length > 1 && <ol className="solid-steps" aria-label="Steps that shaped this solid">
       {steps.map((step) => {
         const stepStatus = featureStatusText(featureStatus(history, step));

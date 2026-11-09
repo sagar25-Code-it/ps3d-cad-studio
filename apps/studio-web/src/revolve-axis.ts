@@ -90,6 +90,8 @@ export interface PreparedRevolve {
   /** The profile in the canonical frame: on the +X side of a Y axis through the origin. */
   readonly profile: SketchProfile;
   readonly outline: readonly Point2[];
+  /** The holes of the region, moved into the same frame. */
+  readonly holes: readonly SketchProfile[];
 }
 
 export type RevolvePreparation = { readonly ok: true; readonly prepared: PreparedRevolve } | { readonly ok: false; readonly message: string };
@@ -105,7 +107,7 @@ function signedArea(points: readonly Point2[]): number {
 }
 
 /** Moves a profile into the canonical revolve frame (see above), mirroring it across the axis when it lies on the negative side. */
-export function prepareRevolve(axis: RevolveAxis, profile: SketchProfile): RevolvePreparation {
+export function prepareRevolve(axis: RevolveAxis, profile: SketchProfile, holes: readonly SketchProfile[] = []): RevolvePreparation {
   const outline = profileOutlineMm(profile.boundary);
   const side = sideOfAxis(axis, outline);
   if (side === "crosses") {
@@ -118,20 +120,23 @@ export function prepareRevolve(axis: RevolveAxis, profile: SketchProfile): Revol
     return mirrored ? [-local[0], local[1]] : local;
   };
   const angleDeg = (Math.atan2(axis.directionMm[0], axis.directionMm[1]) * 180) / Math.PI;
-  const boundary = profile.boundary;
-  let moved: SketchProfile["boundary"];
-  if (boundary.kind === "circle") moved = { kind: "circle", center: mapPoint(boundary.center), radiusMm: boundary.radiusMm };
-  else if (boundary.kind === "rectangle") moved = { kind: "rectangle", center: mapPoint(boundary.center), widthMm: boundary.widthMm, heightMm: boundary.heightMm, rotationDeg: mirrored ? -(boundary.rotationDeg + angleDeg) : boundary.rotationDeg + angleDeg };
-  else if (boundary.kind === "ellipse") moved = { kind: "ellipse", center: mapPoint(boundary.center), majorRadiusMm: boundary.majorRadiusMm, minorRadiusMm: boundary.minorRadiusMm, rotationDeg: mirrored ? -(boundary.rotationDeg + angleDeg) : boundary.rotationDeg + angleDeg };
-  else if (!mirrored && boundary.kind === "curve-loop") moved = { kind: "curve-loop", points: boundary.points.map(mapPoint), segments: boundary.segments };
-  else {
-    const points = outline.map(mapPoint);
-    // Mirroring turns the outline the other way round; turn it back so the profile keeps its winding.
-    moved = { kind: "line-loop", points: mirrored && signedArea(points) * signedArea(outline) < 0 ? [...points].reverse() : points };
-  }
-  const centroid = mapPoint(profile.centroid);
-  const prepared: SketchProfile = { ...profile, boundary: moved, centroid };
-  return { ok: true, prepared: { axis, mirrored, profile: prepared, outline: profileOutlineMm(moved) } };
+  const move = (source: SketchProfile): SketchProfile => {
+    const outlineOf = profileOutlineMm(source.boundary);
+    const boundary = source.boundary;
+    let moved: SketchProfile["boundary"];
+    if (boundary.kind === "circle") moved = { kind: "circle", center: mapPoint(boundary.center), radiusMm: boundary.radiusMm };
+    else if (boundary.kind === "rectangle") moved = { kind: "rectangle", center: mapPoint(boundary.center), widthMm: boundary.widthMm, heightMm: boundary.heightMm, rotationDeg: mirrored ? -(boundary.rotationDeg + angleDeg) : boundary.rotationDeg + angleDeg };
+    else if (boundary.kind === "ellipse") moved = { kind: "ellipse", center: mapPoint(boundary.center), majorRadiusMm: boundary.majorRadiusMm, minorRadiusMm: boundary.minorRadiusMm, rotationDeg: mirrored ? -(boundary.rotationDeg + angleDeg) : boundary.rotationDeg + angleDeg };
+    else if (!mirrored && boundary.kind === "curve-loop") moved = { kind: "curve-loop", points: boundary.points.map(mapPoint), segments: boundary.segments };
+    else {
+      const points = outlineOf.map(mapPoint);
+      // Mirroring turns the outline the other way round; turn it back so the profile keeps its winding.
+      moved = { kind: "line-loop", points: mirrored && signedArea(points) * signedArea(outlineOf) < 0 ? [...points].reverse() : points };
+    }
+    return { ...source, boundary: moved, centroid: mapPoint(source.centroid) };
+  };
+  const prepared = move(profile);
+  return { ok: true, prepared: { axis, mirrored, profile: prepared, outline: profileOutlineMm(prepared.boundary), holes: holes.map(move) } };
 }
 
 /** Carries canonical-frame positions (xyz as built on the XY plane) back onto the sketch's own plane. */
@@ -172,7 +177,7 @@ export async function buildAxisRevolve(request: AxisRevolveRequest): Promise<Axi
   const { feature, prepared } = request;
   const built = feature.thinWallMm !== undefined
     ? await createThinRevolveBody({ outlineMm: prepared.outline, plane: "xy", angleDeg: request.totalDeg, wallMm: feature.thinWallMm, side: feature.thinSide ?? "inside", bodyId: feature.bodyId, name: feature.name, color: request.color })
-    : await createGeneralSolidBody({ profile: prepared.profile, plane: "xy", operation: "revolve", valueMm: request.totalDeg, bodyId: feature.bodyId, name: feature.name, color: request.color });
+    : await createGeneralSolidBody({ profile: prepared.profile, plane: "xy", operation: "revolve", valueMm: request.totalDeg, ...(prepared.holes.length === 0 ? {} : { holes: prepared.holes }), bodyId: feature.bodyId, name: feature.name, color: request.color });
   if (!built.ok) return built;
   const started = request.startDeg === 0 ? built.body.positionsMm : startRevolveAt(built.body.positionsMm, "xy", request.startDeg);
   const positionsMm = carryBack(started, prepared, request.plane);

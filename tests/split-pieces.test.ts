@@ -4,7 +4,7 @@ import { booleanMeshes } from "../packages/workbench-geometry/src/mesh-boolean.j
 import { splitMeshPieces } from "../packages/workbench-geometry/src/mesh-split.js";
 import { tessellateExtrude } from "../packages/workbench-geometry/src/tessellate.js";
 import { solidMetrics } from "../packages/workbench-core/src/solid-metrics.js";
-import { replayAllBodies, replayBody } from "../apps/studio-web/src/design-regeneration.js";
+import { replayAllBodies, replayBody, isRebuildNote } from "../apps/studio-web/src/design-regeneration.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { isClosedAndOriented } from "./relief-pick-hole-drag.test.js";
 
@@ -121,7 +121,7 @@ export const splitPieceTests: readonly TestCase[] = [
       const mainX = main.positionsMm.filter((_, index) => index % 3 === 0);
       const pieceX = piece.positionsMm.filter((_, index) => index % 3 === 0);
       assert(Math.max(...mainX) < 0 !== Math.max(...pieceX) < 0, "they sit on opposite sides of the hole");
-      assert(designOf(drilled).features.every((feature) => feature.health === undefined), "no step is flagged as failed");
+      assert(designOf(drilled).features.every((feature) => feature.health === undefined || isRebuildNote(feature.health.message)), "no step is flagged as failed");
     }
   },
   {

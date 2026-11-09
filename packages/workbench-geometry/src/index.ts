@@ -4,6 +4,7 @@ export * from "./part.js";
 export * from "./primitive-bodies.js";
 export * from "./surface.js";
 export * from "./tessellate.js";
+export * from "./revolve-region.js";
 export * from "./mesh-boolean.js";
 export * from "./mesh-split.js";
 export * from "./mesh-modify.js";

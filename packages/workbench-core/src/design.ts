@@ -460,13 +460,16 @@ function validDirectionAndThin(value: Record<string, unknown>): boolean {
   return true;
 }
 
+/** Region references one feature may store: a grid of a few hundred cells is one selection. */
+export const MAX_PROFILE_REFS = 2048;
+
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
   if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "flangeReliefShape", ...FEATURE_REF_KEYS, ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
   if (!validExtent(value) || !validFeatureRefs(value)) return false;
   if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "sheet-base", "sheet-flange", "sheet-hem", "sheet-edge-flange", "hole", "pattern", "edge-blend", ...BODY_EDIT_ONLY_KINDS, ...SHEET_FEATURE_KINDS].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
-  if (!Array.isArray(value.profileIds) || value.profileIds.length > 64 || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
+  if (!Array.isArray(value.profileIds) || value.profileIds.length > MAX_PROFILE_REFS || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
   if (typeof value.valueMm !== "number" || !Number.isFinite(value.valueMm) || value.valueMm === 0 || Math.abs(value.valueMm) > 100_000) return false;
   if (!validDirectionAndThin(value)) return false;
   if (Object.hasOwn(value, "edge")) {
@@ -670,7 +673,7 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (Object.hasOwn(value, "loftSecondaryProfileIds")) {
     if (value.kind !== "loft" && value.kind !== "sheet-lofted-bend") return false;
     const ids = value.loftSecondaryProfileIds;
-    if (!Array.isArray(ids) || ids.length === 0 || ids.length > 64 || ids.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_PROFILE_REFS || ids.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
   }
   if (Object.hasOwn(value, "loftContinuity")) {
     if (value.kind !== "loft" || !["position", "tangent", "curvature"].includes(String(value.loftContinuity))) return false;
