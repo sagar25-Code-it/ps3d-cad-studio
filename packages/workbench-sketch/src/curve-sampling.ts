@@ -1,11 +1,13 @@
-import type { Vec2 } from "../../workbench-core/src/index.js";
+import { chordErrorBoundMm, type Vec2 } from "../../workbench-core/src/index.js";
 import { isPeriodicSpline, splineDerivativesAt, splineSpanCount } from "../../workbench-core/src/spline-curvature.js";
 
 /**
  * Curve sampling shared by the profile engine and the rest of the sketch modules.
  *
- * Arcs and circles are sampled by a chord-error bound, not a fixed facet count: a short arc of a small circle gets a
- * few edges and a large bore gets as many as it needs to stay within `CHORD_TOLERANCE_MM` of the true curve.
+ * Arcs and circles are sampled by a chord-error bound, not a fixed facet count. Geometry that becomes a solid (profile outlines, sweep
+ * paths) asks for the one rule in workbench-core/tessellation.ts by passing no tolerance: an edge stays within 1/2,000 of the radius
+ * of the true curve and never further than 0.01 mm, so a r=5 circle is as round as a r=500 one. A caller that passes a
+ * tolerance (hit testing, snapping, drawing) gets exactly that absolute bound, which keeps those interactive paths cheap.
  * Fit-point splines are centripetal Catmull-Rom curves, which follow the points without loops or backtracking when the
  * clicks are unevenly spaced, and a spline whose last fit point equals its first is periodic (smooth across the join).
  */
@@ -15,14 +17,18 @@ export const CHORD_TOLERANCE_MM = 0.01;
 
 const TWO_PI = Math.PI * 2;
 const MAX_ARC_STEPS = 4096;
-/** At least 72 edges to a full turn (5 degrees), as circles have always been sampled; the chord bound only adds edges for big radii. */
+/** At least 72 edges to a full turn (5 degrees); the chord bound adds edges for every circle that needs more. */
 const MIN_STEP_RADIANS = (2 * Math.PI) / 72;
 
-/** How many straight edges an arc of `sweepAbs` radians on a circle of `radius` needs to stay within `chordTolMm`. */
-export function arcStepCount(radius: number, sweepAbs: number, chordTolMm = CHORD_TOLERANCE_MM): number {
-  const maxStep = radius > chordTolMm ? 2 * Math.acos(1 - chordTolMm / radius) : Math.PI / 2;
+/**
+ * How many straight edges an arc of `sweepAbs` radians on a circle of `radius` needs. With `chordTolMm` the edges stay within exactly
+ * that distance of the curve (and there are at least 72 to a turn); without it the shared relative rule applies (see above).
+ */
+export function arcStepCount(radius: number, sweepAbs: number, chordTolMm?: number): number {
+  const tolerance = chordTolMm === undefined ? chordErrorBoundMm(radius) : chordTolMm;
+  const maxStep = radius > tolerance ? 2 * Math.acos(1 - tolerance / radius) : Math.PI / 2;
   const byTolerance = Math.ceil(sweepAbs / maxStep);
-  const bySmoothness = Math.ceil(sweepAbs / MIN_STEP_RADIANS);
+  const bySmoothness = chordTolMm === undefined ? 1 : Math.ceil(sweepAbs / MIN_STEP_RADIANS);
   return Math.min(MAX_ARC_STEPS, Math.max(1, byTolerance, bySmoothness));
 }
 
@@ -53,9 +59,14 @@ export function arcCircle(start: Vec2, mid: Vec2, end: Vec2): { readonly center:
 
 /**
  * Points along a 3-point arc from `start` to `end` through `mid`, including both ends. Falls back to the chord when the
- * three points are collinear. The step count follows the chord-error bound.
+ * three points are collinear. The edges stay within `chordTolMm` of the arc (0.01 mm unless told otherwise); see sampleArcToBound
+ * for the relative rule geometry that becomes a solid follows.
  */
-export function sampleArc(start: Vec2, mid: Vec2, end: Vec2, chordTolMm = CHORD_TOLERANCE_MM): readonly Vec2[] {
+export function sampleArc(start: Vec2, mid: Vec2, end: Vec2, chordTolMm: number = CHORD_TOLERANCE_MM): readonly Vec2[] {
+  return sampleArcWith(start, mid, end, chordTolMm);
+}
+
+function sampleArcWith(start: Vec2, mid: Vec2, end: Vec2, chordTolMm: number | undefined): readonly Vec2[] {
   const circle = arcCircle(start, mid, end);
   if (circle === undefined) return [start, end];
   const sweepAbs = Math.abs(circle.sweep);
@@ -89,12 +100,31 @@ export function splinePositionAt(fitPoints: readonly Vec2[], span: number, s: nu
   return splineDerivativesAt(fitPoints, span, s).point;
 }
 
+/** An arc sampled to the shared relative chord-error rule: use this where the points become part of a solid (a sweep path, a rail). */
+export function sampleArcToBound(start: Vec2, mid: Vec2, end: Vec2): readonly Vec2[] {
+  return sampleArcWith(start, mid, end, undefined);
+}
+
 /**
- * Smooth curve through the fit points, sampled into short straight edges (`samplesPerSpan` per span).
- * The first and last samples are exactly the first and last fit points.
+ * A spline sampled to the shared relative chord-error rule (see flattenSpline): where the points become part of a solid (a sweep path, a
+ * rail, a surface curve) a 2000 mm span gets as many edges as it needs and a small spline only a few.
  */
-export function sampleSpline(fitPoints: readonly Vec2[], samplesPerSpan = 8): readonly Vec2[] {
+export function sampleSplineToBound(fitPoints: readonly Vec2[]): readonly Vec2[] {
+  return fitPoints.length < 3 ? fitPoints : flattenSpline(fitPoints).points;
+}
+
+/** The coarsest chord error the default spline sampling for drawing and hit testing allows: 0.02 mm, far below a pixel at any zoom. */
+const DISPLAY_SPLINE_TOLERANCE_MM = 0.02;
+
+/**
+ * Smooth curve through the fit points, sampled into short straight edges. With `samplesPerSpan` the count is fixed (a cheap, even
+ * sampling). Without it every span is subdivided until no edge strays more than 0.02 mm (or the finer relative bound for a small spline)
+ * from the curve, so a 2000 mm span gets as many edges as it needs, not eight. The first and last samples are exactly the first and last
+ * fit points. Geometry that becomes a solid uses sampleSplineToBound, which holds the finer relative bound at every size.
+ */
+export function sampleSpline(fitPoints: readonly Vec2[], samplesPerSpan?: number): readonly Vec2[] {
   if (fitPoints.length < 3) return fitPoints;
+  if (samplesPerSpan === undefined) return flattenSpline(fitPoints, Math.max(chordErrorBoundMm(extentOf(fitPoints)), DISPLAY_SPLINE_TOLERANCE_MM)).points;
   const points: Vec2[] = [fitPoints[0]!];
   const spans = splineSpanCount(fitPoints);
   for (let span = 0; span < spans; span += 1) {
@@ -109,11 +139,20 @@ export function sampleSpline(fitPoints: readonly Vec2[], samplesPerSpan = 8): re
   return points;
 }
 
+/** The overall size of a set of points (the longer side of their bounding box), which the relative chord error of a spline follows. */
+function extentOf(points: readonly Vec2[]): number {
+  let minX = Infinity; let maxX = -Infinity; let minY = Infinity; let maxY = -Infinity;
+  for (const [x, y] of points) { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+  return Math.max(maxX - minX, maxY - minY);
+}
+
 /**
- * Samples a spline so no edge strays further than `chordTolMm` from the curve: each span is subdivided until its midpoint
+ * Samples a spline so no edge strays further than the chord error bound from the curve (`explicitMm`, or without it the shared
+ * relative rule: 1/2,000 of the spline's size and at most 0.01 mm, as a small circle gets): each span is subdivided until its midpoint
  * is within tolerance of the chord. Returns the polyline and, for each vertex, how far along the spline it is (0 to 1 by arc length).
  */
-export function flattenSpline(fitPoints: readonly Vec2[], chordTolMm = CHORD_TOLERANCE_MM): { readonly points: readonly Vec2[]; readonly params: readonly number[] } {
+export function flattenSpline(fitPoints: readonly Vec2[], explicitMm?: number): { readonly points: readonly Vec2[]; readonly params: readonly number[] } {
+  const chordTolMm = explicitMm === undefined ? chordErrorBoundMm(extentOf(fitPoints)) : explicitMm;
   const points: Vec2[] = [fitPoints[0]!];
   const spans = splineSpanCount(fitPoints);
   for (let span = 0; span < spans; span += 1) {

@@ -1,4 +1,4 @@
-import { failure, type SketchEntity, type Vec2, type WorkbenchResult, type WorkbenchSketch } from "../../workbench-core/src/index.js";
+import { ENVELOPE_LIMITS, failure, type SketchEntity, type Vec2, type WorkbenchResult, type WorkbenchSketch } from "../../workbench-core/src/index.js";
 import type { SketchEditPlan } from "./edit-tools.js";
 
 /**
@@ -43,8 +43,9 @@ export type ParseResult = WorkbenchResult<ParsedDrawing>;
 
 export const IMPORT_CHUNK_SIZE = 200;
 export const SKETCH_ENTITY_LIMIT = 500;
-export const SKETCH_COORDINATE_LIMIT_MM = 10_000;
-const MIN_GEOMETRY_MM = 0.01;
+/** A drawing may reach as far as a sketch can (the model envelope: +/-100 m), not a smaller private limit. */
+export const SKETCH_COORDINATE_LIMIT_MM: number = ENVELOPE_LIMITS.maxSketchCoordinateMm;
+const MIN_GEOMETRY_MM: number = ENVELOPE_LIMITS.minGeometryMm;
 
 /** The millimetres in one unit of a DXF $INSUNITS code, or undefined for 0 (unitless) and unknown codes. */
 export function mmPerInsUnit(code: number): { readonly name: string; readonly mmPerUnit: number } | undefined {

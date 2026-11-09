@@ -1,5 +1,7 @@
+import { MCP_CALL_MAX_BYTES } from "../../packages/workbench-core/src/envelope-limits.js";
 export const MAX_API_JSON_BYTES = 64 * 1024;
-export const MAX_MCP_JSON_BYTES = 1024 * 1024;
+/** The deployed transport accepts the same tool-call size as the local server (envelope-limits.ts) plus room for the JSON-RPC envelope around it. */
+export const MAX_MCP_JSON_BYTES = MCP_CALL_MAX_BYTES + 65_536;
 
 export interface ApiErrorBody {
   readonly error: {

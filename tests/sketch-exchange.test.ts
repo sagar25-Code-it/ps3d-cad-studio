@@ -343,8 +343,9 @@ export const sketchExchangeTests: readonly TestCase[] = [
       equal(empty.curves.length, 0, "an empty ENTITIES section parses");
       const planned = planDrawingImport(empty, sketchOf([]), { mmPerUnit: 1, newId });
       assert(!planned.ok && messageOf(planned).includes("no lines"), "but there is nothing to import, and the message says so");
-      const nan = must(parseDxf(ringDxf(pairs(0, "LINE", 10, "abc", 20, 0, 11, "NaN", 21, 5))));
-      assert(nan.curves.every((curve) => curve.kind !== "line" || (Number.isFinite(curve.a[0]) && Number.isFinite(curve.b[0]))), "unreadable numbers never become NaN geometry");
+      // N-05: an unreadable number is refused with its line, never replaced by 0 (that put a wrong line in the sketch).
+      const nan = parseDxf(ringDxf(pairs(0, "LINE", 10, "abc", 20, 0, 11, "NaN", 21, 5)));
+      assert(!nan.ok && /unreadable number "abc"/u.test(messageOf(nan)) && /line d+/u.test(messageOf(nan)), "unreadable numbers are refused and the message names the number and its line: " + messageOf(nan));
     }
   },
   {

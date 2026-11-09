@@ -1,6 +1,6 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
-import { detectSketchProfiles, lostProfileRefs, profileOutlineMm, resolveProfileRegion, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, lostProfileRefs, profileOutlineMm, resolveProfileRegion, sampleArcToBound, sampleSplineToBound } from "../../../packages/workbench-sketch/src/index.js";
 import { attachEdgeFlange, attachMiterFlange, booleanMeshes, cutReliefNotch, developBend, flangeReliefs, holeCutter, jogSheetMesh, reliefCorners, snapToAxis, splitMeshPieces, threadBoreWall, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BendRecord, type BentStripSpec, type FlatLayout, type HoleSpec } from "../../../packages/workbench-geometry/src/index.js";
 import { flangeEdgesOf } from "../../../packages/workbench-core/src/index.js";
 import { bendResolverOfStep, loftedBendBody, loftedBendFlat, plateFlangesOf, plateJogsOf } from "./sheet-metal-features.js";
@@ -128,8 +128,8 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
       if (pathEntity === undefined) return {};
       let samples: readonly (readonly [number, number])[] = [];
       if (pathEntity.kind === "line") samples = [pathEntity.start, pathEntity.end];
-      else if (pathEntity.kind === "arc") samples = sampleArc(pathEntity.start, pathEntity.mid, pathEntity.end);
-      else if (pathEntity.kind === "spline") samples = sampleSpline(pathEntity.fitPoints);
+      else if (pathEntity.kind === "arc") samples = sampleArcToBound(pathEntity.start, pathEntity.mid, pathEntity.end);
+      else if (pathEntity.kind === "spline") samples = sampleSplineToBound(pathEntity.fitPoints);
       return samples.length >= 2 ? { sweepPathSamplesMm: samples } : {};
     })() : {}),
     ...(feature.kind === "loft" && feature.loftTopScale !== undefined ? { loftTopScale: feature.loftTopScale } : {}),
@@ -143,8 +143,8 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
       if (railEntity === undefined) return {};
       let samples: readonly (readonly [number, number])[] = [];
       if (railEntity.kind === "line") samples = [railEntity.start, railEntity.end];
-      else if (railEntity.kind === "arc") samples = sampleArc(railEntity.start, railEntity.mid, railEntity.end);
-      else if (railEntity.kind === "spline") samples = sampleSpline(railEntity.fitPoints);
+      else if (railEntity.kind === "arc") samples = sampleArcToBound(railEntity.start, railEntity.mid, railEntity.end);
+      else if (railEntity.kind === "spline") samples = sampleSplineToBound(railEntity.fitPoints);
       return samples.length >= 2 ? { loftRailSamplesMm: samples } : {};
     })() : {}),
     ...(feature.kind === "sweep" && feature.sweepTwistDeg !== undefined ? { sweepTwistDeg: feature.sweepTwistDeg } : {}),

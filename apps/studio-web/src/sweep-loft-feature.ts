@@ -1,5 +1,5 @@
 import type { DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchEntity, SweepPathRef } from "../../../packages/workbench-core/src/index.js";
-import { detectSketchProfiles, resolveProfileRegion, sampleArc, sampleSpline, type ProfileRegion } from "../../../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, resolveProfileRegion, sampleArcToBound, sampleSplineToBound, type ProfileRegion } from "../../../packages/workbench-sketch/src/index.js";
 import {
   loftProfiles, loopCentroid, pathStartFrame, placeDirection, resamplePath, solidMeshVolume, sweepAlongPath, sweepRigid, flipped,
   signedArea2, type Loops2, type Loops3, type SolidMesh, type V3
@@ -32,12 +32,20 @@ interface Piece {
 
 function samplesOf(entity: SketchEntity): readonly Point2[] | undefined {
   if (entity.kind === "line") return [entity.start, entity.end];
-  if (entity.kind === "arc") return sampleArc(entity.start, entity.mid, entity.end);
-  if (entity.kind === "spline") return sampleSpline(entity.fitPoints);
+  if (entity.kind === "arc") return sampleArcToBound(entity.start, entity.mid, entity.end);
+  if (entity.kind === "spline") return sampleSplineToBound(entity.fitPoints);
   return undefined;
 }
 
 const gap = (a: Point2, b: Point2): number => Math.hypot(a[0] - b[0], a[1] - b[1]);
+
+/** Keeps at most `limit` evenly spaced points of a sampled piece, always the first and the last (a straight piece has only those two). */
+function thinned(points: readonly Point2[], limit: number): readonly Point2[] {
+  if (points.length <= limit || limit < 2) return points;
+  const kept: Point2[] = [];
+  for (let index = 0; index < limit; index += 1) kept.push(points[Math.round((index * (points.length - 1)) / (limit - 1))]!);
+  return kept;
+}
 
 /** Chains pieces end to end starting from the first one, in the order given; returns the polyline or the first gap it could not close. */
 function chainInOrder(pieces: readonly Piece[], toleranceMm: number): { readonly ok: true; readonly points: readonly Point2[] } | { readonly ok: false; readonly message: string } {
@@ -71,14 +79,14 @@ function chainInOrder(pieces: readonly Piece[], toleranceMm: number): { readonly
 }
 
 /** The curves of a sketch chained end to end (in the order given, or reordered to connect), as one polyline in sketch millimetres. */
-export function chainSketchCurves(sketchFeature: DesignSketchFeature, entityIds: readonly string[]): { readonly ok: true; readonly points: readonly Point2[] } | { readonly ok: false; readonly message: string } {
+export function chainSketchCurves(sketchFeature: DesignSketchFeature, entityIds: readonly string[], maxPointsPerPiece?: number): { readonly ok: true; readonly points: readonly Point2[] } | { readonly ok: false; readonly message: string } {
   const pieces: Piece[] = [];
   for (const id of entityIds) {
     const entity = sketchFeature.sketch.entities.find((candidate) => candidate.id === id);
     if (entity === undefined) return { ok: false, message: `The sweep path curve ${id.replace(/^entity:/u, "")} is no longer in ${sketchFeature.name}. Pick the path again.` };
     const samples = samplesOf(entity);
     if (samples === undefined || samples.length < 2) return { ok: false, message: `A sweep path is made of lines, arcs and splines; ${id.replace(/^entity:/u, "")} is a ${entity.kind}.` };
-    pieces.push({ id, points: samples });
+    pieces.push({ id, points: maxPointsPerPiece === undefined ? samples : thinned(samples, maxPointsPerPiece) });
   }
   if (pieces.length === 0) return { ok: false, message: "The sweep path has no curves." };
   const tolerance = Math.max(0.05, sketchFeature.sketch.snapToleranceMm);
@@ -127,6 +135,8 @@ function bodyOf(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature,
 }
 
 const MAX_TRIANGLES = 99_000;
+/** Triangles a sweep along a curved path may use before the path is sampled more coarsely (the mesh is stored as plain JSON). */
+const SWEEP_TRIANGLE_BUDGET = 16_000;
 
 function checked(mesh: SolidMesh, what: string): { readonly ok: true } | { readonly ok: false; readonly message: string } {
   if (mesh.positionsMm.length / 3 > 99_000 || mesh.indices.length / 3 > MAX_TRIANGLES * 2) return { ok: false, message: `The ${what} has too many triangles to store. Use a shorter or simpler path or profile.` };
@@ -173,8 +183,16 @@ export async function buildSweepFeature(feature: DesignSolidFeature, sketchFeatu
 
   const pathSketch = path.sketchFeatureId === sketchFeature.id ? sketchFeature : lookup?.(path.sketchFeatureId);
   if (pathSketch === undefined) return { ok: false, message: lookup === undefined ? "The sketch holding this sweep's path could not be reached from here." : "The sketch holding this sweep's path is no longer in the timeline. Pick the path again, or delete the sweep." };
-  const chain = chainSketchCurves(pathSketch, path.entityIds);
+  let chain = chainSketchCurves(pathSketch, path.entityIds);
   if (!chain.ok) return chain;
+  // A long curved path sampled to the chord error bound can ask for more triangles than a stored mesh should carry (every station repeats
+  // the whole section): thin each curve evenly, never below 12 points, until the sweep fits the budget.
+  const sectionPoints = profilePolygonMm(region.outer.boundary).length + region.holes.reduce((total, hole) => total + profilePolygonMm(hole.boundary).length, 0);
+  for (let limit = 256; limit >= 12 && (chain.points.length - 1) * sectionPoints * 2 > SWEEP_TRIANGLE_BUDGET; limit = Math.floor(limit / 2)) {
+    const coarser = chainSketchCurves(pathSketch, path.entityIds, limit);
+    if (!coarser.ok) break;
+    chain = coarser;
+  }
   let worldPath = chain.points.map(([x, y]) => sketchToWorld(pathSketch.sketch, x, y));
   const sameSketch = pathSketch.id === sketchFeature.id;
   // The sweep starts at the end of the path that is nearer the profile.

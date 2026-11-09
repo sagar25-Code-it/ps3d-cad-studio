@@ -1,5 +1,5 @@
 import { combineGeneralBodies, createGeneralSolidBody } from "../apps/studio-web/src/general-modeling.js";
-import { applyWorkbenchOperation, createWorkbenchProject, type GeneralSolidBody } from "../packages/workbench-core/src/index.js";
+import { applyWorkbenchOperation, createWorkbenchProject, fullCircleFacets, type GeneralSolidBody } from "../packages/workbench-core/src/index.js";
 import { detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
 import { booleanMeshes, type BooleanMeshInput } from "../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism } from "../packages/occt-kernel-adapter/src/reference-runtime.js";
@@ -155,9 +155,9 @@ export const meshBooleanTests: readonly TestCase[] = [
       assert(roles.some((role) => role.startsWith("target.")) && roles.some((role) => role.startsWith("tool.face.lateral")), "faces are named after their source: " + roles.join(", "));
       equal(combined.body.brep!.origin, "mesh-boolean", "the result is labelled as a mesh Boolean");
       equal(combined.body.brep!.faceTriangles.length, combined.body.indices.length / 3, "every triangle has a face");
-      near(meshVolume(combined.body), 40 * 40 * 10 - polygonArea(5, 72) * 10, 1e-4, "the hole is cut through the block");
+      near(meshVolume(combined.body), 40 * 40 * 10 - polygonArea(5, fullCircleFacets(5)) * 10, 1e-4, "the hole is cut through the block");
       const wall = combined.body.brep!.faces.find((face) => face.role === "tool.face.lateral")!;
-      near(wall.areaMm2, 72 * (2 * 5 * Math.sin(Math.PI / 72)) * 10, 1e-6, "the hole wall is the facet strip, one block height tall");
+      near(wall.areaMm2, fullCircleFacets(5) * (2 * 5 * Math.sin(Math.PI / fullCircleFacets(5))) * 10, 1e-6, "the hole wall is the facet strip, one block height tall");
 
       const project = { ...base, part: { ...base.part, generalBodies: [target, tool] } };
       const applied = applyWorkbenchOperation(project, { kind: "boolean-general-bodies", operationId: "operation:test-combine", expectedRevision: project.revision, targetBodyId: target.id, toolBodyId: tool.id, mode: "cut", keepTool: false, body: combined.body });

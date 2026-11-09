@@ -1,4 +1,5 @@
 import type { SketchEntity, Vec2 } from "../../workbench-core/src/index.js";
+import { chordErrorBoundMm } from "../../workbench-core/src/index.js";
 import { arcCircle, arcStepCount, CHORD_TOLERANCE_MM, flattenSpline, isClosedFitSpline } from "./curve-sampling.js";
 
 /**
@@ -161,7 +162,7 @@ function finiteVec(value: Vec2): boolean {
 // Curves
 // ---------------------------------------------------------------------------------------------
 
-function buildCurves(entities: readonly SketchEntity[], tol: number, chordTol: number, skipped: { entityId: string; reason: string }[]): Curve[] {
+function buildCurves(entities: readonly SketchEntity[], tol: number, chordTol: number | undefined, skipped: { entityId: string; reason: string }[]): Curve[] {
   const curves: Curve[] = [];
   const sorted = [...entities].sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
   const push = (make: (index: number) => Curve | undefined): void => {
@@ -232,7 +233,7 @@ function buildCurves(entities: readonly SketchEntity[], tol: number, chordTol: n
       const radians = (rotation * Math.PI) / 180;
       const cos = Math.cos(radians);
       const sin = Math.sin(radians);
-      const steps = Math.min(MAX_POLY_STEPS, Math.max(36, Math.ceil(TWO_PI / Math.sqrt((8 * chordTol * minor * minor) / (major ** 3)))));
+      const steps = Math.min(MAX_POLY_STEPS, Math.max(36, Math.ceil(TWO_PI / Math.sqrt((8 * (chordTol ?? chordErrorBoundMm(Math.sqrt(major * minor), CHORD_TOLERANCE_MM)) * minor * minor) / (major ** 3)))));
       const pts: Vec2[] = [];
       const ts: number[] = [];
       for (let step = 0; step <= steps; step += 1) {
@@ -310,7 +311,7 @@ function polyPointAt(poly: Poly, t: number): Vec2 {
 }
 
 /** Sampled points of the curve between two parameters, both ends exact. */
-function flattenRange(curve: Curve, t0: number, t1: number, chordTol: number): Vec2[] {
+function flattenRange(curve: Curve, t0: number, t1: number, chordTol: number | undefined): Vec2[] {
   if (curve.kind === "line") return [curvePoint(curve, t0), curvePoint(curve, t1)];
   if (isRound(curve)) {
     const portion = Math.abs(curve.sweep) * (t1 - t0);
@@ -367,7 +368,7 @@ interface SplitEntry {
 
 interface Context {
   readonly tol: number;
-  readonly chordTol: number;
+  readonly chordTol: number | undefined;
   readonly splits: SplitEntry[][];
   readonly curves: readonly Curve[];
   readonly overlaps: { readonly entityIds: readonly [string, string]; readonly at: Vec2 }[];
@@ -512,7 +513,7 @@ function roundRound(context: Context, a: RoundCurve, b: RoundCurve): void {
   }
 }
 
-function polyOf(curve: Curve, chordTol: number): Poly {
+function polyOf(curve: Curve, chordTol: number | undefined): Poly {
   if (curve.kind === "ellipse" || curve.kind === "spline") return curve.poly;
   const points = flattenRange(curve, 0, 1, chordTol);
   return { pts: points, ts: points.map((_, index) => index / (points.length - 1)) };
@@ -713,7 +714,7 @@ interface RawEdge {
 
 export function buildArrangement(entities: readonly SketchEntity[], options: { readonly gapToleranceMm?: number; readonly chordToleranceMm?: number } = {}): Arrangement {
   const tol = Math.max(options.gapToleranceMm ?? PROFILE_GAP_TOLERANCE_MM, 1e-9);
-  const chordTol = options.chordToleranceMm ?? CHORD_TOLERANCE_MM;
+  const chordTol = options.chordToleranceMm;
   const skipped: { entityId: string; reason: string }[] = [];
   const curves = buildCurves(entities, tol, chordTol, skipped);
   const context: Context = {

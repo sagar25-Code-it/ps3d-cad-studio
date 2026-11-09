@@ -1,4 +1,4 @@
-import { WORKBENCH_LIMITS, circleThroughThreePoints, type SketchEntity, type Vec2, type WorkbenchResult, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
+import { MODEL_ENVELOPE, WORKBENCH_LIMITS, circleThroughThreePoints, type SketchEntity, type Vec2, type WorkbenchResult, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
 import { badShape, type ShapeIds, type SketchShape } from "./curve-math.js";
 
 /**
@@ -13,8 +13,8 @@ type Circle = Extract<SketchEntity, { kind: "circle" }>;
 type Arc = Extract<SketchEntity, { kind: "arc" }>;
 export type TangentTarget = Line | Circle | Arc;
 
-const MAX_RADIUS_MM = 10_000;
-const MIN_RADIUS_MM = 0.01;
+const MAX_RADIUS_MM: number = MODEL_ENVELOPE.maxSketchRadiusMm;
+const MIN_RADIUS_MM: number = MODEL_ENVELOPE.minGeometryMm;
 
 /** An unknown circle (x, y, r) meets: A (x^2 + y^2 - r^2) + B x + C y + D r + E = 0. */
 interface Equation { readonly A: number; readonly B: number; readonly C: number; readonly D: number; readonly E: number }

@@ -68,9 +68,37 @@ const WELD_QUANTUM = 1e-5;
  * coordinate a "nice" number would produce far from a boundary.
  */
 const WELD_OFFSET: readonly [number, number, number] = [0.003141592653589793, 0.002718281828459045, 0.001414213562373095];
-const weldKey = (x: number, y: number, z: number): string => `${Math.round((x + WELD_OFFSET[0]) / WELD_QUANTUM)},${Math.round((y + WELD_OFFSET[1]) / WELD_QUANTUM)},${Math.round((z + WELD_OFFSET[2]) / WELD_QUANTUM)}`;
+/** Points closer than this on every axis are one vertex: a few times the plane tolerance, far below the 0.01 mm smallest feature. */
+const WELD_RADIUS = 4 * WELD_QUANTUM;
+const cellOf = (value: number, axis: number): number => Math.floor((value + WELD_OFFSET[axis]!) / WELD_RADIUS);
+
+/**
+ * A vertex index that merges every point within WELD_RADIUS of one already stored. Rounding to a grid alone splits two points that
+ * lie a hair apart on opposite sides of a grid line, and a cut through a plate with a finely faceted bore produced many such pairs
+ * (the plane tolerance snaps two crossing points to within a millionth of a millimetre of each other), which left the result open.
+ * Here the 27 cells around the point are searched, so near points always merge.
+ */
+function vertexWelder(positions: V3[]): (x: number, y: number, z: number) => number {
+  const cells = new Map<string, number[]>();
+  return (x, y, z) => {
+    const cx = cellOf(x, 0); const cy = cellOf(y, 1); const cz = cellOf(z, 2);
+    for (let dx = -1; dx <= 1; dx += 1) for (let dy = -1; dy <= 1; dy += 1) for (let dz = -1; dz <= 1; dz += 1) {
+      const nearby = cells.get(`${cx + dx},${cy + dy},${cz + dz}`);
+      if (nearby === undefined) continue;
+      for (const id of nearby) {
+        const point = positions[id]!;
+        if (Math.abs(point[0] - x) <= WELD_RADIUS && Math.abs(point[1] - y) <= WELD_RADIUS && Math.abs(point[2] - z) <= WELD_RADIUS) return id;
+      }
+    }
+    positions.push([x, y, z]);
+    const own = `${cx},${cy},${cz}`;
+    const list = cells.get(own);
+    if (list === undefined) cells.set(own, [positions.length - 1]); else list.push(positions.length - 1);
+    return positions.length - 1;
+  };
+}
 const MIN_TRIANGLE_AREA = 1e-10;
-const MAX_TRIANGLES_PER_INPUT = 30_000;
+const MAX_TRIANGLES_PER_INPUT = 60_000;
 const MAX_TREE_DEPTH = 3_000;
 const COPLANAR = 0;
 const FRONT = 1;
@@ -363,15 +391,7 @@ interface WeldedMesh {
 
 function weld(flat: readonly number[], indices: readonly number[]): WeldedMesh {
   const positions: V3[] = [];
-  const lookup = new Map<string, number>();
-  const idOf = (x: number, y: number, z: number): number => {
-    const key = weldKey(x, y, z);
-    const existing = lookup.get(key);
-    if (existing !== undefined) return existing;
-    positions.push([x, y, z]);
-    lookup.set(key, positions.length - 1);
-    return positions.length - 1;
-  };
+  const idOf = vertexWelder(positions);
   const remap = new Map<number, number>();
   const triangles: { a: number; b: number; c: number }[] = [];
   const mapped = (index: number): number => {
@@ -427,15 +447,8 @@ function componentCount(triangles: readonly { a: number; b: number; c: number }[
 function cleanUp(polygons: readonly Poly[]): { positions: V3[]; triangles: Triangle[] } | string {
   if (polygons.length === 0) return "The result is empty.";
   const positions: V3[] = [];
-  const lookup = new Map<string, number>();
-  const idOf = (vertex: V3): number => {
-    const key = weldKey(vertex[0], vertex[1], vertex[2]);
-    const existing = lookup.get(key);
-    if (existing !== undefined) return existing;
-    positions.push([vertex[0], vertex[1], vertex[2]]);
-    lookup.set(key, positions.length - 1);
-    return positions.length - 1;
-  };
+  const weldVertex = vertexWelder(positions);
+  const idOf = (vertex: V3): number => weldVertex(vertex[0], vertex[1], vertex[2]);
   let triangles: Triangle[] = [];
   for (const polygon of polygons) {
     const ids = polygon.v.map(idOf);
@@ -444,13 +457,105 @@ function cleanUp(polygons: readonly Poly[]): { positions: V3[]; triangles: Trian
     }
   }
   for (let pass = 0; pass < 6; pass += 1) {
-    triangles = triangles.filter((triangle) => triangle.a !== triangle.b && triangle.b !== triangle.c && triangle.a !== triangle.c && triangleArea(positions, triangle) >= MIN_TRIANGLE_AREA);
+    triangles = cancelCoincidentTriangles(triangles.filter((triangle) => triangle.a !== triangle.b && triangle.b !== triangle.c && triangle.a !== triangle.c && triangleArea(positions, triangle) >= MIN_TRIANGLE_AREA));
     const repaired = splitTJunctions(positions, triangles);
     triangles = repaired.triangles;
     if (!repaired.changed) break;
   }
+  if (!checkClosed(triangles)) triangles = fillTinyGaps(positions, triangles);
   if (!checkClosed(triangles)) return "The Boolean did not produce a clean closed solid (the faces do not meet exactly), so it was rejected and nothing changed.";
   return { positions, triangles };
+}
+
+/** A leftover gap is closed only when it is a sliver: its area stays under this (a strip a few microns wide and a millimetre long) and its outline is short. */
+const MAX_GAP_AREA_MM2 = 0.005;
+const MAX_GAP_PERIMETER_MM = 20;
+
+/**
+ * The splitting can drop a sliver of a face that lies within a hair of a cutting wall, leaving a tiny hole in an otherwise closed
+ * result (the edges around it are used once and never backwards). A hole that is only a sliver (a loop with a tiny area) is closed
+ * with a fan of triangles facing the way the neighbours expect; a bigger one is left open, and the result is then refused as before.
+ * The volume check that follows keeps a wrongly closed gap from being accepted.
+ */
+function fillTinyGaps(positions: readonly V3[], triangles: Triangle[]): Triangle[] {
+  const present = new Set<string>();
+  for (const { a, b, c } of triangles) for (const [from, to] of [[a, b], [b, c], [c, a]] as const) present.add(`${from},${to}`);
+  // The edges a filling triangle would use: each unmatched edge, turned round.
+  const next = new Map<number, number[]>();
+  let unmatched = 0;
+  for (const key of present) {
+    const [from, to] = key.split(",").map(Number) as [number, number];
+    if (present.has(`${to},${from}`)) continue;
+    unmatched += 1;
+    const list = next.get(to);
+    if (list === undefined) next.set(to, [from]); else list.push(from);
+  }
+  if (unmatched === 0 || unmatched > 60) return triangles;
+  const used = new Set<string>();
+  const filled: Triangle[] = [...triangles];
+  for (const [startFrom, targets] of next) {
+    for (const startTo of targets) {
+      if (used.has(`${startFrom},${startTo}`)) continue;
+      const loop: number[] = [startFrom];
+      let from = startFrom;
+      let to = startTo;
+      let closedLoop = false;
+      for (let step = 0; step < 8; step += 1) {
+        used.add(`${from},${to}`);
+        if (to === startFrom) { closedLoop = true; break; }
+        loop.push(to);
+        const options = (next.get(to) ?? []).filter((candidate) => !used.has(`${to},${candidate}`));
+        if (options.length !== 1) break;
+        from = to;
+        to = options[0]!;
+      }
+      if (!closedLoop || loop.length < 3) continue;
+      let perimeter = 0;
+      let nx = 0; let ny = 0; let nz = 0;
+      for (let index = 0; index < loop.length; index += 1) {
+        const a = positions[loop[index]!]!;
+        const b = positions[loop[(index + 1) % loop.length]!]!;
+        perimeter += Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+        nx += a[1] * b[2] - a[2] * b[1]; ny += a[2] * b[0] - a[0] * b[2]; nz += a[0] * b[1] - a[1] * b[0];
+      }
+      if (perimeter > MAX_GAP_PERIMETER_MM || Math.hypot(nx, ny, nz) / 2 > MAX_GAP_AREA_MM2) continue;
+      const template = triangles[0]!;
+      for (let corner = 1; corner + 1 < loop.length; corner += 1) filled.push({ a: loop[0]!, b: loop[corner]!, c: loop[corner + 1]!, source: template.source, face: -1 });
+    }
+  }
+  return filled;
+}
+
+/**
+ * Two triangles on the same three vertices cancel when they face opposite ways (a zero-thickness fold the splitting leaves where a
+ * cutting wall grazes a long thin face), and a repeated copy facing the same way is kept once. Either one leaves every edge it
+ * touches matched twice and the solid looking open.
+ */
+function cancelCoincidentTriangles(triangles: Triangle[]): Triangle[] {
+  const groups = new Map<string, Triangle[]>();
+  for (const triangle of triangles) {
+    const key = [triangle.a, triangle.b, triangle.c].sort((x, y) => x - y).join(",");
+    const group = groups.get(key);
+    if (group === undefined) groups.set(key, [triangle]); else group.push(triangle);
+  }
+  if (groups.size === triangles.length) return triangles;
+  const kept: Triangle[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) { kept.push(group[0]!); continue; }
+    // The winding of each copy relative to the first: an even permutation of the vertices faces the same way.
+    const first = group[0]!;
+    const same = (other: Triangle): boolean => {
+      const corners = [first.a, first.b, first.c];
+      const at = corners.indexOf(other.a);
+      return corners[(at + 1) % 3] === other.b;
+    };
+    const facing = group.filter(same);
+    const against = group.length - facing.length;
+    const net = facing.length - against;
+    if (net > 0) kept.push(first);
+    else if (net < 0) kept.push(group.find((triangle) => !same(triangle))!);
+  }
+  return kept;
 }
 
 function triangleArea(positions: readonly V3[], triangle: Triangle): number {

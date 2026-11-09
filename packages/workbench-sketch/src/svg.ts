@@ -98,7 +98,9 @@ export function writeSketchSvg(sketch: WorkbenchSketch, options: SvgWriteOptions
           const end = chain.controls[index + 2]!;
           d += `C${x(c1[0])} ${y(c1[1])} ${x(c2[0])} ${y(c2[1])} ${x(end[0])} ${y(end[1])}`;
         }
-        return `<path d="${d}"/>`;
+        // The fit points ride along (in the same coordinates as the path) so PS3D reads the same spline back, not a refit of the curve.
+        const fit = entity.fitPoints.map((point) => `${x(point[0])} ${y(point[1])}`).join(" ");
+        return `<path d="${d}" data-ps3d-fit="${fit}"/>`;
       }
     }
   };
@@ -107,7 +109,8 @@ export function writeSketchSvg(sketch: WorkbenchSketch, options: SvgWriteOptions
   const title = escapeXml(options.title ?? sketch.name);
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${n(width)}mm" height="${n(height)}mm" viewBox="0 0 ${n(width)} ${n(height)}">`,
+    // data-ps3d-origin: the sketch point (mm) that the drawing's own 0,0 (with its Y axis turned up) stands for, so PS3D puts the curves back where they were.
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${n(width)}mm" height="${n(height)}mm" viewBox="0 0 ${n(width)} ${n(height)}" data-ps3d-origin="${Number((minX - pad).toFixed(9))} ${Number((maxY + pad).toFixed(9))}">`,
     `<title>${title}</title>`,
     `<g id="profile" fill="none" stroke="#000000" stroke-width="0.1" stroke-linecap="round" stroke-linejoin="round">${profile.join("")}</g>`,
     ...(construction.length === 0 ? [] : [`<g id="construction" fill="none" stroke="#808080" stroke-width="0.1" stroke-dasharray="2 1">${construction.join("")}</g>`]),
@@ -673,6 +676,28 @@ function number(text: string | undefined, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+/** The fit points a PS3D-written path carries (3 to 64 of them), mapped through the element's matrix; undefined when absent or unusable. */
+function fitPointsOf(text: string | undefined, matrix: Matrix): Vec2[] | undefined {
+  if (text === undefined) return undefined;
+  const values = text.split(/[s,]+/u).filter((part) => part !== "").map(Number);
+  if (values.length < 6 || values.length % 2 === 1 || values.length > 128 || values.some((value) => !Number.isFinite(value))) return undefined;
+  const points: Vec2[] = [];
+  for (let index = 0; index + 1 < values.length; index += 2) points.push(apply(matrix, [values[index]!, values[index + 1]!]));
+  return points;
+}
+
+function shiftedCurve(curve: RawCurve, shift: Vec2): RawCurve {
+  const move = (point: Vec2): Vec2 => [point[0] + shift[0], point[1] + shift[1]];
+  switch (curve.kind) {
+    case "line": return { ...curve, a: move(curve.a), b: move(curve.b) };
+    case "arc": return { ...curve, start: move(curve.start), mid: move(curve.mid), end: move(curve.end) };
+    case "circle": return { ...curve, center: move(curve.center) };
+    case "ellipse": return { ...curve, center: move(curve.center) };
+    case "spline": return { ...curve, fit: curve.fit.map(move) };
+    case "point": return { ...curve, at: move(curve.at) };
+  }
+}
+
 /** Reads an SVG into curves. The Y axis is flipped so the drawing is upright in the sketch. */
 export interface SvgReadOptions {
   /** How closely Bezier curves and elliptical arcs must be followed by the fit-point splines, in millimetres (default 0.02). */
@@ -707,7 +732,8 @@ export function parseSvg(text: string, options: SvgReadOptions = {}): ParseResul
     }
     const attr = element.attrs;
     const m = multiply(flip, matrix);
-    const push = (list: readonly RawCurve[]): void => { for (const curve of list) curves.push({ ...curve, layer: here }); };
+    const construction = /^construction$/iu.test(here);
+    const push = (list: readonly RawCurve[]): void => { for (const curve of list) curves.push({ ...curve, layer: here, ...(construction ? { construction: true } : {}) }); };
     if (name === "line") {
       const a = apply(m, [number(attr["x1"]), number(attr["y1"])]);
       const b = apply(m, [number(attr["x2"]), number(attr["y2"])]);
@@ -750,6 +776,8 @@ export function parseSvg(text: string, options: SvgReadOptions = {}): ParseResul
         const ellipse = ellipseUnder(m, [cx, cy], rx, ry);
         if (ellipse !== undefined) push([ellipse]);
       }
+    } else if (name === "path" && fitPointsOf(attr["data-ps3d-fit"], m) !== undefined) {
+      push([{ kind: "spline", fit: fitPointsOf(attr["data-ps3d-fit"], m)!, layer: here }]);
     } else {
       const parsed = parsePathData(attr["d"] ?? "");
       if (parsed.problem !== undefined) context.warnings.add(`A path was only partly read: ${parsed.problem}`);
@@ -760,6 +788,12 @@ export function parseSvg(text: string, options: SvgReadOptions = {}): ParseResul
     }
   };
   visit(svg, IDENTITY, "SVG");
+  // A drawing PS3D wrote says where its own origin sits in the sketch; move the curves back there.
+  const origin = (svg.attrs["data-ps3d-origin"] ?? "").split(/s+/u).map(Number);
+  if (origin.length === 2 && origin.every(Number.isFinite)) {
+    const shift: Vec2 = [origin[0]! / units.mmPerUnit, origin[1]! / units.mmPerUnit];
+    for (let index = 0; index < curves.length; index += 1) curves[index] = shiftedCurve(curves[index]!, shift);
+  }
   const counts = new Map<string, number>();
   for (const curve of curves) counts.set(curve.layer, (counts.get(curve.layer) ?? 0) + 1);
   const layers = [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));

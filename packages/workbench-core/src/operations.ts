@@ -1638,7 +1638,7 @@ function validConstructionPlanePayload(value: unknown): value is import("./types
   const def = value.definition;
   if (def.kind === "offset") {
     return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && typeof def.offsetMm === "number"
-      && Number.isFinite(def.offsetMm) && Math.abs(def.offsetMm) <= 10_000
+      && Number.isFinite(def.offsetMm) && Math.abs(def.offsetMm) <= MODEL_ENVELOPE.maxPlaneOffsetMm
       && Object.keys(def).every((key) => ["kind", "basePlane", "offsetMm"].includes(key));
   }
   if (def.kind === "angle") {
@@ -1652,8 +1652,8 @@ function validConstructionPlanePayload(value: unknown): value is import("./types
       && Object.keys(def).every((key) => ["kind", "points"].includes(key));
   }
   if (def.kind === "midplane") {
-    return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && typeof def.fromMm === "number" && Number.isFinite(def.fromMm) && Math.abs(def.fromMm) <= 10_000
-      && typeof def.toMm === "number" && Number.isFinite(def.toMm) && Math.abs(def.toMm) <= 10_000 && def.fromMm !== def.toMm
+    return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && typeof def.fromMm === "number" && Number.isFinite(def.fromMm) && Math.abs(def.fromMm) <= MODEL_ENVELOPE.maxPlaneOffsetMm
+      && typeof def.toMm === "number" && Number.isFinite(def.toMm) && Math.abs(def.toMm) <= MODEL_ENVELOPE.maxPlaneOffsetMm && def.fromMm !== def.toMm
       && Object.keys(def).every((key) => ["kind", "basePlane", "fromMm", "toMm"].includes(key));
   }
   if (def.kind === "tangent-to-cylinder") {

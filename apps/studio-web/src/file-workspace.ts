@@ -1,4 +1,4 @@
-import { validateWorkbenchProject, type WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
+import { describeByteLimit, PROJECT_FILE_MAX_BYTES, validateWorkbenchProject, type WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 
 const WORKSPACE_NAME = "PS CAD Studio";
 const DATABASE_NAME = "ps3d-file-workspace";
@@ -8,7 +8,8 @@ const DIRECTORY_KEY = "workspace-directory";
 const CURRENT_FILE_KEY = "current-project-file";
 const RECENT_KEY = "recent-projects";
 const MAX_RECENT_PROJECTS = 12;
-export const MAX_PROJECT_BYTES = 50 * 1024 * 1024;
+/** Save writes, Open reads and the validators accept the same number of bytes (envelope-limits.ts). */
+export const MAX_PROJECT_BYTES: number = PROJECT_FILE_MAX_BYTES;
 
 type WritablePermission = PermissionState | "unsupported";
 type ProjectLocator = "workspace" | "file-handle" | "metadata";
@@ -269,7 +270,7 @@ export async function readProjectFilePayload(file: Pick<File, "name" | "size" | 
 
 export function assertProjectFileSize(sizeBytes: number): void {
   if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_PROJECT_BYTES) {
-    throw new Error("The selected PS3D project must be between 1 byte and the 50 MB browser safety limit.");
+    throw new Error(`The selected PS3D project must be between 1 byte and the ${describeByteLimit(MAX_PROJECT_BYTES)} browser safety limit.`);
   }
 }
 
@@ -504,7 +505,7 @@ function projectPickerTypes(): readonly { readonly description: string; readonly
 
 function assertProjectText(text: string): void {
   const bytes = byteLength(text);
-  if (bytes <= 0 || bytes > MAX_PROJECT_BYTES) throw new Error("The PS3D project must be between 1 byte and 50 MB.");
+  if (bytes <= 0 || bytes > MAX_PROJECT_BYTES) throw new Error(`The PS3D project must be between 1 byte and ${describeByteLimit(MAX_PROJECT_BYTES)}.`);
 }
 
 function byteLength(text: string): number { return new TextEncoder().encode(text).byteLength; }

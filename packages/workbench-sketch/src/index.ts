@@ -25,7 +25,7 @@ import { detectProfilesOf, shapesOf } from "./profile-detect.js";
 import type { ProfileDetectionOptions } from "./profile-regions.js";
 
 import { sampleArc, sampleSpline } from "./curve-sampling.js";
-export { sampleArc, sampleSpline, CHORD_TOLERANCE_MM, isClosedFitSpline } from "./curve-sampling.js";
+export { sampleArc, sampleArcToBound, sampleSpline, sampleSplineToBound, CHORD_TOLERANCE_MM, isClosedFitSpline } from "./curve-sampling.js";
 export { PROFILE_GAP_TOLERANCE_MM } from "./arrangement.js";
 export { profileBaseOf, profileRefOf, parseProfileRef, signedProfileId, type ProfileDetectionOptions } from "./profile-regions.js";
 export { profileOutlineMm, resolveProfileRegion, type ProfileRegion };

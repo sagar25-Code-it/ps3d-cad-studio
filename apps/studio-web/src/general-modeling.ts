@@ -12,30 +12,19 @@ type PolygonPoint = readonly [number, number];
 type WorldPoint = readonly [number, number, number];
 
 /**
- * Convert a detected sketch profile boundary into a closed polygon (millimetres). A circle or ellipse is faceted by its size (see
- * adaptiveFacetCount): 72 facets up to a radius of about 50 mm, more on large ones, so a big round part is not visibly polygonal.
+ * Convert a detected sketch profile boundary into a closed polygon (millimetres). Every curve follows the one chord-error rule of the
+ * sketch (profileOutlineMm: within 1/2,000 of the radius, at most 0.01 mm), so the outline of an extrusion, a sweep and a loft is as
+ * round as the sketch curve at any size. `maxFacets` caps a round outline for a caller that multiplies it by another count (a revolve).
  */
-export function profilePolygonMm(boundary: SketchProfile["boundary"]): readonly PolygonPoint[] {
-  if (boundary.kind === "circle") {
-    const count = adaptiveFacetCount(boundary.radiusMm);
-    return Array.from({ length: count }, (_, index): PolygonPoint => {
-      const angle = (2 * Math.PI * index) / count;
-      return [boundary.center[0] + boundary.radiusMm * Math.cos(angle), boundary.center[1] + boundary.radiusMm * Math.sin(angle)];
-    });
-  }
-  if (boundary.kind === "ellipse") {
-    const count = adaptiveFacetCount(boundary.majorRadiusMm);
-    const radians = (boundary.rotationDeg * Math.PI) / 180;
-    const cos = Math.cos(radians);
-    const sin = Math.sin(radians);
-    return Array.from({ length: count }, (_, index): PolygonPoint => {
-      const theta = (2 * Math.PI * index) / count;
-      const localX = boundary.majorRadiusMm * Math.cos(theta);
-      const localY = boundary.minorRadiusMm * Math.sin(theta);
-      return [boundary.center[0] + localX * cos - localY * sin, boundary.center[1] + localX * sin + localY * cos];
-    });
-  }
-  return profileOutlineMm(boundary).map((point) => [point[0], point[1]] as PolygonPoint);
+export function profilePolygonMm(boundary: SketchProfile["boundary"], maxFacets?: number): readonly PolygonPoint[] {
+  return profileOutlineMm(boundary, maxFacets === undefined ? {} : { maxFacets }).map((point) => [point[0], point[1]] as PolygonPoint);
+}
+
+/** The coarser faceting a revolve gives the round outline of its profile (the file grows with the facets times the turns): see adaptiveFacetCount. */
+function revolveProfileFacets(boundary: SketchProfile["boundary"]): number | undefined {
+  if (boundary.kind === "circle") return adaptiveFacetCount(boundary.radiusMm);
+  if (boundary.kind === "ellipse") return adaptiveFacetCount(boundary.majorRadiusMm);
+  return undefined;
 }
 
 /**
@@ -248,7 +237,7 @@ async function createRegionGroups(request: CreateGeneralSolidRequest): Promise<C
  */
 export async function createGeneralSolidBody(request: CreateGeneralSolidRequest): Promise<CreateGeneralSolidResult> {
   if (request.extraGroups !== undefined && request.extraGroups.length > 0) return createRegionGroups(request);
-  const polygonMm = profilePolygonMm(request.profile.boundary);
+  const polygonMm = profilePolygonMm(request.profile.boundary, request.operation === "revolve" ? revolveProfileFacets(request.profile.boundary) : undefined);
   if (polygonMm.length < 3) return { ok: false, message: "The selected profile does not form a closed polygon." };
   if (!Number.isFinite(request.valueMm) || request.valueMm === 0) {
     return { ok: false, message: request.operation === "extrude" ? "Enter a non-zero extrusion height." : "Enter a non-zero revolve angle." };

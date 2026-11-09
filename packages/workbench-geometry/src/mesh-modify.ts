@@ -146,7 +146,7 @@ export interface PickableEdge {
   readonly triangles?: readonly [number, number];
 }
 
-const MAX_SHARP_EDGES = 200;
+const MAX_SHARP_EDGES = 1_200;
 const DEFAULT_CYLINDER_SEGMENTS = 32;
 const DEFAULT_FILLET_SEGMENTS = 8;
 const DEFAULT_ANGLE_THRESHOLD_DEG = 5;
@@ -580,7 +580,7 @@ const CHAIN_TURN_LIMIT_DEG = 35;
 /** An edge that bends the surface by less than this is a facet seam, not a pickable edge. */
 const PICK_MIN_BEND_DEG = 20;
 /** How many sharp edges a body may have before picking is refused (inside corners double the count of a typical body). */
-const MAX_PICKABLE_EDGES = 600;
+const MAX_PICKABLE_EDGES = 4_000;
 
 export interface PickableEdgeOptions {
   /** Offer inside (concave) corners as well as outside ones. */

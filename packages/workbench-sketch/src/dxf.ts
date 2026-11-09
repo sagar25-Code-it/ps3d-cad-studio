@@ -283,7 +283,8 @@ export function writeSketchDxf(sketch: WorkbenchSketch, options: DxfWriteOptions
 // Reader
 // ---------------------------------------------------------------------------------------------------------------------
 
-type Pair = readonly [number, string];
+/** A group code, its value, and the 1-based line the value is on (so a damaged number can be named). */
+type Pair = readonly [number, string, number?];
 
 interface DxfRecord {
   /** The entity type (group 0 value). */
@@ -313,6 +314,9 @@ function tokenize(text: string): readonly Pair[] | string {
   if (text.startsWith("AutoCAD Binary DXF")) return "This is a binary DXF. Save the drawing as an ASCII DXF (in most CAD programs: Save As, DXF, ASCII or text).";
   if (/^AC10\d\d/u.test(text) && text.includes("\u0000")) return "This is a DWG file, which PS3D cannot read. Save or export the drawing as DXF from your CAD program and open that.";
   const lines = text.replace(/^﻿/u, "").split(/\r\n|\r|\n/u);
+  // A file cut off in the middle of a group ends on a code with no value: say so instead of quietly dropping the last group.
+  while (lines.length > 0 && lines[lines.length - 1]!.trim() === "") lines.pop();
+  if (lines.length % 2 === 1 && lines.length > 1) return `The DXF ends in the middle of a group at line ${lines.length} (the group code "${lines[lines.length - 1]!.trim().slice(0, 20)}" has no value): the file looks cut off. Export the drawing again.`;
   const pairs: Pair[] = [];
   for (let index = 0; index + 1 < lines.length; index += 2) {
     const codeText = lines[index]!.trim();
@@ -320,9 +324,26 @@ function tokenize(text: string): readonly Pair[] | string {
       if (index === 0 || pairs.length === 0) return "This does not look like a DXF file: the first line is not a group code number.";
       return `The DXF is damaged near line ${index + 1}: expected a group code number but found "${codeText.slice(0, 20)}".`;
     }
-    pairs.push([Number(codeText), lines[index + 1]!.trim()]);
+    pairs.push([Number(codeText), lines[index + 1]!.trim(), index + 2]);
   }
   return pairs;
+}
+
+/** Group codes whose value is a number (coordinates, radii, angles, flags, counts). */
+function isNumericGroup(code: number): boolean {
+  return (code >= 10 && code <= 99) || (code >= 110 && code <= 149) || (code >= 160 && code <= 179) || (code >= 210 && code <= 239) || (code >= 270 && code <= 289) || (code >= 370 && code <= 389) || (code >= 400 && code <= 409) || (code >= 420 && code <= 429) || (code >= 440 && code <= 469);
+}
+
+const DXF_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/u;
+
+/** The first number in the pairs that cannot be read (not a number, or too large to be one), with the line it is on; undefined when all are fine. */
+function unreadableNumber(pairs: readonly Pair[]): string | undefined {
+  for (const [code, value, line] of pairs) {
+    if (!isNumericGroup(code)) continue;
+    if (DXF_NUMBER.test(value) && Number.isFinite(Number(value))) continue;
+    return `The DXF has an unreadable number "${value.slice(0, 24)}" for group ${code} at line ${line ?? "?"}. The file may be damaged or cut off, and importing it would put wrong geometry in the sketch. Export the drawing again.`;
+  }
+  return undefined;
 }
 
 function sectionsOf(pairs: readonly Pair[]): ReadonlyMap<string, readonly Pair[]> {
@@ -513,6 +534,8 @@ export function parseDxf(text: string, options: DxfReadOptions = {}): ParseResul
   const sections = sectionsOf(pairs);
   const entitiesSection = sections.get("ENTITIES");
   if (entitiesSection === undefined) return bad("The DXF has no ENTITIES section, so there is nothing to import.", "Choose a DXF that contains drawn geometry (not just blocks or tables).");
+  const unreadable = unreadableNumber(entitiesSection) ?? unreadableNumber(sections.get("HEADER") ?? []);
+  if (unreadable !== undefined) return bad(unreadable, "Export the drawing from your CAD program again as an ASCII DXF.");
   const units = detectUnits(sections.get("HEADER"));
   const toleranceUnits = Math.max(0.0005, Math.min(1, options.curveToleranceMm ?? 0.02)) / units.mmPerUnit;
   const records = recordsOf(entitiesSection);

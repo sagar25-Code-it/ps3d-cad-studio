@@ -1,4 +1,5 @@
 import { circleThroughThreePoints } from "./arc-geometry.js";
+import { ENVELOPE_LIMITS } from "./envelope-limits.js";
 import { SPLINE_MAX_FIT_POINTS, SPLINE_MIN_FIT_POINTS } from "./spline-limits.js";
 import type { WorkbenchDiagnostic } from "./types.js";
 
@@ -13,14 +14,7 @@ import type { WorkbenchDiagnostic } from "./types.js";
  *  - Built bodies: every vertex within +/-1000 m, so a 100 m part on a plane 100 m out still fits.
  */
 export const MODEL_ENVELOPE = {
-  minGeometryMm: 0.01,
-  maxSketchCoordinateMm: 100_000,
-  maxSketchSizeMm: 200_000,
-  maxSketchRadiusMm: 100_000,
-  maxSketchLongMm: 400_000,
-  maxFeatureDistanceMm: 100_000,
-  maxPlaneOffsetMm: 100_000,
-  maxBodyCoordinateMm: 1_000_000,
+  ...ENVELOPE_LIMITS,
   maxSplineFitPoints: SPLINE_MAX_FIT_POINTS,
   minSplineFitPoints: SPLINE_MIN_FIT_POINTS
 } as const;

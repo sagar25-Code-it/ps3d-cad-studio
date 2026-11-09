@@ -13,7 +13,7 @@ import {
   requiredSketchPoints,
   selectConnectedSketchEntities,
   selectTangentSketchEntities,
-  sampleSpline,
+  sampleSplineToBound,
   sketchBounds,
   sketchChainBranchCount,
   sketchToolLabel,
@@ -2614,7 +2614,7 @@ function SketchEntityShape({ entity, name, px, selected, hovered, related = fals
     if (entity.kind === "circle") return <circle className={cls} cx={entity.center[0]} cy={-entity.center[1]} r={entity.radiusMm} />;
     if (entity.kind === "ellipse") return <ellipse className={cls} cx={entity.center[0]} cy={-entity.center[1]} rx={entity.majorRadiusMm} ry={entity.minorRadiusMm} transform={`rotate(${-entity.rotationDeg} ${entity.center[0]} ${-entity.center[1]})`} />;
     if (entity.kind === "point") return <circle className={`${cls} sketch-point`} cx={entity.point[0]} cy={-entity.point[1]} r={(hit ? 9 : 3.5) * px} />;
-    if (entity.kind === "spline") return <path className={cls} d={sampleSpline(entity.fitPoints).map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${-point[1]}`).join(" ")} />;
+    if (entity.kind === "spline") return <path className={cls} d={sampleSplineToBound(entity.fitPoints).map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${-point[1]}`).join(" ")} />;
     return <path className={cls} d={arcPathData(entity.start, entity.mid, entity.end)} />;
   };
   if (preview || onSelect === undefined) return <g data-selection-id={entity.id}>{geometry(className, false)}</g>;

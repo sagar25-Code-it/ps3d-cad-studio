@@ -1,4 +1,4 @@
-import { failure, type SketchEntity, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
+import { failure, MODEL_ENVELOPE, type SketchEntity, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
 import { isDimensionConstraint, measureDimensionConstraint } from "../../workbench-core/src/sketch-measure.js";
 import { entityExtents, entityPoints } from "./index.js";
 import { mapEntity, type SketchEditContext, type SketchEditResult } from "./edit-tools.js";
@@ -207,7 +207,7 @@ export function patternEntities(context: SketchEditContext, ids: readonly string
       for (let column = 0; column < countX; column += 1) {
         if (row === 0 && column === 0) continue;
         const offset: Vec2 = [column * dx * cos - row * dy * sin, column * dx * sin + row * dy * cos];
-        if (Math.abs(offset[0]) > 1e6 || Math.abs(offset[1]) > 1e6) return reject("The pattern spacing is far outside the sketch limit of 10000 mm.");
+        if (Math.abs(offset[0]) > 1e6 || Math.abs(offset[1]) > 1e6) return reject(`The pattern spacing is far outside the sketch limit of ${MODEL_ENVELOPE.maxSketchCoordinateMm} mm.`);
         instances.push({ point: (value) => [value[0] + offset[0], value[1] + offset[1]], rotation: (degrees) => degrees });
       }
     }

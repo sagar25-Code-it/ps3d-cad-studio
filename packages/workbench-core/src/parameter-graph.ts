@@ -1,3 +1,4 @@
+import { ENVELOPE_LIMITS } from "./envelope-limits.js";
 import { dimensionNameOf } from "./sketch-dimension-edit.js";
 import { bindableFieldsOf, boundValueProblem, featureAlias, findBindableField, type BindableDimension, type BindableField } from "./feature-bindings.js";
 import {
@@ -21,8 +22,8 @@ import type { DesignHistory, DesignParameter, DesignSolidFeature, SketchDimensio
 
 export const MAX_DESIGN_PARAMETERS = 200;
 export const MAX_COMMENT_LENGTH = 200;
-/** The same envelope the sketch dimension operation enforces. */
-export const SKETCH_DIMENSION_RANGE_MM = { min: 0.01, max: 10_000 } as const;
+/** The same envelope the sketch dimension operation enforces: a side up to 200 m, a radius up to 100 m (see envelope-limits.ts). */
+export const SKETCH_DIMENSION_RANGE_MM = { min: ENVELOPE_LIMITS.minGeometryMm, max: ENVELOPE_LIMITS.maxSketchSizeMm } as const;
 
 const NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,47}$/u;
 
@@ -263,7 +264,7 @@ class Evaluation {
     if (!scalar && !(quantity.length === 1 && quantity.angle === 0)) return { ok: false, message: `A dimension needs a length, but this expression gives ${describeDimension(quantity)}.` };
     const name = sketchDimensionOf(constraint);
     const minimum = ZERO_ALLOWED.includes(name) ? 0 : SKETCH_DIMENSION_RANGE_MM.min;
-    const maximum = LONG_DIMENSIONS.includes(name) ? SKETCH_DIMENSION_RANGE_MM.max * 2 : SKETCH_DIMENSION_RANGE_MM.max;
+    const maximum = name === "radius" ? ENVELOPE_LIMITS.maxSketchRadiusMm : LONG_DIMENSIONS.includes(name) ? SKETCH_DIMENSION_RANGE_MM.max * 2 : SKETCH_DIMENSION_RANGE_MM.max;
     if (!(quantity.value >= minimum && quantity.value <= maximum)) {
       return { ok: false, message: `A dimension must be between ${minimum} and ${maximum} mm, but this expression gives ${Number(quantity.value.toFixed(6))} mm.` };
     }
