@@ -147,3 +147,45 @@ function circleThrough(a: Vec2, b: Vec2, c: Vec2): readonly [number, number, num
   const y = (a2 * (c[0] - b[0]) + b2 * (a[0] - c[0]) + c2 * (b[0] - a[0])) / d;
   return [x, y, Math.hypot(a[0] - x, a[1] - y)];
 }
+
+const ellipse = (id: string, center: Vec2, majorRadiusMm: number, minorRadiusMm: number, rotationDeg: number): SketchEntity => ({ id, kind: "ellipse", center, majorRadiusMm, minorRadiusMm, rotationDeg, construction: false });
+
+export const sketchEllipseCrossing3Tests: readonly TestCase[] = [
+  {
+    name: "Curve creation F6: an ellipse x circle crossing snap is exact and its two relations are accepted",
+    run: () => {
+      const project = addShape(emptyProject3(), { entities: [ellipse("entity:el1", [-8.3, 15.6], 47.6, 13.3, -74.9), { id: "entity:ci1", kind: "circle", center: [10, -0.15], radiusMm: 29.1, construction: false }], constraints: [] });
+      let snapped = 0;
+      for (let trial = 0; trial < 12; trial += 1) {
+        const pointer: Vec2 = [-18.77 + (trial % 4) * 0.07 - 0.1, 4.3 + Math.floor(trial / 4) * 0.06 - 0.06];
+        const drawn = drawEntity("point", project, [pointer], { tolerance: 1 });
+        if (drawn.placed[0]?.primary?.kind !== "intersection") continue;
+        snapped += 1;
+        const at = drawn.placed[0].point;
+        near(Math.hypot(at[0] - 10, at[1] + 0.15), 29.1, 1e-9, "the snap is on the circle");
+        const added = tryAdd(project, { entities: [drawn.entity], constraints: drawn.constraints });
+        assert(added.ok, `the point and its relations (${drawn.constraints.map((constraint) => constraint.kind).join(",")}) are accepted: ${added.ok ? "" : added.message}`);
+      }
+      assert(snapped >= 6, `the crossing snapped in most trials (${snapped})`);
+    }
+  },
+  {
+    name: "Curve creation F6: an ellipse x ellipse crossing snap is exact and its relations are accepted",
+    run: () => {
+      const project = addShape(emptyProject3(), { entities: [ellipse("entity:el1", [0, 0], 30, 12, 20), ellipse("entity:el2", [4, 3], 28, 10, -50)], constraints: [] });
+      let snapped = 0;
+      const seen: Vec2[] = [];
+      for (let gx = -30; gx <= 30; gx += 0.7) for (let gy = -30; gy <= 30; gy += 0.7) {
+        const drawn = drawEntity("point", project, [[gx, gy]], { tolerance: 0.6 });
+        const at = drawn.placed[0]?.point;
+        if (at === undefined || seen.some((earlier) => Math.hypot(earlier[0] - at[0], earlier[1] - at[1]) < 1e-6)) continue;
+        if (drawn.placed[0]?.primary?.kind !== "intersection") continue;
+        seen.push(at);
+        snapped += 1;
+        const added = tryAdd(project, { entities: [drawn.entity], constraints: drawn.constraints });
+        assert(added.ok, `accepted (${drawn.constraints.map((constraint) => constraint.kind).join(",")}): ${added.ok ? "" : added.message}`);
+      }
+      assert(snapped >= 3, `the pointer snapped to a crossing (${snapped})`);
+    }
+  }
+];

@@ -2,6 +2,7 @@ import type { SketchEntity, Vec2, WorkbenchSketch } from "../../workbench-core/s
 import { ellipsePerpendicularFeet, ellipsePolyline, ellipseSegmentIntersections, ellipseTangentPointsFrom, nearestOnEllipse, type EllipseShape } from "./ellipse-geometry.js";
 import { entityPoints, sampleSpline } from "./index.js";
 import { tidyPoint } from "./clean-numbers.js";
+import { circleImplicit, ellipseImplicit, refineCrossing } from "./crossing-refine.js";
 
 /**
  * Cursor inference for the sketch canvas: while a tool is active the pointer snaps to the most meaningful nearby geometry
@@ -305,10 +306,11 @@ function intersect(first: Primitive, second: Primitive): readonly Vec2[] {
     const oval = first.kind === "ellipse" ? first : (second as Oval);
     const other = first.kind === "ellipse" ? second : first;
     if (other.kind === "segment") return ellipseSegmentIntersections(other.a, other.b, oval.shape);
-    if (other.kind === "round") return ovalSegments(oval).flatMap((segment) => intersectSegmentRound(segment, other)).map((point) => ontoOval(point, oval)).filter((point, index, all) => all.findIndex((candidate) => dist(candidate, point) < 1e-6) === index);
+    // A crossing found on the polygonal outline is moved onto both true curves, so the point it snaps to is exact.
+    if (other.kind === "round") return ovalSegments(oval).flatMap((segment) => intersectSegmentRound(segment, other)).map((point) => refineCrossing(ontoOval(point, oval), ellipseImplicit(oval.shape), circleImplicit(other.center, other.radius))).filter((point, index, all) => all.findIndex((candidate) => dist(candidate, point) < 1e-6) === index);
     const segments = ovalSegments(oval);
     const otherSegments = ovalSegments(other);
-    return segments.flatMap((segment) => otherSegments.flatMap((candidate) => intersectSegments(segment, candidate))).map((point) => ontoOval(point, oval)).filter((point, index, all) => all.findIndex((candidate) => dist(candidate, point) < 1e-6) === index);
+    return segments.flatMap((segment) => otherSegments.flatMap((candidate) => intersectSegments(segment, candidate))).map((point) => refineCrossing(ontoOval(point, oval), ellipseImplicit(oval.shape), ellipseImplicit(other.shape))).filter((point, index, all) => all.findIndex((candidate) => dist(candidate, point) < 1e-6) === index);
   }
   if (first.kind === "segment" && second.kind === "segment") return intersectSegments(first, second);
   if (first.kind === "segment" && second.kind === "round") return intersectSegmentRound(first, second);
