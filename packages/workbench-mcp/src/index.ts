@@ -24,6 +24,7 @@ import { analyzeWorkbenchSketch } from "../../workbench-sketch/src/index.js";
 import { createElectricalSchematic } from "../../workbench-electrical/src/index.js";
 import { analyzeDesignHealth } from "../../workbench-health/src/index.js";
 import { buildDesignSolidOperation } from "./design-solid.js";
+import { packMeshes } from "../../workbench-core/src/index.js";
 
 export interface McpToolDefinition {
   readonly name: string;
@@ -331,7 +332,7 @@ export async function handleWorkbenchMcpTool(name: string, args: unknown): Promi
 }
 
 async function handleWorkbenchMcpToolChecked(name: string, args: unknown): Promise<WorkbenchMcpResult> {
-  if (encodedSize(args) > WORKBENCH_LIMITS.maxMcpInputBytes) return error("RESOURCE_LIMIT", `The MCP tool input is ${Math.round(encodedSize(args) / 1000)} kB; one call may carry at most ${describeByteLimit(WORKBENCH_LIMITS.maxMcpInputBytes)}. Send a smaller project: delete bodies you no longer need before the call.`);
+  if (encodedSize(args) > WORKBENCH_LIMITS.maxMcpInputBytes) return error("RESOURCE_LIMIT", `The MCP tool input is ${Math.round(encodedSize(args) / 1000)} kB; one call may carry at most ${describeByteLimit(WORKBENCH_LIMITS.maxMcpInputBytes)}. Send the meshes exactly as this server returned them (packed, in packedMesh records, several times smaller than plain lists), or delete bodies you no longer need before the call.`);
   if (name === "ps3d_guide") {
     if (!isRecord(args) || Object.keys(args).length !== 0) return error("INVALID_PARAMS", "ps3d_guide accepts no arguments.");
     const guide = await createPs3dCollaborationGuide();
@@ -519,13 +520,14 @@ async function handleWorkbenchMcpToolChecked(name: string, args: unknown): Promi
     if (!project.ok) return diagnostics(project.diagnostics);
     const built = await buildDesignSolidOperation(project.value, args.solid);
     if (!built.ok) return error(built.code, built.message);
-    const bytes = encodedSize(built.operation);
+    // Meshes travel packed (mesh-pack.ts), so the size that counts is the packed one.
+    const bytes = encodedSize(packMeshes(built.operation));
     // ps3d_apply_preview carries the project and the operation together, so both must fit one call (not just the operation).
-    const projectBytes = encodedSize(args["project"]);
+    const projectBytes = encodedSize(packMeshes(args["project"]));
     if (projectBytes + bytes + 1_024 > WORKBENCH_LIMITS.maxMcpInputBytes) return error("RESOURCE_LIMIT", `The built solid is ${Math.round(bytes / 1000)} kB and the project is ${Math.round(projectBytes / 1000)} kB; ps3d_apply_preview needs both in one call of at most ${describeByteLimit(WORKBENCH_LIMITS.maxMcpInputBytes)}. Use a simpler profile or a smaller solid, or delete bodies you no longer need from the project first.`);
     const previewed = await preview(project.value, built.operation);
     if (previewed.isError === true) return previewed;
-    return success(`Built ${String(built.solid["kind"])} (${String(built.solid["volumeMm3"])} mm3); ${String(previewed.structuredContent["summary"])} No state was modified.`, { ...previewed.structuredContent, schema: "ps3d-design-solid-preview/1", operation: built.operation, solid: built.solid });
+    return success(`Built ${String(built.solid["kind"])} (${String(built.solid["volumeMm3"])} mm3); ${String(previewed.structuredContent["summary"])} No state was modified.`, { ...previewed.structuredContent, schema: "ps3d-design-solid-preview/1", operation: packMeshes(built.operation), solid: built.solid });
   }
   if (name === "ps3d_preview_electromechanical") {
     if (!exactKeys(args, ["project", "guideAcknowledgement"])) return error("INSTRUCTION_ACKNOWLEDGEMENT_REQUIRED", "Read ps3d_guide and provide the project plus its current guideAcknowledgement.");
@@ -599,7 +601,7 @@ async function handleWorkbenchMcpToolChecked(name: string, args: unknown): Promi
     const nextProject = prepared.structuredContent["nextProject"] as WorkbenchProject;
     return success(`Applied confirmed preview; returned revision ${nextProject.revision} without writing external state.`, {
       schema: "ps3d-applied-operation/1",
-      project: nextProject,
+      project: packMeshes(nextProject),
       receipt: args.receipt,
       receiptInfo: prepared.structuredContent["receiptInfo"],
       summary: prepared.structuredContent["summary"],
@@ -626,7 +628,7 @@ async function preview(projectInput: unknown, operationInput: unknown): Promise<
     changedIds: prepared.structuredContent["changedIds"],
     baseProjectRef: prepared.structuredContent["baseProjectRef"],
     candidateProjectRef: prepared.structuredContent["candidateProjectRef"],
-    candidateProject: nextProject,
+    candidateProject: packMeshes(nextProject),
     confirmationBoundary: "The receipt is an unkeyed deterministic integrity checksum, not a signature or proof of human approval. The host must show the candidate project and bind confirmation to this exact base revision before apply."
   });
 }

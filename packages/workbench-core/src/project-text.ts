@@ -1,13 +1,15 @@
+import { packMeshes } from "./mesh-pack.js";
 import type { WorkbenchProject } from "./types.js";
 
 /**
  * The text a project is saved as. It is the same JSON as before, indented for people to read, except that a list of plain numbers (the
  * vertex and index arrays of a tessellated body, a polyline) is written on one line. Pretty-printing every number on its own line made
  * a mesh body about three times larger than it needs to be, which is what pushed realistic projects past the file limits. Any JSON
- * parser reads the result, and `parseWorkbenchProjectText` accepts both layouts.
+ * parser reads the result, and `parseWorkbenchProjectText` accepts both layouts. Tessellated meshes are written packed (base64 typed
+ * arrays, see mesh-pack.ts), which is several times smaller again; a file with plain lists, as older versions wrote, opens as before.
  */
 export function serializeWorkbenchProject(project: WorkbenchProject): string {
-  const pretty = JSON.stringify(project, null, 2);
+  const pretty = JSON.stringify(packMeshes(project), null, 2);
   return `${collapseNumberLists(pretty)}\n`;
 }
 

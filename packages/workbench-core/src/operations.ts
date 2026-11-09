@@ -68,6 +68,7 @@ import { firstNonFinitePath, MODEL_ENVELOPE, sketchEntityProblem, solidEnvelopeP
 import { AUDIT_KEEP_FULL, compactAudit } from "./audit-archive.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
 import { applySketchObjectsEdit, explicitObjectIds, reconcileSketchObjects, validSketchObjectsEdit } from "./sketch-objects.js";
+import { unpackMeshes } from "./mesh-pack.js";
 import { constraintPayloadProblem, describeGivenValue, parameterTableProblem, sketchObjectsProblem } from "./operation-payload-problems.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
@@ -251,7 +252,11 @@ function sketchDimensionProblem(input: Record<string, unknown>): string {
   return "The sketch dimension edit is invalid: check the entity IDs and the dimension name.";
 }
 
-export function validateWorkbenchOperation(input: unknown): WorkbenchResult<WorkbenchOperation> {
+export function validateWorkbenchOperation(rawInput: unknown): WorkbenchResult<WorkbenchOperation> {
+  // A body travelling with a packed mesh (MCP, see mesh-pack.ts) is read back to plain lists first.
+  const unpacked = unpackMeshes(rawInput);
+  if (!unpacked.ok) return invalidOperation(`The operation has a damaged packed mesh: ${unpacked.message}`);
+  const input = unpacked.value;
   if (containsNonFinite(input)) return invalidOperation("The operation contains a number that is not finite (NaN or Infinity); enter a finite value.");
   if (!isRecord(input) || !stableId(input.operationId) || !Number.isSafeInteger(input.expectedRevision) || (input.expectedRevision as number) < 0 || typeof input.kind !== "string") {
     return invalidOperation("The operation envelope is invalid.");

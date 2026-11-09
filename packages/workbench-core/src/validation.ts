@@ -55,6 +55,7 @@ import { describeByteLimit, MCP_CALL_MAX_BYTES, PROJECT_FILE_MAX_BYTES } from ".
 import { sketchShapeProblem } from "./sketch-problem-messages.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
 import { AUDIT_CHECKPOINT_KIND, AUDIT_MAX_ENTRIES } from "./audit-archive.js";
+import { unpackMeshes } from "./mesh-pack.js";
 
 export const WORKBENCH_LIMITS = {
   /** A project file as Open and the validators accept it: the same constant Save checks (see envelope-limits.ts). */
@@ -84,7 +85,11 @@ const WORKSPACES: readonly WorkspaceId[] = ["sketch", "part", "assembly", "surfa
  * input's own objects (an operation reducer builds the next project from the previous one by structural sharing and does not need
  * a second full copy of every mesh to check it).
  */
-export function validateWorkbenchProject(input: unknown, options?: { readonly share?: boolean }): WorkbenchResult<WorkbenchProject> {
+export function validateWorkbenchProject(rawInput: unknown, options?: { readonly share?: boolean }): WorkbenchResult<WorkbenchProject> {
+  // A project file or MCP call may carry its meshes packed (see mesh-pack.ts); they are read back to plain lists before anything else looks.
+  const unpacked = unpackMeshes(rawInput);
+  if (!unpacked.ok) return invalid(`The project has a damaged packed mesh: ${unpacked.message}`);
+  const input = unpacked.value;
   const requiredRoot = [
     "format", "schemaVersion", "applicationVersion", "id", "name", "revision", "unit", "activeWorkspace",
     "sketch", "part", "assembly", "surface", "drawing", "audit"
