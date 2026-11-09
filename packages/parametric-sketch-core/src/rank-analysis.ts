@@ -184,7 +184,9 @@ export function analyzeRank(model: SolverModel, options: { readonly invalid?: bo
     const quantised = (row: JacobianRow): number => (Math.abs(row.residual) > REDUNDANT_RESIDUAL ? Math.abs(row.residual) : 0);
     const order = groupRows.map((_, index) => index).sort((a, b) => quantised(groupRows[a]!) - quantised(groupRows[b]!) || a - b);
     const ordered = order.map((index) => sparse[index]!);
-    const elimination = eliminateRows(ordered, list.length, 1e-7, groupRows.length <= 4000);
+    // The names of dependent rows cost a combination per pivot; a group whose rows are all independent (the usual case) does not need them.
+    let elimination = eliminateRows(ordered, list.length, 1e-7, false);
+    if (elimination.dependent.length > 0 && groupRows.length <= 4000) elimination = eliminateRows(ordered, list.length, 1e-7, true);
     rankTotal += elimination.rank;
     dofTotal += list.length - elimination.rank;
     for (const dependent of elimination.dependent) {

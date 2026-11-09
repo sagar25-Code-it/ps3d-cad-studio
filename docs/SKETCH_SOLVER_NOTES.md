@@ -14,7 +14,18 @@ How the sketch solver works after the simultaneous-solver rewrite, and how to us
 
 In the workbench, `packages/workbench-core/src/sketch-translate.ts` turns the live sketch into the document and back (and builds the names), `sketch-anchors.ts` says who gives way for each operation, `sketch-solve.ts` is `solveLiveSketch` / `dragLiveSketch`, `sketch-analysis.ts` is the rank analysis for the live sketch, and `sketch-dimension-edit.ts` is `set-sketch-dimension`.
 
-Performance: 500 entities with 1000 constraints solve in about 0.1 s and analyse in about 0.13 s; a connected 330-line chain edits in about 0.1 s.
+Performance (measured on a development laptop, Node 24, a warm second run; the first call of a session is slower while the code compiles). These are the numbers the regression tests bound generously:
+
+| sketch | solve | analyse | one dimension edit | one drag step |
+| --- | --- | --- | --- | --- |
+| 100 tangent circles with tangent lines, all equal to the first (200 curves, 399 relations) | 40 ms | 20 ms | 0.2 s | 60 ms |
+| 250 of them (500 curves, 999 relations) | 80 ms | 70 ms | 0.4 to 0.8 s | 130 ms |
+| 500 lines all equal to the first (499 relations) | 250 ms | 220 ms | 0.25 s | 0.2 s |
+| a 330-line joined horizontal/vertical chain | 35 ms | 10 ms | 0.1 s | 60 ms |
+| 125 joined rectangles, 500 lines, 1374 relations | 100 ms | 50 ms | 10 ms | 140 ms |
+| a 12 x 12 grid of 312 joined horizontal/vertical lines (766 relations) | 80 ms | 40 ms | 1.5 s | 0.25 s |
+
+Earlier builds took 3.4 s (150 circles) and 12 s (250 circles) for the edit and 9.5 s for the drag, because every Levenberg-Marquardt step factored a dense matrix whose cost grew with the cube of a coupled chain. Now: the normal equations of each independent component are solved with a sparse minimum-degree LDL factorisation (`sparse-ldl.ts`), so a hub that many relations share (every circle equal to the first) costs a few elimination steps instead of a dense factorisation; row damping is relative to the row, so a long chain does not need ever more damping; a step that no longer improves ends the iteration early; the second, shape-keeping level tries fewer one-by-one shape relations on a component of more than 300 equations (each try is a full solve), so a big grid keeps the first level's answer sooner; and the rank analysis skips its support tracking when the relations are independent. The cost is still superlinear in the size of one coupled component (the 250-circle edit is about five times the 100-circle one), and a closed grid of hundreds of lines, whose relations couple every cell to its neighbours, is the slowest shape (about a second and a half per edit at 312 lines), but a 500-curve sketch of the other shapes edits in well under a second. Timings move by a factor of two with machine load.
 
 ## Behaviour you can rely on
 
@@ -23,7 +34,8 @@ Performance: 500 entities with 1000 constraints solve in about 0.1 s and analyse
 - **Driven (reference) dimensions never move geometry.** They are measured.
 - **Dimensions are equations.** A stale dimension (a radius that says 7 on a circle that is 6) snaps the geometry to the dimension when solved or restored, like a line length always did. Rectangle width and height are enforced on restore and on drag.
 - **No sign flips.** Line length, signed point-to-line distance, tangency type (outside or inside) and point-to-point direction are kept from the geometry as it is when the solve starts, so lengthening a joined line slides its neighbour instead of folding it back.
-- **Edit order does not matter.** Editing either entity of an equal or symmetric pair works; adding the same relations in another order gives the same geometry.
+- **Editing either entity of an equal or symmetric pair works.** Which of the two is edited does not matter for the result.
+- **Order of adding relations.** Every relation is solved from where the previous one left the geometry and moves it as little as it can, so adding the same relations in another order gives geometry that satisfies all of them, with the same degrees of freedom and the same classification, but not necessarily the same coordinates (three test sketches gave 8 to 17 different valid results out of 20 orders, up to about 5 mm apart). What is guaranteed: the same sketch and the same operation always give exactly the same result (no randomness, ties break by index), the result satisfies every relation, and solving it again moves nothing. If a design must come out the same however it was built, state its size with dimensions or Fix instead of relying on the starting positions.
 - **Failures name relations.** A solve that cannot hold returns a `CONSTRAINT_CONFLICT` (or `DIMENSION_CONFLICT`, `DRAG_CONFLICT`) whose message lists the relations by name ("Length 20 on Line 1, Length 30 on Line 2 and Equal between Line 1 and Line 2 contradict each other") and whose `relatedIds` are the constraint IDs (not the document ID). A solution that squashes a curve to nothing is reported the same way ("Line 1 would collapse to a point...").
 - **Drag.** The dragged point (a line end, a centre, a rectangle corner, a line midpoint for a body drag) is held exactly under the pointer and everything else relaxes around it. If a dimension makes that impossible the point goes as near as the relations allow.
 

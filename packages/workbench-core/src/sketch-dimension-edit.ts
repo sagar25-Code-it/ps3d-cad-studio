@@ -1,6 +1,8 @@
 import { constraintFit } from "./constraint-fit.js";
+import { ANGLE_FLIP_MIN_DEG, chooseAngleSide } from "./sketch-angle-side.js";
 import { anchorsAfterResize, anchorsForDimension, preserveForConstraint } from "./sketch-anchors.js";
 import { arcShape, dimensionTargetValue, ellipsePerimeterMm, measureDimensionConstraint } from "./sketch-measure.js";
+import { outlineBroken, outlineBrokenMessage } from "./sketch-outline-guard.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
 import { describeConstraint, entityKindOf, entityNames } from "./sketch-translate.js";
 import type { SketchDimensionName, SketchEntity, SketchPointRef, WorkbenchOperation, WorkbenchProject, WorkbenchResult, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
@@ -21,6 +23,11 @@ function constraintKindOf(name: SketchDimensionName): WorkbenchSketchConstraint[
 
 function unitLabel(name: SketchDimensionName): string {
   return name === "angle" ? "°" : " mm";
+}
+
+/** The curve's name ("Line 2") for a message; the raw id only when the curve is not in the sketch. */
+function entityLabel(sketch: WorkbenchSketch, id: string): string {
+  return entityNames(sketch).get(id) ?? id;
 }
 
 function formatNumber(value: number): string {
@@ -132,6 +139,12 @@ export function redriveDimension(sketch: WorkbenchSketch, constraint: WorkbenchS
   const solved = solveLiveSketch(baseSketch, real, { anchors, preserve: preserveForConstraint(constraint, entityMap), keepChains: false });
   if (!solved.ok) return { ok: false, applied: solveFailure(solved, sketch, constraint) as Extract<Applied, { readonly ok: false }> };
   const nextSketch: WorkbenchSketch = { ...baseSketch, entities: solved.entities };
+  // A value only a folded or self-crossing outline can reach (opposite sides of a parallelogram, rounded rectangle or slot) is a conflict.
+  const folded = outlineBroken(sketch, nextSketch, [...entityIds, ...solved.movedIds]);
+  if (folded !== undefined) {
+    const explained = outlineBrokenMessage(folded, nextSketch, constraint);
+    return { ok: false, applied: failure("CONSTRAINT_CONFLICT", explained.message, explained.relatedIds, explained.recovery) as Extract<Applied, { readonly ok: false }> };
+  }
   const measured = measureDimensionConstraint(nextSketch, constraint);
   if (measured !== undefined || resized === undefined) {
     const gap = measured === undefined ? Infinity : name === "angle" ? Math.min(Math.abs(measured - value), 360 - Math.abs(measured - value)) : Math.abs(measured - value);
@@ -226,14 +239,24 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
       value: {
         project: { ...project, sketch: { ...sketch, constraints: withDimension(reference) } },
         changedIds: [dimensionId],
-        summary: `Made ${name} of ${operation.entityId} a reference dimension${measured === undefined ? "" : ` (${formatNumber(measured)}${unitLabel(name)})`}.`
+        summary: `Made ${name} of ${entityLabel(sketch, operation.entityId)} a reference dimension${measured === undefined ? "" : ` (${formatNumber(measured)}${unitLabel(name)})`}.`
       }
     };
   }
 
-  const value = operation.valueMm;
+  let value = operation.valueMm;
+  let sideNote = "";
   if (name === "angle") {
-    if (!(value >= 0 && value < 360)) return failure("OUTSIDE_SUPPORTED_ENVELOPE", "An angle dimension must be at least 0° and under 360°.", [operation.entityId], "Enter an angle in degrees, counter-clockwise from the first line to the second.");
+    if (!(value > ANGLE_FLIP_MIN_DEG && value < 360)) return failure("OUTSIDE_SUPPORTED_ENVELOPE", "An angle dimension must be at least 0° and under 360°.", [operation.entityId], "Enter an angle in degrees, counter-clockwise from the first line to the second; up to 180 keeps the side the lines are on, and a negative value takes the other side.");
+    if (!ellipseRotation) {
+      // The value read off a drawing is the angle between the lines: it keeps the side they are on unless the person asks for the other one.
+      const measuredNow = measureDimensionConstraint({ entities: sketch.entities }, { id: dimensionId, kind, entityIds, driven: true });
+      const choice = chooseAngleSide(value, measuredNow);
+      if (choice.valueDeg !== value) sideNote = ` The lines stay on the side they were on, so it is stored as ${formatNumber(choice.valueDeg)}° counter-clockwise from the first line to the second; enter -${formatNumber(Math.abs(value))} for the other side.`;
+      value = choice.valueDeg;
+    } else if (value < 0) {
+      value += 360;
+    }
   } else {
     const limit = name === "arc-length" || name === "perimeter" || name === "diameter" ? MAX_LONG_ENVELOPE_MM : MAX_ENVELOPE_MM;
     const minimum = relative ? 0 : WORKBENCH_LIMITS.minGeometryMm;
@@ -259,7 +282,7 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
       value: {
         project: { ...project, sketch: { ...sketch, constraints } },
         changedIds: [dimensionId],
-        summary: `Set ${name} of ${operation.entityId} to ${formatNumber(value)}${unitLabel(name)}. The dimension is relaxed, so the geometry did not change; restore it to enforce the value.`
+        summary: `Set ${name} of ${entityLabel(sketch, operation.entityId)} to ${formatNumber(value)}${unitLabel(name)}. The dimension is relaxed, so the geometry did not change; restore it to enforce the value.`
       }
     };
   }
@@ -272,7 +295,7 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
     value: {
       project: { ...project, sketch: redriven.sketch },
       changedIds: [...(primary === undefined ? [] : [primary]), dimensionId, ...redriven.movedIds.filter((id) => id !== primary)],
-      summary: `Set ${name} of ${operation.entityId} to ${formatNumber(value)}${unitLabel(name)}.${solveSummary(redriven.solved)}`
+      summary: `Set ${name} of ${entityLabel(sketch, operation.entityId)} to ${formatNumber(value)}${unitLabel(name)}.${sideNote}${solveSummary(redriven.solved)}`
     }
   };
 }

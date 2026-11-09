@@ -121,11 +121,14 @@ export const sketchDimensionWpTests: readonly TestCase[] = [
     name: "an angle pivots about the shared corner even when the second line ends there, and turns the first line when the second is fixed",
     run: () => {
       const reversed = projectWith([line("a", [0, 0], [10, 0]), line("b", [10, 5], [0, 0])]);
-      const turned = setAngle(reversed, "a", "b", 30);
+      // B is drawn toward the corner, so the directed angle from A to B is 206.6; a value over 180 is the directed angle exactly as typed (wave 3 R2-7: values up to 180 keep the side the lines are on).
+      const turned = setAngle(reversed, "a", "b", 210);
       const b = get(turned, "b", "line");
       near(b.end[0], 0, 1e-9, "B ends on the corner, which stayed (x)");
       near(b.end[1], 0, 1e-9, "B ends on the corner, which stayed (y)");
-      near(angleBetweenLinesDeg(get(turned, "a", "line"), b), 30, 1e-9, "B now makes 30 degrees with A");
+      near(angleBetweenLinesDeg(get(turned, "a", "line"), b), 210, 1e-9, "B now makes 210 degrees with A");
+      const mirrored = setAngle(reversed, "a", "b", 30);
+      near(angleBetweenLinesDeg(get(mirrored, "a", "line"), get(mirrored, "b", "line")), 330, 1e-9, "30 keeps the clockwise side B was on, so it is stored as 330");
 
       const heldSecond = projectWith([line("a", [0, 0], [10, 0]), line("b", [0, 0], [0, 10])], [{ id: "constraint:fix-b", kind: "fixed", entityIds: ["entity:b"] }]);
       const rotated = setAngle(heldSecond, "a", "b", 45);

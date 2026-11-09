@@ -73,13 +73,13 @@ export const sketchSolverTests: readonly TestCase[] = [
     }
   },
   {
-    name: "horizontal and vertical straighten a slanted line, keeping its start",
+    name: "horizontal and vertical straighten a slanted line, keeping its start and its length",
     run: () => {
       const horizontal = constrain(projectWith([line("a", [0, 0], [10, 3])]), "horizontal", ["a"]);
       assert(horizontal.ok, "a horizontal constraint applies");
       const flat = lineOf(horizontal.value.project, "a");
       near(flat.end[1], 0, 1e-9, "the end snaps to the start's height");
-      near(flat.end[0], 10, 1e-9, "the end keeps its X");
+      near(flat.end[0], Math.hypot(10, 3), 1e-9, "the line keeps its length: a direction relation turns a line, it does not shorten it");
       assert(horizontal.value.summary.includes("Moved line"), `the status says what moved: ${horizontal.value.summary}`);
 
       const vertical = constrain(projectWith([line("b", [2, 1], [5, 9])]), "vertical", ["b"]);

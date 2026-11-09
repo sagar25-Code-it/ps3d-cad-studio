@@ -1,3 +1,5 @@
+import { solveSymmetricSparse } from "./sparse-ldl.js";
+
 /**
  * Small sparse linear algebra for the sketch solver: a symmetric positive-definite solve (reverse Cuthill-McKee ordering and a
  * skyline Cholesky factorisation, so chains, rings and grids of sketch geometry cost almost nothing) and an incremental sparse
@@ -16,6 +18,8 @@ export function solveSymmetric(n: number, diag: Float64Array, lower: readonly Ma
       adjacency[j]!.push(i);
     }
   }
+  // One node coupled to many others (an arrowhead) is cheap only when it is eliminated last, which a band ordering cannot do.
+  if (adjacency.some((neighbours) => neighbours.length > HUB_DEGREE)) return solveSymmetricSparse(n, diag, lower, rhs);
   const order = reverseCuthillMcKee(n, adjacency);
   const position = new Int32Array(n);
   for (let index = 0; index < n; index += 1) position[order[index]!] = index;
@@ -84,6 +88,8 @@ export function solveSymmetric(n: number, diag: Float64Array, lower: readonly Ma
 
 /** Systems this small are factored as a dense matrix: the ordering work of the skyline solve costs more than the factorisation. */
 const DENSE_LIMIT = 24;
+/** A node with more neighbours than this sends the system to the minimum-degree factorisation. */
+const HUB_DEGREE = 24;
 
 function solveDense(n: number, diag: Float64Array, lower: readonly Map<number, number>[], rhs: Float64Array): Float64Array | undefined {
   const a = new Float64Array(n * n);

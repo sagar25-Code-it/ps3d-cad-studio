@@ -64,6 +64,9 @@ export function anchorsForConstraint(constraint: WorkbenchSketchConstraint, enti
       return [hold(first!), ...(kindOf(second) === "line" ? [keep(second!, "start")] : [])];
     case "collinear":
       return [hold(first!)];
+    case "refraction":
+      // The incident line and the interface are the references; the refracted line is bent and carried to the incident line's end.
+      return [hold(first!), hold(ids[2]!)];
     case "coincident": {
       if (points[0] === "curve") return [...carry(entities, second!, points[1] ?? "self"), hold(first!)];
       if (points[1] === "curve") return [...carry(entities, first!, points[0] ?? "self"), hold(second!)];
@@ -97,6 +100,10 @@ export function anchorsForConstraint(constraint: WorkbenchSketchConstraint, enti
  */
 export function preserveForConstraint(constraint: WorkbenchSketchConstraint, entities: ReadonlyMap<string, SketchEntity>): readonly string[] {
   const [first, second] = constraint.entityIds;
+  // The refracted line keeps its length while it is bent and carried.
+  if (constraint.kind === "refraction" && second !== undefined && entities.get(second)?.kind === "line") return [second];
+  // A line turned horizontal or vertical keeps its length: a relation that only asks for a direction does not shorten the line.
+  if ((constraint.kind === "horizontal" || constraint.kind === "vertical") && first !== undefined && entities.get(first)?.kind === "line") return [first];
   // The line turned to an angle with a sketch axis keeps its length.
   if (constraint.kind === "angle" && constraint.driven !== true && first !== undefined && second !== undefined && isSketchDatumEntityId(second) && entities.get(first)?.kind === "line") return [first];
   if (second === undefined || entities.get(second)?.kind !== "line") return [];

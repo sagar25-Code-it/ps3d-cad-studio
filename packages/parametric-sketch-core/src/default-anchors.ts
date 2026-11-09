@@ -20,6 +20,8 @@ export function defaultPreserve(document: ParametricSketchDocument): readonly st
   for (const dimension of document.dimensions) {
     if (!dimension.suppressed && dimension.mode === "driving" && dimension.kind === "angle" && lines.has(dimension.second.entityId)) kept.push(dimension.second.entityId);
   }
+  // A refracted line is bent and moved to the incident line's end but keeps its length.
+  for (const constraint of document.constraints) if (!constraint.suppressed && constraint.kind === "refraction" && lines.has(constraint.refracted.entityId)) kept.push(constraint.refracted.entityId);
   return [...new Set(kept)];
 }
 
@@ -103,6 +105,10 @@ export function defaultAnchors(document: ParametricSketchDocument): readonly Sol
       case "symmetric":
         hold(self(constraint.axis));
         hold(self(constraint.first));
+        break;
+      case "refraction":
+        hold(self(constraint.incident));
+        hold(self(constraint.boundary));
         break;
       case "fix":
         break;

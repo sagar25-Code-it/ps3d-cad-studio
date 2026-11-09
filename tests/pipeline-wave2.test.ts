@@ -270,18 +270,16 @@ export const pipelineWave2Tests: readonly TestCase[] = [
     }
   },
   {
-    name: "Wave2 N-08: Horizontal on an exactly vertical line says why instead of 'would collapse to a point'",
+    name: "Wave2 N-08 (changed by wave 3 R2-2): Horizontal on an exactly vertical line turns it a quarter turn and keeps its length instead of refusing",
     run: () => {
       const base = pipelineRun(fresh(), { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: [line("cl", [30, -10], [30, 40])], addConstraints: [], label: "centerline" });
-      const refused = pipelineApply(base, { kind: "add-sketch-constraint", constraint: { id: "constraint:h", kind: "horizontal", entityIds: ["entity:cl"] } });
-      assert(!refused.ok, "the relation is still not applied");
-      const text = message(refused);
-      assert(/exactly vertical/u.test(text) && /quarter turn/u.test(text) && !/collapse to a point\. The relations acting/u.test(text), `the cause is named: ${text}`);
-      const recovery = refused.ok ? "" : refused.diagnostics[0]?.recovery ?? "";
-      assert(/Turn the line/u.test(recovery), `and the way out is given: ${recovery}`);
+      const turned = pipelineApply(base, { kind: "add-sketch-constraint", constraint: { id: "constraint:h", kind: "horizontal", entityIds: ["entity:cl"] } });
+      assert(turned.ok, `the relation is applied: ${message(turned)}`);
+      const cl = turned.ok ? turned.value.project.sketch.entities.find((candidate) => candidate.id === "entity:cl") : undefined;
+      assert(cl?.kind === "line" && cl.end[1] === cl.start[1] && Math.abs(Math.abs(cl.end[0] - cl.start[0]) - 50) < 1e-9, `the line lies flat and keeps its 50 mm: ${JSON.stringify(cl)}`);
       const horizontal = pipelineRun(fresh(), { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: [line("h", [0, 0], [40, 0], true)], addConstraints: [], label: "h" });
       const vertical = pipelineApply(horizontal, { kind: "add-sketch-constraint", constraint: { id: "constraint:v", kind: "vertical", entityIds: ["entity:h"] } });
-      assert(!vertical.ok && /exactly horizontal/u.test(message(vertical)), `Vertical on an exactly horizontal construction line likewise: ${message(vertical)}`);
+      assert(vertical.ok, `Vertical on an exactly horizontal construction line likewise: ${message(vertical)}`);
       const slanted = pipelineRun(fresh(), { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: [line("d", [0, 0], [30, 30])], addConstraints: [], label: "d" });
       assert(pipelineApply(slanted, { kind: "add-sketch-constraint", constraint: { id: "constraint:h", kind: "horizontal", entityIds: ["entity:d"] } }).ok, "a 45 degree line still turns horizontal");
       const both = pipelineRun(fresh(), { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: [line("b", [0, 0], [30, 0])], addConstraints: [{ id: "constraint:hh", kind: "horizontal", entityIds: ["entity:b"] }], label: "b" });

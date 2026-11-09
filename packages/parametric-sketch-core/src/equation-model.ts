@@ -1,3 +1,4 @@
+import { heldRectangleIds } from "./rectangle-hold.js";
 import { evaluateSketchExpression } from "./expression.js";
 import type {
   GeometryReference,
@@ -547,7 +548,41 @@ class ModelBuilder {
         })];
       }
       case "on-curve": return this.buildOnCurve(constraint);
+      case "refraction": return this.buildRefraction(constraint);
     }
+  }
+
+  private buildRefraction(constraint: Extract<SketchConstraint, { kind: "refraction" }>): readonly Equation[] | Failure {
+    const id = constraint.id;
+    const incident = this.line(constraint.incident);
+    const refracted = this.line(constraint.refracted);
+    const boundary = this.line(constraint.boundary);
+    if (incident === undefined || refracted === undefined || boundary === undefined) return this.invalid(id, "Refraction requires an incident line, a refracted line and an interface line.");
+    const ratio = constraint.ratio;
+    const directionOf = (line: LineFn, x: Float64Array): readonly [number, number] => {
+      const dx = line.q.x(x) - line.p.x(x);
+      const dy = line.q.y(x) - line.p.y(x);
+      const length = Math.max(Math.hypot(dx, dy), 1e-12);
+      return [dx / length, dy / length];
+    };
+    // Which side of the interface the incident ray travels toward is kept from the geometry the solve began with.
+    const across = (x: Float64Array, line: LineFn): { readonly along: number; readonly cross: number } => {
+      const [tx, ty] = directionOf(boundary, x);
+      const [dx, dy] = directionOf(line, x);
+      return { along: dx * tx + dy * ty, cross: -dx * ty + dy * tx };
+    };
+    const side = across(this.x0, incident).cross < 0 ? -1 : 1;
+    const entities = [constraint.incident.entityId, constraint.refracted.entityId, constraint.boundary.entityId];
+    return [this.make(id, "constraint", 3, entities, [incident.p.vars, incident.q.vars, refracted.p.vars, refracted.q.vars, boundary.p.vars, boundary.q.vars], (x, out, o) => {
+      out[o] = refracted.p.x(x) - incident.q.x(x);
+      out[o + 1] = refracted.p.y(x) - incident.q.y(x);
+      const inbound = across(x, incident);
+      const outbound = across(x, refracted);
+      const wanted = Math.asin(Math.max(-1, Math.min(1, inbound.along / ratio)));
+      const bent = Math.atan2(outbound.along, side * outbound.cross);
+      const gap = bent - wanted;
+      out[o + 2] = Math.atan2(Math.sin(gap), Math.cos(gap));
+    })];
   }
 
   private buildEqual(constraint: Extract<SketchConstraint, { kind: "equal" }>): readonly Equation[] | Failure {
@@ -605,6 +640,25 @@ class ModelBuilder {
     return undefined;
   }
 
+  /**
+   * The point where two circles or arcs are joined by a Coincident relation (an end of one on an end of the other, or on the other's
+   * curve), if there is one. Two curves that share a point and are tangent there have their radii in line through it.
+   */
+  private radialContactPoint(firstId: string, secondId: string): PointFn | undefined {
+    for (const constraint of this.document.constraints) {
+      if (constraint.suppressed || constraint.kind !== "coincident") continue;
+      const [a, b] = [constraint.first, constraint.second];
+      const matches = (a.entityId === firstId && b.entityId === secondId) || (a.entityId === secondId && b.entityId === firstId);
+      if (!matches) continue;
+      const endRef = (a.selector === "start" || a.selector === "end") ? a : (b.selector === "start" || b.selector === "end") ? b : undefined;
+      if (endRef === undefined) continue;
+      const other = endRef === a ? b : a;
+      if (other.selector !== "start" && other.selector !== "end" && other.selector !== "curve") continue;
+      return this.point(endRef);
+    }
+    return undefined;
+  }
+
   private buildTangent(constraint: Extract<SketchConstraint, { kind: "tangent" }>): readonly Equation[] | Failure {
     const id = constraint.id;
     const first = this.layout.get(constraint.first.entityId);
@@ -657,6 +711,19 @@ class ModelBuilder {
     if (radial(first.geometry) && radial(second.geometry)) {
       const ba = first.base;
       const bb = second.base;
+      // Two arcs that meet at a shared point are tangent exactly when their radii are in line through it. "Centre distance equals the sum
+      // of the radii" is also true then, but it is flat there (the triangle inequality makes it a maximum), so it would add no
+      // independent equation beyond the joint and the analysis would call the Tangent redundant.
+      const contact = this.radialContactPoint(first.id, second.id);
+      if (contact !== undefined) {
+        return [this.make(id, "constraint", 1, [first.id, second.id], [contact.vars, [ba, ba + 1], [bb, bb + 1]], (x, out, o) => {
+          const ax = contact.x(x) - x[ba]!;
+          const ay = contact.y(x) - x[ba + 1]!;
+          const bx = contact.x(x) - x[bb]!;
+          const by = contact.y(x) - x[bb + 1]!;
+          out[o] = (ax * by - ay * bx) / Math.max(Math.hypot(ax, ay) * Math.hypot(bx, by), 1e-12) * Math.min(Math.hypot(ax, ay), Math.hypot(bx, by));
+        })];
+      }
       const gap = (x: Float64Array): number => Math.hypot(x[ba]! - x[bb]!, x[ba + 1]! - x[bb + 1]!);
       const d0 = gap(this.x0);
       const r1 = this.x0[ba + 2]!;
@@ -1024,6 +1091,8 @@ export function buildSolverModel(document: ParametricSketchDocument, options: Bu
     if (constraint.kind !== "fix") builder.addConstraint(constraint);
   }
   for (const dimension of document.dimensions.filter((candidate) => !candidate.suppressed && candidate.mode === "driving")) builder.addDimension(dimension);
+  // An axis-aligned rectangle that nothing turns keeps its orientation (see rectangle-hold.ts).
+  for (const id of heldRectangleIds(document)) builder.freezeRange(id, 4, 5, undefined);
   if (options.anchors !== undefined) builder.applyAnchors(options.anchors);
   // A size that must be kept is an equation of its own (the solver retries without it if the other relations cannot allow it);
   // a size that is only preferred is a soft term that every real relation outweighs.

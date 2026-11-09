@@ -102,6 +102,7 @@ export function constraintReferences(constraint: SketchConstraint): readonly Geo
   if (constraint.kind === "midpoint") return [constraint.point, constraint.line];
   if (constraint.kind === "on-curve") return [constraint.point, constraint.curve];
   if (constraint.kind === "symmetric") return [constraint.first, constraint.second, constraint.axis];
+  if (constraint.kind === "refraction") return [constraint.incident, constraint.refracted, constraint.boundary];
   return [constraint.first, constraint.second];
 }
 
@@ -179,6 +180,11 @@ function validateConstraintCompatibility(
     const pointGeometry = geometryById.get(constraint.point.entityId);
     if (pointGeometry !== undefined && !supportsPointSelector(pointGeometry, constraint.point.selector)) {
       diagnostics.push(error("INVALID_REFERENCE", `on-curve constraint '${constraint.id}' requires a point-like reference.`, [constraint.id], "Select a point, endpoint, or center."));
+    }
+  } else if (constraint.kind === "refraction") {
+    requireKinds([constraint.incident, constraint.refracted, constraint.boundary], ["line"], "requires three lines");
+    if (!(Number.isFinite(constraint.ratio) && constraint.ratio > 0)) {
+      diagnostics.push(error("INVALID_NUMBER", `refraction constraint '${constraint.id}' needs a positive index ratio.`, [constraint.id], "Give the ratio n2 / n1 as a positive number."));
     }
   } else if (constraint.kind === "parallel" || constraint.kind === "perpendicular" || constraint.kind === "collinear") {
     requireKinds([constraint.first, constraint.second], ["line"], "requires two lines");

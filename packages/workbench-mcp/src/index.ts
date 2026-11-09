@@ -317,7 +317,19 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
   }
 ];
 
+/**
+ * Runs one tool. Whatever a malformed argument does inside a handler, the caller gets a structured error result (isError) and never
+ * a thrown exception, so a stdio or HTTP host cannot be taken down by one bad payload.
+ */
 export async function handleWorkbenchMcpTool(name: string, args: unknown): Promise<WorkbenchMcpResult> {
+  try {
+    return await runWorkbenchMcpTool(name, args);
+  } catch (caught) {
+    return error("INVALID_PARAMS", `The ${name} arguments could not be processed: ${caught instanceof Error ? caught.message : "malformed input"}. Check every field against the tool's inputSchema.`);
+  }
+}
+
+async function runWorkbenchMcpTool(name: string, args: unknown): Promise<WorkbenchMcpResult> {
   if (encodedSize(args) > WORKBENCH_LIMITS.maxMcpInputBytes) return error("RESOURCE_LIMIT", `The MCP tool input is ${Math.round(encodedSize(args) / 1000)} kB; one call may carry at most ${describeByteLimit(WORKBENCH_LIMITS.maxMcpInputBytes)}. Send a smaller project: delete bodies you no longer need before the call.`);
   if (name === "ps3d_guide") {
     if (!isRecord(args) || Object.keys(args).length !== 0) return error("INVALID_PARAMS", "ps3d_guide accepts no arguments.");

@@ -1,5 +1,6 @@
 import { ENVELOPE_LIMITS } from "./envelope-limits.js";
 import { dimensionNameOf } from "./sketch-dimension-edit.js";
+import { sketchEntityName } from "./sketch-names.js";
 import { bindableFieldsOf, boundValueProblem, featureAlias, findBindableField, type BindableDimension, type BindableField } from "./feature-bindings.js";
 import {
   describeDimension,
@@ -314,7 +315,7 @@ export function evaluateDesignExpressions(history: DesignHistory, working?: Work
     for (const constraint of owner.sketch.constraints) {
       if (constraint.expression === undefined) continue;
       const dimension = sketchDimensionOf(constraint);
-      const label = `${owner.name} · ${DIMENSION_WORD[dimension]} of ${constraint.entityIds[0] ?? "?"}`;
+      const label = `${owner.name} · ${DIMENSION_WORD[dimension]} of ${constraint.entityIds[0] === undefined ? "?" : sketchEntityName(owner.sketch, constraint.entityIds[0])}`;
       const node = evaluation.sketchNode(constraint);
       bindings.push(node.ok
         ? { source: "sketch", ownerId: owner.ownerId, fieldId: constraint.id, label, expression: constraint.expression, ok: true, value: node.quantity.value, dimension: constraint.kind === "angle" ? "angle" : "length" }

@@ -22,7 +22,7 @@ export function checkNewConstraint(project: WorkbenchProject, constraint: Workbe
   const distinct = new Set(constraint.entityIds);
   const mayRepeat = constraint.kind === "coincident" || constraint.kind === "midpoint" || constraint.kind === "perimeter" || constraint.kind === "fixed" || constraint.kind === "distance";
   if (distinct.size !== constraint.entityIds.length && !mayRepeat) {
-    return failure("INVALID_OPERATION", `${constraint.kind === "equal" || constraint.kind === "collinear" ? "An" : "A"} ${constraint.kind} constraint relates two different curves, but the same one was picked twice.`, [...distinct], INVALID_RECOVERY);
+    return failure("INVALID_OPERATION", `${/^[aeiou]/u.test(constraint.kind) ? "An" : "A"} ${constraint.kind} constraint relates two different curves, but the same one was picked twice.`, [...distinct], INVALID_RECOVERY);
   }
   if (constraint.kind === "coincident" && constraint.entityIds[0] === constraint.entityIds[1] && constraint.points?.[0] === constraint.points?.[1]) {
     return failure("INVALID_OPERATION", "A point cannot be made coincident with itself.", [...distinct], INVALID_RECOVERY);
