@@ -17,8 +17,8 @@ export const FIT_TOLERANCE_NOTE = "0.01 mm of the true curve (up to 0.03 mm on s
 
 /** Fit-point counts tried in turn (a spline holds at most 64). */
 const COUNT_LADDER = [24, 32, 40, 48, 56, 64] as const;
-const REFERENCE_SAMPLES = 1600;
-const CHECK_SAMPLES_PER_SPAN = 8;
+const REFERENCE_SAMPLES = 800;
+const CHECK_SAMPLES_PER_SPAN = 6;
 
 /** The largest distance from any of `samples` to the polyline `reference`. */
 export function maxDistanceToPolyline(samples: readonly Vec2[], reference: readonly Vec2[]): number {
