@@ -1,11 +1,12 @@
-import { dragLiveSketch } from "../packages/workbench-core/src/index.js";
+import { dragLiveSketch, solveLiveSketch } from "../packages/workbench-core/src/index.js";
 import { analyzeWorkbenchSketch } from "../packages/workbench-sketch/src/index.js";
 import { repairAll, validateSketch } from "../packages/workbench-sketch/src/sketch-repair.js";
+import { readFileSync } from "node:fs";
 import { dragSketchHandle, grabHandlesOf } from "../packages/workbench-sketch/src/drag.js";
 import { buildCurveTool, DEFAULT_CURVE_TOOL_OPTIONS } from "../packages/workbench-sketch/src/curve-tools.js";
 import { buildSlot } from "../packages/workbench-sketch/src/shapes.js";
 import { assert, near, type TestCase } from "./test-kit.js";
-import { addConstraint, analysis, apply, arc, get, lengthOf, line, projectWith, rect, refuse, rel, run, setDimension, type Arc, type Line, type Vec } from "./sketch-solver-kit.js";
+import { addConstraint, analysis, apply, arc, circle, get, lengthOf, line, projectWith, rect, refuse, rel, run, setDimension, type Arc, type Line, type Vec } from "./sketch-solver-kit.js";
 import type { WorkbenchProject } from "../packages/workbench-core/src/index.js";
 
 /**
@@ -188,6 +189,91 @@ export const sketchSolverWave3bTests: readonly TestCase[] = [
       // A rectangle pinned at two corners is not held: its turn follows the pins.
       const twoPins = addConstraint(addConstraint(free, rel("coincident", ["r", "sketch:origin"], { points: ["corner-0", "self"] })), rel("coincident", ["r", "sketch:axis-y"], { points: ["corner-3", "curve"] }));
       assert(analysis(twoPins).degreesOfFreedom >= 2, "two pins do not pretend to fix the turn");
+    }
+  },
+  {
+    name: "Wave3 R2-10: adding the same relations in another order always gives geometry that satisfies them all, with the same degrees of freedom, deterministically and stable under a re-solve (the notes no longer claim identical coordinates)",
+    run: () => {
+      let seed = 5;
+      const random = (): number => {
+        seed = (seed * 1664525 + 1013904223) % 4294967296;
+        return seed / 4294967296;
+      };
+      const shuffle = <T,>(list: readonly T[]): T[] => {
+        const out = [...list];
+        for (let index = out.length - 1; index > 0; index -= 1) {
+          const other = Math.floor(random() * (index + 1));
+          [out[index], out[other]] = [out[other]!, out[index]!];
+        }
+        return out;
+      };
+      const join = (a: string, b: string) => rel("coincident", [a, b], { points: ["end", "start"] });
+      const cases: readonly { readonly name: string; readonly entities: readonly ReturnType<typeof line>[]; readonly relations: readonly ReturnType<typeof rel>[] }[] = [
+        { name: "triangle", entities: [line("a", [0, 0], [10, 1]), line("b", [10, 1], [6, 9]), line("c", [6, 9], [0.5, 0.2])], relations: [join("a", "b"), join("b", "c"), join("c", "a"), rel("horizontal", ["a"]), rel("equal", ["a", "b"])] },
+        { name: "perpendicular and parallel quad", entities: [line("a", [0, 0], [20, 1]), line("b", [20, 1], [19, 12]), line("c", [19, 12], [1, 11]), line("d", [1, 11], [0.2, 0.1])], relations: [join("a", "b"), join("b", "c"), join("c", "d"), join("d", "a"), rel("perpendicular", ["a", "b"]), rel("parallel", ["a", "c"]), rel("equal", ["a", "c"])] }
+      ];
+      for (const entry of cases) {
+        const dofs = new Set<number>();
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          const order = shuffle(entry.relations);
+          const build = (): WorkbenchProject => order.reduce((project, relation) => addConstraint(project, relation), projectWith(entry.entities, []));
+          const first = build();
+          assert(JSON.stringify(first.sketch.entities) === JSON.stringify(build().sketch.entities), `${entry.name}: the same order twice gives exactly the same geometry`);
+          const result = analysis(first);
+          assert(result.conflicts.length === 0, `${entry.name}: every order satisfies the relations (no conflicts)`);
+          dofs.add(result.degreesOfFreedom);
+          const again = solveLiveSketch(first.sketch);
+          assert(again.ok, `${entry.name}: a re-solve is accepted`);
+          if (!again.ok) continue;
+          const drift = Math.max(...again.entities.map((e, index) => {
+            const before = first.sketch.entities[index]!;
+            return e.kind === "line" && before.kind === "line" ? Math.max(Math.abs(e.start[0] - before.start[0]), Math.abs(e.start[1] - before.start[1]), Math.abs(e.end[0] - before.end[0]), Math.abs(e.end[1] - before.end[1])) : 0;
+          }));
+          assert(drift < 1e-6, `${entry.name}: solving the result again moves nothing (${drift})`);
+        }
+        assert(dofs.size === 1, `${entry.name}: every order has the same degrees of freedom (${[...dofs].join(", ")})`);
+      }
+      const notes = readFileSync("docs/SKETCH_SOLVER_NOTES.md", "utf8");
+      assert(!/adding the same relations in another order gives the same geometry\./u.test(notes), "the notes do not claim identical geometry for another order");
+      assert(/another order gives geometry that satisfies all of them/u.test(notes), "the notes state what is guaranteed");
+    }
+  },
+  {
+    name: "Wave3 R2-1: the 250-circle chain with tangent lines (500 curves, 999 relations) edits in under 5 s and drags in under 3 s, and the notes publish the measured numbers (was 12 s and 9.5 s)",
+    run: () => {
+      const entities: SketchEntityLike[] = [];
+      const constraints: ConstraintLike[] = [];
+      for (let index = 0; index < 250; index += 1) {
+        entities.push(circle(`c${index}`, [index * 20, 0], 10), line(`g${index}`, [index * 20 - 10, -10], [index * 20 + 10, -10]));
+        if (index > 0) constraints.push(rel("tangent", [`c${index - 1}`, `c${index}`]));
+        constraints.push(rel("tangent", [`g${index}`, `c${index}`]), rel("horizontal", [`g${index}`]));
+      }
+      constraints.push({ id: "constraint:r0", kind: "radius", entityIds: ["entity:c0"], valueMm: 10, dimension: "radius" });
+      for (let index = 1; index < 250; index += 1) constraints.push(rel("equal", ["c0", `c${index}`]));
+      const project = projectWith(entities as never, constraints as never);
+      const started = performance.now();
+      const edited = apply(project, { kind: "set-sketch-dimension", entityId: "entity:c0", dimension: "radius", valueMm: 14 });
+      const editMs = performance.now() - started;
+      assert(edited.ok, `the edit is accepted: ${edited.ok ? "" : edited.diagnostics[0]?.message}`);
+      assert(editMs < 5000, `the edit took ${editMs.toFixed(0)} ms (bound 5000 ms; about 0.5 s measured, the released build needed 12 s)`);
+      const dragStarted = performance.now();
+      const dragged = dragLiveSketch(project.sketch, { entityId: "entity:c125", point: "center", positionMm: [2500, 15] });
+      const dragMs = performance.now() - dragStarted;
+      assert(dragged.ok, "the drag is accepted");
+      assert(dragMs < 3000, `the drag took ${dragMs.toFixed(0)} ms (bound 3000 ms; about 0.15 s measured, the released build needed 9.5 s)`);
+      const notes = readFileSync("docs/SKETCH_SOLVER_NOTES.md", "utf8");
+      assert(/250 of them \(500 curves, 999 relations\)/u.test(notes) && !/500 entities with 1000 constraints solve in about 0\.1 s/u.test(notes), "the notes carry the measured table, not the old 0.1 s claim");
+    }
+  },
+  {
+    name: "Wave3 R2-11: the same-curve-twice message reads 'A collinear', 'An equal', 'A parallel' and names no raw id",
+    run: () => {
+      const project = projectWith([line("a", [0, 0], [10, 0]), line("b", [0, 5], [10, 5])], []);
+      for (const [kind, article] of [["collinear", "A"], ["equal", "An"], ["parallel", "A"], ["perpendicular", "A"]] as const) {
+        const message = refuse(project, { kind: "add-sketch-constraint", constraint: rel(kind, ["a", "a"]) });
+        assert(message.startsWith(`${article} ${kind} constraint relates two different curves`), `${kind}: "${message}"`);
+        assert(!/entity:/u.test(message), `${kind}: the message names no raw id`);
+      }
     }
   }
 ];
