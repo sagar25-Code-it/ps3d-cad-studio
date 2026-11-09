@@ -65,6 +65,7 @@ import {
 import { setDesignParameters, settleDesignExpressions } from "./design-parameters.js";
 import { failure, MAX_AUDIT_CHANGED_IDS, validateWorkbenchProject, validSketchPlaneFrame, validSketchPlaneTilt, WORKBENCH_LIMITS } from "./validation.js";
 import { sketchConstraintPayloadProblem } from "./constraint-payload.js";
+import { outlineBroken, outlineBrokenMessage } from "./sketch-outline-guard.js";
 import { firstNonFinitePath, MODEL_ENVELOPE, sketchEntityProblem, solidEnvelopeProblem, type EnvelopeProblem } from "./envelope.js";
 import { AUDIT_KEEP_FULL, compactAudit } from "./audit-archive.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
@@ -702,6 +703,12 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const entityMap = new Map(withConstraint.entities.map((entity) => [entity.id, entity] as const));
       const solved = solveLiveSketch(withConstraint, operation.constraint.entityIds.filter((id) => !isSketchDatumEntityId(id)), { anchors: anchorsForConstraint(operation.constraint, entityMap, withConstraint.constraints), preserve: preserveForConstraint(operation.constraint, entityMap) });
       if (!solved.ok) return solveFailure(solved);
+      // A relation that only a folded or self-crossing outline can satisfy is a contradiction (second re-audit F3).
+      const folded = outlineBroken(project.sketch, { entities: solved.entities }, [...operation.constraint.entityIds, ...solved.movedIds]);
+      if (folded !== undefined) {
+        const explained = outlineBrokenMessage(folded, { ...withConstraint, entities: solved.entities }, operation.constraint);
+        return failure("CONSTRAINT_CONFLICT", explained.message, explained.relatedIds, explained.recovery);
+      }
       const overlap = solved.redundant.filter((set) => set.constraintIds.includes(operation.constraint.id));
       return changed(
         { ...project, sketch: { ...withConstraint, entities: solved.entities } },

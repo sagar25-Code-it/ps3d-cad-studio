@@ -2,6 +2,7 @@ import { constraintFit } from "./constraint-fit.js";
 import { ANGLE_FLIP_MIN_DEG, chooseAngleSide } from "./sketch-angle-side.js";
 import { anchorsAfterResize, anchorsForDimension, preserveForConstraint } from "./sketch-anchors.js";
 import { arcShape, dimensionTargetValue, ellipsePerimeterMm, measureDimensionConstraint } from "./sketch-measure.js";
+import { outlineBroken, outlineBrokenMessage } from "./sketch-outline-guard.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
 import { describeConstraint, entityKindOf, entityNames } from "./sketch-translate.js";
 import type { SketchDimensionName, SketchEntity, SketchPointRef, WorkbenchOperation, WorkbenchProject, WorkbenchResult, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
@@ -138,6 +139,12 @@ export function redriveDimension(sketch: WorkbenchSketch, constraint: WorkbenchS
   const solved = solveLiveSketch(baseSketch, real, { anchors, preserve: preserveForConstraint(constraint, entityMap), keepChains: false });
   if (!solved.ok) return { ok: false, applied: solveFailure(solved, sketch, constraint) as Extract<Applied, { readonly ok: false }> };
   const nextSketch: WorkbenchSketch = { ...baseSketch, entities: solved.entities };
+  // A value only a folded or self-crossing outline can reach (opposite sides of a parallelogram, rounded rectangle or slot) is a conflict.
+  const folded = outlineBroken(sketch, nextSketch, [...entityIds, ...solved.movedIds]);
+  if (folded !== undefined) {
+    const explained = outlineBrokenMessage(folded, nextSketch, constraint);
+    return { ok: false, applied: failure("CONSTRAINT_CONFLICT", explained.message, explained.relatedIds, explained.recovery) as Extract<Applied, { readonly ok: false }> };
+  }
   const measured = measureDimensionConstraint(nextSketch, constraint);
   if (measured !== undefined || resized === undefined) {
     const gap = measured === undefined ? Infinity : name === "angle" ? Math.min(Math.abs(measured - value), 360 - Math.abs(measured - value)) : Math.abs(measured - value);

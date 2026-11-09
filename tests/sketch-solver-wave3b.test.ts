@@ -1,8 +1,10 @@
 import { dragLiveSketch } from "../packages/workbench-core/src/index.js";
 import { analyzeWorkbenchSketch } from "../packages/workbench-sketch/src/index.js";
 import { repairAll, validateSketch } from "../packages/workbench-sketch/src/sketch-repair.js";
+import { buildCurveTool, DEFAULT_CURVE_TOOL_OPTIONS } from "../packages/workbench-sketch/src/curve-tools.js";
+import { buildSlot } from "../packages/workbench-sketch/src/shapes.js";
 import { assert, near, type TestCase } from "./test-kit.js";
-import { addConstraint, arc, get, line, projectWith, rel, type Arc, type Vec } from "./sketch-solver-kit.js";
+import { addConstraint, apply, arc, get, lengthOf, line, projectWith, refuse, rel, run, type Arc, type Line, type Vec } from "./sketch-solver-kit.js";
 import type { WorkbenchProject } from "../packages/workbench-core/src/index.js";
 
 /**
@@ -89,5 +91,53 @@ export const sketchSolverWave3bTests: readonly TestCase[] = [
       const twice = projectWith(base.sketch.entities, [...base.sketch.constraints, rel("tangent", ["ar", "sim1"])]);
       assert(analyzeWorkbenchSketch(twice.sketch).redundant.length > 0, "a Tangent stated twice is still redundant");
     }
+  },
+  {
+    name: "Wave3 F3: contradictory opposite-side lengths on a parallelogram, a rounded rectangle and a slot are refused as a named conflict (they collapsed the parallelogram flat, crossed the rounded rectangle and turned the slot into a cusped lens)",
+    run: () => {
+      let counter = 0;
+      const ids = { entity: () => `entity:q${++counter}`, constraint: () => `constraint:q${++counter}` };
+      const make = (entities: readonly SketchEntityLike[], constraints: readonly ConstraintLike[]): WorkbenchProject => projectWith(entities as never, constraints as never);
+      const lengthOfLineAt = (project: WorkbenchProject, index: number): string => project.sketch.entities.filter((entity) => entity.kind === "line")[index]!.id;
+      const setLength = (project: WorkbenchProject, index: number, valueMm: number) => ({ kind: "set-sketch-dimension" as const, entityId: lengthOfLineAt(project, index), dimension: "length" as const, valueMm });
+
+      const parallelogram = buildCurveTool("parallelogram", [[0, 0], [20, 0], [28, 10]], DEFAULT_CURVE_TOOL_OPTIONS, ids);
+      assert(parallelogram.ok, "the parallelogram builds");
+      if (!parallelogram.ok) return;
+      let project = make(parallelogram.value.entities, parallelogram.value.constraints);
+      project = run(project, setLength(project, 0, 12));
+      const flat = refuse(project, setLength(project, 2, 7));
+      assert(/Length 7 on Line 3/u.test(flat) && /flat/u.test(flat) && /Length 12 on Line 1/u.test(flat) && /Parallel/u.test(flat) && !/entity:/u.test(flat), `parallelogram: the refusal names the dimensions and the fold: ${flat}`);
+      project = run(project, setLength(project, 2, 12));
+      near(lengthOf(get(project, project.sketch.entities[2]!.id.slice(7), "line")), 12, 1e-6, "an equal opposite side is still accepted");
+
+      const rounded = buildCurveTool("rectangle-rounded", [[0, 0], [50, 30]], { ...DEFAULT_CURVE_TOOL_OPTIONS, cornerRadiusMm: 6 }, ids);
+      assert(rounded.ok, "the rounded rectangle builds");
+      if (!rounded.ok) return;
+      project = make(rounded.value.entities, rounded.value.constraints);
+      project = run(project, setLength(project, 3, 14.21));
+      project = run(project, setLength(project, 2, 36.56));
+      const crossing = refuse(project, setLength(project, 0, 48.02));
+      assert(/Length 48\.02 on Line 1/u.test(crossing) && /cross itself/u.test(crossing) && /Length 36\.56 on Line 3/u.test(crossing), `rounded rectangle: ${crossing}`);
+
+      const slot = buildSlot([0, 0], [20, 0], [10, 3], ids);
+      assert(slot.ok, "the slot builds");
+      if (!slot.ok) return;
+      project = make(slot.value.entities, slot.value.constraints);
+      project = run(project, setLength(project, 0, 30));
+      const lens = refuse(project, setLength(project, 1, 12));
+      assert(/Length 12 on Line 2/u.test(lens) && /double back/u.test(lens) && /Length 30 on Line 1/u.test(lens), `slot: ${lens}`);
+      project = run(project, setLength(project, 1, 30));
+      // The same through add-sketch-constraint.
+      const viaConstraint = apply(make(slot.value.entities, slot.value.constraints), { kind: "add-sketch-constraint", constraint: { id: "constraint:lens-a", kind: "distance", dimension: "length", entityIds: [lengthOfLineAt(project, 0)], valueMm: 30 } });
+      assert(viaConstraint.ok, `a first length is accepted through add-sketch-constraint: ${viaConstraint.ok ? "" : viaConstraint.diagnostics[0]?.message}`);
+      if (!viaConstraint.ok) return;
+      const second = apply(viaConstraint.value.project, { kind: "add-sketch-constraint", constraint: { id: "constraint:lens-b", kind: "distance", dimension: "length", entityIds: [lengthOfLineAt(project, 1)], valueMm: 12 } });
+      assert(!second.ok && /Length 12 on Line 2/u.test(second.ok ? "" : second.diagnostics[0]?.message ?? "") && /Length 30 on Line 1/u.test(second.ok ? "" : second.diagnostics[0]?.message ?? ""), `and the second contradictory length is refused there too: ${second.ok ? "accepted" : second.diagnostics[0]?.message}`);
+    }
   }
 ];
+
+type SketchEntityLike = unknown;
+type ConstraintLike = unknown;
+void ([] as readonly Line[]);
