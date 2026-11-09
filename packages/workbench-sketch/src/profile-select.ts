@@ -169,7 +169,7 @@ const shortId = (id: string): string => {
 export interface MatchedProfile {
   readonly profile: SketchProfile;
   /** The id still names a profile ("id"), only its loop name does ("name": the curves were moved or resized), or the region was found by its geometry. */
-  readonly how: "id" | "name" | "geometry";
+  readonly how: "id" | "name" | "geometry" | "only";
   /** For a region found by its geometry: the outline area it has now over the one the reference carried. */
   readonly areaRatio?: number;
   /** For a region found by its geometry: how far its centroid moved, in millimetres. */
@@ -210,6 +210,9 @@ function matchDetailed(ref: string, profiles: readonly SketchProfile[], useGeome
   const sameName = profiles.filter((profile) => profileBaseOf(profile.id) === parsed.base);
   if (sameName.length === 1) return found({ profile: sameName[0]!, how: "name" });
   if (!useGeometry && sameName.length === 0) return found(undefined);
+  // A bare id from an old file carries no size to compare, so after a fillet or chamfer renamed its curves nothing could match it. When the
+  // sketch has a single region left it can only be that one (said in a note); with several, guessing would pick the wrong one.
+  if (wantedArea === undefined && sameName.length === 0 && profiles.length === 1) return found({ profile: profiles[0]!, how: "only" });
   if (wantedArea === undefined || wantedCentroid === undefined || wantedArea <= 0) return found(sameName.length > 1 ? { profile: sameName.sort((left, right) => right.areaMm2 - left.areaMm2)[0]!, how: "name" } : undefined);
   const size = Math.sqrt(wantedArea);
   const scored = (sameName.length > 1 ? sameName : profiles)
@@ -260,6 +263,7 @@ export function resolveProfileRegion(
       ?? (parsed.exact || shapes === undefined ? undefined : matchProfileRef(id, shapes, false))
       ?? matchProfileRef(id, profiles);
     if (found === undefined) return missing(id, profiles);
+    if (found.how === "only") matchNotes.push(`The profile ${shortId(id)} was named in an older file and its curves have changed, so the only region the sketch has now was used. Select the region again to keep it for good.`);
     if (found.how === "geometry") {
       const note = geometryMatchNote(parsed, found);
       if (note !== undefined) matchNotes.push(note);

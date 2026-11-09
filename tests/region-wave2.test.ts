@@ -3,6 +3,8 @@ import { createGeneralSolidBody } from "../apps/studio-web/src/general-modeling.
 import { triangulateLoops } from "../packages/occt-kernel-adapter/src/polygon.js";
 import { breakAtIntersections, detectSketchProfiles, explainNoProfiles, resolveProfileRegion } from "../packages/workbench-sketch/src/index.js";
 import { analyzeSketch } from "../packages/workbench-sketch/src/sketch-repair.js";
+import { RingIndex } from "../packages/workbench-sketch/src/ring-index.js";
+import { pointInRing } from "../packages/workbench-sketch/src/arrangement.js";
 import { filletCorners } from "../packages/workbench-sketch/src/edit-tools.js";
 import * as editKit from "./sketch-edit-kit.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
@@ -322,6 +324,34 @@ export const regionWave2Tests: readonly TestCase[] = [
     }
   },
   {
+    name: "region N-09: the ring index answers inside and near exactly like the plain scans, on a ring with 1200 edges",
+    run: () => {
+      const ring: [number, number][] = [];
+      for (let i = 0; i < 1200; i += 1) {
+        const angle = (i / 1200) * Math.PI * 2;
+        const radius = 50 + (i % 2 === 0 ? 6 : -6) * Math.sin(i * 0.37);
+        ring.push([Math.cos(angle) * radius, Math.sin(angle) * radius]);
+      }
+      const index = new RingIndex(ring);
+      let seed = 12345;
+      const next = (): number => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+      for (let sample = 0; sample < 3000; sample += 1) {
+        const point: [number, number] = [next() * 130 - 65, next() * 130 - 65];
+        equal(index.contains(point), pointInRing(point, ring), `inside agrees at (${point[0].toFixed(3)}, ${point[1].toFixed(3)})`);
+        let nearest = Infinity;
+        for (let edge = 0; edge < ring.length; edge += 1) {
+          const a = ring[edge]!;
+          const b = ring[(edge + 1) % ring.length]!;
+          const dx = b[0] - a[0];
+          const dy = b[1] - a[1];
+          const w = Math.min(1, Math.max(0, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / (dx * dx + dy * dy)));
+          nearest = Math.min(nearest, Math.hypot(point[0] - a[0] - dx * w, point[1] - a[1] - dy * w));
+        }
+        equal(index.within(point, 1.5), nearest <= 1.5, `near agrees at (${point[0].toFixed(3)}, ${point[1].toFixed(3)})`);
+      }
+    }
+  },
+  {
     name: "region N-11: the reason a sketch has no region reads cleanly, with no '1 more open ends' and no doubled full stop",
     run: () => {
       const parallel = sketchOf([line("a", [0, 0], [10, 0]), line("b", [0, 5], [10, 5])]);
@@ -330,6 +360,22 @@ export const regionWave2Tests: readonly TestCase[] = [
       assert(!reasons.some((reason) => /1 more open ends/u.test(reason)), "no '1 more open ends'");
       const report = analyzeSketch(editKit.context(editKit.projectWith([editKit.line("a", [0, 0], [10, 0]), editKit.line("b", [10, 0], [10, 10])])));
       assert(report.summary.every((sentence) => !/\.\./u.test(sentence)), `no sentence ends in two full stops: ${report.summary.join(" | ")}`);
+    }
+  },
+  {
+    name: "region P-05 recheck: a bare id from an older file still finds the only region after a fillet renamed its curves, with a note; with two regions it refuses",
+    run: async () => {
+      const project = editKit.projectWith([rect("r", [0, 0], 20, 20)]);
+      const filleted = editKit.commitOk(project, filletCorners(editKit.context(project), ["entity:r"], 3));
+      const built = await rebuildSolidFeature(solidFeature("extrude", { profileIds: ["profile:r"] }), sketchFeatureOf(filleted.sketch));
+      assert(built.ok, `the bare id profile:r is found again after a fillet: ${built.ok ? "" : built.message}`);
+      near(volumeOf(built.body.positionsMm, built.body.indices), (400 - (4 - Math.PI) * 9) * 10, 5, "and builds the rounded plate");
+      assert((built.warnings ?? []).some((warning) => /only region/u.test(warning)), `and says which region it used: ${String(built.warnings)}`);
+      // Two separate regions: nothing says which one the old id meant, so it is reported instead of guessed.
+      const two = editKit.projectWith([rect("r", [0, 0], 20, 20), rect("q", [100, 0], 20, 20)]);
+      const twoFilleted = editKit.commitOk(two, filletCorners(editKit.context(two), ["entity:r"], 3));
+      const refused = await rebuildSolidFeature(solidFeature("extrude", { profileIds: ["profile:r"] }), sketchFeatureOf(twoFilleted.sketch));
+      assert(!refused.ok, "with two regions the lost bare id is refused");
     }
   },
   {
