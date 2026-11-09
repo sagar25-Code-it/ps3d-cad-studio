@@ -1,5 +1,6 @@
 import { differenceStep, type Equation, type SolverModel } from "./equation-model.js";
 import { solveSymmetric } from "./linear-algebra.js";
+import { HUB_ROWS, maxRowsPerColumn, solveLeastNormSparse } from "./sparse-ldl.js";
 
 /**
  * Damped Gauss-Newton (Levenberg-Marquardt) over every relation at once. Each step is the weighted least-norm correction that
@@ -28,6 +29,10 @@ export interface SolveOptions {
 }
 
 const CONVERGED = 1e-13;
+/** A hard-relation solve stops when the residual is below the floor and two iterations in a row improved it by less than half. */
+const STALL_FLOOR = 1e-11;
+const STALL_RATIO = 0.5;
+const STALL_ITERATIONS = 2;
 const SOFT_FACTOR = 1e-3;
 /** Weight of the "stay where you were" term in the soft phase, so that anchored geometry resists the soft pull and free geometry does not. */
 const STAY_FACTOR = SOFT_FACTOR * SOFT_FACTOR * 1e-4;
@@ -38,6 +43,8 @@ const REFINE_TOLERANCE = 1e-8;
 const UNMOVED_MM = 2e-9;
 /** One step may turn an angle by at most this many radians and change a size by at most this fraction of it. */
 const MAX_ANGLE_STEP = 0.35;
+/** A least-norm step with this many rows or fewer is always solved through J J' (a dense factorisation of that size is cheap). */
+const AUGMENTED_MIN_ROWS = 24;
 const MAX_SIZE_STEP = 0.5;
 
 interface Row {
@@ -243,9 +250,17 @@ function levenbergMarquardt(model: SolverModel, component: Component, frozen: Ui
   let iteration = 0;
   let moved = 0;
   let stalled = false;
+  let previousHard = Infinity;
+  let slowIterations = 0;
   for (; iteration < maxIterations; iteration += 1) {
     const hardNow = maxHard(parts, residual);
     if (!includeSoft && hardNow <= CONVERGED) break;
+    if (!includeSoft) {
+      // Finite-difference round-off puts a floor under the residual (a few 1e-13); once there, more iterations only repeat the same number.
+      slowIterations = hardNow <= STALL_FLOOR && hardNow > STALL_RATIO * previousHard ? slowIterations + 1 : 0;
+      if (slowIterations >= STALL_ITERATIONS) break;
+      previousHard = hardNow;
+    }
     if (!Number.isFinite(cost)) break;
     const rows = jacobian(parts, x, rowCount, scratch, model.role);
     // Each residual row, with its columns mapped to the component's unknowns and scaled by the weights.
@@ -268,10 +283,19 @@ function levenbergMarquardt(model: SolverModel, component: Component, frozen: Ui
     // Hard-only: the least-norm step J'(JJ' + lambda I)^-1 r lies exactly in the row space, so geometry the relations do not touch cannot drift.
     // With soft terms the unknowns carry their own cost, and the ordinary damped normal equations are used.
     const dual = !includeSoft;
+    // One unknown shared by many rows (a master dimension, an Equal to a reference curve) makes J J' dense: those systems go through the augmented form.
+    const augmented = dual && prepared.length > AUGMENTED_MIN_ROWS && maxRowsPerColumn(prepared, n) > HUB_ROWS;
     const diag = new Float64Array(dual ? prepared.length : n);
-    const lower: Map<number, number>[] = Array.from({ length: dual ? prepared.length : n }, () => new Map<number, number>());
+    const lower: Map<number, number>[] = Array.from({ length: dual && !augmented ? prepared.length : dual ? 0 : n }, () => new Map<number, number>());
     const rhs = new Float64Array(dual ? prepared.length : n);
-    if (dual) {
+    if (augmented) {
+      prepared.forEach((entry, rowIndex) => {
+        rhs[rowIndex] = -entry.value;
+        let sum = 0;
+        for (let k = 0; k < entry.scaled.length; k += 1) sum += entry.scaled[k]! * entry.scaled[k]!;
+        diag[rowIndex] = sum;
+      });
+    } else if (dual) {
       const byColumn: { readonly row: number; readonly value: number }[][] = Array.from({ length: n }, () => []);
       prepared.forEach((entry, rowIndex) => {
         rhs[rowIndex] = -entry.value;
@@ -326,13 +350,18 @@ function levenbergMarquardt(model: SolverModel, component: Component, frozen: Ui
       // A system made only of rows on very stiff unknowns is tiny in the scaled coordinates; the damping follows its size so it does not stall.
       const dampLambda = dual ? lambda * dampScale : lambda;
       for (let index = 0; index < damped.length; index += 1) damped[index] = damped[index]! + dampLambda;
-      const solved = solveSymmetric(damped.length, damped, lower, rhs);
-      let step = solved;
-      if (dual && solved !== undefined) {
-        step = new Float64Array(n);
-        prepared.forEach((entry, rowIndex) => {
-          for (let k = 0; k < entry.columns.length; k += 1) step![entry.columns[k]!] = step![entry.columns[k]!]! + entry.scaled[k]! * solved[rowIndex]!;
-        });
+      let step: Float64Array | undefined;
+      if (augmented) {
+        step = solveLeastNormSparse(n, prepared, Float64Array.from(diag, (own) => dampLambda * Math.max(own, dampScale * 1e-6)), rhs);
+      } else {
+        const solved = solveSymmetric(damped.length, damped, lower, rhs);
+        step = solved;
+        if (dual && solved !== undefined) {
+          step = new Float64Array(n);
+          prepared.forEach((entry, rowIndex) => {
+            for (let k = 0; k < entry.columns.length; k += 1) step![entry.columns[k]!] = step![entry.columns[k]!]! + entry.scaled[k]! * solved[rowIndex]!;
+          });
+        }
       }
       if (step !== undefined && step.every((value) => Number.isFinite(value))) {
         // A long way off, the angles and sizes are far from linear: take the same direction in shorter steps.
@@ -435,36 +464,49 @@ function refineNearest(model: SolverModel, component: Component, frozen: Uint8Ar
       }
     }
     const size = target.length;
-    const byColumn: { readonly row: number; readonly value: number }[][] = Array.from({ length: n }, () => []);
-    for (let rowIndex = 0; rowIndex < size; rowIndex += 1) {
-      for (let k = 0; k < columnsOf[rowIndex]!.length; k += 1) byColumn[columnsOf[rowIndex]![k]!]!.push({ row: rowIndex, value: scaledOf[rowIndex]![k]! });
-    }
     const diag = new Float64Array(size);
-    const lower: Map<number, number>[] = Array.from({ length: size }, () => new Map<number, number>());
-    for (const list of byColumn) {
-      for (let a = 0; a < list.length; a += 1) {
-        const left = list[a]!;
-        diag[left.row] = diag[left.row]! + left.value * left.value;
-        for (let b = 0; b < a; b += 1) {
-          const right = list[b]!;
-          const high = Math.max(left.row, right.row);
-          const low = Math.min(left.row, right.row);
-          const map = lower[high]!;
-          map.set(low, (map.get(low) ?? 0) + left.value * right.value);
+    for (let rowIndex = 0; rowIndex < size; rowIndex += 1) {
+      for (let k = 0; k < scaledOf[rowIndex]!.length; k += 1) diag[rowIndex] = diag[rowIndex]! + scaledOf[rowIndex]![k]! ** 2;
+    }
+    const sparseRows = columnsOf.map((columns, index) => ({ columns, scaled: scaledOf[index]! }));
+    let proposal: Float64Array | undefined;
+    if (size > AUGMENTED_MIN_ROWS && maxRowsPerColumn(sparseRows, n) > HUB_ROWS) {
+      // One unknown shared by many rows: the augmented form keeps the factorisation as sparse as the sketch.
+      for (let damping = 1e-10; damping <= 1e-2 && proposal === undefined; damping *= 100) {
+        proposal = solveLeastNormSparse(n, sparseRows, Float64Array.from(diag, (own) => damping * Math.max(own, 1e-12)), Float64Array.from(target));
+      }
+    } else {
+      const byColumn: { readonly row: number; readonly value: number }[][] = Array.from({ length: n }, () => []);
+      for (let rowIndex = 0; rowIndex < size; rowIndex += 1) {
+        for (let k = 0; k < columnsOf[rowIndex]!.length; k += 1) byColumn[columnsOf[rowIndex]![k]!]!.push({ row: rowIndex, value: scaledOf[rowIndex]![k]! });
+      }
+      const lower: Map<number, number>[] = Array.from({ length: size }, () => new Map<number, number>());
+      for (const list of byColumn) {
+        for (let a = 0; a < list.length; a += 1) {
+          const left = list[a]!;
+          for (let b = 0; b < a; b += 1) {
+            const right = list[b]!;
+            const high = Math.max(left.row, right.row);
+            const low = Math.min(left.row, right.row);
+            const map = lower[high]!;
+            map.set(low, (map.get(low) ?? 0) + left.value * right.value);
+          }
+        }
+      }
+      let solved: Float64Array | undefined;
+      for (let damping = 1e-10; damping <= 1e-2 && solved === undefined; damping *= 100) {
+        const damped = Float64Array.from(diag);
+        for (let index = 0; index < size; index += 1) damped[index] = damped[index]! + damping * Math.max(diag[index]!, 1e-12);
+        solved = solveSymmetric(size, damped, lower, Float64Array.from(target));
+      }
+      if (solved !== undefined) {
+        proposal = new Float64Array(n);
+        for (let rowIndex = 0; rowIndex < size; rowIndex += 1) {
+          for (let k = 0; k < columnsOf[rowIndex]!.length; k += 1) proposal[columnsOf[rowIndex]![k]!] = proposal[columnsOf[rowIndex]![k]!]! + scaledOf[rowIndex]![k]! * solved[rowIndex]!;
         }
       }
     }
-    let solved: Float64Array | undefined;
-    for (let damping = 1e-10; damping <= 1e-2 && solved === undefined; damping *= 100) {
-      const damped = Float64Array.from(diag);
-      for (let index = 0; index < size; index += 1) damped[index] = damped[index]! + damping * Math.max(diag[index]!, 1e-12);
-      solved = solveSymmetric(size, damped, lower, Float64Array.from(target));
-    }
-    if (solved === undefined) break;
-    const proposal = new Float64Array(n);
-    for (let rowIndex = 0; rowIndex < size; rowIndex += 1) {
-      for (let k = 0; k < columnsOf[rowIndex]!.length; k += 1) proposal[columnsOf[rowIndex]![k]!] = proposal[columnsOf[rowIndex]![k]!]! + scaledOf[rowIndex]![k]! * solved[rowIndex]!;
-    }
+    if (proposal === undefined) break;
     const from = variables.map((variable) => x[variable]!);
     // Already the nearest feasible point (to round-off): nothing to do.
     let move = 0;
