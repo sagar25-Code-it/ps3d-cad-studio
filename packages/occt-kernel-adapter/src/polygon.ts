@@ -212,6 +212,7 @@ function earClip(ringInput: readonly number[], points: readonly Point2[]): numbe
   while (ring.length > 3 && guard > 0) {
     guard -= 1;
     let clipped = false;
+    let straightPosition = -1;
     for (let position = 0; position < ring.length; position += 1) {
       const previousIndex = ring[(position + ring.length - 1) % ring.length]!;
       const currentIndex = ring[position]!;
@@ -221,7 +222,14 @@ function earClip(ringInput: readonly number[], points: readonly Point2[]): numbe
       const next = points[nextIndex]!;
       const area = orient(previous, current, next);
       if (Math.abs(area) <= DEGENERATE_AREA) {
-        // A collinear or repeated vertex adds no area; drop it without emitting a triangle.
+        if (isStraightThrough(previous, current, next)) {
+          // A vertex that sits on the straight line between its neighbours is a real corner of the walls (for example the point where
+          // two bridges meet a hole). Dropping it would leave the cap edge spanning a vertex the wall still uses, a T-junction that opens the
+          // mesh; keep it until a neighbour has been clipped, and only emit a sliver for it when nothing else can be clipped.
+          if (straightPosition < 0) straightPosition = position;
+          continue;
+        }
+        // A repeated vertex or a zero-width spike adds no area and has no partner edge to open; drop it without emitting a triangle.
         ring.splice(position, 1);
         clipped = true;
         break;
@@ -240,13 +248,30 @@ function earClip(ringInput: readonly number[], points: readonly Point2[]): numbe
       clipped = true;
       break;
     }
+    if (!clipped && straightPosition >= 0) {
+      const previousIndex = ring[(straightPosition + ring.length - 1) % ring.length]!;
+      const currentIndex = ring[straightPosition]!;
+      const nextIndex = ring[(straightPosition + 1) % ring.length]!;
+      // A zero-area triangle keeps every edge paired: previous-current and current-next pair with the bridge side, next-previous with the ring.
+      triangles.push(previousIndex, currentIndex, nextIndex);
+      ring.splice(straightPosition, 1);
+      clipped = true;
+    }
     if (!clipped) throw new Error("The profile could not be triangulated; it may cross itself or be degenerate.");
   }
   if (ring.length === 3) {
     const [a, b, c] = [points[ring[0]!]!, points[ring[1]!]!, points[ring[2]!]!];
-    if (Math.abs(orient(a, b, c)) > DEGENERATE_AREA) triangles.push(ring[0]!, ring[1]!, ring[2]!);
+    if (Math.abs(orient(a, b, c)) > DEGENERATE_AREA
+      || isStraightThrough(a, b, c) || isStraightThrough(b, c, a) || isStraightThrough(c, a, b)) triangles.push(ring[0]!, ring[1]!, ring[2]!);
   }
   return triangles;
+}
+
+/** True when `current` lies strictly between `previous` and `next` on one straight line (a 180 degree corner, not a spike or a repeat). */
+function isStraightThrough(previous: Point2, current: Point2, next: Point2): boolean {
+  if (samePosition(previous, current) || samePosition(current, next) || samePosition(previous, next)) return false;
+  const dot = (previous[0] - current[0]) * (next[0] - current[0]) + (previous[1] - current[1]) * (next[1] - current[1]);
+  return dot < 0;
 }
 
 function orient(a: Point2, b: Point2, c: Point2): number {
