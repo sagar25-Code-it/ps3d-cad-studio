@@ -12,6 +12,8 @@ import { typedIntentConstraints } from "../packages/workbench-sketch/src/typed-i
 import { DEFAULT_CURVE_TOOL_OPTIONS, buildCurveTool } from "../packages/workbench-sketch/src/curve-tools.js";
 import { gridSteps } from "../packages/workbench-sketch/src/camera.js";
 import { buildSlot, buildSlotOverall } from "../packages/workbench-sketch/src/shapes.js";
+import { buildFitSpline, tangentFromDegrees } from "../packages/workbench-sketch/src/spline-fit.js";
+import { sampleSpline } from "../packages/workbench-sketch/src/index.js";
 import { PROFILE_CHAINS, autoId, drawShape, inferPlaced, typedLineChain, arcSlotProblem, addShape, drawEntity, emptyProject3, tryAdd, profileProject, stressProblem, wholeProblem } from "./sketch-shapes3-kit.js";
 import { arcRadius, dimension, shapeIds } from "./sketch-shape-kit.js";
 
@@ -484,6 +486,59 @@ export const sketchBuilderGuards3Tests: readonly TestCase[] = [
       assert(text.value.entities.length > 200, `with more than 200 curves (${text.value.entities.length})`);
       const added = tryAdd(emptyProject3(), text.value);
       assert(added.ok, `and the project takes them: ${added.ok ? "" : added.message}`);
+    }
+  }
+];
+
+const direction = (from: Vec2, to: Vec2): number => (Math.atan2(to[1] - from[1], to[0] - from[0]) * 180) / Math.PI;
+const wrap180 = (degrees: number): number => ((((degrees + 180) % 360) + 360) % 360) - 180;
+
+export const sketchSpline3Tests: readonly TestCase[] = [
+  {
+    name: "Curve creation T26: two points make a straight spline that the project accepts and that lies on the chord",
+    run: () => {
+      for (const mode of ["uniform", "chord-length", "centripetal"] as const) {
+        const built = buildFitSpline([[0, 0], [30, 10]], mode, "entity:two-point");
+        assert(built.ok, `${mode}: two points build (${built.ok ? "" : built.diagnostics[0]?.message})`);
+        assert(built.value.kind === "spline", "a spline");
+        const samples = sampleSpline(built.value.fitPoints, 8);
+        for (const point of samples) near(Math.abs(point[0] * 10 - point[1] * 30) / Math.hypot(10, 30), 0, 1e-9, `${mode}: every sample lies on the chord`);
+        near(samples[0]![0], 0, 1e-12, "starts at the first point");
+        near(samples.at(-1)![0], 30, 1e-12, "ends at the second point");
+        const added = tryAdd(emptyProject3(), { entities: [built.value], constraints: [] });
+        assert(added.ok, `${mode}: the project takes it: ${added.ok ? "" : added.message}`);
+      }
+      assert(!buildFitSpline([[0, 0], [0.001, 0]], "uniform", "entity:tiny").ok, "two points on top of each other are refused");
+      assert(!buildFitSpline([[0, 0]], "uniform", "entity:one").ok, "one point is not a spline");
+    }
+  },
+  ...([[30, 0, 30, 0], [90, undefined, 90, undefined], [undefined, -45, undefined, -45], [60, 120, 60, 120]] as const).map(([start, end]): TestCase => ({
+    name: `Curve creation T26: a two-point spline with end directions ${start ?? "free"} / ${end ?? "free"} degrees leaves and arrives along them`,
+    run: () => {
+      const built = buildFitSpline([[0, 0], [40, 10]], "uniform", "entity:tangent", { start: tangentFromDegrees(start), end: tangentFromDegrees(end) });
+      assert(built.ok, `builds: ${built.ok ? "" : built.diagnostics[0]?.message}`);
+      assert(built.value.kind === "spline", "a spline");
+      const fit = built.value.fitPoints;
+      const samples = sampleSpline(fit, 400);
+      near(samples[0]![0], 0, 1e-12, "starts at the first point");
+      near(samples.at(-1)![0], 40, 1e-12, "ends at the second point");
+      if (start !== undefined) near(Math.abs(wrap180(direction(samples[0]!, samples[1]!) - start)), 0, 0.2, "leaves along the start direction");
+      if (end !== undefined) near(Math.abs(wrap180(direction(samples.at(-2)!, samples.at(-1)!) - end)), 0, 0.2, "arrives along the end direction");
+      const added = tryAdd(emptyProject3(), { entities: [built.value], constraints: [] });
+      assert(added.ok, `the project takes it: ${added.ok ? "" : added.message}`);
+    }
+  })),
+  {
+    name: "Curve creation T26: end directions on a longer fit-point spline keep every clicked point and the direction at both ends",
+    run: () => {
+      const clicks: readonly Vec2[] = [[0, 0], [20, 15], [45, 5], [70, 20]];
+      const built = buildFitSpline(clicks, "uniform", "entity:long", { start: tangentFromDegrees(0), end: tangentFromDegrees(90) });
+      assert(built.ok && built.value.kind === "spline", "builds");
+      for (const click of clicks) assert(built.value.fitPoints.some((point) => Math.hypot(point[0] - click[0], point[1] - click[1]) < 1e-9), `the clicked point ${click.join(",")} is kept`);
+      const samples = sampleSpline(built.value.fitPoints, 400);
+      near(Math.abs(wrap180(direction(samples[0]!, samples[1]!) - 0)), 0, 0.2, "start direction");
+      near(Math.abs(wrap180(direction(samples.at(-2)!, samples.at(-1)!) - 90)), 0, 0.2, "end direction");
+      assert(!buildFitSpline(clicks, "uniform", "entity:bad", { start: [0, 0] }).ok, "a zero direction is refused with a message");
     }
   }
 ];

@@ -26,6 +26,9 @@ export interface CurveOptionFields {
   readonly profileMode: ProfileSegmentMode;
   /** Fit-point spline: how the curve is spaced between uneven clicks. */
   readonly splineMode: SplineParameterization;
+  /** Fit-point spline end directions in degrees (counter-clockwise from +X); blank leaves that end free. */
+  readonly splineStartAngle: string;
+  readonly splineEndAngle: string;
   readonly keepPolygon: boolean;
   /** Insert block: which saved block, the angle and scale to insert it at, and the name to save the selection under. */
   readonly blockChoice: string;
@@ -46,6 +49,8 @@ export const DEFAULT_CURVE_OPTION_FIELDS: CurveOptionFields = {
   textAlign: "left",
   profileMode: "line",
   splineMode: "uniform",
+  splineStartAngle: "",
+  splineEndAngle: "",
   keepPolygon: DEFAULT_CURVE_TOOL_OPTIONS.keepControlPolygon,
   blockChoice: "",
   blockRotation: "0",
@@ -123,11 +128,15 @@ export function SketchCurveOptionsPanel({ tool, fields, onChange, blockNames, se
     case "blend": return numberField("Blend tension", "tension", 0.1, BLEND_TENSION_MIN, BLEND_TENSION_MAX);
     case "spline-control": return <label className="palette-number"><span>Keep control polygon</span><input type="checkbox" checked={fields.keepPolygon} aria-label="Keep the control polygon as construction lines" onChange={(event) => set("keepPolygon", event.target.checked)} /></label>;
     case "spline": return (
-      <label className="palette-number"><span>Spline spacing</span>
-        <select aria-label="Fit-point spline parameterisation" value={fields.splineMode} onChange={(event) => set("splineMode", event.target.value === "centripetal" ? "centripetal" : event.target.value === "chord-length" ? "chord-length" : "uniform")}>
-          {(Object.keys(SPLINE_PARAMETERIZATION_LABELS) as SplineParameterization[]).map((mode) => <option key={mode} value={mode}>{SPLINE_PARAMETERIZATION_LABELS[mode]}</option>)}
-        </select>
-      </label>
+      <>
+        <label className="palette-number"><span>Spline spacing</span>
+          <select aria-label="Fit-point spline parameterisation" value={fields.splineMode} onChange={(event) => set("splineMode", event.target.value === "centripetal" ? "centripetal" : event.target.value === "chord-length" ? "chord-length" : "uniform")}>
+            {(Object.keys(SPLINE_PARAMETERIZATION_LABELS) as SplineParameterization[]).map((mode) => <option key={mode} value={mode}>{SPLINE_PARAMETERIZATION_LABELS[mode]}</option>)}
+          </select>
+        </label>
+        <label className="palette-number"><span>Start direction (deg)</span><input type="number" step={15} placeholder="free" value={fields.splineStartAngle} aria-label="Spline start tangent direction in degrees, blank for free" onChange={(event) => set("splineStartAngle", event.target.value)} /></label>
+        <label className="palette-number"><span>End direction (deg)</span><input type="number" step={15} placeholder="free" value={fields.splineEndAngle} aria-label="Spline end tangent direction in degrees, blank for free" onChange={(event) => set("splineEndAngle", event.target.value)} /></label>
+      </>
     );
     case "profile": return (
       <label className="palette-number"><span>Next segment</span>

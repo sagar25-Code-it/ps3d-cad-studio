@@ -21,7 +21,7 @@ import {
   type SketchTool
 } from "../../../../packages/workbench-sketch/src/index.js";
 import { gridSteps, sketchToScreen } from "../../../../packages/workbench-sketch/src/camera.js";
-import { buildFitSpline } from "../../../../packages/workbench-sketch/src/spline-fit.js";
+import { buildFitSpline, tangentFromDegrees } from "../../../../packages/workbench-sketch/src/spline-fit.js";
 import { advanceArcSweepTrack, arcSweepDirection, startArcSweepTrack, type ArcSweepTrack } from "../../../../packages/workbench-sketch/src/arc-sweep.js";
 import { mergeTyped, typedIntentConstraints } from "../../../../packages/workbench-sketch/src/typed-intent.js";
 import { dynamicFieldsFor, measureFromCursor, parseDynamicNumber, type DynamicFieldId, type DynamicValues } from "../../../../packages/workbench-sketch/src/dynamic-input.js";
@@ -594,6 +594,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }), [visibleSketch.constraints, visibleEntities]);
   const dimensionedIds = useMemo(() => new Set(drivingDimensions.map((view) => view.entity.id)), [drivingDimensions]);
   const dimensionModeWasActive = useRef(false);
+  // The Sketch palette's spline end directions (blank = free): they become the tangents a fit-point spline leaves and arrives with.
+  const splineTangents = useMemo(() => {
+    const parse = (text: string): Vec2 | undefined => text.trim() === "" ? undefined : tangentFromDegrees(Number(text));
+    const start = parse(curveFields.splineStartAngle);
+    const end = parse(curveFields.splineEndAngle);
+    return start === undefined && end === undefined ? undefined : { start, end };
+  }, [curveFields.splineStartAngle, curveFields.splineEndAngle]);
   const previewEntity = useMemo(() => {
     if (props.tool === "profile") {
       const chain = profileChain.current;
@@ -605,8 +612,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (props.tool === "spline") {
       if (pending.length < 1) return undefined;
       const rough = { id: "entity:tool-preview", kind: "spline" as const, fitPoints: [...pending, cursor], construction: false } satisfies SketchEntity;
-      if (pending.length < 2 || curveFields.splineMode === "uniform") return rough;
-      const shaped = buildFitSpline([...pending, cursor], curveFields.splineMode, "entity:tool-preview");
+      if (pending.length < 1 || (curveFields.splineMode === "uniform" && splineTangents === undefined)) return rough;
+      const shaped = buildFitSpline([...pending, cursor], curveFields.splineMode, "entity:tool-preview", splineTangents ?? {});
       return shaped.ok ? shaped.value : rough;
     }
     if (props.tool === "select") return undefined;
@@ -625,7 +632,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       return { id: "entity:tool-preview", kind: "line" as const, start: pending[pending.length - 1]!, end: cursor, construction: false } satisfies SketchEntity;
     }
     return undefined;
-  }, [cursor, pending, props.tool, curveFields.profileMode, curveFields.splineMode]);
+  }, [cursor, pending, props.tool, curveFields.profileMode, curveFields.splineMode, splineTangents]);
   const navigationPan = props.tool === "select" && props.viewportState.navigationMode === "pan";
   /** A whole polygon or slot is built from the points placed so far plus the cursor, so it can be previewed and then placed. */
   const buildShape = (tool: Exclude<SketchTool, "select">, points: readonly Vec2[]): WorkbenchResult<SketchShape> => {
@@ -944,12 +951,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (props.tool === "spline") {
       const last = pending.at(-1);
       const gap = last === undefined ? Infinity : Math.hypot(snapped.point[0] - last[0], snapped.point[1] - last[1]);
-      if (pending.length >= 3 && gap <= PICK_PIXELS * px) { finishSpline(pending); return; }
+      if (pending.length >= 2 && gap <= PICK_PIXELS * px) { finishSpline(pending); return; }
       if (gap < 0.01) return;
       if (pending.length >= SPLINE_MAX_FIT_POINTS) { props.onMessage(`A spline takes at most ${SPLINE_MAX_FIT_POINTS} fit points. Click the last point again or press Enter to finish.`); return; }
       const next = [...pending, snapped.point];
       setPending(next);
-      props.onMessage(`Fit-point spline: point ${next.length} accepted.${next.length >= 3 ? " Click the last point again or press Enter to finish." : ""}`);
+      props.onMessage(`Fit-point spline: point ${next.length} accepted.${next.length >= 2 ? " Click the last point again or press Enter to finish (two points make a straight spline)." : ""}`);
       return;
     }
     if (props.tool === "select") {
@@ -1103,7 +1110,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       lastPlaced.current = result.point;
       setPending(next);
       setFieldText({});
-      props.onMessage(`${sketchToolLabel(props.tool)}: point ${next.length} accepted (typed).${next.length >= 3 ? " Press Enter to finish." : ""}${result.notes.length === 0 ? "" : ` ${result.notes.join(" ")}`}`);
+      props.onMessage(`${sketchToolLabel(props.tool)}: point ${next.length} accepted (typed).${next.length >= 2 ? " Press Enter to finish." : ""}${result.notes.length === 0 ? "" : ` ${result.notes.join(" ")}`}`);
       typedNotes.current = [];
       return true;
     }
@@ -1112,7 +1119,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
 
   const finishSpline = (points: readonly Vec2[]): void => {
-    const built = buildFitSpline(points, curveFields.splineMode, `entity:user-${crypto.randomUUID()}`);
+    const built = buildFitSpline(points, curveFields.splineMode, `entity:user-${crypto.randomUUID()}`, splineTangents ?? {});
     if (!built.ok) { props.onMessage(built.diagnostics[0]?.message ?? "The spline was rejected."); setPending([]); return; }
     addDrawn(built.value);
     setPending([]);
@@ -1657,7 +1664,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       case "finish":
         if (props.tool === "spline-control") { if (pending.length >= 3) finishControlSpline(pending, false); return; }
         if (props.tool === "profile") { profileChain.current = undefined; setPending([]); props.onMessage("Profile finished."); return; }
-        if (pending.length >= 3) finishSpline(pending);
+        if (pending.length >= 2) finishSpline(pending);
         return;
       case "type-value": {
         const first = dynamicFields[0];
