@@ -27,6 +27,8 @@ import { DimensionMarks } from "../apps/studio-web/src/workspaces/sketch/Dimensi
 import { ExtraDimensionMarks } from "../apps/studio-web/src/workspaces/sketch/ConstraintExtras.js";
 import { SelectOtherPopup } from "../apps/studio-web/src/workspaces/sketch/SelectOtherPopup.js";
 import { checkSketch } from "../packages/workbench-sketch/src/edit-tools.js";
+import { sameTrimPreview, trimHoverPreview, TRIM_PREVIEW_MAX_ENTITIES, type TrimPreview } from "../packages/workbench-sketch/src/trim-preview.js";
+import { TrimHighlight } from "../apps/studio-web/src/workspaces/sketch/TrimHighlight.js";
 import { dimensionLayout } from "../packages/workbench-sketch/src/dimension-layout.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { renderWorkspaceMarkup } from "./sketch-ui3-dimensions.test.js";
@@ -236,6 +238,95 @@ export const sketchUi3ChromeTests: readonly TestCase[] = [
       assert(contrast("#ffd36a", "#081522") >= 3 && contrast("#7bd88f", "#081522") >= 3, "the centre markers are visible on the dark canvas");
       assert(contrast("#5c4400", "#ffffff") >= 4.5 && contrast("#5c4400", "#f4f1ea") >= 4.5, "the bound-expression note is readable text on the inspector");
       assert(contrast("#124a7c", "#eaf5fb") >= 4.5, "an active palette button is readable");
+    }
+  },
+  {
+    name: "Re-audit UX E19: while Trim is active the stretch of curve a click would remove is highlighted (an end up to the crossing, the middle between two crossings, an arc of a circle, one edge of a rectangle), and nothing is drawn where Trim would refuse",
+    run: () => {
+      let id = 0;
+      const context = (entities: readonly SketchEntity[]) => ({ sketch: projectWith(entities).sketch, newId: (prefix: "entity" | "constraint"): string => `${prefix}:preview-${(id += 1)}` });
+      const xs = (preview: TrimPreview | undefined): readonly number[] => (preview?.removed ?? []).flatMap((run) => run.map((point) => point[0]));
+      const ys = (preview: TrimPreview | undefined): readonly number[] => (preview?.removed ?? []).flatMap((run) => run.map((point) => point[1]));
+      const range = (values: readonly number[]): [number, number] => [Math.min(...values), Math.max(...values)];
+      // An end of a line: the part between the end and the crossing.
+      const cross = [line("entity:h", [0, 0], [100, 0]), line("entity:v", [50, -30], [50, 30])];
+      const left = trimHoverPreview(context(cross), [20, 0], 2);
+      assert(left?.targetId === "entity:h", "the horizontal line is the one under the pointer");
+      const [leftFrom, leftTo] = range(xs(left));
+      near(leftFrom, 0, 0.3, "the highlight starts at the line's end");
+      near(leftTo, 50, 0.3, "and stops at the crossing");
+      const right = trimHoverPreview(context(cross), [80, 0], 2);
+      const [rightFrom, rightTo] = range(xs(right));
+      near(rightFrom, 50, 0.3, "on the other side it starts at the crossing");
+      near(rightTo, 100, 0.3, "and runs to the other end");
+      // The middle of a line between two crossings.
+      const three = [line("entity:h", [0, 0], [100, 0]), line("entity:v1", [30, -20], [30, 20]), line("entity:v2", [70, -20], [70, 20])];
+      const middle = trimHoverPreview(context(three), [50, 0], 2);
+      const [midFrom, midTo] = range(xs(middle));
+      near(midFrom, 30, 0.3, "the middle stretch starts at the first crossing");
+      near(midTo, 70, 0.3, "and ends at the second");
+      equal(middle?.removed.length, 1, "as one stretch");
+      assert(ys(middle).every((y) => Math.abs(y) < 1e-6), "lying on the line");
+      // A circle cut by a line through its centre: the half under the pointer.
+      const circleCut = [{ id: "entity:c", kind: "circle", center: [0, 0], radiusMm: 20, construction: false } as SketchEntity, line("entity:d", [-30, 0], [30, 0])];
+      const arc = trimHoverPreview(context(circleCut), [0, 20], 2);
+      assert(arc?.targetId === "entity:c", "the circle is the one under the pointer");
+      assert(ys(arc).every((y) => y > -0.5), "the highlight is the upper half (the pointer is on top)");
+      assert(Math.max(...ys(arc)) > 19, "and reaches the top of the circle");
+      assert(xs(arc).some((x) => Math.abs(x) > 19), "and the sides where the line crosses it");
+      // One edge of a rectangle cut by a line.
+      const plate: SketchEntity = { id: "entity:plate", kind: "rectangle", center: [50, 25], widthMm: 100, heightMm: 50, rotationDeg: 0, construction: false };
+      const edge = trimHoverPreview(context([plate, line("entity:cut", [50, -10], [50, 60])]), [25, 50], 2);
+      assert(edge !== undefined, "an edge of a rectangle can be previewed");
+      assert(ys(edge).every((y) => Math.abs(y - 50) < 1e-6), "on the top edge");
+      const [edgeFrom, edgeTo] = range(xs(edge));
+      near(edgeFrom, 0, 0.3, "from the corner");
+      near(edgeTo, 50, 0.3, "to the crossing");
+      // Nothing under the pointer, nothing to draw; a sketch beyond the limit draws nothing while the pointer moves.
+      assert(trimHoverPreview(context(cross), [200, 200], 2) === undefined, "away from every curve there is no highlight");
+      const many = Array.from({ length: TRIM_PREVIEW_MAX_ENTITIES + 1 }, (_, index) => line(`entity:m${index}`, [index, 0], [index, 5]));
+      assert(trimHoverPreview(context(many), [1, 2], 2) === undefined, "a very large sketch skips the live highlight");
+      // The same preview is not redrawn.
+      assert(sameTrimPreview(left, trimHoverPreview(context(cross), [20, 0], 2)) && !sameTrimPreview(left, right) && sameTrimPreview(undefined, undefined) && !sameTrimPreview(left, undefined), "an unchanged highlight is recognised");
+      // It is drawn over the sketch without taking the pointer, and only the removed part.
+      const markup = renderToStaticMarkup(createElement("svg", null, createElement(TrimHighlight, { preview: { targetId: "entity:h", removed: [[[0, 0], [10, 0]]] }, px: 0.2 })));
+      assert(markup.includes('class="trim-highlight"') && markup.includes('points="0,0 10,0"') && markup.includes('pointer-events="none"'), "the highlight is a polyline with the y axis flipped, inert");
+      equal(renderToStaticMarkup(createElement("svg", null, createElement(TrimHighlight, { preview: undefined, px: 0.2 }))), "<svg></svg>", "no preview, nothing drawn");
+      const workspace = repoFile("apps/studio-web/src/workspaces/SketchWorkspace.tsx");
+      assert(workspace.includes("trimHoverPreview(editContext(), point, PICK_PIXELS * px)") && workspace.includes('props.editTool === "trim" && <TrimHighlight'), "the workspace computes it while the pointer moves over Trim and draws it");
+    }
+  },
+  {
+    name: "Re-audit UX E28: every button, field and list in the rendered Sketch workspace (every tool, edit tool and mode) has an accessible name, and every role=button on the canvas is in the tab order",
+    run: () => {
+      const rect: SketchEntity = { id: "entity:r1", kind: "rectangle", center: [100, 10], widthMm: 30, heightMm: 20, rotationDeg: 0, construction: false };
+      const project = projectWith([line("entity:l1", [0, 0], [60, 0]), rect, { id: "entity:c1", kind: "circle", center: [20, 50], radiusMm: 6, construction: false }]);
+      const variants: Record<string, unknown>[] = [{}, { dimensionMode: true }, { tool: "line" }, { tool: "text" }, { tool: "polygon" }, { checkOpen: true }, { displayUnit: "in" }];
+      for (const editTool of ["rotate", "scale", "fillet", "chamfer", "pattern", "offset", "mirror", "move", "stretch", "jog", "make-path", "dynamic-mirror", "import-drawing", "export-drawing", "underlay", "split", "trim"]) variants.push({ editTool });
+      const text = (html: string): string => html.replace(/<[^>]*>/gu, " ").replace(/\s+/gu, " ").trim();
+      const problems = new Set<string>();
+      let controls = 0;
+      for (const variant of variants) {
+        const html = renderWorkspaceMarkup(project, variant);
+        const tag = JSON.stringify(variant);
+        for (const match of html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/gu)) {
+          controls += 1;
+          if (!/aria-label="[^"]+"/u.test(match[1]!) && !/title="[^"]+"/u.test(match[1]!) && text(match[2]!) === "") problems.add(`${tag}: a button has no name: ${match[0].slice(0, 120)}`);
+        }
+        // A field is named by its aria-label or by the label that wraps it.
+        const unwrapped = html.replace(/<label\b[^>]*>[\s\S]*?<\/label>/gu, (block) => (text(block.replace(/<(input|select|textarea)\b[^>]*>/gu, "")) === "" ? block : ""));
+        for (const match of unwrapped.matchAll(/<(input|select|textarea)\b([^>]*)>/gu)) {
+          controls += 1;
+          if (!/type="hidden"/u.test(match[2]!) && !/aria-label(ledby)?="[^"]+"/u.test(match[2]!)) problems.add(`${tag}: a ${match[1]} has no name: ${match[0].slice(0, 120)}`);
+        }
+        for (const match of html.matchAll(/<(\w+)\b([^>]*role="button"[^>]*)>/gu)) {
+          controls += 1;
+          if (!/tabindex="0"/iu.test(match[2]!)) problems.add(`${tag}: a role=button is outside the tab order: <${match[1]} ${match[2]!.slice(0, 100)}`);
+          if (!/aria-label="[^"]+"/u.test(match[2]!)) problems.add(`${tag}: a role=button has no name: <${match[1]} ${match[2]!.slice(0, 100)}`);
+        }
+      }
+      assert(controls > 500, `the sweep looked at the controls (${controls})`);
+      equal(JSON.stringify([...problems]), "[]", "no unnamed control and no role=button outside the tab order");
     }
   },
   {

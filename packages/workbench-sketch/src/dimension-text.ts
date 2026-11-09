@@ -34,11 +34,12 @@ export const DIMENSION_TEXT_MAX_MM = 200_000;
 
 export function readDimensionText(text: string, options: DimensionTextOptions): DimensionTextRead {
   const typed = text.trim();
-  const subject = options.subject ?? (options.angle === true ? "an angle" : "a length");
+  const given = options.subject ?? "a length";
+  const subject = /^(a|an|the) /u.test(given) ? given : `the ${given}`;
   if (typed === "" || typed === "-" || typed === "+") {
     return { kind: "invalid", message: options.angle === true
-      ? `Type ${subject} in degrees, or a parameter such as turn_angle / 2.`
-      : `Type ${subject} such as 12 or 0.5 in, or a parameter such as plate_w / 4.` };
+      ? "Type the angle in degrees, or a parameter such as turn_angle / 2."
+      : `Type ${subject} (for example 12 or 0.5 in), or a parameter such as plate_w / 4.` };
   }
   if (options.angle === true) {
     const plain = parseAngleText(typed);

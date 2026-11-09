@@ -17,3 +17,6 @@
 .sketch-stage .dimension-editor input:focus-visible { outline: 2px solid #f4bd42; outline-offset: 0; }
 .studio-app .sketch-stage .select-other [role="listbox"] { display: grid; gap: 2px; }
 .studio-app .sketch-stage .select-other [role="listbox"] { display: grid; gap: 2px; }
+
+/* ---- Trim: what the click would remove ---- */
+.trim-highlight polyline { fill: none; stroke: #ff6b6b; stroke-width: 4px; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 8 4; vector-effect: non-scaling-stroke; opacity: 0.95; }

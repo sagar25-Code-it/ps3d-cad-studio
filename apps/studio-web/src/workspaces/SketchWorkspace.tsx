@@ -114,6 +114,8 @@ import { ViewportChrome } from "../ui/ViewportChrome.js";
 import { PointDistanceField } from "./sketch/SolverRelations.js";
 import { DimensionField, EntityDimensions } from "./sketch/EntityDimensionFields.js";
 import { CentreMarker, snapPickedCentre, useCentrePickState } from "./sketch/CentrePick.js";
+import { TrimHighlight } from "./sketch/TrimHighlight.js";
+import { sameTrimPreview, trimHoverPreview, type TrimPreview } from "../../../../packages/workbench-sketch/src/trim-preview.js";
 import { ORIGIN_DIMENSION_POINT as ORIGIN_POINT, allDimensionPoints, dimensionHandles, defaultDimensionPoints, resolveDirectSketchDimension, type DirectSketchDimension, type SketchDimensionPoint } from "./sketch/dimension-points.js";
 import { applyOf, circleDiameterApply, type DimensionApply } from "./sketch/dimension-requests.js";
 import { dimensionAllowsZero, readDimensionText } from "../../../../packages/workbench-sketch/src/dimension-text.js";
@@ -306,6 +308,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [pickRelation, setPickRelation] = useState<"coincident" | "midpoint" | null>(null);
   // Rotate, Scale and a circular Pattern: the centre can be clicked on the canvas (the panels hold the fields, this holds the pick).
   const centrePick = useCentrePickState(String(props.editTool));
+  // Trim: what a click on the curve under the pointer would remove, drawn as a highlight (see trim-preview.ts).
+  const [trimHover, setTrimHover] = useState<TrimPreview | undefined>(undefined);
+  const lastTrimPick = useRef<Vec2 | undefined>(undefined);
+  useEffect(() => { if (props.editTool !== "trim") { setTrimHover(undefined); lastTrimPick.current = undefined; } }, [props.editTool]);
+  useEffect(() => { lastTrimPick.current = undefined; }, [props.sketch]);
+  useEffect(() => { if (centrePick.picking) props.onMessage("Click the centre on the canvas; it snaps to endpoints, centres and the origin (hold Ctrl to place it freely). Esc cancels."); }, [centrePick.picking]); // eslint-disable-line react-hooks/exhaustive-deps
   const [pickedPoint, setPickedPoint] = useState<RelationPoint | undefined>(undefined);
   // The in-place value editor for a driving dimension (opened from Sketch Dimension, or by clicking a dimension's text).
   const [dimensionEdit, setDimensionEdit] = useState<DimensionEditState | undefined>(undefined);
@@ -876,8 +884,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setHoverStack((current) => sameCandidates(current, next) ? current : next);
   };
 
+  /** Recomputes the Trim highlight for the pointer, skipping tiny moves so a busy sketch stays smooth. */
+  const updateTrimHover = (point: Vec2): void => {
+    const last = lastTrimPick.current;
+    if (last !== undefined && Math.hypot(point[0] - last[0], point[1] - last[1]) < 1.5 * px) return;
+    lastTrimPick.current = point;
+    const next = trimHoverPreview(editContext(), point, PICK_PIXELS * px);
+    setTrimHover((current) => (sameTrimPreview(current, next) ? current : next));
+  };
+
   const pointer = (event: React.PointerEvent<SVGSVGElement>, commit: boolean): void => {
     const point = camera.toSketch(event.clientX, event.clientY);
+    if (!commit && props.editTool === "trim" && props.tool === "select" && trimSweep.current === undefined) updateTrimHover(point);
     // Placing tools infer from the sketch (endpoints, centres, midpoints, intersections, alignment...). A line or spline also
     // infers from the last point it placed, which enables perpendicular, tangent and level/plumb hints.
     const placing = props.tool !== "select";
@@ -2006,7 +2024,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         onPointerUp={finishCanvasDrag}
         onPointerCancel={finishCanvasDrag}
         onPointerEnter={() => setPointerInside(true)}
-        onPointerLeave={() => { setPointerInside(false); setHoverId(null); setInference(undefined); }}
+        onPointerLeave={() => { setPointerInside(false); setHoverId(null); setInference(undefined); setTrimHover(undefined); lastTrimPick.current = undefined; }}
         onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }}
         onAuxClick={(event) => event.preventDefault()}
         onContextMenu={(event) => {
@@ -2042,6 +2060,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {showDimensions && dimensionViews.map((entry) => <DimensionMarks key={entry.id} constraintId={entry.id} entityId={entry.view.entity.id} layout={entry.layout} px={px} relaxed={entry.view.constraint.suppressed === true} selected={selectedConstraintIds.includes(entry.id)} interactive={interactive} repositionable={isRepositionable(entry.layout)} title={constraintTitles.get(entry.id) ?? "Dimension"} onPress={(event, additive) => pressDimension(entry, event, additive)} onEdit={() => openDimensionEditor(entry.view.entity, entry.view.dimension)} onSelect={() => selectConstraint(entry.id, false)} />)}
         {showDimensions && <ExtraDimensionMarks sketch={visibleSketch} px={px} selectedIds={selectedConstraintIds} offsets={dimensionDragOffset === undefined ? dimensionOffsets : { ...dimensionOffsets, [dimensionDragOffset.constraintId]: dimensionDragOffset.offsetPx }} format={(value) => formatLengthLabel(value, dimensionDisplay)} {...(interactive ? { onEdit: openExtraDimensionEditor, onSelect: selectConstraint, onLabelPress: pressExtraDimension } : {})} />}
         {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r={4 * px} className="pending-point" />)}
+        {props.editTool === "trim" && <TrimHighlight preview={trimHover} px={px} />}
         <CentreMarker centre={centrePick.centre} hover={centrePick.picking ? centrePick.hover : undefined} px={px} />
         {underlayPick.points.length > 0 && props.editTool === "underlay" && <g className="underlay-pick" pointerEvents="none" stroke="#d9480f" strokeWidth={1.5 * px} fill="none">
           {underlayPick.points.length === 2 && <line x1={underlayPick.points[0]![0]} y1={-underlayPick.points[0]![1]} x2={underlayPick.points[1]![0]} y2={-underlayPick.points[1]![1]} strokeDasharray={`${6 * px} ${4 * px}`} />}
