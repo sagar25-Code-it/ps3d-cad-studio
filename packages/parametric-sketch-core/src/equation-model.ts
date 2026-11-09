@@ -639,6 +639,25 @@ class ModelBuilder {
     return undefined;
   }
 
+  /**
+   * The point where two circles or arcs are joined by a Coincident relation (an end of one on an end of the other, or on the other's
+   * curve), if there is one. Two curves that share a point and are tangent there have their radii in line through it.
+   */
+  private radialContactPoint(firstId: string, secondId: string): PointFn | undefined {
+    for (const constraint of this.document.constraints) {
+      if (constraint.suppressed || constraint.kind !== "coincident") continue;
+      const [a, b] = [constraint.first, constraint.second];
+      const matches = (a.entityId === firstId && b.entityId === secondId) || (a.entityId === secondId && b.entityId === firstId);
+      if (!matches) continue;
+      const endRef = (a.selector === "start" || a.selector === "end") ? a : (b.selector === "start" || b.selector === "end") ? b : undefined;
+      if (endRef === undefined) continue;
+      const other = endRef === a ? b : a;
+      if (other.selector !== "start" && other.selector !== "end" && other.selector !== "curve") continue;
+      return this.point(endRef);
+    }
+    return undefined;
+  }
+
   private buildTangent(constraint: Extract<SketchConstraint, { kind: "tangent" }>): readonly Equation[] | Failure {
     const id = constraint.id;
     const first = this.layout.get(constraint.first.entityId);
@@ -691,6 +710,19 @@ class ModelBuilder {
     if (radial(first.geometry) && radial(second.geometry)) {
       const ba = first.base;
       const bb = second.base;
+      // Two arcs that meet at a shared point are tangent exactly when their radii are in line through it. "Centre distance equals the sum
+      // of the radii" is also true then, but it is flat there (the triangle inequality makes it a maximum), so it would add no
+      // independent equation beyond the joint and the analysis would call the Tangent redundant.
+      const contact = this.radialContactPoint(first.id, second.id);
+      if (contact !== undefined) {
+        return [this.make(id, "constraint", 1, [first.id, second.id], [contact.vars, [ba, ba + 1], [bb, bb + 1]], (x, out, o) => {
+          const ax = contact.x(x) - x[ba]!;
+          const ay = contact.y(x) - x[ba + 1]!;
+          const bx = contact.x(x) - x[bb]!;
+          const by = contact.y(x) - x[bb + 1]!;
+          out[o] = (ax * by - ay * bx) / Math.max(Math.hypot(ax, ay) * Math.hypot(bx, by), 1e-12) * Math.min(Math.hypot(ax, ay), Math.hypot(bx, by));
+        })];
+      }
       const gap = (x: Float64Array): number => Math.hypot(x[ba]! - x[bb]!, x[ba + 1]! - x[bb + 1]!);
       const d0 = gap(this.x0);
       const r1 = this.x0[ba + 2]!;
