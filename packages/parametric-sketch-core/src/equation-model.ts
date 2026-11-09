@@ -1,3 +1,4 @@
+import { heldRectangleIds } from "./rectangle-hold.js";
 import { evaluateSketchExpression } from "./expression.js";
 import type {
   GeometryReference,
@@ -1090,6 +1091,8 @@ export function buildSolverModel(document: ParametricSketchDocument, options: Bu
     if (constraint.kind !== "fix") builder.addConstraint(constraint);
   }
   for (const dimension of document.dimensions.filter((candidate) => !candidate.suppressed && candidate.mode === "driving")) builder.addDimension(dimension);
+  // An axis-aligned rectangle that nothing turns keeps its orientation (see rectangle-hold.ts).
+  for (const id of heldRectangleIds(document)) builder.freezeRange(id, 4, 5, undefined);
   if (options.anchors !== undefined) builder.applyAnchors(options.anchors);
   // A size that must be kept is an equation of its own (the solver retries without it if the other relations cannot allow it);
   // a size that is only preferred is a soft term that every real relation outweighs.

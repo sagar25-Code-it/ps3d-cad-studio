@@ -1,10 +1,11 @@
 import { dragLiveSketch } from "../packages/workbench-core/src/index.js";
 import { analyzeWorkbenchSketch } from "../packages/workbench-sketch/src/index.js";
 import { repairAll, validateSketch } from "../packages/workbench-sketch/src/sketch-repair.js";
+import { dragSketchHandle, grabHandlesOf } from "../packages/workbench-sketch/src/drag.js";
 import { buildCurveTool, DEFAULT_CURVE_TOOL_OPTIONS } from "../packages/workbench-sketch/src/curve-tools.js";
 import { buildSlot } from "../packages/workbench-sketch/src/shapes.js";
 import { assert, near, type TestCase } from "./test-kit.js";
-import { addConstraint, apply, arc, get, lengthOf, line, projectWith, refuse, rel, run, type Arc, type Line, type Vec } from "./sketch-solver-kit.js";
+import { addConstraint, analysis, apply, arc, get, lengthOf, line, projectWith, rect, refuse, rel, run, setDimension, type Arc, type Line, type Vec } from "./sketch-solver-kit.js";
 import type { WorkbenchProject } from "../packages/workbench-core/src/index.js";
 
 /**
@@ -134,6 +135,59 @@ export const sketchSolverWave3bTests: readonly TestCase[] = [
       if (!viaConstraint.ok) return;
       const second = apply(viaConstraint.value.project, { kind: "add-sketch-constraint", constraint: { id: "constraint:lens-b", kind: "distance", dimension: "length", entityIds: [lengthOfLineAt(project, 1)], valueMm: 12 } });
       assert(!second.ok && /Length 12 on Line 2/u.test(second.ok ? "" : second.diagnostics[0]?.message ?? "") && /Length 30 on Line 1/u.test(second.ok ? "" : second.diagnostics[0]?.message ?? ""), `and the second contradictory length is refused there too: ${second.ok ? "accepted" : second.diagnostics[0]?.message}`);
+    }
+  },
+  {
+    name: "Wave3 R2-8: a rectangle pinned at a corner or its centre stays exactly axis aligned through 200 mixed drags and dimension edits (was up to 0.0069 degrees of residual turn, and one drag left 0.00019)",
+    run: () => {
+      let seed = 3;
+      const random = (): number => {
+        seed = (seed * 1664525 + 1013904223) % 4294967296;
+        return seed / 4294967296;
+      };
+      for (const [label, centre, pin] of [["corner-0 on the origin", [50, 30], "corner-0"], ["centre on the origin", [0, 0], "center"]] as const) {
+        let project = projectWith([rect("r", centre, 100, 60)], [rel("coincident", ["r", "sketch:origin"], { points: [pin, "self"] })]);
+        for (let step = 0; step < 200; step += 1) {
+          const entity = get(project, "r", "rectangle");
+          const operation = Math.floor(random() * 3);
+          if (operation < 2) {
+            const result = apply(project, { kind: "set-sketch-dimension", entityId: entity.id, dimension: operation === 0 ? "width" : "height", valueMm: 20 + random() * 150 });
+            if (result.ok) project = result.value.project;
+          } else {
+            const handles = grabHandlesOf(entity);
+            const handle = handles[Math.floor(random() * handles.length)]!;
+            const dragged = dragSketchHandle(project.sketch, entity.id, handle.handle, handle.point, [handle.point[0] + (random() - 0.5) * 80, handle.point[1] + (random() - 0.5) * 80]);
+            if (dragged.ok) project = { ...project, sketch: { ...project.sketch, entities: dragged.entities } };
+          }
+          assert(Math.abs(get(project, "r", "rectangle").rotationDeg) === 0, `${label}: step ${step} leaves the rectangle exactly axis aligned, not ${get(project, "r", "rectangle").rotationDeg} degrees`);
+        }
+      }
+      // A rectangle that is turned on purpose, or has a Horizontal of its own, keeps working as before.
+      const turned = projectWith([rect("r", [50, 30], 100, 60, 30)], [rel("coincident", ["r", "sketch:origin"], { points: ["corner-0", "self"] })]);
+      near(get(run(turned, { kind: "set-sketch-dimension", entityId: "entity:r", dimension: "width", valueMm: 80 }), "r", "rectangle").rotationDeg, 30, 1e-6, "a 30 degree rectangle keeps its turn");
+    }
+  },
+  {
+    name: "Wave3 UX R2-6: a Rectangle-tool rectangle with its corner on the origin, a width and a height reads fully constrained (DOF 0); a free rectangle keeps its five degrees of freedom and an explicit Horizontal still works",
+    run: () => {
+      const free = projectWith([rect("r", [40, 25], 80, 50)], []);
+      assert(analysis(free).degreesOfFreedom === 5, `a free rectangle has 5 degrees of freedom, not ${analysis(free).degreesOfFreedom}`);
+      let project = addConstraint(free, rel("coincident", ["r", "sketch:origin"], { points: ["corner-0", "self"] }));
+      project = setDimension(project, "r", "width", 80);
+      project = setDimension(project, "r", "height", 50);
+      const result = analysis(project);
+      assert(result.degreesOfFreedom === 0 && result.classification === "fully-constrained", `corner + width + height is fully constrained: DOF ${result.degreesOfFreedom}, ${result.classification}`);
+      assert(result.redundant.length === 0 && result.conflicts.length === 0, "and nothing is redundant or in conflict");
+      // The same with the centre on the origin.
+      let centred = addConstraint(projectWith([rect("r", [0, 0], 80, 50)], []), rel("coincident", ["r", "sketch:origin"], { points: ["center", "self"] }));
+      centred = setDimension(setDimension(centred, "r", "width", 80), "r", "height", 50);
+      assert(analysis(centred).degreesOfFreedom === 0, "centre + width + height is fully constrained too");
+      // An explicit Horizontal on the rectangle replaces the default hold: it is not redundant.
+      const explicit = addConstraint(project, rel("horizontal", ["r"]));
+      assert(analysis(explicit).redundant.length === 0 && analysis(explicit).degreesOfFreedom === 0, "an explicit Horizontal is accepted without a redundancy warning");
+      // A rectangle pinned at two corners is not held: its turn follows the pins.
+      const twoPins = addConstraint(addConstraint(free, rel("coincident", ["r", "sketch:origin"], { points: ["corner-0", "self"] })), rel("coincident", ["r", "sketch:axis-y"], { points: ["corner-3", "curve"] }));
+      assert(analysis(twoPins).degreesOfFreedom >= 2, "two pins do not pretend to fix the turn");
     }
   }
 ];
