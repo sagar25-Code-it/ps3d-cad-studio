@@ -139,10 +139,12 @@ export function buildArcSlot(arc: CenterlineArc, halfWidthMm: number, ids: Shape
   const endCap = mk(outerEnd, add(endCentre, scale(along(a1), h)), innerEnd);
   const inner = mk(innerEnd, polar(center, R - h, aMid), innerStart);
   const startCap = mk(innerStart, add(startCentre, scale(along(a0), -h)), outerStart);
-  // The four joints are tangent by construction. They are not recorded as Tangent relations because the live solver
-  // only enforces tangency between a line and an arc, and would misread an arc-to-arc pair as a conflict.
+  // Every joint is a Coincident pair of real ends held Tangent (outer arc, cap, inner arc, cap), the two caps are equal and the two long
+  // arcs share their centre, so a width or radius edit keeps the slot a slot instead of kinking at the caps.
+  const ring: readonly SketchEntity[] = [outer, endCap, inner, startCap];
   const constraints: WorkbenchSketchConstraint[] = [
-    ...joinRing([outer, endCap, inner, startCap], ids),
+    ...joinRing(ring, ids),
+    ...ring.map((entity, index): WorkbenchSketchConstraint => ({ id: ids.constraint(), kind: "tangent", entityIds: [entity.id, ring[(index + 1) % ring.length]!.id] })),
     { id: ids.constraint(), kind: "equal", entityIds: [endCap.id, startCap.id] },
     { id: ids.constraint(), kind: "concentric", entityIds: [outer.id, inner.id] }
   ];

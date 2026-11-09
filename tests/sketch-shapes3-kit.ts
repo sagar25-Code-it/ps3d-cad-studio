@@ -111,3 +111,13 @@ export function stressProblem(project: WorkbenchProject, profiles = 1, dragProfi
 
 export const kindsOf = (constraints: readonly WorkbenchSketchConstraint[]): string => constraints.map((constraint) => constraint.kind).join(",");
 export const endOf = at;
+
+/** A curved slot's width: the long arcs differ by twice the cap radius and the caps are equal (undefined when it still is one). */
+export function arcSlotProblem(sketch: WorkbenchSketch): string | undefined {
+  const arcs = sketch.entities.filter((entity) => entity.kind === "arc");
+  if (arcs.length !== 4) return `${arcs.length} arcs (expected 4)`;
+  const [outer, endCap, inner, startCap] = arcs.map((arc) => arcRadius(arc)!) as [number, number, number, number];
+  if (Math.abs(endCap - startCap) > 1e-5) return `the caps differ (${endCap.toFixed(4)} and ${startCap.toFixed(4)})`;
+  if (Math.abs(outer - inner - 2 * endCap) > 1e-4) return `the width is not twice the cap radius (outer ${outer.toFixed(4)}, inner ${inner.toFixed(4)}, cap ${endCap.toFixed(4)})`;
+  return undefined;
+}
