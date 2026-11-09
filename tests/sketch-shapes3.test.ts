@@ -1,7 +1,7 @@
-import { type SketchEntity, type Vec2 } from "../packages/workbench-core/src/index.js";
-import { assert, equal, type TestCase } from "./test-kit.js";
+import { type SketchEntity, type Vec2, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { buildArcSlot, buildCenterpointArcSlot, buildThreePointArcSlot } from "../packages/workbench-sketch/src/basic-curve-shapes.js";
-import { PROFILE_CHAINS, arcSlotProblem, addShape, emptyProject3, profileProject, stressProblem, wholeProblem } from "./sketch-shapes3-kit.js";
+import { PROFILE_CHAINS, arcSlotProblem, addShape, drawEntity, emptyProject3, tryAdd, profileProject, stressProblem, wholeProblem } from "./sketch-shapes3-kit.js";
 import { arcRadius, dimension, shapeIds } from "./sketch-shape-kit.js";
 
 /**
@@ -92,3 +92,58 @@ export const sketchArcSlots3Tests: readonly TestCase[] = ARC_SLOTS.flatMap((slot
     }
   }
 ]);
+
+const seedLine = (): WorkbenchProject => addShape(emptyProject3(), { entities: [line("entity:seed-line", [-10, 0], [10, 0])], constraints: [] });
+
+export const sketchSnapRelations3Tests: readonly TestCase[] = [
+  {
+    name: "Curve creation F5: a 3-point arc whose through-point snaps to a line end is accepted and passes through that end",
+    run: () => {
+      const project = seedLine();
+      const drawn = drawEntity("arc", project, [[40, 40], [10.2, 0.1], [-40, 40]]);
+      const through = drawn.constraints.find((constraint) => constraint.kind === "coincident");
+      assert(through !== undefined, "the through-point earns a relation");
+      assert(through.points?.includes("curve") === true, "held as the line end ON the arc (a through-point is not the middle of the sweep)");
+      const added = tryAdd(project, { entities: [drawn.entity], constraints: drawn.constraints });
+      assert(added.ok, `the arc and its relation are accepted: ${added.ok ? "" : added.message}`);
+      const arc = added.project.sketch.entities.find((entity) => entity.id === drawn.entity.id)!;
+      assert(arc.kind === "arc", "an arc");
+      const centre = circleThrough(arc.start, arc.mid, arc.end)!;
+      near(Math.hypot(10 - centre[0], 0 - centre[1]), centre[2], 1e-6, "the line end lies on the arc's circle");
+    }
+  },
+  ...([
+    ["the origin", [[40, 40], [0.2, 0.1], [-30, 55]]],
+    ["a line middle", [[40, 40], [0.2, 20.3], [-30, 55]]]
+  ] as const).map(([name, pointers]): TestCase => ({
+    name: `Curve creation F5: a 3-point arc whose through-point snaps to ${name} is accepted`,
+    run: () => {
+      const project = name === "a line middle" ? addShape(emptyProject3(), { entities: [line("entity:seed-line2", [-10, 20], [10, 20])], constraints: [] }) : seedLine();
+      const drawn = drawEntity("arc", project, pointers as unknown as Vec2[]);
+      assert(drawn.placed[1]?.primary !== undefined, `the through-point snapped (${name})`);
+      const added = tryAdd(project, { entities: [drawn.entity], constraints: drawn.constraints });
+      assert(added.ok, `accepted with ${drawn.constraints.map((constraint) => constraint.kind).join(",")}: ${added.ok ? "" : added.message}`);
+    }
+  })),
+  {
+    name: "Curve creation F5: a line that starts on an existing 3-point arc's through-point is accepted",
+    run: () => {
+      const project = addShape(emptyProject3(), { entities: [{ id: "entity:seed-arc", kind: "arc", start: [40, 40], mid: [10, 0], end: [-40, 40], construction: false }], constraints: [] });
+      const drawn = drawEntity("line", project, [[10.1, 0.1], [30, -20]]);
+      const added = tryAdd(project, { entities: [drawn.entity], constraints: drawn.constraints });
+      assert(added.ok, `accepted with ${drawn.constraints.map((constraint) => constraint.kind).join(",")}: ${added.ok ? "" : added.message}`);
+      assert(drawn.constraints.some((constraint) => constraint.kind === "coincident"), "and it is joined to the arc");
+    }
+  }
+];
+
+function circleThrough(a: Vec2, b: Vec2, c: Vec2): readonly [number, number, number] | undefined {
+  const d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
+  if (Math.abs(d) < 1e-12) return undefined;
+  const a2 = a[0] ** 2 + a[1] ** 2;
+  const b2 = b[0] ** 2 + b[1] ** 2;
+  const c2 = c[0] ** 2 + c[1] ** 2;
+  const x = (a2 * (b[1] - c[1]) + b2 * (c[1] - a[1]) + c2 * (a[1] - b[1])) / d;
+  const y = (a2 * (c[0] - b[0]) + b2 * (a[0] - c[0]) + c2 * (b[0] - a[0])) / d;
+  return [x, y, Math.hypot(a[0] - x, a[1] - y)];
+}

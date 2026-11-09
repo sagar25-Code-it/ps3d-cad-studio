@@ -121,3 +121,41 @@ export function arcSlotProblem(sketch: WorkbenchSketch): string | undefined {
   if (Math.abs(outer - inner - 2 * endCap) > 1e-4) return `the width is not twice the cap radius (outer ${outer.toFixed(4)}, inner ${inner.toFixed(4)}, cap ${endCap.toFixed(4)})`;
   return undefined;
 }
+
+// ---------------------------------------------------------------- drawing the way the canvas does
+
+import { autoConstraintsFor, type PlacedPointInference } from "../packages/workbench-sketch/src/auto-constraints.js";
+import { buildSketchEntity, type SketchTool } from "../packages/workbench-sketch/src/index.js";
+import { DEFAULT_SNAP_ASSIST, anchorFor, assistedInference, type SnapAssistSettings, type SnapModifiers } from "../packages/workbench-sketch/src/snap-assist.js";
+
+export interface DrawnEntity {
+  readonly entity: SketchEntity;
+  readonly constraints: readonly WorkbenchSketchConstraint[];
+  readonly placed: readonly PlacedPointInference[];
+  readonly points: readonly Vec2[];
+}
+
+let autoCounter = 0;
+export const autoId = (): string => `constraint:s3-${(autoCounter += 1)}`;
+
+/** Infers each pointer like the pointer-move handler does and returns what the click handler would place. */
+export function inferPlaced(tool: SketchTool, project: WorkbenchProject, pointers: readonly Vec2[], options: { readonly settings?: Partial<SnapAssistSettings>; readonly modifiers?: SnapModifiers; readonly tolerance?: number } = {}): { readonly points: Vec2[]; readonly placed: PlacedPointInference[] } {
+  const settings: SnapAssistSettings = { ...DEFAULT_SNAP_ASSIST, ...options.settings };
+  const placed: PlacedPointInference[] = [];
+  const points: Vec2[] = [];
+  for (const pointer of pointers) {
+    const result = assistedInference({ tool, pointer, sketch: project.sketch, toleranceMm: options.tolerance ?? 1, gridMm: undefined, anchor: anchorFor(tool, points), placedCount: points.length, settings, ...(options.modifiers === undefined ? {} : { modifiers: options.modifiers }) });
+    const previous = points.at(-1);
+    placed.push({ point: result.point, ...(result.primary === undefined ? {} : { primary: result.primary }), guides: result.guides, ...(previous === undefined ? {} : { anchor: previous }) });
+    points.push(result.point);
+  }
+  return { points, placed };
+}
+
+/** Draws one single-entity tool through inference, the entity builder and autoConstraintsFor (no project change). */
+export function drawEntity(tool: Exclude<SketchTool, "select">, project: WorkbenchProject, pointers: readonly Vec2[], options: { readonly settings?: Partial<SnapAssistSettings>; readonly modifiers?: SnapModifiers; readonly tolerance?: number } = {}): DrawnEntity {
+  const { points, placed } = inferPlaced(tool, project, pointers, options);
+  const built = buildSketchEntity(tool, points, "entity:s3-drawn");
+  if (!built.ok) throw new Error(`the ${tool} did not build: ${built.diagnostics[0]?.message}`);
+  return { entity: built.value, constraints: autoConstraintsFor({ tool, entity: built.value, placed, sketch: project.sketch, newId: autoId }), placed, points };
+}
