@@ -550,6 +550,8 @@ function refineNearest(model: SolverModel, component: Component, frozen: Uint8Ar
 const FORCED_MOVE = 1e-7;
 /** The second level tries at most this many keepers one by one when asking for all of them at once is not possible. */
 const MAX_KEEP_ATTEMPTS = 12;
+/** Components with more hard equations than this get a proportionally smaller shape-keeping budget. */
+const KEEP_FULL_BUDGET_ROWS = 300;
 const KEEP_ITERATIONS = 14;
 const MAX_KEEP_FORCED = 240;
 
@@ -625,6 +627,8 @@ function keepShape(model: SolverModel, component: Component, held: Uint8Array): 
   };
   const adopted: Equation[] = [];
   let attempts = 0;
+  // Every attempt is a full solve of the component, so a big coupled sketch (a 300-line grid) gets fewer one-by-one tries than a small one.
+  const attemptBudget = component.hard.length <= KEEP_FULL_BUDGET_ROWS ? MAX_KEEP_ATTEMPTS : Math.max(2, Math.floor((MAX_KEEP_ATTEMPTS * KEEP_FULL_BUDGET_ROWS) / component.hard.length));
   const attempt = (extra: readonly Equation[]): boolean => {
     attempts += 1;
     const saved = component.variables.map((variable) => x[variable]!);
@@ -640,7 +644,7 @@ function keepShape(model: SolverModel, component: Component, held: Uint8Array): 
     if (attempt(wanted)) { adopted.push(...wanted); continue; }
     for (const equation of wanted) {
       if (!unsatisfied(equation)) { adopted.push(equation); continue; }
-      if (attempts >= MAX_KEEP_ATTEMPTS) break;
+      if (attempts >= attemptBudget) break;
       if (attempt([equation])) adopted.push(equation);
     }
   }
