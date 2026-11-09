@@ -7,7 +7,7 @@ import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kerne
 import { planHoleFacets } from "./many-holes.js";
 
 /** Sketch-plane identifier shared with the solid builder UI. */
-export type SketchPlane = TessellatePlane;
+export type SketchPlane = "xy" | "xz" | "yz";
 
 type PolygonPoint = readonly [number, number];
 type WorldPoint = readonly [number, number, number];
@@ -74,32 +74,44 @@ function curveEdgeGroups(boundary: SketchProfile["boundary"], rolePrefix: string
   });
 }
 
+/**
+ * The plane a solid is built on, as the tessellator knows it: "yz-zup" is the Right plane of the Z-up convention (sketch X along world +Y,
+ * sketch Y along +Z), "yz" the legacy mapping every older sketch keeps. A stored feature keeps the plain "yz" either way (storedPlaneOf).
+ */
+export type BuildPlane = TessellatePlane;
+
+export function storedPlaneOf(plane: BuildPlane): SketchPlane {
+  return plane === "yz-zup" ? "yz" : plane;
+}
+
 /** Place a 2D sketch point (millimetres) onto its datum plane in world metres, matching the analytic tessellator's orientation. */
-function placeOnPlane(point: PolygonPoint, plane: SketchPlane): WorldPoint {
+function placeOnPlane(point: PolygonPoint, plane: TessellatePlane): WorldPoint {
   const u = point[0] / 1000;
   const v = point[1] / 1000;
   if (plane === "xz") return [u, 0, v];
   if (plane === "yz") return [0, v, -u];
+  if (plane === "yz-zup") return [0, u, v];
   return [u, v, 0];
 }
 
 /** The outward extrusion normal for each datum plane (matches placeOnPlane). */
-function planeNormal(plane: SketchPlane): WorldPoint {
+function planeNormal(plane: TessellatePlane): WorldPoint {
   if (plane === "xz") return [0, -1, 0];
-  if (plane === "yz") return [1, 0, 0];
+  if (plane === "yz" || plane === "yz-zup") return [1, 0, 0];
   return [0, 0, 1];
 }
 
 /** Rotate a kernel local-space revolve point (revolved about Y) onto its datum plane, matching the analytic tessellator. */
-function rotateLocalToPlane(point: WorldPoint, plane: SketchPlane): WorldPoint {
+function rotateLocalToPlane(point: WorldPoint, plane: TessellatePlane): WorldPoint {
   if (plane === "xz") return [point[0], -point[2], point[1]];
   if (plane === "yz") return [point[2], point[1], -point[0]];
+  if (plane === "yz-zup") return [point[2], point[0], point[1]];
   return point;
 }
 
 export interface CreateGeneralSolidRequest {
   readonly profile: SketchProfile;
-  readonly plane: SketchPlane;
+  readonly plane: BuildPlane;
   readonly operation: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem";
   /** Extrusion height / revolve angle (deg) / sweep distance / loft height, in millimetres (angle: degrees). For edge-fillet/chamfer, shell and draft this is still the extrusion height. */
   readonly valueMm: number;
@@ -167,7 +179,7 @@ export interface CreateGeneralSolidRequest {
 }
 
 /** Maps a hole profile to the kernel's hole loop; the id comes from its sketch entities so wall names survive edits. */
-function kernelHole(profile: SketchProfile, plane: SketchPlane, maxFacets?: number): ProfileHole {
+function kernelHole(profile: SketchProfile, plane: TessellatePlane, maxFacets?: number): ProfileHole {
   const points = profilePolygonMm(profile.boundary, maxFacets).map((point) => placeOnPlane(point, plane));
   const id = stableEntityToken(profile.entityIds);
   const groups = curveEdgeGroups(profile.boundary, `face.hole-${id}-seg`);
@@ -262,6 +274,7 @@ async function createRegionGroups(request: CreateGeneralSolidRequest): Promise<C
  */
 export async function createGeneralSolidBody(request: CreateGeneralSolidRequest): Promise<CreateGeneralSolidResult> {
   if (request.extraGroups !== undefined && request.extraGroups.length > 0) return createRegionGroups(request);
+  const plane = request.plane;
   const polygonMm = profilePolygonMm(request.profile.boundary, request.operation === "revolve" ? revolveProfileFacets(request.profile.boundary) : undefined);
   if (polygonMm.length < 3) return { ok: false, message: "The selected profile does not form a closed polygon." };
   if (!Number.isFinite(request.valueMm) || request.valueMm === 0) {
@@ -273,7 +286,7 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     name: request.name,
     visible: true as const,
     color: request.color,
-    feature: { operation: request.operation, plane: request.plane, valueMm: request.valueMm }
+    feature: { operation: request.operation, plane: storedPlaneOf(plane), valueMm: request.valueMm }
   };
 
   if (request.operation === "draft") {
@@ -290,10 +303,10 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     const topScale = Math.max(0.01, 1 - shift / characteristic);
     if (topScale < 0.05) return { ok: false, message: "The draft angle collapses the top face. Use a smaller angle or a shorter height." };
     // Rebuild the lofted mesh using the loft tessellator with the computed top scale. Flip the mesh if neutral is "top".
-    const mesh = tessellateLoft(polygonMm, neutral === "bottom" ? topScale : 1, Math.abs(request.valueMm), request.plane);
+    const mesh = tessellateLoft(polygonMm, neutral === "bottom" ? topScale : 1, Math.abs(request.valueMm), plane);
     if (neutral === "top") {
       // Scale the BASE instead: reuse tessellateLoft for the top-scale-as-base interpretation by inverting.
-      const inverted = tessellateLoft(polygonMm.map((point) => [centroid[0] + (point[0] - centroid[0]) * topScale, centroid[1] + (point[1] - centroid[1]) * topScale] as const), 1 / topScale, Math.abs(request.valueMm), request.plane);
+      const inverted = tessellateLoft(polygonMm.map((point) => [centroid[0] + (point[0] - centroid[0]) * topScale, centroid[1] + (point[1] - centroid[1]) * topScale] as const), 1 / topScale, Math.abs(request.valueMm), plane);
       if (inverted.positionsMm.length < 9) return { ok: false, message: "The profile could not be drafted." };
       return { ok: true, body: { ...base, positionsMm: Array.from(inverted.positionsMm), indices: Array.from(inverted.indices) } };
     }
@@ -309,17 +322,17 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     if (request.profile.boundary.kind !== "rectangle" && request.profile.boundary.kind !== "circle") {
       return { ok: false, message: "Shell is supported for rectangular and circular profiles in this slice." };
     }
-    const outer = tessellateExtrude(polygonMm, height, request.plane);
+    const outer = tessellateExtrude(polygonMm, height, plane);
     if (outer.positionsMm.length < 9) return { ok: false, message: "The outer shell could not be built." };
     const insetPoints = insetPolygon(polygonMm, thickness, request.profile.boundary.kind);
     if (insetPoints === undefined) return { ok: false, message: "The wall thickness is larger than the profile; nothing would remain." };
     const openFace = request.shellOpenFace ?? "top";
     const innerHeight = openFace === "none" ? height - thickness * 2 : height - thickness;
     const innerStart = openFace === "top" ? 0 : openFace === "bottom" ? thickness : thickness;
-    const inner = tessellateExtrude(insetPoints, innerHeight, request.plane);
+    const inner = tessellateExtrude(insetPoints, innerHeight, plane);
     if (inner.positionsMm.length < 9) return { ok: false, message: "The inner cavity could not be built." };
     // Translate the inner mesh along the plane normal by innerStart.
-    const normal = planeNormal(request.plane);
+    const normal = planeNormal(plane);
     const innerShifted = inner.positionsMm.map((value, index) => value + normal[index % 3]! * innerStart);
     const booleanResult = booleanMeshes({ positionsMm: outer.positionsMm, indices: outer.indices }, { positionsMm: innerShifted, indices: inner.indices }, "cut");
     if (!booleanResult.ok) return { ok: false, message: `Shell could not be built: ${booleanResult.message}` };
@@ -337,7 +350,7 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
   if (request.operation === "sheet-base") {
     const thickness = request.sheetThicknessMm;
     if (thickness === undefined || !Number.isFinite(thickness) || thickness <= 0) return { ok: false, message: "Sheet base needs a positive thickness." };
-    const mesh = tessellateExtrude(polygonMm, thickness, request.plane);
+    const mesh = tessellateExtrude(polygonMm, thickness, plane);
     if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The sheet base could not be built." };
     return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
@@ -355,7 +368,7 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     const xs = polygonMm.map((point) => point[0]);
     const leg = Math.max(...xs) - Math.min(...xs);
     const innerRadius = isHem && (request.hemStyle ?? "closed") === "closed" ? 0.05 : radius;
-    const mesh = tessellateBentStrip({ legMm: leg, flangeLengthMm: flangeLength, angleDeg: angle, innerRadiusMm: innerRadius, thicknessMm: thickness, widthMm: Math.abs(request.valueMm) }, request.plane);
+    const mesh = tessellateBentStrip({ legMm: leg, flangeLengthMm: flangeLength, angleDeg: angle, innerRadiusMm: innerRadius, thicknessMm: thickness, widthMm: Math.abs(request.valueMm) }, plane);
     if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The flange could not be built. Check the leg, flange length, thickness and width are positive." };
     return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
@@ -372,7 +385,7 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     const sectionBase = pitch * 0.6;
     const sectionHeight = pitch * 0.5;
     const threadSection: readonly (readonly [number, number])[] = [[-sectionBase / 2, 0], [sectionBase / 2, 0], [0, sectionHeight]];
-    const mesh = tessellateHelix(threadSection, depth, pitch, turns, hand, request.plane);
+    const mesh = tessellateHelix(threadSection, depth, pitch, turns, hand, plane);
     if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The thread could not be built." };
     return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
@@ -380,14 +393,14 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     const ribThickness = request.ribThicknessMm;
     if (ribThickness === undefined || !Number.isFinite(ribThickness) || ribThickness <= 0) return { ok: false, message: "Rib needs a positive thickness." };
     // The sketch profile is used as the rib's plan; it's extruded by valueMm with the thickness baked into the profile already.
-    const mesh = tessellateExtrude(polygonMm, Math.abs(request.valueMm), request.plane);
+    const mesh = tessellateExtrude(polygonMm, Math.abs(request.valueMm), plane);
     if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The rib could not be built." };
     return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
   if (request.operation === "dome") {
     const height = request.domeHeightMm;
     if (height === undefined || !Number.isFinite(height) || height === 0) return { ok: false, message: "Dome needs a non-zero height." };
-    const mesh = tessellateDome(polygonMm, height, request.plane);
+    const mesh = tessellateDome(polygonMm, height, plane);
     if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The dome could not be built." };
     return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
@@ -399,7 +412,7 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     if (radius === undefined || !Number.isFinite(radius) || radius <= 0) return { ok: false, message: "Helix needs a positive coil radius." };
     if (pitch === undefined || !Number.isFinite(pitch) || pitch <= 0) return { ok: false, message: "Helix needs a positive pitch." };
     if (turns === undefined || !Number.isFinite(turns) || turns <= 0) return { ok: false, message: "Helix needs a positive number of turns." };
-    const mesh = tessellateHelix(polygonMm, radius, pitch, turns, handedness, request.plane);
+    const mesh = tessellateHelix(polygonMm, radius, pitch, turns, handedness, plane);
     if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be wound into a helix." };
     return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
@@ -407,17 +420,17 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     const twist = request.sweepTwistDeg ?? 0;
     const frameTransport = request.sweepFrameTransport ?? false;
     if (request.sweepPathSamplesMm !== undefined && request.sweepPathSamplesMm.length >= 2) {
-      const mesh = tessellateSweepPath(polygonMm, request.sweepPathSamplesMm, request.valueMm, request.plane, twist, frameTransport);
+      const mesh = tessellateSweepPath(polygonMm, request.sweepPathSamplesMm, request.valueMm, plane, twist, frameTransport);
       if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be swept along the path." };
       return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
     }
     if (request.sweepDirectionMm === undefined) return { ok: false, message: "A sweep needs a direction vector or a path entity." };
     const length = Math.hypot(request.sweepDirectionMm[0], request.sweepDirectionMm[1], request.sweepDirectionMm[2]);
     if (length < 1e-6) return { ok: false, message: "The sweep direction must not be zero." };
-    const normal = planeNormal(request.plane);
+    const normal = planeNormal(plane);
     const dotWithNormal = Math.abs(request.sweepDirectionMm[0] * normal[0] + request.sweepDirectionMm[1] * normal[1] + request.sweepDirectionMm[2] * normal[2]) / length;
     if (dotWithNormal < 1e-6) return { ok: false, message: "The sweep direction is parallel to the sketch plane, which would flatten the solid. Give it a component off the plane." };
-    const mesh = tessellateSweep(polygonMm, request.sweepDirectionMm, request.valueMm, request.plane, twist);
+    const mesh = tessellateSweep(polygonMm, request.sweepDirectionMm, request.valueMm, plane, twist);
     if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be converted into a swept solid." };
     return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
@@ -427,13 +440,13 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
       if (topPolygon.length < 3) return { ok: false, message: "The top profile does not form a closed polygon." };
       const continuity = request.loftContinuity ?? "position";
       const tangencyWeight = request.loftTangencyWeight ?? 1;
-      const mesh = tessellateLoftTwoProfiles(polygonMm, topPolygon, request.valueMm, continuity, request.plane, 12, request.loftRailSamplesMm, tangencyWeight);
+      const mesh = tessellateLoftTwoProfiles(polygonMm, topPolygon, request.valueMm, continuity, plane, 12, request.loftRailSamplesMm, tangencyWeight);
       if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profiles could not be lofted. Check both have at least three points and a non-zero height." };
       return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
     }
     const scale = request.loftTopScale;
     if (scale === undefined || !Number.isFinite(scale) || scale <= 0) return { ok: false, message: "Loft needs a positive top scale or a second profile." };
-    const mesh = tessellateLoft(polygonMm, scale, request.valueMm, request.plane);
+    const mesh = tessellateLoft(polygonMm, scale, request.valueMm, plane);
     if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be converted into a lofted solid." };
     return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   }
@@ -451,13 +464,13 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
       const prism = await evaluateProfilePrism({
         operationId: request.bodyId,
         semanticId: request.bodyId,
-        profilePointsMeters: polygonMm.map((point) => placeOnPlane(point, request.plane)),
-        normal: planeNormal(request.plane),
+        profilePointsMeters: polygonMm.map((point) => placeOnPlane(point, plane)),
+        normal: planeNormal(plane),
         heightMeters: Math.abs(request.valueMm) / 1000,
         // A circle is one cylindrical face, not 72 planar ones: the faceted loop is only its tessellation.
         ...(request.profile.boundary.kind === "circle" ? { smoothSides: true } : {}),
         ...(outerGroups === undefined ? {} : { edgeGroups: outerGroups }),
-        ...(holes.length === 0 ? {} : { holes: holes.map((hole) => kernelHole(hole, request.plane, facetPlan.maxFacets)) }),
+        ...(holes.length === 0 ? {} : { holes: holes.map((hole) => kernelHole(hole, plane, facetPlan.maxFacets)) }),
         ...(request.edge === undefined ? {} : { cornerTreatment: { kind: request.edge.kind, sizeMeters: request.edge.sizeMm / 1000 } })
       });
       if (prism.indices.length < 3) return { ok: false, message: "The profile could not be converted into a solid." };
@@ -504,7 +517,7 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
       if (revolution.indices.length >= 3) {
         const positionsMm: number[] = [];
         for (let index = 0; index + 2 < revolution.positionsMeters.length; index += 3) {
-          const world = rotateLocalToPlane([revolution.positionsMeters[index]!, revolution.positionsMeters[index + 1]!, revolution.positionsMeters[index + 2]!], request.plane);
+          const world = rotateLocalToPlane([revolution.positionsMeters[index]!, revolution.positionsMeters[index + 1]!, revolution.positionsMeters[index + 2]!], plane);
           positionsMm.push(world[0] * 1000, world[1] * 1000, world[2] * 1000);
         }
         return {
@@ -526,7 +539,7 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     }
   }
 
-  const mesh = tessellateRevolve(polygonMm, request.valueMm, request.plane);
+  const mesh = tessellateRevolve(polygonMm, request.valueMm, plane);
   if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) {
     return { ok: false, message: "The profile could not be converted into a solid." };
   }

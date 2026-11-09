@@ -24,6 +24,8 @@ import { analyzeWorkbenchSketch } from "../../workbench-sketch/src/index.js";
 import { createElectricalSchematic } from "../../workbench-electrical/src/index.js";
 import { analyzeDesignHealth } from "../../workbench-health/src/index.js";
 import { buildDesignSolidOperation } from "./design-solid.js";
+import { timelineSummary } from "./timeline-summary.js";
+import { packMeshes } from "../../workbench-core/src/index.js";
 
 export interface McpToolDefinition {
   readonly name: string;
@@ -75,7 +77,8 @@ const PROJECT_SCHEMA = {
     activeWorkspace: { enum: ["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"] },
     sketch: { type: "object" }, part: { type: "object" }, assembly: { type: "object" }, surface: { type: "object" },
     drawing: { type: "object" }, electrical: { type: "object" }, vehicle: { type: "object" }, audit: { type: "array", maxItems: 1000 },
-    design: { type: "object", description: "The parametric timeline: finished sketches and the solids built from them. Absent until the first sketch is finished." }
+    design: { type: "object", description: "The parametric timeline: finished sketches and the solids built from them. Absent until the first sketch is finished." },
+    displayUnit: { enum: ["mm", "in"], description: "How lengths are shown and typed; the model stays in millimetres. Optional." }
   }
 } as const;
 const OPERATION_SCHEMA = {
@@ -141,10 +144,10 @@ export const PS3D_AI_COMMAND_RECIPES: readonly Ps3dAiCommandRecipe[] = [
   recipe("guide", "any", "Learn the safe AI workflow", "Discover tools, protocol support, state ownership, and confirmation rules.", ["help", "start", "connect ai", "what can you do"], "read-only", "ps3d_guide", {}, "Call this first from a new host."),
   recipe("coordinate", "any", "Activate the PS3D collaboration agent", "Configure a stateless two-agent working contract, adapt explanations to the user, match bounded commands, and correct an AI host's proposed tool or recipe before execution.", ["activate agent", "collaborate", "coordinate ai", "check command", "validate plan", "beginner help", "phd mode"], "read-only", "ps3d_agent_handshake", { request: "<user engineering goal>", experienceLevel: "engineer", workspace: "<optional workspace>" }, "Call after ps3d_guide and again whenever the goal or proposed tool is unclear."),
   recipe("engineering-intent", "any", "Plan a part or assembly from engineering intent", "Decompose an ordinary-language request into reusable part definitions, ordered feature histories, standards questions, interfaces, subassembly dependency packages, approval gates, and truth-labeled execution routes.", ["create part", "make part", "build assembly", "complex part", "product structure", "engineering approach", "standard part", "decompose assembly", "plan cad model"], "read-only", "ps3d_plan_engineering_intent", { request: "<complete user engineering request>", unit: "mm", workspace: "<optional workspace>", experienceLevel: "engineer", projectRevision: "<optional current revision>", targetCad: ["ps3d"], evidence: ["<optional drawing, standard, BOM, or supplier reference>"] }, "Use this built-in planner before command search for creation requests; do not ask the user to paste a master prompt."),
-  recipe("inspect", "any", "Understand the current project", "Validate and summarize a caller-supplied project without changing it.", ["inspect project", "understand model", "summarize cad", "read project"], "read-only", "ps3d_inspect_project", { project: "<complete ps3d-workbench-project/1>" }, "The open browser project is not exposed automatically."),
+  recipe("inspect", "any", "Understand the current project", "Validate and summarize a caller-supplied project, including its design timeline (sketch and solid step ids, failed steps and the solid bodies), without changing it.", ["inspect project", "understand model", "summarize cad", "read project"], "read-only", "ps3d_inspect_project", { project: "<complete ps3d-workbench-project/1>" }, "The open browser project is not exposed automatically."),
   recipe("design-health", "any", "Review design health and dependencies", "Analyze every workspace, actual associativity, rebuild order, evidence gaps, and release boundaries without changing the project.", ["design health", "rebuild all", "dependency", "associativity", "quality check", "model readiness", "professional review"], "read-only", "ps3d_design_health", { project: "<complete ps3d-workbench-project/1>" }, "Findings are deterministic assistance, not a manufacturing or regulatory release."),
   recipe("sketch-geometry", "sketch", "Create bounded sketch geometry", "Prepare a revision-checked line, rectangle, circle, or three-point arc entity on the supported datum plane.", ["draw line", "create rectangle", "make circle", "three point arc", "sketch geometry", "add sketch entity"], "generic-preview", "ps3d_preview_operation", operationEnvelope("add-sketch-entity", { entity: { id: "sketch-entity:<caller-unique-id>", kind: "line", start: [0, 0], end: [40, 0], construction: false, visible: true } }), "Use a unique stable entity ID, millimetres, and only the supported entity fields; preview before apply."),
-  recipe("sketch-new-plane", "sketch", "Start a sketch on a chosen plane", "Prepare a new sketch on a datum plane (datum:xy, datum:xz, datum:yz) with an optional offset in mm, a tilt about a world axis, a three-point frame, or a face of a solid (the sketch then follows the face when the solid changes). The previous working sketch should be finished first with commit-design-sketch.", ["new sketch", "sketch on plane", "sketch on face", "offset plane", "tilted plane", "start sketch"], "generic-preview", "ps3d_preview_operation", operationEnvelope("new-design-sketch", { plane: "datum:xz", offsetMm: 25 }), "Plane choices: datum:xy faces +Z, datum:xz faces -Y, datum:yz faces +X (its sketch X runs along world -Z). Add tilt: { axis, angleDeg } or frame, but not both; face: { bodyId, faceKey, faceRole, axis, outwardPositive, coordinateMm, areaMm2 } comes from a planar face of an existing solid."),
+  recipe("sketch-new-plane", "sketch", "Start a sketch on a chosen plane", "Prepare a new sketch on a datum plane (datum:xy, datum:xz, datum:yz) with an optional offset in mm, a tilt about a world axis, a three-point frame, or a face of a solid (the sketch then follows the face when the solid changes). The previous working sketch should be finished first with commit-design-sketch.", ["new sketch", "sketch on plane", "sketch on face", "offset plane", "tilted plane", "start sketch"], "generic-preview", "ps3d_preview_operation", operationEnvelope("new-design-sketch", { plane: "datum:xz", offsetMm: 25 }), "Plane choices: datum:xy faces +Z, datum:xz faces -Y, datum:yz faces +X (a new YZ sketch is z-up: its sketch X runs along world +Y and its sketch Y along world +Z; add convention: \"legacy\" only to recreate an older sketch whose X ran along world -Z and Y along +Y). Add tilt: { axis, angleDeg } or frame, but not both; face: { bodyId, faceKey, faceRole, axis, outwardPositive, coordinateMm, areaMm2 } comes from a planar face of an existing solid."),
   recipe("sketch-edit-batch", "sketch", "Draw many curves and relations in one edit", "Prepare one atomic sketch edit that removes, updates and adds up to 500 entities (line, rectangle, circle, ellipse, arc, point, spline) and up to 1000 constraints, for example a whole profile with its relations.", ["draw profile", "batch sketch", "apply sketch edit", "many lines", "sketch polyline", "add entities and constraints"], "generic-preview", "ps3d_preview_operation", operationEnvelope("apply-sketch-edit", { removeEntityIds: [], updateEntities: [], addEntities: [{ id: "entity:<unique>", kind: "rectangle", center: [0, 0], widthMm: 60, heightMm: 40, rotationDeg: 0, construction: false }], addConstraints: [], label: "Draw base profile" }), "Entities must stay within 0.01 mm and +/-100000 mm; a refused entity is named in the diagnostic with the field and limit."),
   recipe("sketch-commit", "sketch", "Finish the sketch into the timeline", "Prepare commit-design-sketch, which turns the working sketch into a named timeline feature that solids can be built on.", ["finish sketch", "commit sketch", "exit sketch", "save sketch to timeline"], "generic-preview", "ps3d_preview_operation", operationEnvelope("commit-design-sketch", { featureId: "feature:<unique-sketch-id>", name: "Base profile" }), "Names are kept unique automatically; a blank name is refused."),
   recipe("design-solid", "part", "Extrude, revolve, sweep or loft a finished sketch", "Build a solid from a finished sketch of the supplied project (distance or angle, join or cut an existing solid, revolve about a sketch line or edge, sweep along a chained path from another sketch, loft to a profile on another plane) and return the ready add-design-solid operation with its preview.", ["extrude sketch", "revolve sketch", "sweep along path", "loft between sketches", "make solid from sketch", "cut from sketch", "boss from sketch"], "generic-preview", "ps3d_prepare_design_solid", { project: "<complete project with the finished sketch>", solid: { kind: "extrude", sketchFeatureId: "feature:<finished sketch>", valueMm: 20 }, guideAcknowledgement: { manifestSha256: "<current ps3d_guide manifestSha256>", understood: true } }, "Returns the add-design-solid operation, receipt and candidate project; confirm and apply with ps3d_apply_preview. The built solid and the project must fit one " + describeByteLimit(WORKBENCH_LIMITS.maxMcpInputBytes) + " call."),
@@ -318,19 +321,20 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
 ];
 
 /**
- * Runs one tool. Whatever a malformed argument does inside a handler, the caller gets a structured error result (isError) and never
- * a thrown exception, so a stdio or HTTP host cannot be taken down by one bad payload.
+ * Runs one MCP tool call. A call whose arguments break an assumption of a tool never throws out of the handler: it comes back as an error
+ * result that names the tool, so the host shows a reason instead of a failed request.
  */
 export async function handleWorkbenchMcpTool(name: string, args: unknown): Promise<WorkbenchMcpResult> {
   try {
-    return await runWorkbenchMcpTool(name, args);
-  } catch (caught) {
-    return error("INVALID_PARAMS", `The ${name} arguments could not be processed: ${caught instanceof Error ? caught.message : "malformed input"}. Check every field against the tool's inputSchema.`);
+    return await handleWorkbenchMcpToolChecked(name, args);
+  } catch (failure) {
+    const detail = failure instanceof Error ? failure.message.slice(0, 160) : "unexpected value";
+    return error("INVALID_PARAMS", `${name.slice(0, 60)} could not read its arguments (${detail}). Check every field against the tool's input schema and the capability list, then call again.`);
   }
 }
 
-async function runWorkbenchMcpTool(name: string, args: unknown): Promise<WorkbenchMcpResult> {
-  if (encodedSize(args) > WORKBENCH_LIMITS.maxMcpInputBytes) return error("RESOURCE_LIMIT", `The MCP tool input is ${Math.round(encodedSize(args) / 1000)} kB; one call may carry at most ${describeByteLimit(WORKBENCH_LIMITS.maxMcpInputBytes)}. Send a smaller project: delete bodies you no longer need before the call.`);
+async function handleWorkbenchMcpToolChecked(name: string, args: unknown): Promise<WorkbenchMcpResult> {
+  if (encodedSize(args) > WORKBENCH_LIMITS.maxMcpInputBytes) return error("RESOURCE_LIMIT", `The MCP tool input is ${Math.round(encodedSize(args) / 1000)} kB; one call may carry at most ${describeByteLimit(WORKBENCH_LIMITS.maxMcpInputBytes)}. Send the meshes exactly as this server returned them (packed, in packedMesh records, several times smaller than plain lists), or delete bodies you no longer need before the call.`);
   if (name === "ps3d_guide") {
     if (!isRecord(args) || Object.keys(args).length !== 0) return error("INVALID_PARAMS", "ps3d_guide accepts no arguments.");
     const guide = await createPs3dCollaborationGuide();
@@ -518,13 +522,14 @@ async function runWorkbenchMcpTool(name: string, args: unknown): Promise<Workben
     if (!project.ok) return diagnostics(project.diagnostics);
     const built = await buildDesignSolidOperation(project.value, args.solid);
     if (!built.ok) return error(built.code, built.message);
-    const bytes = encodedSize(built.operation);
+    // Meshes travel packed (mesh-pack.ts), so the size that counts is the packed one.
+    const bytes = encodedSize(packMeshes(built.operation));
     // ps3d_apply_preview carries the project and the operation together, so both must fit one call (not just the operation).
-    const projectBytes = encodedSize(args["project"]);
+    const projectBytes = encodedSize(packMeshes(args["project"]));
     if (projectBytes + bytes + 1_024 > WORKBENCH_LIMITS.maxMcpInputBytes) return error("RESOURCE_LIMIT", `The built solid is ${Math.round(bytes / 1000)} kB and the project is ${Math.round(projectBytes / 1000)} kB; ps3d_apply_preview needs both in one call of at most ${describeByteLimit(WORKBENCH_LIMITS.maxMcpInputBytes)}. Use a simpler profile or a smaller solid, or delete bodies you no longer need from the project first.`);
     const previewed = await preview(project.value, built.operation);
     if (previewed.isError === true) return previewed;
-    return success(`Built ${String(built.solid["kind"])} (${String(built.solid["volumeMm3"])} mm3); ${String(previewed.structuredContent["summary"])} No state was modified.`, { ...previewed.structuredContent, schema: "ps3d-design-solid-preview/1", operation: built.operation, solid: built.solid });
+    return success(`Built ${String(built.solid["kind"])} (${String(built.solid["volumeMm3"])} mm3); ${String(previewed.structuredContent["summary"])} No state was modified.`, { ...previewed.structuredContent, schema: "ps3d-design-solid-preview/1", operation: packMeshes(built.operation), solid: built.solid });
   }
   if (name === "ps3d_preview_electromechanical") {
     if (!exactKeys(args, ["project", "guideAcknowledgement"])) return error("INSTRUCTION_ACKNOWLEDGEMENT_REQUIRED", "Read ps3d_guide and provide the project plus its current guideAcknowledgement.");
@@ -598,7 +603,7 @@ async function runWorkbenchMcpTool(name: string, args: unknown): Promise<Workben
     const nextProject = prepared.structuredContent["nextProject"] as WorkbenchProject;
     return success(`Applied confirmed preview; returned revision ${nextProject.revision} without writing external state.`, {
       schema: "ps3d-applied-operation/1",
-      project: nextProject,
+      project: packMeshes(nextProject),
       receipt: args.receipt,
       receiptInfo: prepared.structuredContent["receiptInfo"],
       summary: prepared.structuredContent["summary"],
@@ -625,7 +630,7 @@ async function preview(projectInput: unknown, operationInput: unknown): Promise<
     changedIds: prepared.structuredContent["changedIds"],
     baseProjectRef: prepared.structuredContent["baseProjectRef"],
     candidateProjectRef: prepared.structuredContent["candidateProjectRef"],
-    candidateProject: nextProject,
+    candidateProject: packMeshes(nextProject),
     confirmationBoundary: "The receipt is an unkeyed deterministic integrity checksum, not a signature or proof of human approval. The host must show the candidate project and bind confirmation to this exact base revision before apply."
   });
 }
@@ -705,6 +710,7 @@ export function projectSummary(project: WorkbenchProject): Readonly<Record<strin
     revision: project.revision,
     activeWorkspace: project.activeWorkspace,
     unit: project.unit,
+    displayUnit: project.displayUnit ?? null,
     sketch: {
       entities: project.sketch.entities.length,
       constraints: project.sketch.constraints.length,
@@ -722,6 +728,7 @@ export function projectSummary(project: WorkbenchProject): Readonly<Record<strin
     drawing: { sheet: project.drawing.sheet, projection: project.drawing.projection, scale: project.drawing.scale },
     electrical: { template: project.electrical.template, standard: project.electrical.standard, components: project.electrical.components.length, nets: project.electrical.nets.length },
     vehicle: { template: project.vehicle.template, kind: project.vehicle.kind, powertrain: project.vehicle.powertrain, layout: project.vehicle.layout, state: project.vehicle.state, inputStatus: project.vehicle.inputStatus },
+    timeline: timelineSummary(project),
     auditEntries: project.audit.length
   };
 }

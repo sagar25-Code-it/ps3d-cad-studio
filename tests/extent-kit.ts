@@ -71,7 +71,7 @@ export const BLOCK = "general-body:block";
 
 /** Adds a sketch holding `entity` on `plane` (optionally offset) and finishes it as `featureId`. */
 export function withSketch(project: WorkbenchProject, featureId: string, entity: SketchEntity, plane: "datum:xy" | "datum:xz" | "datum:yz" = "datum:xy", offsetMm?: number): WorkbenchProject {
-  let next = run(project, { kind: "new-design-sketch", plane, ...(offsetMm === undefined ? {} : { offsetMm }) });
+  let next = run(project, { kind: "new-design-sketch", plane, ...(plane === "datum:yz" ? { convention: "legacy" as const } : {}), ...(offsetMm === undefined ? {} : { offsetMm }) });
   next = run(next, { kind: "add-sketch-entity", entity });
   return run(next, { kind: "commit-design-sketch", featureId, name: featureId });
 }

@@ -202,7 +202,10 @@ export const pipelinePlatformTests: readonly TestCase[] = [
       const text = serializeWorkbenchProject(project);
       const pretty = JSON.stringify(project, null, 2);
       assert(text.length < pretty.length * 0.6, `the saved text is much smaller (${text.length} against ${pretty.length})`);
-      equal(JSON.stringify(JSON.parse(text)), JSON.stringify(project), "and it parses back to exactly the same project");
+      // Meshes are written packed (wave 3, mesh-pack.ts), so the raw JSON is no longer the plain project; reading it gives the same project back.
+      const parsedBack = parseWorkbenchProjectText(text);
+      assert(parsedBack.ok, `and it parses back: ${message(parsedBack)}`);
+      equal(JSON.stringify(parsedBack.ok ? parsedBack.value : undefined), JSON.stringify(project), "to exactly the same project");
       assert(text.endsWith("\n") && text.includes("\n  \"sketch\""), "while the structure stays indented for people");
       const reopened = parseWorkbenchProjectText(text);
       assert(reopened.ok, `it reopens: ${message(reopened)}`);

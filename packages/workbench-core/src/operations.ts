@@ -71,6 +71,11 @@ import { firstNonFinitePath, MODEL_ENVELOPE, rebuildResultProblem, sketchEntityP
 import { AUDIT_KEEP_FULL, compactAudit } from "./audit-archive.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
 import { applySketchObjectsEdit, explicitObjectIds, reconcileSketchObjects, validSketchObjectsEdit } from "./sketch-objects.js";
+import { unpackMeshes } from "./mesh-pack.js";
+import { conventionFields } from "./plane-convention.js";
+import { quarterTurnEditProblem, seedQuarterTurns } from "./sketch-quarter-turn.js";
+import { missingSketchEntityFailure } from "./finished-sketch-hint.js";
+import { constraintPayloadProblem, describeGivenValue, parameterTableProblem, sketchObjectsProblem } from "./operation-payload-problems.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/iu;
@@ -107,7 +112,24 @@ const VEHICLE_BRAKE_PARAMETERS: readonly VehicleParameterKey[] = [
  */
 const VALIDATED_PROJECTS = new WeakSet<object>();
 
+/**
+ * Applies one operation. A payload whose shape the checks did not foresee never escapes as an exception: the call comes back as a refused
+ * operation that names the operation and what the engine could not read, so a caller always gets a result to show.
+ */
 export function applyWorkbenchOperation(
+  projectInput: WorkbenchProject,
+  operationInput: WorkbenchOperation
+): WorkbenchResult<AppliedWorkbenchOperation> {
+  try {
+    return applyWorkbenchOperationChecked(projectInput, operationInput);
+  } catch (error) {
+    const kind = isRecord(operationInput) && typeof (operationInput as { kind?: unknown }).kind === "string" ? String((operationInput as { kind: string }).kind).slice(0, 60) : "this";
+    const detail = error instanceof Error ? error.message.slice(0, 160) : "unexpected value";
+    return failure("INVALID_OPERATION", `The ${kind} operation has a payload the engine could not read (${detail}).`, [], "Compare the payload with the field list of this operation in the capability list; every list, id and number must be present and of the right type.");
+  }
+}
+
+function applyWorkbenchOperationChecked(
   projectInput: WorkbenchProject,
   operationInput: WorkbenchOperation
 ): WorkbenchResult<AppliedWorkbenchOperation> {
@@ -245,7 +267,11 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
   }
 }
 
-function validateWorkbenchOperationShape(input: unknown): WorkbenchResult<WorkbenchOperation> {
+function validateWorkbenchOperationShape(rawInput: unknown): WorkbenchResult<WorkbenchOperation> {
+  // A body travelling with a packed mesh (MCP, see mesh-pack.ts) is read back to plain lists first.
+  const unpacked = unpackMeshes(rawInput);
+  if (!unpacked.ok) return invalidOperation(`The operation has a damaged packed mesh: ${unpacked.message}`);
+  const input = unpacked.value;
   if (containsNonFinite(input)) return invalidOperation("The operation contains a number that is not finite (NaN or Infinity); enter a finite value.");
   if (!isRecord(input) || !stableId(input.operationId) || !Number.isSafeInteger(input.expectedRevision) || (input.expectedRevision as number) < 0 || typeof input.kind !== "string") {
     return invalidOperation("The operation envelope is invalid.");
@@ -266,8 +292,11 @@ function validateWorkbenchOperationShape(input: unknown): WorkbenchResult<Workbe
       if (!keys(input, [...common, "entityId"]) || !stableId(input.entityId)) return invalidOperation("The sketch entity ID is invalid.");
       break;
     case "add-sketch-constraint":
-      if (!keys(input, [...common, "constraint"]) || !isRecord(input.constraint)) return invalidOperation("The sketch constraint payload is invalid.");
+      if (!keys(input, [...common, "constraint"]) || !isRecord(input.constraint)) return invalidOperation(constraintPayloadProblem(input.constraint) ?? "The sketch constraint payload needs exactly one field, constraint.");
       {
+        // The relation names its own field first (and its position inside an edit); then the bounded-range check of the envelope.
+        const named = constraintPayloadProblem(input.constraint);
+        if (named !== undefined) return invalidOperation(named);
         const problem = sketchConstraintPayloadProblem(input.constraint);
         if (problem !== undefined) return envelopeFailure(problem);
       }
@@ -306,7 +335,9 @@ function validateWorkbenchOperationShape(input: unknown): WorkbenchResult<Workbe
         const problem = sketchEntityProblem(entity);
         if (problem !== undefined) return envelopeFailure(problem);
       }
-      for (const constraint of input.addConstraints as readonly unknown[]) {
+      for (const [index, constraint] of (input.addConstraints as readonly unknown[]).entries()) {
+        const named = constraintPayloadProblem(constraint, index);
+        if (named !== undefined) return invalidOperation(named);
         const problem = sketchConstraintPayloadProblem(constraint);
         if (problem !== undefined) return envelopeFailure(problem);
       }
@@ -356,7 +387,7 @@ function validateWorkbenchOperationShape(input: unknown): WorkbenchResult<Workbe
         || input.parameters.some((parameter) => !keys(parameter, ["name", "expression", "unit", "comment"]) || typeof parameter.name !== "string" || typeof parameter.expression !== "string"
           || !["mm", "deg", ""].includes(String(parameter.unit)) || typeof parameter.comment !== "string")
         || (Object.hasOwn(input, "renames") && (!boundedList(input.renames, 200, isRecord)
-          || input.renames.some((rename) => !keys(rename, ["from", "to"]) || typeof rename.from !== "string" || typeof rename.to !== "string")))) return invalidOperation("The parameter table is invalid.");
+          || input.renames.some((rename) => !keys(rename, ["from", "to"]) || typeof rename.from !== "string" || typeof rename.to !== "string")))) return invalidOperation(parameterTableProblem(input) ?? "The parameter table is invalid.");
       break;
     case "set-design-feature-suppressed":
       if (!keys(input, [...common, "featureId", "suppressed"]) || !stableId(input.featureId) || typeof input.suppressed !== "boolean") return invalidOperation("The suppress request is invalid.");
@@ -682,7 +713,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       return changed({ ...project, sketch: { ...project.sketch, entities: [...project.sketch.entities, operation.entity] } }, [operation.entity.id], `Added ${sketchEntityName({ entities: [...project.sketch.entities, operation.entity] }, operation.entity.id)}.`);
     }
     case "delete-sketch-entity": {
-      if (!project.sketch.entities.some((entity) => entity.id === operation.entityId)) return broken(operation.entityId, "The sketch entity does not exist.");
+      if (!project.sketch.entities.some((entity) => entity.id === operation.entityId)) return missingSketchEntityFailure(project, operation.entityId, "The sketch entity does not exist.");
       const removedConstraints = project.sketch.constraints.filter((constraint) => constraint.entityIds.includes(operation.entityId));
       return changed({
         ...project,
@@ -747,10 +778,10 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       );
     }
     case "set-sketch-plane": {
-      const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, ...rest } = project.sketch;
+      const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, planeConvention: _previousConvention, ...rest } = project.sketch;
       const offset = operation.offsetMm ?? 0;
       return changed(
-        { ...project, sketch: { ...rest, plane: operation.plane, ...(offset === 0 ? {} : { planeOffsetMm: offset }), ...(operation.tilt === undefined ? {} : { planeTilt: operation.tilt }), ...(operation.frame === undefined ? {} : { planeFrame: operation.frame }), ...(operation.face === undefined ? {} : { planeFace: operation.face }) } },
+        { ...project, sketch: { ...rest, plane: operation.plane, ...conventionFields(operation.plane, operation.convention, operation.frame !== undefined, project.sketch), ...(offset === 0 ? {} : { planeOffsetMm: offset }), ...(operation.tilt === undefined ? {} : { planeTilt: operation.tilt }), ...(operation.frame === undefined ? {} : { planeFrame: operation.frame }), ...(operation.face === undefined ? {} : { planeFace: operation.face }) } },
         [project.sketch.id],
         operation.frame === undefined
           ? `Placed the sketch on the ${operation.plane.replace("datum:", "").toUpperCase()} plane${offset === 0 ? "" : ` offset ${offset} mm`}${operation.tilt === undefined ? "" : ` tilted ${operation.tilt.angleDeg}° about ${operation.tilt.axis.toUpperCase()}`}.`
@@ -759,7 +790,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "commit-design-sketch": return commitDesignSketch(project, operation.featureId, operation.name);
     case "edit-design-sketch": return editDesignSketch(project, operation.featureId);
-    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt, operation.frame, operation.face);
+    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt, operation.frame, operation.face, operation.convention);
     case "add-design-solid": return addDesignSolid(project, operation.feature, operation.body);
     case "update-design-solid": return updateDesignSolid(project, operation.feature, operation.body);
     case "regenerate-design": return regenerateDesign(project, operation.results);
@@ -770,7 +801,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     case "rename-design-feature": return renameDesignFeature(project, operation.featureId, operation.name);
     case "toggle-sketch-construction": {
       const target = project.sketch.entities.find((entity) => entity.id === operation.entityId);
-      if (target === undefined) return broken(operation.entityId, "The sketch entity does not exist.");
+      if (target === undefined) return missingSketchEntityFailure(project, operation.entityId, "The sketch entity does not exist.");
       return changed({
         ...project,
         sketch: { ...project.sketch, entities: project.sketch.entities.map((entity) => entity.id === target.id ? { ...entity, construction: !entity.construction } : entity) }
@@ -778,7 +809,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "toggle-sketch-entity-visibility": {
       const target = project.sketch.entities.find((entity) => entity.id === operation.entityId);
-      if (target === undefined) return broken(operation.entityId, "The sketch entity does not exist.");
+      if (target === undefined) return missingSketchEntityFailure(project, operation.entityId, "The sketch entity does not exist.");
       const visible = target.visible !== false;
       return changed({
         ...project,
@@ -1409,14 +1440,23 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   const sketch = project.sketch;
   const existing = new Set(sketch.entities.map((entity) => entity.id));
   const removed = new Set(operation.removeEntityIds);
-  for (const id of removed) if (!existing.has(id)) return broken(id, "A sketch entity to remove does not exist.");
+  for (const id of removed) if (!existing.has(id)) return missingSketchEntityFailure(project, id, "A sketch entity to remove does not exist.");
   const updates = new Map(operation.updateEntities.map((entity) => [entity.id, entity] as const));
-  if (updates.size !== operation.updateEntities.length) return invalidOperation("The sketch edit updates the same entity twice.");
+  if (updates.size !== operation.updateEntities.length) {
+    const seenIds = new Set<string>();
+    const twice = operation.updateEntities.find((entity) => seenIds.size === seenIds.add(entity.id).size)?.id;
+    return invalidOperation(`The sketch edit updates ${twice ?? "the same entity"} twice; list each curve once in updateEntities.`);
+  }
   for (const id of updates.keys()) {
-    if (!existing.has(id) || removed.has(id)) return invalidOperation("A sketch entity to update does not exist or is also removed.");
+    if (!existing.has(id)) return missingSketchEntityFailure(project, id, "A sketch entity to update does not exist.");
+    if (removed.has(id)) return invalidOperation(`The sketch edit both removes and updates ${id}; it can do only one of the two.`);
   }
   const addedIds = operation.addEntities.map((entity) => entity.id);
-  if (new Set(addedIds).size !== addedIds.length || addedIds.some((id) => existing.has(id))) return invalidOperation("A new sketch entity reuses an existing ID.");
+  if (new Set(addedIds).size !== addedIds.length || addedIds.some((id) => existing.has(id))) {
+    const seenIds = new Set<string>();
+    const reused = addedIds.find((id) => existing.has(id) || seenIds.size === seenIds.add(id).size);
+    return invalidOperation(`A new sketch entity reuses the ID ${reused ?? "of another curve"}; give each new curve an ID that is not in the sketch yet.`);
+  }
   const entities = [...sketch.entities.filter((entity) => !removed.has(entity.id)).map((entity) => updates.get(entity.id) ?? entity), ...operation.addEntities];
   if (entities.length > WORKBENCH_LIMITS.maxEntities) return failure("RESOURCE_LIMIT", "The sketch would exceed its entity limit.", [sketch.id], "Delete entities or use a smaller pattern count.");
   const removedConstraints = new Set(operation.removeConstraintIds ?? []);
@@ -1424,12 +1464,19 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   const dropped = sketch.constraints.filter((constraint) => constraint.entityIds.some((id) => removed.has(id)));
   const constraints = [...sketch.constraints.filter((constraint) => !constraint.entityIds.some((id) => removed.has(id)) && !removedConstraints.has(constraint.id)), ...operation.addConstraints];
   if (constraints.length > WORKBENCH_LIMITS.maxConstraints) return failure("RESOURCE_LIMIT", "The sketch reached its constraint record limit.", [sketch.id], "Delete a constraint before applying this edit.");
-  if (new Set(constraints.map((constraint) => constraint.id)).size !== constraints.length) return invalidOperation("A new constraint reuses an existing ID.");
+  if (new Set(constraints.map((constraint) => constraint.id)).size !== constraints.length) {
+    const seenIds = new Set<string>();
+    const reused = constraints.find((constraint) => seenIds.size === seenIds.add(constraint.id).size)?.id;
+    return invalidOperation(`A new constraint reuses the ID ${reused ?? "of another relation"}; give each new relation an ID that is not in the sketch yet.`);
+  }
   const next = applySketchObjectsEdit({ ...sketch, entities, constraints }, operation.objects);
   const focus = [...updates.keys(), ...addedIds, ...operation.addConstraints.flatMap((constraint) => constraint.entityIds)];
   const solved = solveLiveSketch(next, focus);
   if (!solved.ok) return solveFailure(solved);
   if (solved.movedIds.length > 0) {
+    // Horizontal on a vertical line (or Vertical on a horizontal one) is a quarter turn: add-sketch-constraint does it, an exact edit cannot.
+    const turn = quarterTurnEditProblem(next, seedQuarterTurns(next, new Set(focus)).turnedIds);
+    if (turn !== undefined) return failure("CONSTRAINT_CONFLICT", turn.message, solved.movedIds, turn.recovery);
     return failure(
       "CONSTRAINT_CONFLICT",
       `This edit conflicts with a sketch relation on ${solved.movedIds.map((id) => sketchEntityName(next, id)).join(", ")}. ${solved.notes.join("; ")}.`,
@@ -1483,6 +1530,27 @@ function sketchEditPayloadMessage(input: Record<string, unknown>): string {
     if (Array.isArray(list) && list.length > maximum) return `The sketch edit lists ${list.length} items in ${name}; one edit may carry at most ${maximum}. Split it into several edits.`;
   }
   if (typeof input.label !== "string" || input.label.length < 1 || input.label.length > 80) return "The sketch edit needs a label of 1 to 80 characters.";
+  if (Object.hasOwn(input, "objects")) {
+    const problem = sketchObjectsProblem(input.objects);
+    if (problem !== undefined) return problem;
+  }
+  for (const field of ["removeEntityIds", "removeConstraintIds"] as const) {
+    const list = input[field];
+    if (!Array.isArray(list)) continue;
+    const bad = Array.from(list).findIndex((id) => !stableId(id));
+    if (bad >= 0) return `The sketch edit's ${field} entry ${bad + 1} must be a stable id like "entity:l1", but it is ${describeGivenValue(list[bad])}.`;
+  }
+  for (const field of ["updateEntities", "addEntities", "addConstraints"] as const) {
+    const list = input[field];
+    if (!Array.isArray(list)) continue;
+    const bad = Array.from(list).findIndex((item) => !isRecord(item));
+    if (bad >= 0) return `The sketch edit's ${field} entry ${bad + 1} must be an object, but it is ${describeGivenValue(list[bad])}.`;
+  }
+  const unknownField = Object.keys(input).find((key) => !["operationId", "expectedRevision", "kind", "removeEntityIds", "updateEntities", "addEntities", "addConstraints", "removeConstraintIds", "label", "objects"].includes(key));
+  if (unknownField !== undefined) return `The sketch edit has a field "${unknownField}" that it does not take (it takes removeEntityIds, updateEntities, addEntities, addConstraints, removeConstraintIds, label and objects).`;
+  for (const field of ["removeEntityIds", "updateEntities", "addEntities", "addConstraints"] as const) {
+    if (!Object.hasOwn(input, field)) return `The sketch edit is missing its ${field} list (use an empty list when there is nothing to put in it).`;
+  }
   return "The sketch edit payload is invalid: check removeEntityIds, updateEntities, addEntities, addConstraints and label.";
 }
 
@@ -1496,7 +1564,9 @@ function invalidOperation(message: string): WorkbenchResult<never> {
 }
 
 function broken(id: string, message: string): WorkbenchResult<never> {
-  return failure("BROKEN_REFERENCE", message, [id], "Refresh the project and select an existing stable ID.");
+  // The message names the thing that is missing, not just its kind ("The sketch entity does not exist (entity:l9).").
+  const named = message.includes(id) || !message.endsWith(".") ? message : `${message.slice(0, -1)} (${id}).`;
+  return failure("BROKEN_REFERENCE", named, [id], "Refresh the project and select an existing stable ID.");
 }
 
 function partFeatureFailure(result: Extract<PartFeatureResult<unknown>, { readonly ok: false }>): WorkbenchResult<never> {
@@ -1522,7 +1592,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function boundedList<T>(value: unknown, max: number, guard: (item: unknown) => item is T): value is readonly T[] {
-  return Array.isArray(value) && value.length <= max && value.every(guard);
+  // Array.from reads a hole in a sparse list as undefined, which every() would skip.
+  return Array.isArray(value) && value.length <= max && Array.from(value).every(guard);
 }
 
 function keys(value: Record<string, unknown>, expected: readonly string[]): boolean {
@@ -1543,7 +1614,9 @@ function stableId(value: unknown): value is string {
 /** The shared payload of the two operations that place a sketch: a datum plane with an optional offset, tilt or (instead of both) frame. */
 function validSketchPlacementInput(input: Record<string, unknown>, common: readonly string[]): boolean {
   const optional = ["offsetMm", "tilt", "frame", "face"].filter((key) => Object.hasOwn(input, key));
-  if (!keys(input, [...common, "plane", ...optional]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)) return false;
+  const hasConvention = Object.hasOwn(input, "convention");
+  if (!keys(input, [...common, "plane", ...optional, ...(hasConvention ? ["convention"] : [])]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)) return false;
+  if (hasConvention && input.convention !== "z-up" && input.convention !== "legacy") return false;
   if (Object.hasOwn(input, "offsetMm") && !(typeof input.offsetMm === "number" && Number.isFinite(input.offsetMm) && Math.abs(input.offsetMm) <= MODEL_ENVELOPE.maxPlaneOffsetMm)) return false;
   if (Object.hasOwn(input, "tilt") && !validSketchPlaneTilt(input.tilt)) return false;
   if (Object.hasOwn(input, "frame") && (!validSketchPlaneFrame(input.frame) || input.plane !== "datum:xy" || optional.length > 1)) return false;

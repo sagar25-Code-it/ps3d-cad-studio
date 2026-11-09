@@ -30,13 +30,15 @@ export const fresh = (): WorkbenchProject => createWorkbenchProject("project:tes
 export interface PlaneOptions {
   readonly offsetMm?: number;
   readonly tilt?: { readonly axis: "x" | "y" | "z"; readonly angleDeg: number };
+  /** The Right (YZ) plane's mapping: "z-up" is the default for a new sketch, "legacy" the mapping older sketches keep. */
+  readonly convention?: "z-up" | "legacy";
 }
 
 /** A project whose timeline holds one finished sketch (feature:s1 unless named) with the given curves. */
 export function committedSketch(plane: SketchDatumPlane, entities: readonly SketchEntity[], options: PlaneOptions & { readonly project?: WorkbenchProject; readonly featureId?: string; readonly constraints?: readonly WorkbenchSketchConstraint[] } = {}): { readonly project: WorkbenchProject; readonly sketch: DesignSketchFeature } {
   let project = options.project ?? fresh();
   const featureId = options.featureId ?? "feature:s1";
-  project = pipelineRun(project, { kind: "new-design-sketch", plane, ...(options.offsetMm === undefined ? {} : { offsetMm: options.offsetMm }), ...(options.tilt === undefined ? {} : { tilt: options.tilt }) });
+  project = pipelineRun(project, { kind: "new-design-sketch", plane, ...(options.convention === undefined ? {} : { convention: options.convention }), ...(options.offsetMm === undefined ? {} : { offsetMm: options.offsetMm }), ...(options.tilt === undefined ? {} : { tilt: options.tilt }) });
   project = pipelineRun(project, { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: entities, addConstraints: options.constraints ?? [], label: "Draw" });
   project = pipelineRun(project, { kind: "commit-design-sketch", featureId, name: `Sketch ${featureId.slice(-2)}` });
   const sketch = designOf(project).features.find((feature): feature is DesignSketchFeature => feature.id === featureId && feature.kind === "sketch");

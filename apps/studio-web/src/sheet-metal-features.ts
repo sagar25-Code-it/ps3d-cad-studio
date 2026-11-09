@@ -1,5 +1,6 @@
 import type { DesignSolidFeature, GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
 import { flangeEdgesOf } from "../../../packages/workbench-core/src/index.js";
+import { storedPlaneOf } from "./general-modeling.js";
 import { profileOutlineMm, resolveProfileRegion, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import {
   bendResolverOf, circleOfOutline, coneDevelopment, developBend, miterChainOf, tessellateLoftedBend,
@@ -86,7 +87,7 @@ export function loftedBendBody(feature: DesignSolidFeature, profiles: readonly S
   if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The lofted bend could not be built. Check the height and thickness are positive and the two outlines are clean closed shapes that do not pinch to a point." };
   return {
     ok: true,
-    body: { id: feature.bodyId, name: feature.name, visible: true, color, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices), feature: { operation: "loft", plane, valueMm: feature.valueMm } }
+    body: { id: feature.bodyId, name: feature.name, visible: true, color, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices), feature: { operation: "loft", plane: storedPlaneOf(plane), valueMm: feature.valueMm } }
   };
 }
 

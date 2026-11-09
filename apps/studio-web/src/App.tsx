@@ -9,6 +9,8 @@ import {
 } from "../../../packages/model-schema/src/index.js";
 import { parameterCommandId } from "../../../packages/commands/src/command-ids.js";
 import { parseNativeRevisionText, serializeNativeRevision } from "../../../packages/import-export/src/index.js";
+import { rememberDisplayUnit, unitToShow } from "./display-unit-memory.js";
+import { sweepPathParams } from "./sweep-path-ui.js";
 import {
   applyWorkbenchOperation,
   buildMasterCartItem,
@@ -28,6 +30,7 @@ import {
   isElectricalSheetPositionAvailable,
   parseWorkbenchProjectText,
   serializeWorkbenchProject,
+  withDisplayUnit,
   sketchPlaneName,
   preferredElectromechanicalLayout,
   resolveWorkbenchContextCommands,
@@ -45,6 +48,7 @@ import {
   edgeBlendTitle,
   type ComponentInstance,
   type DesignFeature,
+  type DesignSketchFeature,
   type DesignExtentTarget,
   type DesignParameter,
   type SketchDimensionName,
@@ -168,7 +172,7 @@ import { AboutDialog } from "./ui/AboutDialog.js";
 import { useBuildUpdate } from "./ui/useBuildUpdate.js";
 import { formatBuildLabel } from "./build-info.js";
 import { dimensionModeStatus } from "./sketch-help-text.js";
-import { INITIAL_PLANE_OFFER, decidePlaneOffer, describeSketchPlane, existingSketchPlanes, planeOfferAfterFinish } from "./sketch-plane-ui.js";
+import { INITIAL_PLANE_OFFER, decidePlaneOffer, conventionOf, describeSketchPlane, existingSketchPlanes, planeOfferAfterFinish } from "./sketch-plane-ui.js";
 import { SKETCH_HOTKEY_HELP } from "../../../packages/workbench-sketch/src/hotkeys.js";
 import { friendlySketchText } from "../../../packages/workbench-core/src/sketch-names.js";
 import { WorkbenchContextMenu } from "./ui/WorkbenchContextMenu.js";
@@ -423,6 +427,8 @@ export function App(): React.JSX.Element {
   const electrical = useMemo(() => createElectricalSchematic(project.electrical), [project.electrical]);
   const vehiclePreview = useMemo(() => buildVehiclePreview(project.vehicle), [project.vehicle]);
   const designHealth = useMemo(() => buildDesignHealthReport(project), [project]);
+  // The finished sketches, offered as the source of a sweep path.
+  const finishedSketches = useMemo(() => designOf(project).features.filter((feature): feature is DesignSketchFeature => feature.kind === "sketch"), [project.design]);
   // The planar faces of the shown solids, as sketch planes: the "sketch on a face" choices in the plane dialog.
   /** The part's angle construction planes, offered in the sketch plane dialog as ready-made tilted planes. */
   const anglePlaneOptions = useMemo(() => (project.part.construction ?? []).flatMap((plane) => plane.definition.kind === "angle"
@@ -922,12 +928,12 @@ export function App(): React.JSX.Element {
     setSketchPlaneDialogOpen(true);
   };
 
-  const confirmSketchPlane = (plane: SketchPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef): void => {
+  const confirmSketchPlane = (plane: SketchPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef, convention?: "z-up" | "legacy"): void => {
     setSketchPlaneDialogOpen(false);
     const datum = `datum:${plane}` as const;
     const where = frame !== undefined ? "plane through three points"
       : `${plane.toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
-    const placement = { ...(offsetMm === 0 ? {} : { offsetMm }), ...(tilt === undefined ? {} : { tilt }), ...(frame === undefined ? {} : { frame }), ...(face === undefined ? {} : { face }) };
+    const placement = { ...(offsetMm === 0 ? {} : { offsetMm }), ...(tilt === undefined ? {} : { tilt }), ...(frame === undefined ? {} : { frame }), ...(face === undefined ? {} : { face }), ...(convention === undefined ? {} : { convention }) };
     if (sketchPlaneDialogMode === "new") {
       void (async () => {
         await commitWorkingSketch();
@@ -939,7 +945,8 @@ export function App(): React.JSX.Element {
     const sameTilt = (sketch.planeTilt?.axis ?? null) === (tilt?.axis ?? null) && (sketch.planeTilt?.angleDeg ?? 0) === (tilt?.angleDeg ?? 0);
     const sameFrame = JSON.stringify(sketch.planeFrame ?? null) === JSON.stringify(frame ?? null);
     const sameFace = (sketch.planeFace?.faceKey ?? null) === (face?.faceKey ?? null) && (sketch.planeFace?.bodyId ?? null) === (face?.bodyId ?? null);
-    if ((sketch.plane !== datum || (sketch.planeOffsetMm ?? 0) !== offsetMm || !sameTilt || !sameFrame || !sameFace)
+    const sameConvention = convention === undefined || sketch.plane !== "datum:yz" || convention === conventionOf(sketch);
+    if ((sketch.plane !== datum || !sameConvention || (sketch.planeOffsetMm ?? 0) !== offsetMm || !sameTilt || !sameFrame || !sameFace)
       && !applyProjectOperation({ kind: "set-sketch-plane", plane: datum, ...placement })) return;
     if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
     setStatusText(`${describeSketchPlane(projectRef.current.sketch).status} Shown face-on. Draw a closed profile, then Create solid extrudes or revolves it from this plane.`);
@@ -2513,6 +2520,8 @@ export function App(): React.JSX.Element {
       readonly revolveAxis?: RevolveAxisRef;
       readonly sweepDirectionMm?: readonly [number, number, number];
       readonly sweepPathEntityId?: string;
+      /** A chained path from this sketch or a finished one (see sweep-path-ui.ts). */
+      readonly sweepPathSource?: { readonly sketchId: string; readonly entityIds: readonly string[] };
       readonly sweepTwistDeg?: number;
       readonly sweepFrameTransport?: boolean;
       readonly loftTopScale?: number;
@@ -2545,7 +2554,7 @@ export function App(): React.JSX.Element {
     if (!Number.isFinite(valueMm) || valueMm <= 0) { setStatus("error"); setStatusText(operation === "revolve" ? "Enter a revolve angle between 1 and 360 degrees." : operation === "sweep" ? "Enter a positive sweep distance." : operation === "loft" ? "Enter a positive loft height." : "Enter a positive extrusion distance."); return; }
     if (operation === "sweep") {
       const direction = advancedParams?.sweepDirectionMm;
-      const pathId = advancedParams?.sweepPathEntityId;
+      const pathId = advancedParams?.sweepPathEntityId ?? advancedParams?.sweepPathSource?.entityIds[0];
       if ((pathId === undefined || pathId.length === 0) && (direction === undefined || Math.hypot(direction[0], direction[1], direction[2]) < 1e-6)) {
         setStatus("error"); setStatusText("Sweep: pick a path entity or enter a non-zero direction."); return;
       }
@@ -2616,8 +2625,9 @@ export function App(): React.JSX.Element {
       ...(edge === undefined ? {} : { edge }),
       ...(target === undefined ? {} : { operation: target.mode }),
       ...(target?.extent === "through-all" && operation === "extrude" && target.mode === "cut" ? { extent: "through-all" as const } : {}),
-      ...(operation === "sweep" && advancedParams?.sweepDirectionMm !== undefined && (advancedParams.sweepPathEntityId === undefined || advancedParams.sweepPathEntityId === "") ? { sweepDirectionMm: advancedParams.sweepDirectionMm } : {}),
+      ...(operation === "sweep" && advancedParams?.sweepDirectionMm !== undefined && (advancedParams.sweepPathEntityId === undefined || advancedParams.sweepPathEntityId === "") && advancedParams.sweepPathSource === undefined ? { sweepDirectionMm: advancedParams.sweepDirectionMm } : {}),
       ...(operation === "sweep" && advancedParams?.sweepPathEntityId !== undefined && advancedParams.sweepPathEntityId !== "" ? { sweepPathEntityId: advancedParams.sweepPathEntityId } : {}),
+      ...(operation === "sweep" && advancedParams?.sweepPathSource !== undefined ? sweepPathParams(advancedParams.sweepPathSource.sketchId, advancedParams.sweepPathSource.entityIds, sketchId) : {}),
       ...(operation === "sweep" && advancedParams?.sweepTwistDeg !== undefined ? { sweepTwistDeg: advancedParams.sweepTwistDeg } : {}),
       ...(operation === "sweep" && advancedParams?.sweepFrameTransport === true ? { sweepFrameTransport: true } : {}),
       ...(operation === "loft" && advancedParams?.loftRailEntityId !== undefined && advancedParams.loftRailEntityId !== "" ? { loftRailEntityId: advancedParams.loftRailEntityId } : {}),
@@ -2814,12 +2824,25 @@ export function App(): React.JSX.Element {
     setFeatureEdit(feature);
   };
 
+  // The unit is a property of the project (saved with it, restored on open) and is remembered for the next session; the CAD document follows.
   const changeUnit = async (unit: DisplayUnit): Promise<void> => {
+    rememberDisplayUnit(unit);
+    if (projectRef.current.displayUnit !== unit) pushProject(withDisplayUnit(projectRef.current, unit));
+  };
+
+  const followDocumentUnit = async (unit: DisplayUnit): Promise<void> => {
     if (unit === documentRef.current.displayUnit || clientRef.current === undefined) return;
     setStatus("working");
     const response = await clientRef.current.commit(documentRef.current.revision, { protocolVersion: 1, kind: "set-display-unit", commandId: `command:display-unit-${crypto.randomUUID()}`, expectedRevision: documentRef.current.revision, displayUnit: unit }).catch(() => undefined);
     if (response !== undefined) acceptResponse(response);
   };
+
+  // Whatever the project says (or, when it says nothing, the unit chosen last time) is what the CAD document shows.
+  useEffect(() => {
+    const wanted = unitToShow(project, document.displayUnit);
+    if (wanted !== document.displayUnit) void followDocumentUnit(wanted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.displayUnit, project.id, document.displayUnit, document.id]);
 
   const moveHistory = async (direction: "undo" | "redo"): Promise<boolean> => {
     const client = clientRef.current;
@@ -3966,7 +3989,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace displayUnit={document.displayUnit} projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={(text) => setStatusText(friendlySketchText(text, [projectRef.current.sketch]))} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams)} onChangePlane={() => openSketchPlaneDialog("set")} onDisplayUnit={(unit) => void changeUnit(unit)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={cancelSketch} onSelectionCount={setSketchSelectionCount} evaluateText={(text) => evaluateTextInDesign(designOf(project), text)} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace displayUnit={unitToShow(project, document.displayUnit)} finishedSketches={finishedSketches} workingTimelineId={designOf(project).editingSketchId} projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={(text) => setStatusText(friendlySketchText(text, [projectRef.current.sketch]))} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams)} onChangePlane={() => openSketchPlaneDialog("set")} onDisplayUnit={(unit) => void changeUnit(unit)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={cancelSketch} onSelectionCount={setSketchSelectionCount} evaluateText={(text) => evaluateTextInDesign(designOf(project), text)} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl
@@ -4101,7 +4124,7 @@ export function App(): React.JSX.Element {
       onClose={() => setNewDialogOpen(false)}
     />
     <ConstructionPlaneDialog open={constructionDialog !== null} mode={constructionDialog ?? "through-two-edges"} axes={project.part.constructionAxes ?? []} bodies={project.part.generalBodies ?? []} binders={project.part.constructionBinders ?? []} paths={constructionDialog === null ? [] : sketchPathOptions(project.sketch, designOf(project))} picking={constructionPicking} onPickEdge={pickEdgeForConstructionPlane} onConfirm={confirmConstructionPlane} onClose={() => setConstructionDialog(null)} />
-    <SketchPlaneDialog open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} initialTilt={sketchPlaneDialogMode === "new" ? undefined : project.sketch.planeTilt} anglePlanes={anglePlaneOptions} framePlanes={framePlaneOptions} faces={sketchFaceOptions} existingPlanes={existingSketchPlanes(designOf(project).features, project.sketch)} mode={sketchPlaneDialogMode} currentPlaneChip={describeSketchPlane(project.sketch).chip} {...(sketchPlaneOffered ? { onContinue: () => { setSketchPlaneDialogOpen(false); switchWorkspace("sketch"); } } : {})} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
+    <SketchPlaneDialog unit={unitToShow(project, document.displayUnit)} open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} initialTilt={sketchPlaneDialogMode === "new" ? undefined : project.sketch.planeTilt} anglePlanes={anglePlaneOptions} framePlanes={framePlaneOptions} faces={sketchFaceOptions} existingPlanes={existingSketchPlanes(designOf(project).features, project.sketch)} mode={sketchPlaneDialogMode} currentPlaneChip={describeSketchPlane(project.sketch).chip} {...(sketchPlaneOffered ? { onContinue: () => { setSketchPlaneDialogOpen(false); switchWorkspace("sketch"); } } : {})} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
     <AboutDialog open={aboutOpen} update={buildUpdate} onClose={() => setAboutOpen(false)} />
     <ChangeParametersDialog open={parametersOpen} project={project} busy={status === "working"} onApply={changeParameters} onClose={() => setParametersOpen(false)} />
     <FeatureEditDialog feature={featureEdit} project={project} busy={status === "working"} onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />

@@ -24,6 +24,7 @@ import { cornerQuadrant } from "../../../../packages/workbench-sketch/src/corner
 import { parseDecimal } from "../../../../packages/workbench-sketch/src/edit-input.js";
 import { formatLengthField, parseLengthField, parseNumberField } from "../../../../packages/workbench-sketch/src/edit-fields.js";
 import type { SketchLengthUnit } from "../../../../packages/workbench-sketch/src/sketch-units.js";
+import { defaultLengthText } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
 import { resolveMirrorAxis } from "../../../../packages/workbench-sketch/src/dynamic-mirror.js";
 import { breakAtIntersections } from "../../../../packages/workbench-sketch/src/break-intersections.js";
 import { describePath, healPathGaps, makePath, pathToSpline } from "../../../../packages/workbench-sketch/src/make-path.js";
@@ -163,7 +164,9 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   /** A typed length in millimetres (NaN when unreadable) and a typed plain number. */
   const len = (text: string): number => parseLengthField(text, unit);
   const num = parseNumberField;
-  const [offset, setOffset] = useState(() => seed(5));
+  /** The starting value of a field: the metric default in millimetres, the round inch size nearest to it in an inch document. */
+  const start = (metricMm: number): string => defaultLengthText(metricMm, unit);
+  const [offset, setOffset] = useState(() => start(5));
   const [offsetFlip, setOffsetFlip] = useState(false);
   const [offsetBoth, setOffsetBoth] = useState(false);
   const [offsetCorner, setOffsetCorner] = useState<OffsetCorner>("mitre");
@@ -172,12 +175,12 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   const [centerY, setCenterY] = useState("0");
   const [radius, setRadius] = useState(props.corner?.radius ?? DEFAULT_CORNER_PARAMS.radius);
   const [bevel, setBevel] = useState(props.corner?.bevel ?? DEFAULT_CORNER_PARAMS.bevel);
-  const [bevelSecond, setBevelSecond] = useState(() => seed(2));
+  const [bevelSecond, setBevelSecond] = useState(() => start(2));
   const [bevelAngle, setBevelAngle] = useState("45");
   const [radiusDimension, setRadiusDimension] = useState(true);
   const [cornerSide, setCornerSide] = useState<"auto" | "ne" | "nw" | "sw" | "se">("auto");
   const [mirrorAxis, setMirrorAxis] = useState<"line" | "x" | "y">("line");
-  const [moveX, setMoveX] = useState(() => seed(10));
+  const [moveX, setMoveX] = useState(() => start(10));
   const [moveY, setMoveY] = useState("0");
   const [rotateAngle, setRotateAngle] = useState("45");
   const [scaleFactor, setScaleFactor] = useState("2");
@@ -186,8 +189,8 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   const [copyMode, setCopyMode] = useState(false);
   const [windowX1, setWindowX1] = useState("0");
   const [windowY1, setWindowY1] = useState("0");
-  const [windowX2, setWindowX2] = useState(() => seed(10));
-  const [windowY2, setWindowY2] = useState(() => seed(10));
+  const [windowX2, setWindowX2] = useState(() => start(10));
+  const [windowY2, setWindowY2] = useState(() => start(10));
   const [chamferMode, setChamferMode] = useState<"equal" | "asymmetric" | "distance-angle">("equal");
   const [moveMode, setMoveMode] = useState<"offset" | "vector">("offset");
   // Pattern has its own panel (SketchPatternPanel: rectangular, circular and path layouts, ghost preview, Enter to apply).

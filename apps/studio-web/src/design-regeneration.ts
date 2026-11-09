@@ -1,10 +1,11 @@
-import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
+import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
+import { usesZUpPlane } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, HEALTH_NOTE_PREFIX, isHealthNote, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, lostProfileRefs, profileOutlineMm, resolveProfileRegion, sampleArc, sampleArcToBound, sampleSpline, sampleSplineToBound } from "../../../packages/workbench-sketch/src/index.js";
 import { attachEdgeFlange, attachMiterFlange, booleanMeshes, cutReliefNotch, developBend, flangeReliefs, holeCutter, jogSheetMesh, reliefCorners, snapToAxis, splitMeshPieces, threadBoreWall, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BendRecord, type BentStripSpec, type FlatLayout, type HoleSpec } from "../../../packages/workbench-geometry/src/index.js";
 import { flangeEdgesOf } from "../../../packages/workbench-core/src/index.js";
 import { bendResolverOfStep, loftedBendBody, loftedBendFlat, plateFlangesOf, plateJogsOf } from "./sheet-metal-features.js";
-import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
+import { combineGeneralBodies, createGeneralSolidBody, type BuildPlane, type SketchPlane } from "./general-modeling.js";
 import { applyPatternStep } from "./pattern-replay.js";
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { createThinRevolveBody, startRevolveAt } from "./revolve-thin.js";
@@ -33,10 +34,15 @@ export interface RebuildResult {
   readonly sketchPlaneOffsetMm?: number;
 }
 
-export const NORMALS: Readonly<Record<SketchPlane, readonly [number, number, number]>> = { xy: [0, 0, 1], xz: [0, -1, 0], yz: [1, 0, 0] };
+export const NORMALS: Readonly<Record<BuildPlane, readonly [number, number, number]>> = { xy: [0, 0, 1], xz: [0, -1, 0], yz: [1, 0, 0], "yz-zup": [1, 0, 0] };
 
 export function planeKeyOf(plane: SketchDatumPlane): SketchPlane {
   return plane === "datum:xz" ? "xz" : plane === "datum:yz" ? "yz" : "xy";
+}
+
+/** The plane a sketch's solids are built on: the Right plane of a Z-up sketch has its own mapping, every other plane is its datum key. */
+export function buildPlaneOf(sketch: Pick<WorkbenchSketch, "plane" | "planeConvention">): BuildPlane {
+  return usesZUpPlane(sketch) ? "yz-zup" : planeKeyOf(sketch.plane);
 }
 
 /** How far from the sketch plane an extrusion starts, along the plane's normal: symmetric straddles it, flipped goes the other way. */
@@ -79,8 +85,10 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     return { ok: false, message: `${feature.name}: a ${feature.kind} is built from one region, but ${groups.length} separate regions are selected. Select a single region, or use an extrude or revolve for several.` };
   }
   if (groups.length > 1 && feature.kind === "revolve" && feature.thinWallMm !== undefined) return { ok: false, message: `${feature.name}: a thin revolve follows one outline. Select a single region.` };
-  const warnings = [...region.value.warnings, ...(feature.edge !== undefined && groups.some((group) => group.holes.length > 0) ? ["The chamfer or fillet is applied to the outline; the holes keep their sharp edges."] : [])];
-  const plane = planeKeyOf(sketch.plane);
+  const regionWarnings = region.value.warnings;
+  // A note about what the chamfer or fillet did belongs to a build that happened; it is not part of the reason a build failed.
+  const warnings = [...regionWarnings, ...(feature.edge !== undefined && groups.some((group) => group.holes.length > 0) ? ["The chamfer or fillet is applied to the outline; the holes keep their sharp edges."] : [])];
+  const plane = buildPlaneOf(sketch);
   if (feature.kind === "sheet-lofted-bend") {
     const lofted = loftedBendBody(feature, profiles, region.value.outer, plane, color);
     if (!lofted.ok) return lofted;
@@ -175,7 +183,7 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     ...(feature.kind === "draft" && feature.draftAngleDeg !== undefined ? { draftAngleDeg: feature.draftAngleDeg } : {}),
     ...(feature.kind === "draft" && feature.draftNeutralFace !== undefined ? { draftNeutralFace: feature.draftNeutralFace } : {})
   });
-  if (!built.ok) return { ok: false, message: warnings.length === 0 ? built.message : `${built.message} ${warnings.join(" ")}` };
+  if (!built.ok) return { ok: false, message: regionWarnings.length === 0 ? built.message : `${built.message} ${regionWarnings.join(" ")}` };
   const started = sweep === undefined || sweep.startDeg === 0 ? built.body : { ...built.body, positionsMm: startRevolveAt(built.body.positionsMm, plane, sweep.startDeg) };
   const placed = shifted(started, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0));
   // A sketch on an angle or three-point plane is built on its datum plane and then moved onto that plane, which keeps the face names.
@@ -213,7 +221,7 @@ export function sketchNormal(sketch: DesignSketchFeature): readonly [number, num
   return placeDirection(NORMALS[planeKeyOf(sketch.sketch.plane)], sketch.sketch);
 }
 
-const PLANE_AXIS: Readonly<Record<SketchPlane, 0 | 1 | 2>> = { xy: 2, xz: 1, yz: 0 };
+const PLANE_AXIS: Readonly<Record<BuildPlane, 0 | 1 | 2>> = { xy: 2, xz: 1, yz: 0, "yz-zup": 0 };
 
 /**
  * Turns a through-all cut into the distance that reaches across the whole body right now: a symmetric extrusion
@@ -728,7 +736,7 @@ export async function flatPatternForBody(project: WorkbenchProject, bodyId: stri
   if (base.kind !== "sheet-base" && base.kind !== "extrude") return { ok: false, message: "Flat pattern needs a sheet-metal body: a Sheet base (or an extruded plate), optionally with edge flanges, or a Flange / Hem." };
   const rebuilt = await rebuildSolidFeature(base, sketchFeature);
   if (!rebuilt.ok) return { ok: false, message: rebuilt.message };
-  const plane = rebuilt.body.feature?.plane ?? planeKeyOf(sketchFeature.sketch.plane);
+  const plane: BuildPlane = usesZUpPlane(sketchFeature.sketch) ? "yz-zup" : (rebuilt.body.feature?.plane ?? planeKeyOf(sketchFeature.sketch.plane));
   // A plate on a tilted or three-point sketch plane is moved back flat first, so its top face lies in the sketch's own plane.
   const flatBody = isPlaced(sketchFeature.sketch) ? { ...rebuilt.body, positionsMm: placePositions(rebuilt.body.positionsMm, sketchFeature.sketch, true) } : rebuilt.body;
   const frame = sheetFrameOf(flatBody, NORMALS[plane]);

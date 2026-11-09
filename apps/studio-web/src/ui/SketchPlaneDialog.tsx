@@ -5,6 +5,8 @@ import type { SketchPlane } from "../general-modeling.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { datumPlaneHint, type ExistingSketchPlane } from "../sketch-plane-ui.js";
 import { useDialogFocus } from "./useDialogFocus.js";
+import { planeOffsetText, readPlaneOffset } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
+import type { SketchLengthUnit } from "../../../../packages/workbench-sketch/src/sketch-units.js";
 
 interface SketchPlaneOption {
   readonly plane: SketchPlane;
@@ -56,6 +58,8 @@ function parsePointText(text: string): readonly [number, number, number] | undef
 
 interface SketchPlaneDialogProps {
   readonly open: boolean;
+  /** The document's unit: the offset is shown and typed in it (millimetres when absent). */
+  readonly unit?: SketchLengthUnit | undefined;
   readonly initialPlane: SketchPlane;
   readonly initialOffsetMm: number;
   readonly initialTilt?: SketchPlaneTilt | undefined;
@@ -73,7 +77,7 @@ interface SketchPlaneDialogProps {
   readonly currentPlaneChip?: string;
   /** Present when the dialog was offered on entering Sketch: adds a "Continue with the current sketch" button that does not change anything. */
   readonly onContinue?: () => void;
-  readonly onConfirm: (plane: SketchPlane, offsetMm: number, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef) => void;
+  readonly onConfirm: (plane: SketchPlane, offsetMm: number, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef, convention?: "z-up" | "legacy") => void;
   readonly onClose: () => void;
 }
 
@@ -105,7 +109,7 @@ function PlaneDiagram(props: { readonly plane: SketchPlane; readonly onPick: (pl
 /** Asks where a sketch goes: a datum plane, the same offset along its normal, or a planar face of a solid. */
 export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Element | null {
   const [plane, setPlane] = useState<SketchPlane>(props.initialPlane);
-  const [offsetText, setOffsetText] = useState("0");
+  const [offsetText, setOffsetText] = useState(() => planeOffsetText(props.initialOffsetMm, props.unit ?? "mm"));
   const [tiltAxis, setTiltAxis] = useState<"none" | "x" | "y" | "z">("none");
   const [tiltText, setTiltText] = useState("45");
   const [pointTexts, setPointTexts] = useState<readonly [string, string, string]>(["", "", ""]);
@@ -115,19 +119,21 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
   useEffect(() => {
     if (!props.open) return;
     setPlane(props.initialPlane);
-    setOffsetText(String(Number(props.initialOffsetMm.toFixed(3))));
+    setOffsetText(planeOffsetText(props.initialOffsetMm, props.unit ?? "mm"));
     setTiltAxis(props.initialTilt?.axis ?? "none");
     setTiltText(String(props.initialTilt?.angleDeg ?? 45));
     setPointTexts(["", "", ""]);
     setProblem("");
-  }, [props.open, props.initialPlane, props.initialOffsetMm, props.initialTilt]);
+  }, [props.open, props.initialPlane, props.initialOffsetMm, props.initialTilt, props.unit]);
 
   if (!props.open) return null;
   const selected = SKETCH_PLANES.find((option) => option.plane === plane) ?? SKETCH_PLANES[0]!;
+  const unit: SketchLengthUnit = props.unit ?? "mm";
 
   const confirm = (chosenPlane: SketchPlane, rawOffset: string): void => {
-    const parsed = rawOffset.trim() === "" ? 0 : Number(rawOffset.trim().replace(",", "."));
-    if (!Number.isFinite(parsed) || Math.abs(parsed) > 100_000) { setProblem("Enter an offset in millimetres (up to ±100000)."); return; }
+    const read = readPlaneOffset(rawOffset, unit);
+    if (!read.ok) { setProblem(read.message); return; }
+    const parsed = read.valueMm;
     if (tiltAxis === "none") { props.onConfirm(chosenPlane, parsed); return; }
     const angle = Number(tiltText.trim().replace(",", "."));
     if (!Number.isFinite(angle) || angle === 0 || Math.abs(angle) > 180) { setProblem("Enter a tilt angle from -180° to 180°, other than 0."); return; }
@@ -173,12 +179,12 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
           <div className="feature-edit-field">
             <input
               inputMode="decimal"
-              aria-label="Offset from the plane in millimetres"
+              aria-label={`Offset from the plane in ${unit === "in" ? "inches" : "millimetres"}`}
               value={offsetText}
               onChange={(event) => { setOffsetText(event.target.value); setProblem(""); }}
               onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); confirm(plane, offsetText); } }}
             />
-            <small>mm along the plane normal · 0 is the plane itself</small>
+            <small>{unit} along the plane normal · 0 is the plane itself</small>
           </div>
         </label>
         <label className="sketch-plane-offset">
@@ -207,7 +213,7 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
             key={option.featureId}
             type="button"
             className="sketch-plane-face"
-            onClick={() => props.onConfirm(option.sketchPlane, option.offsetMm, option.tilt, option.frame)}
+            onClick={() => props.onConfirm(option.sketchPlane, option.offsetMm, option.tilt, option.frame, undefined, option.convention)}
           ><CommandIcon name="sketch" /><span><strong>{option.name}</strong><small>{option.description}</small></span></button>)}
         </div>}
         {(props.anglePlanes?.length ?? 0) > 0 && <div className="sketch-plane-faces">

@@ -15,7 +15,8 @@ const AXES = ["x", "y", "z"];
 const PLACEMENT_HINT = "Place a sketch on datum:xy, datum:xz or datum:yz, optionally with an offset (offsetMm) or a tilt ({ axis, angleDeg }), or on datum:xy with a frame, or on a solid face.";
 
 export function sketchPlacementProblem(input: Record<string, unknown>, commonKeys: readonly string[]): string {
-  const allowed = [...commonKeys, "plane", "offsetMm", "tilt", "frame", "face"];
+  const allowed = [...commonKeys, "plane", "offsetMm", "tilt", "frame", "face", "convention"];
+  if (Object.hasOwn(input, "convention") && input["convention"] !== "z-up" && input["convention"] !== "legacy") return `The plane convention "${String(input["convention"]).slice(0, 20)}" is not "z-up" or "legacy".`;
   const stray = Object.keys(input).filter((key) => !allowed.includes(key));
   if (stray.length > 0) return `The sketch placement has an unknown field "${stray[0]!}". ${PLACEMENT_HINT}`;
   if (!(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input["plane"])) return `The sketch plane "${String(input["plane"])}" is not one of datum:xy, datum:xz or datum:yz.`;
@@ -53,7 +54,7 @@ export function sketchPlacementProblem(input: Record<string, unknown>, commonKey
 export function sketchShapeProblem(value: unknown, limits: { readonly maxEntities: number; readonly maxConstraints: number }): string {
   if (!isRecord(value)) return "The primary sketch must be an object.";
   const required = ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints"];
-  const optional = ["planeOffsetMm", "planeTilt", "planeFrame", "planeFace", "texts", "patterns", "underlay"];
+  const optional = ["planeOffsetMm", "planeTilt", "planeFrame", "planeFace", "planeConvention", "texts", "patterns", "underlay"];
   const missing = required.filter((key) => !Object.hasOwn(value, key));
   if (missing.length > 0) return `The primary sketch is missing "${missing[0]!}".`;
   const stray = Object.keys(value).filter((key) => !required.includes(key) && !optional.includes(key));

@@ -270,16 +270,19 @@ export const pipelineWave2Tests: readonly TestCase[] = [
     }
   },
   {
-    name: "Wave2 N-08 (changed by wave 3 R2-2): Horizontal on an exactly vertical line turns it a quarter turn and keeps its length instead of refusing",
+    name: "Wave2 N-08 (changed by wave 3 R2-2 and P22/N-08): Horizontal on an exactly vertical line turns it a quarter turn (length kept) instead of refusing it as a collapse; a Fixed line still says why not",
     run: () => {
       const base = pipelineRun(fresh(), { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: [line("cl", [30, -10], [30, 40])], addConstraints: [], label: "centerline" });
       const turned = pipelineApply(base, { kind: "add-sketch-constraint", constraint: { id: "constraint:h", kind: "horizontal", entityIds: ["entity:cl"] } });
       assert(turned.ok, `the relation is applied: ${message(turned)}`);
-      const cl = turned.ok ? turned.value.project.sketch.entities.find((candidate) => candidate.id === "entity:cl") : undefined;
-      assert(cl?.kind === "line" && cl.end[1] === cl.start[1] && Math.abs(Math.abs(cl.end[0] - cl.start[0]) - 50) < 1e-9, `the line lies flat and keeps its 50 mm: ${JSON.stringify(cl)}`);
+      const turnedLine = turned.ok ? turned.value.project.sketch.entities.find((entity) => entity.id === "entity:cl") : undefined;
+      assert(turnedLine !== undefined && turnedLine.kind === "line" && turnedLine.start[0] === 30 && turnedLine.start[1] === -10 && Math.abs(turnedLine.end[0] - 80) < 1e-9 && Math.abs(turnedLine.end[1] + 10) < 1e-9, `the 50 mm line turned about its start: ${JSON.stringify(turnedLine)}`);
+      const fixedLine = pipelineRun(fresh(), { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: [line("fx", [30, -10], [30, 40])], addConstraints: [{ id: "constraint:fx", kind: "fixed", entityIds: ["entity:fx"] }], label: "fixed" });
+      const refused = pipelineApply(fixedLine, { kind: "add-sketch-constraint", constraint: { id: "constraint:h", kind: "horizontal", entityIds: ["entity:fx"] } });
+      assert(!refused.ok && /Horizontal/u.test(message(refused)) && /Fix/u.test(message(refused)), `a Fixed line is not turned, and the conflict names both relations: ${message(refused)}`);
       const horizontal = pipelineRun(fresh(), { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: [line("h", [0, 0], [40, 0], true)], addConstraints: [], label: "h" });
       const vertical = pipelineApply(horizontal, { kind: "add-sketch-constraint", constraint: { id: "constraint:v", kind: "vertical", entityIds: ["entity:h"] } });
-      assert(vertical.ok, `Vertical on an exactly horizontal construction line likewise: ${message(vertical)}`);
+      assert(vertical.ok, `Vertical on an exactly horizontal construction line likewise turns it: ${message(vertical)}`);
       const slanted = pipelineRun(fresh(), { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: [line("d", [0, 0], [30, 30])], addConstraints: [], label: "d" });
       assert(pipelineApply(slanted, { kind: "add-sketch-constraint", constraint: { id: "constraint:h", kind: "horizontal", entityIds: ["entity:d"] } }).ok, "a 45 degree line still turns horizontal");
       const both = pipelineRun(fresh(), { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: [line("b", [0, 0], [30, 0])], addConstraints: [{ id: "constraint:hh", kind: "horizontal", entityIds: ["entity:b"] }], label: "b" });
@@ -333,23 +336,26 @@ export const pipelineWave2Tests: readonly TestCase[] = [
   {
     name: "Wave2 P22: the YZ plane keeps its stored convention and says what it is in world terms in the plane dialog, the status line and the revolve axis",
     run: async () => {
-      const yz = sketchAxesInWorld("datum:yz");
-      equal(yz.x, "world -Z", "sketch X on the Right (YZ) plane is world -Z");
+      const yz = sketchAxesInWorld("datum:yz", "legacy");
+      equal(yz.x, "world -Z", "sketch X on a legacy Right (YZ) sketch is world -Z");
       equal(yz.y, "world +Y", "sketch Y is world +Y (not up: this world is Z up)");
+      const zUp = sketchAxesInWorld("datum:yz");
+      equal(zUp.x, "world +Y", "sketch X on a new Right (YZ) sketch is world +Y");
+      equal(zUp.y, "world +Z", "and its sketch Y is world +Z, up");
       const hint = datumPlaneHint("datum:yz");
-      assert(/Looking along \+X/u.test(hint) && /world -Z/u.test(hint) && /world \+Y/u.test(hint) && !/Y is up/u.test(hint), `the dialog line gives the world axes and no longer calls Y up: ${hint}`);
+      assert(/Looking along \+X/u.test(hint) && /world \+Y/u.test(hint) && /world \+Z/u.test(hint) && !/Y is up/u.test(hint), `the dialog line gives the world axes of a new Right-plane sketch: ${hint}`);
       assert(/world \+Z/u.test(datumPlaneHint("datum:xz")) && /world \+X/u.test(datumPlaneHint("datum:xy")), "and so do the other two planes");
       const status = describeSketchPlane({ plane: "datum:yz", planeOffsetMm: 12 }).status;
       assert(/Right \(YZ\), offset 12 mm\./u.test(status) && /Sketch X runs along world -Z, sketch Y along world \+Y/u.test(status), `the status line says it too: ${status}`);
       // The solid really does follow the documented axes: an upright profile on YZ revolves about world Y.
-      const yzSketch = committedSketch("datum:yz", [rect("r", 10, 10, 10, 20)]).sketch;
+      const yzSketch = committedSketch("datum:yz", [rect("r", 10, 10, 10, 20)], { convention: "legacy" }).sketch;
       const revolved = meshStats(solidOf(await buildSolid(yzSketch, "revolve", { valueMm: 360 })));
       near(revolved.lo[1], 0, 0.01, "the YZ revolve starts at y = 0");
       near(revolved.hi[1], 20, 0.01, "and rises along world Y, as the axis chip says");
       const dialog = readFileSync(new URL("../../apps/studio-web/src/ui/SketchPlaneDialog.tsx", import.meta.url), "utf8");
       assert(/datumPlaneHint\("datum:yz"\)/u.test(dialog) && !/Y is up/u.test(dialog), "the dialog builds its text from the shared description");
       const workspace = readFileSync(new URL("../../apps/studio-web/src/workspaces/SketchWorkspace.tsx", import.meta.url), "utf8");
-      assert(/Sketch Y axis \(\{sketchAxesInWorld\(props\.sketch\.plane\)\.y\}\)/u.test(workspace), "and the revolve axis choice names the world axes");
+      assert(/Sketch Y axis \(\{sketchAxesInWorld\(props\.sketch\.plane, conventionOf\(props\.sketch\)\)\.y\}\)/u.test(workspace), "and the revolve axis choice names the world axes");
     }
   },
   {

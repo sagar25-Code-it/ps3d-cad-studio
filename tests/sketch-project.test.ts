@@ -24,7 +24,7 @@ type PlaneSpec = Pick<SketchFrameSource, "plane" | "planeOffsetMm" | "planeTilt"
 const XY: PlaneSpec = { plane: "datum:xy" };
 
 function startSketch(project: WorkbenchProject, spec: PlaneSpec): WorkbenchProject {
-  return run(project, { kind: "new-design-sketch", plane: spec.plane, ...(spec.planeOffsetMm === undefined ? {} : { offsetMm: spec.planeOffsetMm }), ...(spec.planeTilt === undefined ? {} : { tilt: spec.planeTilt }), ...(spec.planeFrame === undefined ? {} : { frame: spec.planeFrame as SketchPlaneFrame }) });
+  return run(project, { kind: "new-design-sketch", plane: spec.plane, ...(spec.plane === "datum:yz" ? { convention: "legacy" as const } : {}), ...(spec.planeOffsetMm === undefined ? {} : { offsetMm: spec.planeOffsetMm }), ...(spec.planeTilt === undefined ? {} : { tilt: spec.planeTilt }), ...(spec.planeFrame === undefined ? {} : { frame: spec.planeFrame as SketchPlaneFrame }) });
 }
 
 const rectangle = (id: string, cx: number, cy: number, w: number, h: number): SketchEntity => ({ id: `entity:${id}`, kind: "rectangle", center: [cx, cy], widthMm: w, heightMm: h, rotationDeg: 0, construction: false });

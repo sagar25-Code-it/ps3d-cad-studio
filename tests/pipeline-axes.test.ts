@@ -1,3 +1,4 @@
+import { describeYzConvention } from "../packages/workbench-core/src/index.js";
 import { DATUM_PLANE_AXES, DATUM_PLANE_NORMAL, describeSketchAxes, sketchToWorld, worldToSketch } from "../apps/studio-web/src/sketch-world.js";
 import { adaptiveFacetCount } from "../packages/workbench-geometry/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
@@ -9,30 +10,46 @@ const WORLD: Readonly<Record<string, readonly [number, number, number]>> = {
 
 export const pipelineAxesTests: readonly TestCase[] = [
   {
-    name: "P22 the documented sketch axes of every datum plane match where a sketch point really lands, and a revolve on the YZ plane turns about world Y",
+    name: "P22 the documented sketch axes of every datum plane (and of both Right-plane conventions) match where a sketch point really lands, and a legacy YZ revolve turns about world Y",
     run: async () => {
-      for (const plane of ["datum:xy", "datum:xz", "datum:yz"] as const) {
-        const sketch = committedSketch(plane, [rect("r", 0, 0, 10, 10)]).sketch.sketch;
-        const key = plane === "datum:xz" ? "xz" : plane === "datum:yz" ? "yz" : "xy";
+      const cases = [
+        { plane: "datum:xy", convention: undefined, documented: DATUM_PLANE_AXES.xy, key: "xy" },
+        { plane: "datum:xz", convention: undefined, documented: DATUM_PLANE_AXES.xz, key: "xz" },
+        { plane: "datum:yz", convention: "legacy", documented: DATUM_PLANE_AXES.yz, key: "yz" },
+        { plane: "datum:yz", convention: "z-up", documented: describeYzConvention(true), key: "yz" }
+      ] as const;
+      for (const { plane, convention, documented, key } of cases) {
+        const sketch = committedSketch(plane, [rect("r", 0, 0, 10, 10)], convention === undefined ? {} : { convention }).sketch.sketch;
+        const label = `${plane} ${convention ?? ""}`;
         const origin = sketchToWorld(sketch, 0, 0);
         const x = sketchToWorld(sketch, 1, 0);
         const y = sketchToWorld(sketch, 0, 1);
-        const documented = DATUM_PLANE_AXES[key];
-        assert(JSON.stringify([x[0] - origin[0], x[1] - origin[1], x[2] - origin[2]]) === JSON.stringify(WORLD[documented.sketchX]), `${plane}: sketch X is ${documented.sketchX}`);
-        assert(JSON.stringify([y[0] - origin[0], y[1] - origin[1], y[2] - origin[2]]) === JSON.stringify(WORLD[documented.sketchY]), `${plane}: sketch Y is ${documented.sketchY}`);
-        assert(JSON.stringify(DATUM_PLANE_NORMAL[key]) === JSON.stringify(WORLD[documented.normal]), `${plane}: the sketch faces ${documented.normal}`);
+        assert(JSON.stringify([x[0] - origin[0], x[1] - origin[1], x[2] - origin[2]]) === JSON.stringify(WORLD[documented.sketchX]), `${label}: sketch X is ${documented.sketchX}`);
+        assert(JSON.stringify([y[0] - origin[0], y[1] - origin[1], y[2] - origin[2]]) === JSON.stringify(WORLD[documented.sketchY]), `${label}: sketch Y is ${documented.sketchY}`);
+        assert(JSON.stringify(DATUM_PLANE_NORMAL[key]) === JSON.stringify(WORLD[documented.normal]), `${label}: the sketch faces ${documented.normal}`);
         const back = worldToSketch(sketch, sketchToWorld(sketch, 7, -3, 2));
-        near(back.u, 7, 1e-9, `${plane}: world to sketch returns u`);
-        near(back.v, -3, 1e-9, `${plane}: and v`);
-        near(back.w, 2, 1e-9, `${plane}: and the distance off the plane`);
+        near(back.u, 7, 1e-9, `${label}: world to sketch returns u`);
+        near(back.v, -3, 1e-9, `${label}: and v`);
+        near(back.w, 2, 1e-9, `${label}: and the distance off the plane`);
       }
-      assert(/Y axis along world \+Y/u.test(describeSketchAxes({ plane: "datum:yz" })) && /X axis runs along world -Z/u.test(describeSketchAxes({ plane: "datum:yz" })), "the YZ plane is described in words the UI can show");
-      // A profile drawn upright on the YZ plane revolves about the sketch Y axis, which is world Y: the solid stands along Y.
-      const yz = meshStats(solidOf(await buildSolid(committedSketch("datum:yz", [rect("r", 10, 10, 10, 20)]).sketch, "revolve", { valueMm: 360 })));
-      near(yz.lo[1], 0, 0.01, "the YZ revolve starts at y = 0");
+      const legacyYz = committedSketch("datum:yz", [rect("r", 0, 0, 10, 10)], { convention: "legacy" }).sketch.sketch;
+      const zupYz = committedSketch("datum:yz", [rect("r", 0, 0, 10, 10)]).sketch.sketch;
+      assert(legacyYz.planeConvention === undefined && zupYz.planeConvention === "z-up", "a new Right-plane sketch is marked z-up; a legacy one carries no marker");
+      assert(/Y axis along world \+Y/u.test(describeSketchAxes(legacyYz)) && /X axis runs along world -Z/u.test(describeSketchAxes(legacyYz)), "the legacy YZ plane is described in words the UI can show");
+      assert(/Y axis along world \+Z/u.test(describeSketchAxes(zupYz)) && /X axis runs along world \+Y/u.test(describeSketchAxes(zupYz)), "and the Z-up one in its own words");
+      // A profile drawn upright on a legacy YZ sketch revolves about the sketch Y axis, which is world Y: the solid stands along Y.
+      const yz = meshStats(solidOf(await buildSolid(committedSketch("datum:yz", [rect("r", 10, 10, 10, 20)], { convention: "legacy" }).sketch, "revolve", { valueMm: 360 })));
+      near(yz.lo[1], 0, 0.01, "the legacy YZ revolve starts at y = 0");
       near(yz.hi[1], 20, 0.01, "and rises 20 mm along world Y (the sketch Y)");
       near(yz.hi[0], 15, 0.01, "spreading in X");
       near(yz.hi[2], 15, 0.01, "and in Z");
+      // The same profile on a new (Z-up) Right-plane sketch stands along world Z: the revolve turns about the vertical.
+      const up = meshStats(solidOf(await buildSolid(committedSketch("datum:yz", [rect("r", 10, 10, 10, 20)]).sketch, "revolve", { valueMm: 360 })));
+      near(up.lo[2], 0, 0.01, "the Z-up YZ revolve starts at z = 0");
+      near(up.hi[2], 20, 0.01, "and rises 20 mm along world Z (the sketch Y)");
+      near(up.hi[0], 15, 0.01, "spreading in X");
+      near(up.hi[1], 15, 0.01, "and in Y");
+      near(up.volume, yz.volume, 1e-6 * yz.volume, "the two conventions build the same solid, turned");
     }
   },
   {

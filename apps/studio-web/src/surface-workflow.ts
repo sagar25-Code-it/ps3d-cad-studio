@@ -1,3 +1,4 @@
+import { datumPointOf } from "../../../packages/workbench-core/src/index.js";
 import type { DesignSketchFeature, GeneralSolidBody, WorkbenchOperation, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
 import { designOf, isFormBody, isSurfaceBody } from "../../../packages/workbench-core/src/index.js";
 import {
@@ -45,7 +46,7 @@ export function sketchPointsToWorld(sketchFeature: DesignSketchFeature, points: 
   const offset = sketch.planeOffsetMm ?? 0;
   const flat: number[] = [];
   for (const [u, v] of points) {
-    const base: readonly [number, number, number] = plane === "xz" ? [u, 0, v] : plane === "yz" ? [0, v, -u] : [u, v, 0];
+    const base: readonly [number, number, number] = datumPointOf(sketch, u, v);
     flat.push(base[0] + normal[0] * offset, base[1] + normal[1] * offset, base[2] + normal[2] * offset);
   }
   const placed = isPlaced(sketch) ? placePositions(flat, sketch) : flat;

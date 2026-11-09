@@ -125,6 +125,7 @@ export function cancelSketchSession(project: WorkbenchProject, entry: WorkbenchS
   const fresh = applyIntent(project, {
     kind: "new-design-sketch",
     plane: baseline.plane,
+    ...(baseline.plane === "datum:yz" && baseline.planeFrame === undefined ? { convention: baseline.planeConvention === "z-up" ? "z-up" as const : "legacy" as const } : {}),
     ...(baseline.planeOffsetMm === undefined || baseline.planeOffsetMm === 0 ? {} : { offsetMm: baseline.planeOffsetMm }),
     ...(baseline.planeTilt === undefined ? {} : { tilt: baseline.planeTilt }),
     ...(baseline.planeFrame === undefined ? {} : { frame: baseline.planeFrame })

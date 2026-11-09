@@ -9,6 +9,7 @@ import type { SketchDimensionName, SketchEntity, SketchPointRef, WorkbenchOperat
 import { isSketchDatumEntityId, SKETCH_RELATIVE_DISTANCE_NAMES } from "./types.js";
 import { failure, WORKBENCH_LIMITS } from "./validation.js";
 import { MODEL_ENVELOPE } from "./envelope.js";
+import { missingSketchEntityFailure } from "./finished-sketch-hint.js";
 
 type SetDimension = Extract<WorkbenchOperation, { readonly kind: "set-sketch-dimension" }>;
 type Applied = WorkbenchResult<{ readonly project: WorkbenchProject; readonly changedIds: readonly string[]; readonly summary: string }>;
@@ -184,7 +185,7 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
   const name = operation.dimension;
   const lookup = (id: string): SketchEntity | "datum" | undefined => (isSketchDatumEntityId(id) ? "datum" : sketch.entities.find((entity) => entity.id === id));
   const target = lookup(operation.entityId);
-  if (target === undefined) return failure("BROKEN_REFERENCE", "The sketch entity does not exist.", [operation.entityId], "Refresh the project and select an existing stable ID.");
+  if (target === undefined) return missingSketchEntityFailure(project, operation.entityId, "The sketch entity does not exist.");
   const invalid = (message: string): Applied => failure("INVALID_OPERATION", message, [], "Use an exact bounded operation schema from the capability list.");
   const driven = operation.driven === true;
   const relative = (SKETCH_RELATIVE_DISTANCE_NAMES as readonly string[]).includes(name);
@@ -298,4 +299,17 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
       summary: `Set ${name} of ${entityLabel(sketch, operation.entityId)} to ${formatNumber(value)}${unitLabel(name)}.${sideNote}${solveSummary(redriven.solved)}`
     }
   };
+}
+
+/**
+ * The summary of a set-sketch-dimension request whose value came from an expression: the typed `valueMm` is only a placeholder there, so
+ * the sentence names the evaluated value the sketch was driven to.
+ */
+export function restateDimensionSummary(summary: string, operation: SetDimension, evaluated: number, sketch?: WorkbenchSketch): string {
+  // The status names the curve ("Ellipse 1"), or the raw id when the curve is not in the sketch.
+  const label = sketch === undefined ? operation.entityId : entityLabel(sketch, operation.entityId);
+  const typed = `${operation.dimension} of ${label} to ${formatNumber(operation.valueMm)}${unitLabel(operation.dimension)}`;
+  const actual = `${operation.dimension} of ${label} to ${formatNumber(evaluated)}${unitLabel(operation.dimension)}`;
+  if (typed === actual || !summary.includes(typed)) return summary;
+  return summary.replace(typed, `${actual} (from ${operation.expression ?? "its expression"})`);
 }

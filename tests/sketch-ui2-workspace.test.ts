@@ -111,7 +111,8 @@ export const sketchUi2WorkspaceTests: readonly TestCase[] = [
       assert(offset.includes("Distance (in)") && !offset.includes(">mm<"), "the offset distance is labelled in inches");
       const millimetres = renderToStaticMarkup(createElement(SketchEditPanel, { tool: "offset", sketch, selectionIds: ["entity:bar"], onApply: noop, onMessage: noop, onClose: noop }));
       assert(millimetres.includes("Distance (mm)") && millimetres.includes("value=\"5\""), "and in millimetres by default, starting at 5");
-      assert(offset.includes("value=\"0.1969\""), `an inch document starts the offset at 5 mm = 0.1969 in (${/value="[^"]*"/u.exec(offset)?.[0]})`);
+      // Wave 3 (R2-10): an inch document starts on the round inch size nearest to 5 mm, a quarter inch, instead of 0.1969 in.
+      assert(offset.includes("value=\"0.25\""), `an inch document starts the offset at a quarter inch (${/value="[^"]*"/u.exec(offset)?.[0]})`);
       assert(offset.includes("Apply 1") || offset.includes("Apply 0") || offset.includes("adds"), "and its preview line is computed from the inch value");
     }
   },

@@ -55,6 +55,7 @@ import { describeByteLimit, MAX_BODY_MESH_NUMBERS, MCP_CALL_MAX_BYTES, PROJECT_F
 import { sketchShapeProblem } from "./sketch-problem-messages.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
 import { AUDIT_CHECKPOINT_KIND, AUDIT_MAX_ENTRIES } from "./audit-archive.js";
+import { unpackMeshes } from "./mesh-pack.js";
 
 export const WORKBENCH_LIMITS = {
   /** A project file as Open and the validators accept it: the same constant Save checks (see envelope-limits.ts). */
@@ -84,13 +85,17 @@ const WORKSPACES: readonly WorkspaceId[] = ["sketch", "part", "assembly", "surfa
  * input's own objects (an operation reducer builds the next project from the previous one by structural sharing and does not need
  * a second full copy of every mesh to check it).
  */
-export function validateWorkbenchProject(input: unknown, options?: { readonly share?: boolean }): WorkbenchResult<WorkbenchProject> {
+export function validateWorkbenchProject(rawInput: unknown, options?: { readonly share?: boolean }): WorkbenchResult<WorkbenchProject> {
+  // A project file or MCP call may carry its meshes packed (see mesh-pack.ts); they are read back to plain lists before anything else looks.
+  const unpacked = unpackMeshes(rawInput);
+  if (!unpacked.ok) return invalid(`The project has a damaged packed mesh: ${unpacked.message}`);
+  const input = unpacked.value;
   const requiredRoot = [
     "format", "schemaVersion", "applicationVersion", "id", "name", "revision", "unit", "activeWorkspace",
     "sketch", "part", "assembly", "surface", "drawing", "audit"
   ];
   if (!isRecord(input) || !requiredRoot.every((key) => Object.hasOwn(input, key))
-    || Object.keys(input).some((key) => !requiredRoot.includes(key) && key !== "electrical" && key !== "vehicle" && key !== "design")) {
+    || Object.keys(input).some((key) => !requiredRoot.includes(key) && key !== "electrical" && key !== "vehicle" && key !== "design" && key !== "displayUnit")) {
     return invalid("The project root has missing or unsupported fields.");
   }
   if (input.format !== WORKBENCH_FORMAT || input.schemaVersion !== WORKBENCH_SCHEMA_VERSION) {
@@ -102,6 +107,7 @@ export function validateWorkbenchProject(input: unknown, options?: { readonly sh
     return invalid("The project identity, revision, unit, or workspace is invalid.");
   }
 
+  if (Object.hasOwn(input, "displayUnit") && input.displayUnit !== "mm" && input.displayUnit !== "in") return invalid("The project's display unit must be \"mm\" or \"in\".");
   const sketch = validateSketch(input.sketch);
   if (!sketch.ok) return sketch;
   const part = validatePart(input.part);
@@ -255,7 +261,9 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   const optionalFrame = isRecord(value) && Object.hasOwn(value, "planeFrame") ? ["planeFrame"] : [];
   const optionalFace = isRecord(value) && Object.hasOwn(value, "planeFace") ? ["planeFace"] : [];
   const optionalObjects = isRecord(value) ? ["texts", "patterns", "underlay"].filter((key) => Object.hasOwn(value, key)) : [];
-  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame, ...optionalFace, ...optionalObjects])
+  const optionalConvention = isRecord(value) && Object.hasOwn(value, "planeConvention") ? ["planeConvention"] : [];
+  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame, ...optionalFace, ...optionalObjects, ...optionalConvention])
+    || (optionalConvention.length > 0 && (value.planeConvention !== "z-up" || value.plane !== "datum:yz"))
     || (optionalFace.length > 0 && (!validSketchPlaneFace(value.planeFace) || optionalTilt.length > 0 || optionalFrame.length > 0))
     || (optionalTilt.length > 0 && !validSketchPlaneTilt(value.planeTilt))
     || (optionalFrame.length > 0 && (!validSketchPlaneFrame(value.planeFrame) || value.plane !== "datum:xy" || optionalOffset.length > 0 || optionalTilt.length > 0))
@@ -285,7 +293,7 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   return { ok: true, value: value as unknown as WorkbenchSketch };
 }
 
-const CONSTRAINT_KINDS = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed", "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"];
+export const CONSTRAINT_KINDS = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed", "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"];
 
 function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): value is WorkbenchSketchConstraint {
   // A reference perimeter may sum a whole chain of curves; a refraction names three lines and a symmetry three curves.

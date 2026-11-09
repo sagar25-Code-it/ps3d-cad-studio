@@ -1,14 +1,15 @@
-import type { DesignSketchFeature, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
+import { describeYzConvention, usesZUpPlane, type DesignSketchFeature, type WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
 import { placePoint } from "../../../packages/workbench-geometry/src/index.js";
 
 export type V3 = readonly [number, number, number];
 
-/** The outward normal of each datum plane, and how a sketch point (u, v) lands on it. xz sketches face -Y; yz sketches run Y up with X along -Z. */
+/** The outward normal of each datum plane. xz sketches face -Y; yz sketches face +X (the sketch axes on it depend on the plane convention: plane-convention.ts). */
 export const DATUM_PLANE_NORMAL: Readonly<Record<"xy" | "xz" | "yz", V3>> = { xy: [0, 0, 1], xz: [0, -1, 0], yz: [1, 0, 0] };
 
 /**
- * How each datum plane's sketch axes sit in the world (the YZ plane is a Y-up plane in this Z-up world, which is why a profile drawn
- * upright on it keeps its vertical along world Y). Shown in the plane dialog and in revolve messages so the orientation is never a surprise.
+ * How each datum plane's sketch axes sit in the world. The YZ entry is the legacy mapping (a Y-up plane in this Z-up world) that every sketch
+ * saved before the Z-up convention keeps; a new Right-plane sketch carries the "z-up" marker and runs X along world +Y and Y along +Z (see
+ * `yzAxesText`). Shown in the plane dialog and in revolve messages so the orientation is never a surprise.
  */
 export const DATUM_PLANE_AXES: Readonly<Record<"xy" | "xz" | "yz", { readonly sketchX: string; readonly sketchY: string; readonly normal: string }>> = {
   xy: { sketchX: "world +X", sketchY: "world +Y", normal: "world +Z" },
@@ -20,16 +21,21 @@ export function datumKey(sketch: Pick<WorkbenchSketch, "plane">): "xy" | "xz" | 
   return sketch.plane === "datum:xz" ? "xz" : sketch.plane === "datum:yz" ? "yz" : "xy";
 }
 
+/** The world axes a sketch's X, Y and normal run along, for the plane's convention. */
+export function sketchAxesText(sketch: Pick<WorkbenchSketch, "plane" | "planeConvention">): { readonly sketchX: string; readonly sketchY: string; readonly normal: string } {
+  return sketch.plane === "datum:yz" ? describeYzConvention(usesZUpPlane(sketch)) : DATUM_PLANE_AXES[datumKey(sketch)];
+}
+
 /** One sentence naming the world axes a sketch's X and Y run along, for tooltips and messages. */
-export function describeSketchAxes(sketch: Pick<WorkbenchSketch, "plane">): string {
-  const axes = DATUM_PLANE_AXES[datumKey(sketch)];
+export function describeSketchAxes(sketch: Pick<WorkbenchSketch, "plane" | "planeConvention">): string {
+  const axes = sketchAxesText(sketch);
   return `The sketch X axis runs along ${axes.sketchX}, its Y axis along ${axes.sketchY}, and the sketch faces ${axes.normal}.`;
 }
 
 /** A point of the sketch (u, v in millimetres) in world space, with the sketch's plane offset, tilt or frame applied. */
 export function sketchToWorld(sketch: WorkbenchSketch, u: number, v: number, w = 0): V3 {
   const key = datumKey(sketch);
-  const base: V3 = key === "xz" ? [u, 0, v] : key === "yz" ? [0, v, -u] : [u, v, 0];
+  const base: V3 = key === "xz" ? [u, 0, v] : key === "yz" ? (usesZUpPlane(sketch) ? [0, u, v] : [0, v, -u]) : [u, v, 0];
   const normal = DATUM_PLANE_NORMAL[key];
   const offset = (sketch.planeOffsetMm ?? 0) + w;
   return placePoint([base[0] + normal[0] * offset, base[1] + normal[1] * offset, base[2] + normal[2] * offset], sketch);
@@ -43,7 +49,7 @@ export function worldToSketch(sketch: WorkbenchSketch, point: V3): { readonly u:
   const along = datum[0] * normal[0] + datum[1] * normal[1] + datum[2] * normal[2];
   const w = along - (sketch.planeOffsetMm ?? 0);
   const onPlane: V3 = [datum[0] - normal[0] * along, datum[1] - normal[1] * along, datum[2] - normal[2] * along];
-  return key === "xz" ? { u: onPlane[0], v: onPlane[2], w } : key === "yz" ? { u: -onPlane[2], v: onPlane[1], w } : { u: onPlane[0], v: onPlane[1], w };
+  return key === "xz" ? { u: onPlane[0], v: onPlane[2], w } : key === "yz" ? (usesZUpPlane(sketch) ? { u: onPlane[1], v: onPlane[2], w } : { u: -onPlane[2], v: onPlane[1], w }) : { u: onPlane[0], v: onPlane[1], w };
 }
 
 /** The world direction a sketch's normal points in. */

@@ -7,7 +7,7 @@ import { flangeReliefs, reliefCorners, type ReliefShape, type SheetFrame } from 
 type Point2 = readonly [number, number];
 type Vec3 = readonly [number, number, number];
 
-export type SheetPlane = "xy" | "xz" | "yz";
+export type SheetPlane = "xy" | "xz" | "yz" | "yz-zup";
 
 /**
  * The sketch coordinates (u, v) of a world point or direction for a sketch drawn on `plane`; this inverts the plane placement the
@@ -16,6 +16,7 @@ export type SheetPlane = "xy" | "xz" | "yz";
 export function planeCoordinates(point: Vec3, plane: SheetPlane): Point2 {
   if (plane === "xz") return [point[0], point[2]];
   if (plane === "yz") return [-point[2], point[1]];
+  if (plane === "yz-zup") return [point[1], point[2]];
   return [point[0], point[1]];
 }
 

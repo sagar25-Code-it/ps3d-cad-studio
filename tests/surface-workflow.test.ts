@@ -24,7 +24,7 @@ function apply(project: WorkbenchProject, plan: Planned): WorkbenchProject {
   return plan.operations.reduce<WorkbenchProject>((current, operation) => run(current, operation), project);
 }
 function sketchWith(project: WorkbenchProject, plane: "datum:xy" | "datum:xz" | "datum:yz", offsetMm: number, entities: readonly SketchEntity[], featureId: string): WorkbenchProject {
-  let next = run(project, { kind: "new-design-sketch", plane, ...(offsetMm === 0 ? {} : { offsetMm }) });
+  let next = run(project, { kind: "new-design-sketch", plane, ...(plane === "datum:yz" ? { convention: "legacy" as const } : {}), ...(offsetMm === 0 ? {} : { offsetMm }) });
   for (const entity of entities) next = run(next, { kind: "add-sketch-entity", entity });
   return run(next, { kind: "commit-design-sketch", featureId, name: featureId.split(":")[1]! });
 }

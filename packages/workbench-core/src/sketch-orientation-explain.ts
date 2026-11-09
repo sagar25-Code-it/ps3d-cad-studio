@@ -2,9 +2,9 @@ import { entityNames } from "./sketch-translate.js";
 import type { WorkbenchSketch } from "./types.js";
 
 /**
- * A line that is exactly vertical cannot be made Horizontal by the solver (and an exactly horizontal one cannot be made Vertical): the
- * nearest answer that satisfies the relation is to squash the line to a point, which is refused as a collapse, and the user was told
- * only that "Line 1 would collapse to a point" with the relation list. This names the real cause and the way out.
+ * A line that is exactly vertical is turned a quarter turn when it is made Horizontal (sketch-quarter-turn.ts; likewise an exactly horizontal
+ * one made Vertical). When the other relations on the line do not leave room for that turn the nearest answer is to squash the line to a
+ * point, which is refused as a collapse. This names the real cause and the way out instead of "Line 1 would collapse to a point".
  */
 const EXACT = 1e-6;
 
@@ -27,14 +27,14 @@ export function explainOrientationCollapse(sketch: WorkbenchSketch, relatedIds: 
     const alreadyVertical = Math.abs(dx) <= EXACT * Math.max(1, length);
     const alreadyHorizontal = Math.abs(dy) <= EXACT * Math.max(1, length);
     if (constraint.kind === "horizontal" && alreadyVertical) {
-      return `${names.get(line.id) ?? line.id} is exactly vertical (from ${line.start[0]}, ${line.start[1]} to ${line.end[0]}, ${line.end[1]}), so Horizontal would need a quarter turn, which the solver does not do: the nearest answer it finds squashes the line to a point.`;
+      return `${names.get(line.id) ?? line.id} is exactly vertical (from ${line.start[0]}, ${line.start[1]} to ${line.end[0]}, ${line.end[1]}), so Horizontal would need a quarter turn, and the other relations on it leave no room to turn it: the nearest answer squashes the line to a point.`;
     }
     if (constraint.kind === "vertical" && alreadyHorizontal) {
-      return `${names.get(line.id) ?? line.id} is exactly horizontal (from ${line.start[0]}, ${line.start[1]} to ${line.end[0]}, ${line.end[1]}), so Vertical would need a quarter turn, which the solver does not do: the nearest answer it finds squashes the line to a point.`;
+      return `${names.get(line.id) ?? line.id} is exactly horizontal (from ${line.start[0]}, ${line.start[1]} to ${line.end[0]}, ${line.end[1]}), so Vertical would need a quarter turn, and the other relations on it leave no room to turn it: the nearest answer squashes the line to a point.`;
     }
   }
   return undefined;
 }
 
 /** What to do about it. */
-export const ORIENTATION_RECOVERY = "Turn the line away from the axis first (or draw it at the angle you want), then add the relation; or use Perpendicular or an angle dimension for a quarter turn.";
+export const ORIENTATION_RECOVERY = "Relax the relations that hold the line in place (a Fixed end, a joint to fixed geometry, a length or angle), or draw the line at the angle you want, then add the relation.";

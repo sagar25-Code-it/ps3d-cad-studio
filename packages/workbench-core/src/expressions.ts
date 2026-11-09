@@ -381,6 +381,11 @@ export type ReferenceResolution =
 /** Looks up what a name stands for. The caller decides what exists: user parameters, feature values, anything else. */
 export interface ExpressionEnvironment {
   readonly resolve: (reference: ExpressionReference) => ReferenceResolution;
+  /**
+   * What a plain number beside a length means in a sum, in millimetres per unit. Unset, it is one millimetre (`pin_r + 1` is one more
+   * millimetre). A typed length in an inch document sets 25.4, so `5 + 1 in` is six inches.
+   */
+  readonly bareLengthFactor?: number;
 }
 
 export type EvaluatedExpression =
@@ -441,11 +446,15 @@ function evaluateBinary(node: Extract<ExpressionNode, { type: "binary" }>, envir
     case "-": {
       // A plain number beside a length or an angle takes that unit, so "pin_r + 1" means one more millimetre.
       let dimension: Dimension;
+      let leftValue = left.value;
+      let rightValue = right.value;
+      const factor = environment.bareLengthFactor ?? 1;
+      const isLength = (quantity: Dimension): boolean => quantity.length === 1 && quantity.angle === 0;
       if (sameDimension(left, right)) dimension = left;
-      else if (isScalar(left)) dimension = right;
-      else if (isScalar(right)) dimension = left;
+      else if (isScalar(left)) { dimension = right; if (isLength(right)) leftValue *= factor; }
+      else if (isScalar(right)) { dimension = left; if (isLength(left)) rightValue *= factor; }
       else throw new ExpressionFailure(`Cannot ${node.operator === "+" ? "add" : "subtract"} ${describeDimension(left)} and ${describeDimension(right)}.`, node.operatorAt, 1);
-      return { value: finiteOrFail(node.operator === "+" ? left.value + right.value : left.value - right.value, node.start, span), length: dimension.length, angle: dimension.angle };
+      return { value: finiteOrFail(node.operator === "+" ? leftValue + rightValue : leftValue - rightValue, node.start, span), length: dimension.length, angle: dimension.angle };
     }
     case "*":
       return { value: finiteOrFail(left.value * right.value, node.start, span), length: left.length + right.length, angle: left.angle + right.angle };

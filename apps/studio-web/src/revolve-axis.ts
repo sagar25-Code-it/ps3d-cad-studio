@@ -1,7 +1,8 @@
 import type { DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, RevolveAxisRef } from "../../../packages/workbench-core/src/index.js";
 import type { SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
+import { usesZUpPlane } from "../../../packages/workbench-core/src/index.js";
 import { profileOutlineMm } from "../../../packages/workbench-sketch/src/index.js";
-import { createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
+import { createGeneralSolidBody, storedPlaneOf, type BuildPlane } from "./general-modeling.js";
 import { createThinRevolveBody, startRevolveAt } from "./revolve-thin.js";
 import { datumKey, describeSketchAxes, worldToSketch } from "./sketch-world.js";
 
@@ -140,7 +141,7 @@ export function prepareRevolve(axis: RevolveAxis, profile: SketchProfile, holes:
 }
 
 /** Carries canonical-frame positions (xyz as built on the XY plane) back onto the sketch's own plane. */
-export function carryBack(positionsMm: readonly number[], prepared: PreparedRevolve, plane: SketchPlane): number[] {
+export function carryBack(positionsMm: readonly number[], prepared: PreparedRevolve, plane: BuildPlane): number[] {
   const out: number[] = new Array(positionsMm.length);
   for (let index = 0; index + 2 < positionsMm.length; index += 3) {
     const local: Point2 = [prepared.mirrored ? -positionsMm[index]! : positionsMm[index]!, positionsMm[index + 1]!];
@@ -149,6 +150,7 @@ export function carryBack(positionsMm: readonly number[], prepared: PreparedRevo
     // The same plane mapping the extrusion uses for a point built on the XY plane.
     if (plane === "xz") { out[index] = x; out[index + 1] = -z; out[index + 2] = y; }
     else if (plane === "yz") { out[index] = z; out[index + 1] = y; out[index + 2] = -x; }
+    else if (plane === "yz-zup") { out[index] = z; out[index + 1] = x; out[index + 2] = y; }
     else { out[index] = x; out[index + 1] = y; out[index + 2] = z; }
   }
   return out;
@@ -163,7 +165,7 @@ function flipWinding(indices: readonly number[]): number[] {
 export interface AxisRevolveRequest {
   readonly feature: DesignSolidFeature;
   readonly prepared: PreparedRevolve;
-  readonly plane: SketchPlane;
+  readonly plane: BuildPlane;
   /** How far the turn goes in all, and where on the turn it starts (see revolveSpan). */
   readonly totalDeg: number;
   readonly startDeg: number;
@@ -182,11 +184,11 @@ export async function buildAxisRevolve(request: AxisRevolveRequest): Promise<Axi
   const started = request.startDeg === 0 ? built.body.positionsMm : startRevolveAt(built.body.positionsMm, "xy", request.startDeg);
   const positionsMm = carryBack(started, prepared, request.plane);
   const indices = prepared.mirrored ? flipWinding(built.body.indices) : [...built.body.indices];
-  return { ok: true, body: { ...built.body, positionsMm, indices, feature: { operation: "revolve", plane: request.plane, valueMm: request.totalDeg } } };
+  return { ok: true, body: { ...built.body, positionsMm, indices, feature: { operation: "revolve", plane: storedPlaneOf(request.plane), valueMm: request.totalDeg } } };
 }
 
 /** A one-line description of what a revolve turns about, for the timeline and messages. */
 export function describeRevolveAxis(axis: RevolveAxis, sketchFeature: DesignSketchFeature): string {
   const key = datumKey(sketchFeature.sketch);
-  return axis.label === SKETCH_Y_AXIS.label && key === "yz" ? `${axis.label} (world +Y on the YZ plane; ${describeSketchAxes(sketchFeature.sketch)})` : axis.label;
+  return axis.label === SKETCH_Y_AXIS.label && key === "yz" ? `${axis.label} (world ${usesZUpPlane(sketchFeature.sketch) ? "+Z" : "+Y"} on the YZ plane; ${describeSketchAxes(sketchFeature.sketch)})` : axis.label;
 }

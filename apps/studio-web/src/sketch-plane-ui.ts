@@ -1,4 +1,5 @@
 import { DATUM_PLANE_AXES } from "./sketch-world.js";
+import { describeYzConvention, type SketchPlaneConventionRequest } from "../../../packages/workbench-core/src/index.js";
 import type { SketchDatumPlane, SketchPlaneFrame, SketchPlaneTilt, WorkbenchSketch, WorkspaceId } from "../../../packages/workbench-core/src/index.js";
 
 /**
@@ -15,13 +16,14 @@ export const DATUM_PLANE_NAMES: Readonly<Record<SketchDatumPlane, { readonly nam
 };
 
 /**
- * The sketch X and Y axes of a datum plane in world terms. The world is Z up, so on the Right (YZ) plane the sketch's vertical is world
- * +Y (not up) and its horizontal runs along world -Z; saved projects depend on that mapping, so it is kept and shown wherever a plane
- * is chosen or described (the plane dialog, the status line, the revolve axis choice).
+ * The sketch X and Y axes of a datum plane in world terms. The world is Z up, so a sketch started on the Right (YZ) plane now runs its
+ * vertical along world +Z and its horizontal along world +Y ("z-up", the default here). A sketch saved before that keeps the old mapping
+ * (vertical along world +Y, horizontal along -Z: "legacy"), and says so wherever a plane is chosen or described (the plane dialog, the
+ * status line, the revolve axis choice).
  */
-export function sketchAxesInWorld(plane: SketchDatumPlane): { readonly x: string; readonly y: string; readonly sentence: string } {
+export function sketchAxesInWorld(plane: SketchDatumPlane, convention: SketchPlaneConventionRequest = "z-up"): { readonly x: string; readonly y: string; readonly sentence: string } {
   const key = plane === "datum:xz" ? "xz" : plane === "datum:yz" ? "yz" : "xy";
-  const axes = DATUM_PLANE_AXES[key];
+  const axes = key === "yz" ? describeYzConvention(convention === "z-up") : DATUM_PLANE_AXES[key];
   return { x: axes.sketchX, y: axes.sketchY, sentence: `Sketch X runs along ${axes.sketchX}, sketch Y along ${axes.sketchY}` };
 }
 
@@ -30,7 +32,12 @@ export function datumPlaneHint(plane: SketchDatumPlane): string {
   return `${DATUM_PLANE_NAMES[plane].hint} · ${sketchAxesInWorld(plane).sentence}`;
 }
 
-export type SketchPlaneShape = Pick<WorkbenchSketch, "plane" | "planeOffsetMm" | "planeTilt" | "planeFrame">;
+export type SketchPlaneShape = Pick<WorkbenchSketch, "plane" | "planeOffsetMm" | "planeTilt" | "planeFrame"> & { readonly planeConvention?: WorkbenchSketch["planeConvention"] | undefined };
+
+/** The convention a sketch has, as an operation asks for it. */
+export function conventionOf(sketch: { readonly planeConvention?: WorkbenchSketch["planeConvention"] | undefined }): SketchPlaneConventionRequest {
+  return sketch.planeConvention === "z-up" ? "z-up" : "legacy";
+}
 
 export interface SketchPlaneDescription {
   /** "Top (XY)" or "Plane through three points". */
@@ -65,7 +72,7 @@ export function describeSketchPlane(sketch: SketchPlaneShape): SketchPlaneDescri
     details,
     chip: `Sketch plane: ${[name, ...details].join(" · ")}`,
     // A plane through three points has its own axes (shown by the canvas); a datum plane says where its X and Y point in the world.
-    status: `Sketch plane: ${[name, ...details].join(", ")}.${sketch.planeFrame === undefined && sketch.planeTilt === undefined ? ` ${sketchAxesInWorld(sketch.plane).sentence}.` : ""}`
+    status: `Sketch plane: ${[name, ...details].join(", ")}.${sketch.planeFrame === undefined && sketch.planeTilt === undefined ? ` ${sketchAxesInWorld(sketch.plane, conventionOf(sketch)).sentence}.` : ""}`
   };
 }
 
@@ -80,6 +87,8 @@ export interface ExistingSketchPlane {
   readonly offsetMm: number;
   readonly tilt?: SketchPlaneTilt;
   readonly frame?: SketchPlaneFrame;
+  /** The plane mapping that sketch has, so a new sketch on "the same plane" lines up with it. */
+  readonly convention: SketchPlaneConventionRequest;
   /** "Top (XY) · offset 25 mm". */
   readonly description: string;
 }
@@ -92,7 +101,7 @@ interface TimelineLike {
 }
 
 function placementKey(sketch: SketchPlaneShape): string {
-  return JSON.stringify([sketch.plane, sketch.planeOffsetMm ?? 0, sketch.planeTilt ?? null, sketch.planeFrame ?? null]);
+  return JSON.stringify([sketch.plane, sketch.planeOffsetMm ?? 0, sketch.planeTilt ?? null, sketch.planeFrame ?? null, sketch.plane === "datum:yz" ? conventionOf(sketch) : null]);
 }
 
 /**
@@ -113,6 +122,7 @@ export function existingSketchPlanes(features: readonly TimelineLike[], current?
       plane: feature.sketch.plane,
       sketchPlane: feature.sketch.plane === "datum:xz" ? "xz" : feature.sketch.plane === "datum:yz" ? "yz" : "xy",
       offsetMm: feature.sketch.planeOffsetMm ?? 0,
+      convention: conventionOf(feature.sketch),
       ...(feature.sketch.planeTilt === undefined ? {} : { tilt: feature.sketch.planeTilt }),
       ...(feature.sketch.planeFrame === undefined ? {} : { frame: feature.sketch.planeFrame }),
       description: [describeSketchPlane(feature.sketch).name, ...describeSketchPlane(feature.sketch).details].join(" · ")

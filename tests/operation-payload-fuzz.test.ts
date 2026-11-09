@@ -153,11 +153,11 @@ export const operationPayloadFuzzTests: readonly TestCase[] = [
       const bad: readonly [string, Record<string, Json>, RegExp][] = [
         ["no id", { kind: "horizontal", entityIds: ["entity:a"] }, /no id/u],
         ["no entityIds", { id: "constraint:z", kind: "horizontal" }, /no entityIds/u],
-        ["entityIds as text", { id: "constraint:z", kind: "horizontal", entityIds: "entity:a" }, /entityIds to be a list/u],
-        ["null id", { id: null, kind: "horizontal", entityIds: ["entity:a"] }, /not a valid stable id/u],
-        ["null entityIds", { id: "constraint:z", kind: "horizontal", entityIds: null }, /entityIds to be a list/u],
-        ["null points", { id: "constraint:z", kind: "coincident", entityIds: ["entity:a", "entity:b"], points: null }, /points to be a list/u],
-        ["entityIds with a number", { id: "constraint:z", kind: "parallel", entityIds: ["entity:a", 5] }, /not a curve id/u]
+        ["entityIds as text", { id: "constraint:z", kind: "horizontal", entityIds: "entity:a" }, /entityIds (to be|must be) a list/u],
+        ["null id", { id: null, kind: "horizontal", entityIds: ["entity:a"] }, /(not a valid stable id|id must be a stable id)/u],
+        ["null entityIds", { id: "constraint:z", kind: "horizontal", entityIds: null }, /entityIds (to be|must be) a list/u],
+        ["null points", { id: "constraint:z", kind: "coincident", entityIds: ["entity:a", "entity:b"], points: null }, /points (to be|must be) a list/u],
+        ["entityIds with a number", { id: "constraint:z", kind: "parallel", entityIds: ["entity:a", 5] }, /(not a curve id|must be a curve id)/u]
       ];
       const guide = await handleWorkbenchMcpTool("ps3d_guide", {});
       const manifestSha256 = guide.structuredContent["manifestSha256"];

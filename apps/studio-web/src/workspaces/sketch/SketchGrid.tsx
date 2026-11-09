@@ -7,7 +7,7 @@ export interface SketchGridProps {
   readonly majorMm: number;
   readonly showGrid: boolean;
   /** Which world axis the sketch's horizontal and vertical directions run along on the active plane. */
-  readonly horizontalAxis: "x" | "z";
+  readonly horizontalAxis: "x" | "y" | "z";
   readonly verticalAxis: "y" | "z";
   readonly horizontalLabel: string;
   readonly verticalLabel: string;

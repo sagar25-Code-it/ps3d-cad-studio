@@ -131,6 +131,13 @@ import { sketchUi2EditTests } from "./sketch-ui2-edit.test.js";
 import { sketchUi2InputTests } from "./sketch-ui2-input.test.js";
 import { sketchUi2WorkspaceTests } from "./sketch-ui2-workspace.test.js";
 import { sketchUi2CanvasTests } from "./sketch-ui2-canvas.test.js";
+import { pipeline3IoTests } from "./pipeline3-io.test.js";
+import { pipeline3PayloadTests } from "./pipeline3-payload.test.js";
+import { pipeline3MeshTests } from "./pipeline3-mesh.test.js";
+import { pipeline3TimelineTests } from "./pipeline3-timeline.test.js";
+import { pipeline3UnitTests } from "./pipeline3-units.test.js";
+import { pipeline3SweepPathTests } from "./pipeline3-sweep-path.test.js";
+import { pipeline3PlaneTests } from "./pipeline3-plane.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import { regionWave3Tests } from "./region-wave3.test.js";
@@ -279,6 +286,13 @@ const tests: readonly TestCase[] = [
   ...sketchUi2InputTests,
   ...sketchUi2WorkspaceTests,
   ...sketchUi2CanvasTests,
+  ...pipeline3IoTests,
+  ...pipeline3PayloadTests,
+  ...pipeline3MeshTests,
+  ...pipeline3TimelineTests,
+  ...pipeline3UnitTests,
+  ...pipeline3SweepPathTests,
+  ...pipeline3PlaneTests,
 ];
 let failures = 0;
 

@@ -13,6 +13,7 @@ function placeOnPlane(positions: readonly number[], plane: TessellatePlane): num
     const y = positions[i + 1]!;
     const z = positions[i + 2]!;
     if (plane === "xz") out.push(x, -z, y);
+    else if (plane === "yz-zup") out.push(z, x, y);
     else out.push(z, y, -x);
   }
   return out;

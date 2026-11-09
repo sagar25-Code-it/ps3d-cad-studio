@@ -20,7 +20,7 @@ import {
   type SketchProfile,
   type SketchTool
 } from "../../../../packages/workbench-sketch/src/index.js";
-import { gridSteps, sketchToScreen } from "../../../../packages/workbench-sketch/src/camera.js";
+import { sketchToScreen } from "../../../../packages/workbench-sketch/src/camera.js";
 import { buildFitSpline } from "../../../../packages/workbench-sketch/src/spline-fit.js";
 import { advanceArcSweepTrack, arcSweepDirection, startArcSweepTrack, type ArcSweepTrack } from "../../../../packages/workbench-sketch/src/arc-sweep.js";
 import { mergeTyped, typedIntentConstraints } from "../../../../packages/workbench-sketch/src/typed-intent.js";
@@ -38,8 +38,8 @@ import { copySketchSelection, cutSketchSelection, nextPasteNumber, parseClipboar
 import { keyLabelForCommand, sketchHotkeyHelp, type SketchCommandId, type SketchHotkeyAction } from "../../../../packages/workbench-sketch/src/hotkeys.js";
 import { DRAW_CONSTRUCTION_OFF_MESSAGE, DRAW_CONSTRUCTION_ON_MESSAGE, entityForDrawMode, planForDrawMode } from "../../../../packages/workbench-sketch/src/draw-construction.js";
 import { findTextObject, planSketchText, planSketchTextEdit, textSpecFromFields } from "../../../../packages/workbench-sketch/src/sketch-text.js";
-import type { SketchTextObject, WorkbenchResult } from "../../../../packages/workbench-core/src/index.js";
-import { isSketchDatumEntityId } from "../../../../packages/workbench-core/src/index.js";
+import type { DesignSketchFeature, SketchTextObject, WorkbenchResult } from "../../../../packages/workbench-core/src/index.js";
+import { isSketchDatumEntityId, usesZUpPlane } from "../../../../packages/workbench-core/src/index.js";
 import { SketchExportPanel, SketchImportPanel, SketchUnderlayPanel, type UnderlayPickState } from "./sketch/SketchExchangePanel.js";
 import { SketchPatternPanel } from "./sketch/SketchPatternPanel.js";
 import { useDimensionOffsets } from "./sketch/useDimensionOffsets.js";
@@ -47,6 +47,8 @@ import { MEASURE_CONTEXT, effectiveSolidResult, modalModeEnded, type ModalContex
 import { circleDimensionFacts, circleDimensionRequest, fixesBlockingDimension } from "../../../../packages/workbench-sketch/src/dimension-edit-model.js";
 import { isEllipseRadiusConstraint, isPointDistanceConstraint } from "../../../../packages/workbench-sketch/src/point-distance-layout.js";
 import { convertLengthField, parseLengthField } from "../../../../packages/workbench-sketch/src/edit-fields.js";
+import { defaultLengthText, gridStepsForUnit, lengthTextFromDisplay, lengthTextToDisplay } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
+import { WORKING_PATH_SKETCH, chainFromCurve, describePath, pathCurvesOf, pathSketchChoices, pathSketchOf } from "../sweep-path-ui.js";
 import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
 import { autoConstraintsFor, dropConstraintFor, inheritedTangentDirection, tangentArcPoints, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
@@ -63,7 +65,7 @@ import { entitiesInSelectionBox, selectionBoxMode, selectionRect, type SketchSel
 import { DEFAULT_CORNER_PARAMS, DEFAULT_JOG_PARAMS, SKETCH_EDIT_TOOL_LABELS, SketchEditPanel, SketchRelationList, isClickEditTool, parseDecimal, type CornerParams, type JogParams, type SketchEditToolId, type StretchWindowRect } from "./SketchEditPanel.js";
 import { SketchRepairPanel } from "./SketchRepairPanel.js";
 import { ReachOptions } from "./ReachOptions.js";
-import { DEFAULT_REACH, buildReach, isReachTarget, type ReachSettings } from "../reach-settings.js";
+import { DEFAULT_REACH, buildReach, isReachTarget, validReach, type ReachSettings } from "../reach-settings.js";
 import { SketchGrid } from "./sketch/SketchGrid.js";
 import { ConstraintExtras, ExtraDimensionMarks, type ConstraintExtrasBridge, type SetDimensionRequest } from "./sketch/ConstraintExtras.js";
 import { angleDimensionLayout, type DimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
@@ -94,7 +96,7 @@ import { sketchEntityNames } from "../../../../packages/workbench-core/src/sketc
 import { useSketchPref } from "./sketch/useSketchPref.js";
 import type { DisplayUnit } from "../../../../packages/model-schema/src/index.js";
 import { formatLength, formatLengthWithUnit, parseAngleText, setDimensionLabelUnit, unitWord, type SketchLengthUnit } from "../../../../packages/workbench-sketch/src/sketch-units.js";
-import { describeSketchPlane, sketchAxesInWorld } from "../sketch-plane-ui.js";
+import { conventionOf, describeSketchPlane, sketchAxesInWorld } from "../sketch-plane-ui.js";
 import { DEFAULT_PALETTE_LAYOUT } from "./sketch/sketch-prefs.js";
 import {
   type NavigationMode,
@@ -156,11 +158,14 @@ interface DimensionEditState {
 }
 
 /** How each datum plane maps the sketch's horizontal and vertical directions onto the world axes (see general-modeling.ts placeOnPlane). */
-const PLANE_INFO: Readonly<Record<PlaneKey, { readonly name: string; readonly horizontal: "x" | "z"; readonly vertical: "y" | "z"; readonly horizontalLabel: string; readonly verticalLabel: string }>> = {
+const PLANE_INFO: Readonly<Record<PlaneKey, { readonly name: string; readonly horizontal: "x" | "y" | "z"; readonly vertical: "y" | "z"; readonly horizontalLabel: string; readonly verticalLabel: string }>> = {
   xy: { name: "Top (XY)", horizontal: "x", vertical: "y", horizontalLabel: "X", verticalLabel: "Y" },
   xz: { name: "Front (XZ)", horizontal: "x", vertical: "z", horizontalLabel: "X", verticalLabel: "Z" },
   yz: { name: "Right (YZ)", horizontal: "z", vertical: "y", horizontalLabel: "−Z", verticalLabel: "Y" }
 };
+
+/** The Right (YZ) plane of a Z-up sketch: horizontal along world +Y, vertical along +Z (plane-convention.ts). Older sketches keep PLANE_INFO.yz. */
+const PLANE_INFO_YZ_ZUP: (typeof PLANE_INFO)["yz"] = { name: "Right (YZ)", horizontal: "y", vertical: "z", horizontalLabel: "Y", verticalLabel: "Z" };
 
 function planeKeyOf(plane: SketchDatumPlane): PlaneKey {
   return plane === "datum:xz" ? "xz" : plane === "datum:yz" ? "yz" : "xy";
@@ -203,6 +208,10 @@ interface SketchWorkspaceProps {
   readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null) => void;
   readonly onMessage: (message: string) => void;
   readonly optionsRevealRequest: number;
+  /** The finished sketches of the timeline: a sweep path may come from one of them (another plane). */
+  readonly finishedSketches?: readonly DesignSketchFeature[];
+  /** The timeline id of the sketch being edited, when it was opened from the timeline (it is then not offered as a separate path sketch). */
+  readonly workingTimelineId?: string | null;
   readonly onCreateSolid: (
     profileIds: readonly string[],
     plane: PlaneKey,
@@ -220,6 +229,8 @@ interface SketchWorkspaceProps {
       readonly thinSide?: "inside" | "outside" | "center";
       readonly sweepDirectionMm?: readonly [number, number, number];
       readonly sweepPathEntityId?: string;
+      /** A chained path: the sketch it comes from (WORKING_PATH_SKETCH for the one being drawn) and its curves. */
+      readonly sweepPathSource?: { readonly sketchId: string; readonly entityIds: readonly string[] };
       readonly sweepTwistDeg?: number;
       readonly sweepFrameTransport?: boolean;
       readonly loftTopScale?: number;
@@ -305,6 +316,8 @@ interface BoxGesture {
   readonly profileId: string | undefined;
   dragging: boolean;
 }
+
+const NO_FINISHED_SKETCHES: readonly DesignSketchFeature[] = [];
 
 export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element {
   const [pending, setPending] = useState<readonly Vec2[]>([]);
@@ -396,9 +409,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setStretchWindowState((current) => (current !== undefined && next !== undefined && current.x1 === next.x1 && current.y1 === next.y1 && current.x2 === next.x2 && current.y2 === next.y2) || (current === undefined && next === undefined) ? current : next);
   }, []);
   /** Jog values typed in the Jog panel, read when a line is clicked. */
-  const [jogParams, setJogParams] = useSketchPref<JogParams>("jogParams", { offset: convertLengthField(DEFAULT_JOG_PARAMS.offset, "mm", props.displayUnit ?? "mm"), width: convertLengthField(DEFAULT_JOG_PARAMS.width, "mm", props.displayUnit ?? "mm") });
+  const [jogParams, setJogParams] = useSketchPref<JogParams>("jogParams", { offset: defaultLengthText(Number(DEFAULT_JOG_PARAMS.offset), props.displayUnit ?? "mm"), width: defaultLengthText(Number(DEFAULT_JOG_PARAMS.width), props.displayUnit ?? "mm") });
   /** Fillet and chamfer values typed in their panel, read when a vertex is clicked. */
-  const [cornerParams, setCornerParams] = useState<CornerParams>(() => ({ radius: convertLengthField(DEFAULT_CORNER_PARAMS.radius, "mm", props.displayUnit ?? "mm"), bevel: convertLengthField(DEFAULT_CORNER_PARAMS.bevel, "mm", props.displayUnit ?? "mm") }));
+  const [cornerParams, setCornerParams] = useState<CornerParams>(() => ({ radius: defaultLengthText(Number(DEFAULT_CORNER_PARAMS.radius), props.displayUnit ?? "mm"), bevel: defaultLengthText(Number(DEFAULT_CORNER_PARAMS.bevel), props.displayUnit ?? "mm") }));
   /** The ghost of what the open edit tool would do for the values typed now. */
   const [editPreview, setEditPreview] = useState<readonly SketchEntity[]>([]);
   /** Power Trim: the path a press-and-drag has swept so far while the Trim tool is active. */
@@ -433,7 +446,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [sweepDy, setSweepDy] = useSketchPref("sweepDy", "0");
   const [sweepDz, setSweepDz] = useSketchPref("sweepDz", "1");
   const [sweepMode, setSweepMode] = useSketchPref<"direction" | "path">("sweepMode", "direction");
-  const [sweepPathEntityId, setSweepPathEntityId] = useSketchPref<string>("sweepPathEntityId", "", { durable: false });
+  const [sweepPathSketch, setSweepPathSketch] = useSketchPref<string>("sweepPathSketch", WORKING_PATH_SKETCH, { durable: false });
+  const [sweepPathIds, setSweepPathIds] = useSketchPref<readonly string[]>("sweepPathIds", [], { durable: false });
   const [loftTopScale, setLoftTopScale] = useSketchPref("loftTopScale", "0.7");
   const [loftMode, setLoftMode] = useSketchPref<"scaled" | "two-profile">("loftMode", "scaled");
   const [loftContinuity, setLoftContinuity] = useSketchPref<"position" | "tangent" | "curvature">("loftContinuity", "position");
@@ -461,11 +475,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [shellOpenFace, setShellOpenFace] = useSketchPref<"top" | "bottom" | "none">("shellOpenFace", "top");
   const [draftAngle, setDraftAngle] = useSketchPref("draftAngle", "5");
   const [draftNeutralFace, setDraftNeutralFace] = useSketchPref<"top" | "bottom">("draftNeutralFace", "bottom");
-  const [reach, setReach] = useSketchPref<ReachSettings>("reach", DEFAULT_REACH);
+  const [storedReach, setReach] = useSketchPref<ReachSettings>("reach", DEFAULT_REACH);
   // Join and Cut only mean something with a solid to change, for an extrude or revolve. The choice is remembered for the session and project only (a Cut
   // remembered across projects left Create solid disabled in a new project with nothing to cut from) and reads as New body whenever it cannot apply.
   const [storedResult, setSolidResult] = useSketchPref<"new-body" | "join" | "cut">(`solidResult:${props.projectId}`, "new-body", { durable: false });
   const solidResult = effectiveSolidResult(storedResult, props.solidBodies.length, solidOp);
+  // A remembered "to" extent reads as a distance in a project with no solid to reach (the height field stays usable).
+  const reach = solidOp === "extrude" || solidOp === "revolve" ? validReach(storedReach, solidOp, props.targetBodies.length, solidResult === "cut" && props.solidBodies.length > 0) : storedReach;
   const resultProject = useRef(props.projectId);
   useEffect(() => {
     if (resultProject.current !== props.projectId) { resultProject.current = props.projectId; setSolidResult("new-body"); }
@@ -505,8 +521,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const before = previousUnit.current;
     if (before === unit) return;
     previousUnit.current = unit;
-    setJogParams((current) => ({ offset: convertLengthField(current.offset, before, unit), width: convertLengthField(current.width, before, unit) }));
-    setCornerParams((current) => ({ radius: convertLengthField(current.radius, before, unit), bevel: convertLengthField(current.bevel, before, unit) }));
+    // A value still at the starting default moves to the starting default of the new unit (2 mm to 1/16 in); anything typed is converted as it is.
+    const moved = (current: string, defaultMm: string): string => (parseLengthField(current, before) === Number(defaultMm) ? defaultLengthText(Number(defaultMm), unit) : convertLengthField(current, before, unit));
+    setJogParams((current) => ({ offset: moved(current.offset, DEFAULT_JOG_PARAMS.offset), width: moved(current.width, DEFAULT_JOG_PARAMS.width) }));
+    setCornerParams((current) => ({ radius: moved(current.radius, DEFAULT_CORNER_PARAMS.radius), bevel: moved(current.bevel, DEFAULT_CORNER_PARAMS.bevel) }));
   }, [unit]);
   const [selectedProfileIds, setSelectedProfileIds] = useState<readonly string[]>([]);
   // What a revolve turns about: "" is the sketch Y axis, "x" the sketch X axis, otherwise the ID of a line of this sketch (a centerline or construction line).
@@ -535,7 +553,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [props.optionsRevealRequest]);
 
   const plane = planeKeyOf(props.sketch.plane);
-  const planeInfo = PLANE_INFO[plane];
+  const planeInfo = plane === "yz" && usesZUpPlane(props.sketch) ? PLANE_INFO_YZ_ZUP : PLANE_INFO[plane];
   const planeWhere = planeWorldCoordinate(props.sketch.plane, props.sketch.planeOffsetMm ?? 0);
   const planePlacement = props.sketch.planeFrame !== undefined ? "plane through three points"
     : planeWhere.valueMm === 0 ? `${planeInfo.name} plane` : `${planeInfo.name} plane at ${planeWhere.axisName} = ${Number(planeWhere.valueMm.toFixed(3))} mm`;
@@ -567,7 +585,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [visibleEntities]);
   const camera = useSketchCamera(fitExtents, `${props.projectId}:${props.sketch.plane}`, props.fitSerial);
   const px = camera.mmPerPx;
-  const grid = gridSteps(props.sketch.gridMm, px);
+  const grid = gridStepsForUnit(props.sketch.gridMm, px, props.displayUnit ?? "mm");
   // Friendly names for tooltips, chips and messages (derived from sketch order; see workbench-core/sketch-names.ts).
   const entityNames = useMemo(() => sketchEntityNames(workingSketch.entities), [workingSketch.entities]);
   const selectedEntity = workingSketch.entities.find((entity) => entity.id === selectionIds.at(-1));
@@ -655,9 +673,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // Remembered picks that name geometry (sweep path, loft rail) are dropped quietly when the sketch they pointed into is gone.
   useEffect(() => {
     const present = (id: string): boolean => id === "" || props.sketch.entities.some((entity) => entity.id === id);
-    if (!present(sweepPathEntityId)) setSweepPathEntityId("");
     if (!present(loftRailEntityId)) setLoftRailEntityId("");
-  }, [props.sketch.entities, sweepPathEntityId, loftRailEntityId]);
+  }, [props.sketch.entities, loftRailEntityId]);
+  // The sweep path: a sketch (this one, or a finished one on another plane) and the chain of its curves. A choice that no longer exists reads as this sketch.
+  const finishedSketches = props.finishedSketches ?? NO_FINISHED_SKETCHES;
+  const pathChoices = useMemo(() => pathSketchChoices(finishedSketches, props.sketch, props.workingTimelineId ?? null), [finishedSketches, props.sketch, props.workingTimelineId]);
+  const pathSketchId = pathChoices.some((choice) => choice.id === sweepPathSketch) ? sweepPathSketch : WORKING_PATH_SKETCH;
+  const pathSketch = pathSketchOf(pathSketchId, finishedSketches, props.sketch) ?? props.sketch;
+  const pathCurves = useMemo(() => pathCurvesOf(pathSketch), [pathSketch]);
+  const pathIds = useMemo(() => sweepPathIds.filter((id) => pathCurves.some((curve) => curve.id === id)), [sweepPathIds, pathCurves]);
+  const pathReport = useMemo(() => describePath(pathSketch, pathIds, pathChoices.find((choice) => choice.id === pathSketchId)?.name), [pathSketch, pathIds, pathChoices, pathSketchId]);
   const mirrorGhosts = useMemo(
     () => (dynamicMirrorEntity === undefined ? [] : mirrorImages(dynamicMirrorEntity, [...(previewEntity === undefined ? [] : [previewEntity]), ...(previewShape?.entities ?? [])])),
     [dynamicMirrorEntity, previewEntity, previewShape]
@@ -2164,12 +2189,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {!paletteLayout.collapsed && <>
         <PaletteToggle label="Sketch grid" active={props.viewportState.gridVisible} onToggle={props.onGrid} />
         <PaletteToggle label={`Snap${keyLabelForCommand("toggle-snap", sketchKeymap) === undefined ? "" : ` (${keyLabelForCommand("toggle-snap", sketchKeymap)})`}`} active={snapEnabled} onToggle={setSnapEnabled} />
-        <SketchInputPalette settings={assist} gridMm={grid.minorMm} onChange={updateAssist} onOpenShortcuts={() => setShortcutEditorOpen(true)} />
+        <SketchInputPalette settings={assist} gridMm={grid.minorMm} unit={unit} onChange={updateAssist} onOpenShortcuts={() => setShortcutEditorOpen(true)} />
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
         <PaletteToggle label={`Draw as construction${keyHint("toggle-draw-construction")}`} active={drawAsConstruction} onToggle={(next) => { setDrawAsConstruction(next); props.onMessage(next ? DRAW_CONSTRUCTION_ON_MESSAGE : DRAW_CONSTRUCTION_OFF_MESSAGE); }} />
         {props.tool === "polygon" && <label className="palette-number"><span>Polygon sides</span><input type="number" min={POLYGON_MIN_SIDES} max={POLYGON_MAX_SIDES} step={1} value={polygonSides} aria-label="Number of polygon sides" onChange={(event) => setPolygonSides(event.target.value)} /></label>}
         {props.tool === "polygon" && <label className="palette-number"><span>Polygon size by</span><select value={polygonMode} aria-label="How the polygon is sized" title="Inscribed: centre, then a corner. Circumscribed: centre, then the middle of a side. Edge: the two ends of one side." onChange={(event) => setPolygonMode(parsePolygonMode(event.target.value))}>{POLYGON_MODES.map((mode) => <option key={mode} value={mode}>{POLYGON_MODE_LABELS[mode]}</option>)}</select></label>}
-        <SketchCurveOptionsPanel tool={props.tool} fields={curveFields} onChange={setCurveFields} blockNames={blockNames} selectedCount={selectedEntities.length} onSaveBlock={saveSelectionAsBlock} textEdit={textEditId === null ? undefined : { onApply: () => placeText(), onCancel: () => { setTextEditId(null); props.onMessage("Text editing cancelled."); } }} />
+        <SketchCurveOptionsPanel unit={unit} tool={props.tool} fields={curveFields} onChange={setCurveFields} blockNames={blockNames} selectedCount={selectedEntities.length} onSaveBlock={saveSelectionAsBlock} textEdit={textEditId === null ? undefined : { onApply: () => placeText(), onCancel: () => { setTextEditId(null); props.onMessage("Text editing cancelled."); } }} />
         {props.tool === "select" && selectedEntity !== undefined && findTextObject(props.sketch, selectedEntity.id) !== undefined && <button className="palette-action" title="Re-open this text (or double-click it)" onClick={() => startTextEdit(findTextObject(props.sketch, selectedEntity.id)!)}><CommandIcon name="edit" />Edit text</button>}
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
@@ -2209,8 +2234,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="sheet-flange">Sheet metal: flange</option>
               <option value="sheet-hem">Sheet metal: hem</option>
             </select>
-            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? "Sweep distance in millimetres" : "Height in millimetres"} type="number" min={solidOp === "revolve" ? 1 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : 1} value={solidValue} disabled={cutThroughAll || reachesTarget} onChange={(event) => setSolidValue(event.target.value)} />
-            <small>{solidOp === "revolve" ? "°" : "mm"}</small>
+            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? `Sweep distance in ${unitWord(unit)}` : `Height in ${unitWord(unit)}`} type="number" min={solidOp === "revolve" ? 1 : unit === "in" ? 0.005 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : unit === "in" ? 0.125 : 1} value={solidOp === "revolve" ? solidValue : lengthTextToDisplay(solidValue, unit)} disabled={cutThroughAll || reachesTarget} onChange={(event) => setSolidValue(solidOp === "revolve" ? event.target.value : lengthTextFromDisplay(event.target.value, unit))} />
+            <small>{solidOp === "revolve" ? "°" : unit}</small>
           </div>
           <small className="make-solid-plane">On the {planePlacement}</small>
           <div className="make-solid-row" aria-label="Result of the feature">
@@ -2230,8 +2255,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           {solidOp === "revolve" && <div className="make-solid-row" aria-label="Revolve axis">
             <small>Axis</small>
             <select aria-label="Revolve axis" value={props.sketch.entities.some((entity) => entity.id === revolveAxisChoice) || revolveAxisChoice === "x" ? revolveAxisChoice : ""} onChange={(event) => setRevolveAxisChoice(event.target.value)}>
-              <option value="">Sketch Y axis ({sketchAxesInWorld(props.sketch.plane).y})</option>
-              <option value="x">Sketch X axis ({sketchAxesInWorld(props.sketch.plane).x})</option>
+              <option value="">Sketch Y axis ({sketchAxesInWorld(props.sketch.plane, conventionOf(props.sketch)).y})</option>
+              <option value="x">Sketch X axis ({sketchAxesInWorld(props.sketch.plane, conventionOf(props.sketch)).x})</option>
               {props.sketch.entities.filter((entity) => entity.kind === "line").map((entity, index) => <option key={entity.id} value={entity.id}>{entity.construction ? "Construction line" : "Line"} {index + 1} ({shortId(entity.id)})</option>)}
             </select>
             <small>{describeSketchAxes(props.sketch)}</small>
@@ -2249,12 +2274,22 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             <input aria-label="Sweep direction Y" type="number" step={0.1} value={sweepDy} onChange={(event) => setSweepDy(event.target.value)} />
             <input aria-label="Sweep direction Z" type="number" step={0.1} value={sweepDz} onChange={(event) => setSweepDz(event.target.value)} />
           </div>}
-          {solidOp === "sweep" && sweepMode === "path" && <div className="make-solid-row" aria-label="Sweep path entity">
-            <small>Path</small>
-            <select aria-label="Sweep path entity" value={sweepPathEntityId} onChange={(event) => setSweepPathEntityId(event.target.value)}>
-              <option value="">(pick a line / arc / spline)</option>
-              {props.sketch.entities.filter((entity) => (entity.kind === "line" || entity.kind === "arc" || entity.kind === "spline") && entity.visible !== false).map((entity) => <option key={entity.id} value={entity.id}>{entity.kind} · {entity.id.slice(-8)}</option>)}
+          {solidOp === "sweep" && sweepMode === "path" && <div className="make-solid-row" aria-label="Sweep path sketch">
+            <small>Path sketch</small>
+            <select aria-label="Sweep path sketch" value={pathSketchId} onChange={(event) => { setSweepPathSketch(event.target.value); setSweepPathIds([]); }}>
+              {pathChoices.map((choice) => <option key={choice.id} value={choice.id}>{choice.name} ({choice.curves} curve{choice.curves === 1 ? "" : "s"})</option>)}
             </select>
+          </div>}
+          {solidOp === "sweep" && sweepMode === "path" && <div className="make-solid-row sweep-path-curves" aria-label="Sweep path curves">
+            <small>Path curves</small>
+            {pathCurves.length === 0
+              ? <small>This sketch has no lines, arcs or splines to follow.</small>
+              : pathCurves.map((curve) => <label key={curve.id} className="check-row"><input type="checkbox" aria-label={`Path curve ${curve.label}`} checked={pathIds.includes(curve.id)} onChange={(event) => setSweepPathIds(event.target.checked ? [...pathIds, curve.id] : pathIds.filter((id) => id !== curve.id))} /> {curve.label}</label>)}
+            <button type="button" className="palette-action" aria-label="Chain the connected curves of the path" disabled={pathCurves.length === 0 || (pathIds.length === 0 && !(pathSketchId === WORKING_PATH_SKETCH && selectedEntity !== undefined && pathCurves.some((curve) => curve.id === selectedEntity.id)))} title="Adds every curve that continues the checked one end to end" onClick={() => {
+              const seed = pathIds[0] ?? (pathSketchId === WORKING_PATH_SKETCH ? selectedEntity?.id : undefined);
+              if (seed !== undefined) setSweepPathIds(chainFromCurve(pathSketch, seed));
+            }}>Chain connected curves</button>
+            <small className={pathReport.ok ? "" : "profile-help"}>{pathReport.ok ? `${pathReport.curves} curve${pathReport.curves === 1 ? "" : "s"}, ${lengthText(pathReport.lengthMm)} ${unit} along the path` : pathReport.message}</small>
           </div>}
           {solidOp === "loft" && <div className="make-solid-row" aria-label="Loft mode">
             <select aria-label="Loft mode" value={loftMode} onChange={(event) => setLoftMode(event.target.value as "scaled" | "two-profile")}>
@@ -2389,10 +2424,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             if (reachResult !== undefined && !reachResult.ok) { props.onMessage(reachResult.message); return; }
             const sweepTwistValue = Number(sweepTwist);
             const loftTangencyWeightValue = Number(loftTangencyWeight);
+            if (solidOp === "sweep" && sweepMode === "path" && !pathReport.ok) { props.onMessage(pathReport.message); return; }
             const advanced = solidOp === "sweep"
               ? {
-                ...(sweepMode === "path" && sweepPathEntityId !== ""
-                  ? { sweepPathEntityId, ...(sweepFrameTransport ? { sweepFrameTransport: true } : {}) }
+                ...(sweepMode === "path"
+                  ? { sweepPathSource: { sketchId: pathSketchId, entityIds: pathIds }, ...(sweepFrameTransport ? { sweepFrameTransport: true } : {}) }
                   : { sweepDirectionMm: [Number(sweepDx), Number(sweepDy), Number(sweepDz)] as const }),
                 ...(Number.isFinite(sweepTwistValue) && sweepTwistValue !== 0 ? { sweepTwistDeg: sweepTwistValue } : {})
               }
