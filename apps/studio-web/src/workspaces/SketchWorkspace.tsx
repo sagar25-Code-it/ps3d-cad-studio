@@ -38,7 +38,7 @@ import { copySketchSelection, cutSketchSelection, nextPasteNumber, parseClipboar
 import { keyLabelForCommand, sketchHotkeyHelp, type SketchCommandId, type SketchHotkeyAction } from "../../../../packages/workbench-sketch/src/hotkeys.js";
 import { DRAW_CONSTRUCTION_OFF_MESSAGE, DRAW_CONSTRUCTION_ON_MESSAGE, entityForDrawMode, planForDrawMode } from "../../../../packages/workbench-sketch/src/draw-construction.js";
 import { findTextObject, planSketchText, planSketchTextEdit, textSpecFromFields } from "../../../../packages/workbench-sketch/src/sketch-text.js";
-import type { SketchTextObject, WorkbenchResult } from "../../../../packages/workbench-core/src/index.js";
+import type { DesignSketchFeature, SketchTextObject, WorkbenchResult } from "../../../../packages/workbench-core/src/index.js";
 import { isSketchDatumEntityId } from "../../../../packages/workbench-core/src/index.js";
 import { SketchExportPanel, SketchImportPanel, SketchUnderlayPanel, type UnderlayPickState } from "./sketch/SketchExchangePanel.js";
 import { SketchPatternPanel } from "./sketch/SketchPatternPanel.js";
@@ -48,6 +48,7 @@ import { circleDimensionFacts, circleDimensionRequest, fixesBlockingDimension } 
 import { isEllipseRadiusConstraint, isPointDistanceConstraint } from "../../../../packages/workbench-sketch/src/point-distance-layout.js";
 import { convertLengthField, parseLengthField } from "../../../../packages/workbench-sketch/src/edit-fields.js";
 import { defaultLengthText, gridStepsForUnit, lengthTextFromDisplay, lengthTextToDisplay } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
+import { WORKING_PATH_SKETCH, chainFromCurve, describePath, pathCurvesOf, pathSketchChoices, pathSketchOf } from "../sweep-path-ui.js";
 import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
 import { autoConstraintsFor, dropConstraintFor, inheritedTangentDirection, tangentArcPoints, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
@@ -204,6 +205,10 @@ interface SketchWorkspaceProps {
   readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null) => void;
   readonly onMessage: (message: string) => void;
   readonly optionsRevealRequest: number;
+  /** The finished sketches of the timeline: a sweep path may come from one of them (another plane). */
+  readonly finishedSketches?: readonly DesignSketchFeature[];
+  /** The timeline id of the sketch being edited, when it was opened from the timeline (it is then not offered as a separate path sketch). */
+  readonly workingTimelineId?: string | null;
   readonly onCreateSolid: (
     profileIds: readonly string[],
     plane: PlaneKey,
@@ -221,6 +226,8 @@ interface SketchWorkspaceProps {
       readonly thinSide?: "inside" | "outside" | "center";
       readonly sweepDirectionMm?: readonly [number, number, number];
       readonly sweepPathEntityId?: string;
+      /** A chained path: the sketch it comes from (WORKING_PATH_SKETCH for the one being drawn) and its curves. */
+      readonly sweepPathSource?: { readonly sketchId: string; readonly entityIds: readonly string[] };
       readonly sweepTwistDeg?: number;
       readonly sweepFrameTransport?: boolean;
       readonly loftTopScale?: number;
@@ -306,6 +313,8 @@ interface BoxGesture {
   readonly profileId: string | undefined;
   dragging: boolean;
 }
+
+const NO_FINISHED_SKETCHES: readonly DesignSketchFeature[] = [];
 
 export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element {
   const [pending, setPending] = useState<readonly Vec2[]>([]);
@@ -434,7 +443,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [sweepDy, setSweepDy] = useSketchPref("sweepDy", "0");
   const [sweepDz, setSweepDz] = useSketchPref("sweepDz", "1");
   const [sweepMode, setSweepMode] = useSketchPref<"direction" | "path">("sweepMode", "direction");
-  const [sweepPathEntityId, setSweepPathEntityId] = useSketchPref<string>("sweepPathEntityId", "", { durable: false });
+  const [sweepPathSketch, setSweepPathSketch] = useSketchPref<string>("sweepPathSketch", WORKING_PATH_SKETCH, { durable: false });
+  const [sweepPathIds, setSweepPathIds] = useSketchPref<readonly string[]>("sweepPathIds", [], { durable: false });
   const [loftTopScale, setLoftTopScale] = useSketchPref("loftTopScale", "0.7");
   const [loftMode, setLoftMode] = useSketchPref<"scaled" | "two-profile">("loftMode", "scaled");
   const [loftContinuity, setLoftContinuity] = useSketchPref<"position" | "tangent" | "curvature">("loftContinuity", "position");
@@ -660,9 +670,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // Remembered picks that name geometry (sweep path, loft rail) are dropped quietly when the sketch they pointed into is gone.
   useEffect(() => {
     const present = (id: string): boolean => id === "" || props.sketch.entities.some((entity) => entity.id === id);
-    if (!present(sweepPathEntityId)) setSweepPathEntityId("");
     if (!present(loftRailEntityId)) setLoftRailEntityId("");
-  }, [props.sketch.entities, sweepPathEntityId, loftRailEntityId]);
+  }, [props.sketch.entities, loftRailEntityId]);
+  // The sweep path: a sketch (this one, or a finished one on another plane) and the chain of its curves. A choice that no longer exists reads as this sketch.
+  const finishedSketches = props.finishedSketches ?? NO_FINISHED_SKETCHES;
+  const pathChoices = useMemo(() => pathSketchChoices(finishedSketches, props.sketch, props.workingTimelineId ?? null), [finishedSketches, props.sketch, props.workingTimelineId]);
+  const pathSketchId = pathChoices.some((choice) => choice.id === sweepPathSketch) ? sweepPathSketch : WORKING_PATH_SKETCH;
+  const pathSketch = pathSketchOf(pathSketchId, finishedSketches, props.sketch) ?? props.sketch;
+  const pathCurves = useMemo(() => pathCurvesOf(pathSketch), [pathSketch]);
+  const pathIds = useMemo(() => sweepPathIds.filter((id) => pathCurves.some((curve) => curve.id === id)), [sweepPathIds, pathCurves]);
+  const pathReport = useMemo(() => describePath(pathSketch, pathIds, pathChoices.find((choice) => choice.id === pathSketchId)?.name), [pathSketch, pathIds, pathChoices, pathSketchId]);
   const mirrorGhosts = useMemo(
     () => (dynamicMirrorEntity === undefined ? [] : mirrorImages(dynamicMirrorEntity, [...(previewEntity === undefined ? [] : [previewEntity]), ...(previewShape?.entities ?? [])])),
     [dynamicMirrorEntity, previewEntity, previewShape]
@@ -2254,12 +2271,22 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             <input aria-label="Sweep direction Y" type="number" step={0.1} value={sweepDy} onChange={(event) => setSweepDy(event.target.value)} />
             <input aria-label="Sweep direction Z" type="number" step={0.1} value={sweepDz} onChange={(event) => setSweepDz(event.target.value)} />
           </div>}
-          {solidOp === "sweep" && sweepMode === "path" && <div className="make-solid-row" aria-label="Sweep path entity">
-            <small>Path</small>
-            <select aria-label="Sweep path entity" value={sweepPathEntityId} onChange={(event) => setSweepPathEntityId(event.target.value)}>
-              <option value="">(pick a line / arc / spline)</option>
-              {props.sketch.entities.filter((entity) => (entity.kind === "line" || entity.kind === "arc" || entity.kind === "spline") && entity.visible !== false).map((entity) => <option key={entity.id} value={entity.id}>{entity.kind} · {entity.id.slice(-8)}</option>)}
+          {solidOp === "sweep" && sweepMode === "path" && <div className="make-solid-row" aria-label="Sweep path sketch">
+            <small>Path sketch</small>
+            <select aria-label="Sweep path sketch" value={pathSketchId} onChange={(event) => { setSweepPathSketch(event.target.value); setSweepPathIds([]); }}>
+              {pathChoices.map((choice) => <option key={choice.id} value={choice.id}>{choice.name} ({choice.curves} curve{choice.curves === 1 ? "" : "s"})</option>)}
             </select>
+          </div>}
+          {solidOp === "sweep" && sweepMode === "path" && <div className="make-solid-row sweep-path-curves" aria-label="Sweep path curves">
+            <small>Path curves</small>
+            {pathCurves.length === 0
+              ? <small>This sketch has no lines, arcs or splines to follow.</small>
+              : pathCurves.map((curve) => <label key={curve.id} className="check-row"><input type="checkbox" aria-label={`Path curve ${curve.label}`} checked={pathIds.includes(curve.id)} onChange={(event) => setSweepPathIds(event.target.checked ? [...pathIds, curve.id] : pathIds.filter((id) => id !== curve.id))} /> {curve.label}</label>)}
+            <button type="button" className="palette-action" aria-label="Chain the connected curves of the path" disabled={pathCurves.length === 0 || (pathIds.length === 0 && !(pathSketchId === WORKING_PATH_SKETCH && selectedEntity !== undefined && pathCurves.some((curve) => curve.id === selectedEntity.id)))} title="Adds every curve that continues the checked one end to end" onClick={() => {
+              const seed = pathIds[0] ?? (pathSketchId === WORKING_PATH_SKETCH ? selectedEntity?.id : undefined);
+              if (seed !== undefined) setSweepPathIds(chainFromCurve(pathSketch, seed));
+            }}>Chain connected curves</button>
+            <small className={pathReport.ok ? "" : "profile-help"}>{pathReport.ok ? `${pathReport.curves} curve${pathReport.curves === 1 ? "" : "s"}, ${lengthText(pathReport.lengthMm)} ${unit} along the path` : pathReport.message}</small>
           </div>}
           {solidOp === "loft" && <div className="make-solid-row" aria-label="Loft mode">
             <select aria-label="Loft mode" value={loftMode} onChange={(event) => setLoftMode(event.target.value as "scaled" | "two-profile")}>
@@ -2394,10 +2421,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             if (reachResult !== undefined && !reachResult.ok) { props.onMessage(reachResult.message); return; }
             const sweepTwistValue = Number(sweepTwist);
             const loftTangencyWeightValue = Number(loftTangencyWeight);
+            if (solidOp === "sweep" && sweepMode === "path" && !pathReport.ok) { props.onMessage(pathReport.message); return; }
             const advanced = solidOp === "sweep"
               ? {
-                ...(sweepMode === "path" && sweepPathEntityId !== ""
-                  ? { sweepPathEntityId, ...(sweepFrameTransport ? { sweepFrameTransport: true } : {}) }
+                ...(sweepMode === "path"
+                  ? { sweepPathSource: { sketchId: pathSketchId, entityIds: pathIds }, ...(sweepFrameTransport ? { sweepFrameTransport: true } : {}) }
                   : { sweepDirectionMm: [Number(sweepDx), Number(sweepDy), Number(sweepDz)] as const }),
                 ...(Number.isFinite(sweepTwistValue) && sweepTwistValue !== 0 ? { sweepTwistDeg: sweepTwistValue } : {})
               }
