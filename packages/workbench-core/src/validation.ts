@@ -287,6 +287,11 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
 
 const CONSTRAINT_KINDS = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed", "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"];
 
+/** Whether a value is a sketch relation the project would accept, given the ids of the entities it may refer to (the clipboard reads relations with exactly this rule). */
+export function isValidSketchConstraint(value: unknown, entityIds: ReadonlySet<string>): value is WorkbenchSketchConstraint {
+  return validateConstraint(value, entityIds);
+}
+
 function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): value is WorkbenchSketchConstraint {
   // A reference perimeter may sum a whole chain of curves; a refraction names three lines and a symmetry three curves.
   const maxEntities = !isRecord(value) ? 0 : value.kind === "perimeter" ? 64 : value.kind === "symmetry" || value.kind === "refraction" ? 3 : 2;
