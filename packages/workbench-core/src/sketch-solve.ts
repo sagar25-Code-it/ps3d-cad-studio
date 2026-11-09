@@ -7,7 +7,7 @@ import { livePointOf } from "./sketch-measure.js";
 import { toSolverAnchors, type LiveAnchor } from "./sketch-anchors.js";
 import { turnAcrossLines } from "./sketch-quarter-turn.js";
 import { refractionRefusal, seedRefractions } from "./sketch-refraction.js";
-import { constraintComponent, fromSolverGeometry, liveConstraintId, solverSelector, translateSketch, type UnsolvedConstraint } from "./sketch-translate.js";
+import { constraintComponent, entityNames, fromSolverGeometry, liveConstraintId, solverSelector, translateSketch, type UnsolvedConstraint } from "./sketch-translate.js";
 import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 import type { SketchGeometry } from "../../parametric-sketch-core/src/types.js";
 
@@ -155,7 +155,7 @@ function runLiveSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[]
   };
 }
 
-function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[] | undefined, drag: LiveDragTarget | undefined, options: LiveSolveOptions): LiveSketchSolveReport {
+function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[] | undefined, drag: LiveDragTarget | undefined, options: LiveSolveOptions, radiiHeld = false): LiveSketchSolveReport {
   const component = constraintComponent(sketch, focusEntityIds);
   // A line lying exactly across the direction a relation asks for is turned to it first, keeping its length (see sketch-quarter-turn.ts).
   const turned = drag === undefined ? turnAcrossLines(sketch, component, options.forceActive).sketch : sketch;
@@ -200,8 +200,19 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
   if (drag === undefined) {
     // A tangent relation between geometry that is far apart must not quietly change the size of a hole or boss: report it instead.
     const active = sketch.constraints.filter((candidate) => candidate.suppressed !== true && candidate.entityIds.some((id) => component.has(id)));
-    const resize = excessiveTangentResize(active, sketch.entities, solvedById, arcFrames);
-    if (resize !== undefined) return { ok: false, message: resize.message, relatedIds: resize.relatedIds, recovery: "Move the circle (or the line) close to where it should touch first, or dimension the radius so it is held and the other geometry moves instead." };
+    const resize = excessiveTangentResize(active, sketch, solvedById, arcFrames);
+    if (resize !== undefined) {
+      // A circle that nothing holds would have to change size to reach geometry that far away. A routine Tangent should not be refused for
+      // that and should not resize a hole either: the radius is held and the circle travels to the contact instead.
+      if (!radiiHeld) {
+        // The radius outranks where the partners sit: they give way (the line travels, the other circle moves) instead of splitting the difference.
+        const own = (options.anchors ?? (focusEntityIds ?? []).map((entityId): LiveAnchor => ({ entityId, ref: "self", priority: 2 }))).filter((anchor) => !resize.partnerIds.includes(anchor.entityId));
+        const held = resize.circleIds.map((entityId): LiveAnchor => ({ entityId, ref: "radius", priority: 2 }));
+        const moved = runSimultaneousSolve(sketch, focusEntityIds, drag, { ...options, anchors: [...own, ...held] }, true);
+        if (moved.ok) return { ...moved, notes: [...resize.keptNotes, ...moved.notes] };
+      }
+      return { ok: false, message: resize.message, relatedIds: resize.relatedIds, recovery: "Move the circle (or the line) close to where it should touch first, or dimension the radius so it is held and the other geometry moves instead." };
+    }
   }
   const notes: string[] = [];
   const movedIds: string[] = [];
@@ -233,11 +244,12 @@ const lengthText = (valueMm: number): string => String(Number(valueMm.toFixed(3)
  */
 function excessiveTangentResize(
   constraints: readonly WorkbenchSketchConstraint[],
-  entities: readonly SketchEntity[],
+  sketch: Pick<WorkbenchSketch, "entities">,
   solvedById: ReadonlyMap<string, SketchGeometry>,
   arcFrames: ReadonlyMap<string, { readonly radiusMm: number }>
-): { readonly message: string; readonly relatedIds: readonly string[] } | undefined {
-  for (const entity of entities) {
+): { readonly message: string; readonly relatedIds: readonly string[]; readonly circleIds: readonly string[]; readonly partnerIds: readonly string[]; readonly keptNotes: readonly string[] } | undefined {
+  const names = entityNames(sketch);
+  for (const entity of sketch.entities) {
     if (entity.kind !== "circle" && entity.kind !== "arc") continue;
     const solved = solvedById.get(entity.id);
     if (solved === undefined || (solved.kind !== "circle" && solved.kind !== "arc")) continue;
@@ -250,11 +262,14 @@ function excessiveTangentResize(
     if (tangents.length === 0) continue;
     const holdsRadius = mine.some((candidate) => (candidate.kind === "radius" && candidate.driven !== true) || candidate.kind === "equal");
     if (holdsRadius) continue;
-    const label = entity.id.replace(/^entity:/u, "");
-    const others = [...new Set(tangents.flatMap((candidate) => candidate.entityIds).filter((id) => id !== entity.id))].map((id) => id.replace(/^entity:/u, ""));
+    const label = names.get(entity.id) ?? entity.id;
+    const others = [...new Set(tangents.flatMap((candidate) => candidate.entityIds).filter((id) => id !== entity.id))].map((id) => names.get(id) ?? id);
     return {
-      message: `Making ${label} tangent to ${others.join(" and ")} would resize ${entity.kind} ${label} from radius ${lengthText(before)} mm to ${lengthText(solved.radiusMm)} mm, because they are far apart and nothing holds its radius.`,
-      relatedIds: [entity.id, ...tangents.map((candidate) => candidate.id)]
+      message: `Making ${label} tangent to ${others.join(" and ")} would resize ${label} from radius ${lengthText(before)} mm to ${lengthText(solved.radiusMm)} mm, because they are far apart and nothing holds its radius.`,
+      relatedIds: [entity.id, ...tangents.map((candidate) => candidate.id)],
+      circleIds: [entity.id],
+      partnerIds: tangents.flatMap((candidate) => candidate.entityIds).filter((id) => id !== entity.id),
+      keptNotes: [`${label} is far from ${others.join(" and ")}: touching would have needed a radius change of more than ${lengthText(Math.max(TANGENT_RESIZE_ABSOLUTE_MM, before * TANGENT_RESIZE_RELATIVE))} mm, so its radius stays ${lengthText(before)} mm and it moved to touch instead`]
     };
   }
   return undefined;

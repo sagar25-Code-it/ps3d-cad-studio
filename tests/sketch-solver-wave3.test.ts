@@ -281,6 +281,36 @@ export const sketchSolverWave3Tests: readonly TestCase[] = [
       if (!far.ok) assert(!/entity:/u.test(far.message) && /Arc 1/u.test(far.message), `the message names the curve: ${far.message}`);
     }
   }
+,
+  {
+    name: "Wave3 R2-6: Tangent between a free circle and a distant line or circle succeeds the same way whether the radius is dimensioned or not: the radius is kept, the circle moves, and the status explains it with names",
+    run: () => {
+      const free = projectWith([line("l", [0, 0], [40, 0]), circle("c", [20, 30], 5)]);
+      for (const [label, base] of [
+        ["free line and free circle", free],
+        ["fixed line and free circle", addConstraint(free, rel("fixed", ["l"]))],
+        ["circle centre fixed and free line", addConstraint(free, rel("fixed", ["c"], { points: ["center"] }))]
+      ] as const) {
+        const result = apply(base, { kind: "add-sketch-constraint", constraint: rel("tangent", ["l", "c"]) });
+        assert(result.ok, `${label}: a routine Tangent click is accepted: ${result.ok ? "" : result.diagnostics[0]?.message}`);
+        if (!result.ok) continue;
+        const c = get(result.value.project, "c", "circle");
+        near(c.radiusMm, 5, 1e-9, `${label}: the circle keeps its 5 mm radius`);
+        near(Math.abs(c.center[1] - get(result.value.project, "l", "line").start[1]), 5, 1e-6, `${label}: and touches the line`);
+        assert(/Circle 1 is far from Line 1/u.test(result.value.summary) && !/entity:/u.test(result.value.summary), `${label}: the status names the curves: ${result.value.summary}`);
+      }
+      const dimensioned = setDimension(free, "c", "radius", 5);
+      const same = apply(dimensioned, { kind: "add-sketch-constraint", constraint: rel("tangent", ["l", "c"]) });
+      assert(same.ok, "with the radius dimensioned the same click is accepted too");
+      const circles = projectWith([circle("a", [0, 0], 5), circle("b", [60, 0], 3)]);
+      const apart = apply(circles, { kind: "add-sketch-constraint", constraint: rel("tangent", ["a", "b"]) });
+      assert(apart.ok, "two distant circles are made tangent");
+      if (apart.ok) near(get(apart.value.project, "b", "circle").radiusMm, 3, 1e-9, "without resizing the second one");
+      // A small gap is still closed by resizing, as before, and says so.
+      const snug = apply(projectWith([line("rail", [-20, 0], [20, 0]), circle("wheel", [0, 7], 3)]), { kind: "add-sketch-constraint", constraint: rel("tangent", ["rail", "wheel"]) });
+      assert(snug.ok && /Resized circle wheel from radius 3 to 7/u.test(snug.value.summary), "a nearby gap resizes the free circle and the status says how");
+    }
+  }
 ];
 
 // Keep the helpers referenced for the tests added below.
