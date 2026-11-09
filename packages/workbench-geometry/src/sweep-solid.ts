@@ -1,4 +1,5 @@
 import { triangulateLoops } from "../../occt-kernel-adapter/src/polygon.js";
+import { densifyForTwist, twistSegments } from "./twist-stations.js";
 
 /**
  * Sweeps and lofts of profiles that may have holes, along a real 3D path or between profiles on different planes.
@@ -98,7 +99,7 @@ export function cleanLoop<T extends readonly number[]>(points: readonly T[], tol
  * `startCap` and `endCap` are triangle index lists into one ring's points, counter-clockwise about the direction of travel.
  * With `closed` the last ring joins the first and there are no caps.
  */
-export function assembleSolid(rings: readonly (readonly V3[])[], loopSizes: readonly number[], startCap: readonly number[], endCap: readonly number[], closed: boolean): SolidMesh {
+export function assembleSolid(rings: readonly (readonly V3[])[], loopSizes: readonly number[], startCap: readonly number[], endCap: readonly number[], closed: boolean, alternateDiagonals = false): SolidMesh {
   const perRing = rings[0]!.length;
   const positionsMm: number[] = [];
   for (const ring of rings) for (const point of ring) positionsMm.push(point[0], point[1], point[2]);
@@ -116,7 +117,8 @@ export function assembleSolid(rings: readonly (readonly V3[])[], loopSizes: read
     for (const size of loopSizes) {
       for (let i = 0; i < size; i += 1) {
         const next = (i + 1) % size;
-        indices.push(base + offset + i, base + offset + next, nextBase + offset + next, base + offset + i, nextBase + offset + next, nextBase + offset + i);
+        if (alternateDiagonals && ring % 2 === 1) indices.push(base + offset + i, base + offset + next, nextBase + offset + i, base + offset + next, nextBase + offset + next, nextBase + offset + i);
+        else indices.push(base + offset + i, base + offset + next, nextBase + offset + next, base + offset + i, nextBase + offset + next, nextBase + offset + i);
       }
       offset += size;
     }
@@ -181,8 +183,11 @@ export interface PathSweepInput {
  * Sections are perpendicular to the path.
  */
 export function sweepAlongPath(input: PathSweepInput): SolidMeshResult {
-  const points: V3[] = cleanLoop(input.path as readonly (readonly number[])[], 1e-6) as unknown as V3[];
-  const closed = points.length > 2 && length(sub(input.path[0]!, input.path[input.path.length - 1]!)) < 1e-6;
+  const cleaned: V3[] = cleanLoop(input.path as readonly (readonly number[])[], 1e-6) as unknown as V3[];
+  const closed = cleaned.length > 2 && length(sub(input.path[0]!, input.path[input.path.length - 1]!)) < 1e-6;
+  // A twist needs stations between the ends (a straight path has only two points): see twist-stations.ts.
+  const ringPoints = input.loops.outer.length + input.loops.holes.reduce((total, hole) => total + hole.length, 0);
+  const points: V3[] = densifyForTwist(cleaned, closed, input.twistDeg, ringPoints);
   if (points.length < 2) return { ok: false, message: "The sweep path has no length." };
   const segments = points.length - 1 + (closed ? 1 : 0);
   const tangents: V3[] = [];
@@ -263,7 +268,7 @@ export function sweepAlongPath(input: PathSweepInput): SolidMeshResult {
   const caps = capTriangles(oriented);
   if (!caps.ok) return caps;
   if (closed) notes.push("The path is closed, so the sweep is a ring with no end caps.");
-  return { ok: true, mesh: assembleSolid(rings, loopSizes, caps.triangles, caps.triangles, closed), notes };
+  return { ok: true, mesh: assembleSolid(rings, loopSizes, caps.triangles, caps.triangles, closed, twistRad !== 0), notes };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -293,22 +298,28 @@ export function sweepRigid(input: RigidSweepInput): SolidMeshResult {
   const oriented: Loops2 = { outer: outer3.map(to2), holes: holes3.map((hole) => hole.map(to2)) };
   const flat = [...outer3, ...holes3.flat()];
   const loopSizes = [outer3.length, ...holes3.map((hole) => hole.length)];
-  const ring0 = flat;
   const centroid2 = loopCentroid(oriented.outer);
   const centre = add(add(scale(basisU, centroid2[0]), scale(basisV, centroid2[1])), scale(input.normal, dot(flat[0]!, input.normal)));
   const twist = ((Number.isFinite(input.twistDeg) ? input.twistDeg! : 0) * Math.PI) / 180;
-  const ring1 = flat.map((point) => {
-    const offset = sub(point, centre);
-    const turned = twist === 0 ? offset : add(add(scale(offset, Math.cos(twist)), scale(cross(input.normal, offset), Math.sin(twist))), scale(input.normal, dot(input.normal, offset) * (1 - Math.cos(twist))));
-    return add(add(centre, turned), input.shift);
-  });
+  // One ring per station: a twist turns the profile a little between neighbouring stations (see twist-stations.ts), so the sides do not fold.
+  const segments = twistSegments(input.twistDeg, flat.length);
+  const stationRings: V3[][] = [];
+  for (let station = 0; station <= segments; station += 1) {
+    const fraction = station / segments;
+    const angle = twist * fraction;
+    stationRings.push(flat.map((point) => {
+      const offset = sub(point, centre);
+      const turned = angle === 0 ? offset : add(add(scale(offset, Math.cos(angle)), scale(cross(input.normal, offset), Math.sin(angle))), scale(input.normal, dot(input.normal, offset) * (1 - Math.cos(angle))));
+      return add(add(centre, turned), scale(input.shift, fraction));
+    }));
+  }
   const caps = capTriangles(oriented);
   if (!caps.ok) return caps;
   // The cap triangles are counter-clockwise about the plane's normal, so the rings must run along the normal for the caps to face out.
   const along = dot(input.shift, input.normal);
   if (Math.abs(along) < 1e-6 * Math.max(1, length(input.shift))) return { ok: false, message: "The sweep direction is parallel to the profile's plane, which would flatten the solid. Give it a component off the plane." };
-  const rings = along >= 0 ? [ring0, ring1] : [ring1, ring0];
-  return { ok: true, mesh: assembleSolid(rings, loopSizes, caps.triangles, caps.triangles, false), notes: [] };
+  const rings = along >= 0 ? stationRings : [...stationRings].reverse();
+  return { ok: true, mesh: assembleSolid(rings, loopSizes, caps.triangles, caps.triangles, false, twist !== 0), notes: [] };
 }
 
 /** Turns every triangle inside out. */

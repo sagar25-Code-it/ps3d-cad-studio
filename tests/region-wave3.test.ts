@@ -1,13 +1,15 @@
 import { rebuildSolidFeature } from "../apps/studio-web/src/design-regeneration.js";
 import { triangulateLoops } from "../packages/occt-kernel-adapter/src/polygon.js";
-import { detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, type SketchProfile } from "../packages/workbench-sketch/src/index.js";
 import type { SketchEntity } from "../packages/workbench-core/src/index.js";
-import { assert, equal, type TestCase } from "./test-kit.js";
+import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { circ, rect, sketchFeatureOf, sketchOf, solidFeature } from "./region-wave2-kit.js";
 import { meshReport } from "./region-wave3-kit.js";
 import { applyWorkbenchOperation, designOf, solidEnvelopeProblem, type DesignSketchFeature, type GeneralSolidBody, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { commitWorkingSketchAtomically } from "../apps/studio-web/src/sketch-session.js";
-import { buildSolid, circ as pipelineCirc, committedSketch, pipelineApply, pipelineRun, rect as pipelineRect, solidOf } from "./pipeline-kit.js";
+import { rebuildSolidFeature as rebuildFeature } from "../apps/studio-web/src/design-regeneration.js";
+import { sketchLookupOf } from "../apps/studio-web/src/design-regeneration.js";
+import { buildSolid, circ as pipelineCirc, line as pipelineLine, committedSketch, pipelineApply, pipelineRun, rect as pipelineRect, solidOf } from "./pipeline-kit.js";
 
 /**
  * Region engine, wave 3: the second re-audit found plates with a row of four equal holes (or a 12-hole bolt circle) that extrude to
@@ -202,6 +204,45 @@ export const regionWave3Tests: readonly TestCase[] = [
       assert(!refused.ok, "the oversize rebuild result is refused");
       const text = refused.ok ? "" : refused.diagnostics[0]?.message ?? "";
       assert(text.includes("feature:extrude-1") && text.includes("600,000"), `the refusal names the feature and the limit instead of 'The rebuild results are invalid': ${text}`);
+    }
+  },
+  {
+    name: "region R2-05 / N2-01: a straight sweep with Twist builds enough stations for the volume and a closed shape (was two rings: 5333 for 16000)",
+    run: async () => {
+      const bar = committedSketch("datum:xy", [pipelineRect("bar", 0, 0, 20, 40)]).sketch;
+      for (const twist of [5, 20, 45, 90, 180, 360, -90]) {
+        const built = solidOf(await buildSolid(bar, "sweep", { sweepDirectionMm: [0, 0, 1], valueMm: 20, sweepTwistDeg: twist }));
+        const report = meshReport(built.positionsMm, built.indices);
+        near(report.signedVolume, 16000, 16000 * 0.002, `twist ${twist}: the twisted bar keeps its volume`);
+        equal(report.badEdges, 0, `twist ${twist}: closed`);
+        assert(report.triangles > 12 + Math.abs(twist) / 2, `twist ${twist}: stations between the ends (${report.triangles} triangles)`);
+      }
+      const disc = committedSketch("datum:xy", [pipelineCirc("c", 0, 0, 10)]).sketch;
+      const discBody = solidOf(await buildSolid(disc, "sweep", { sweepDirectionMm: [0, 0, 1], valueMm: 20, sweepTwistDeg: 90 }));
+      const turned = meshReport(discBody.positionsMm, discBody.indices);
+      near(turned.signedVolume, Math.PI * 100 * 20, Math.PI * 100 * 20 * 0.003, "a twisted disc keeps its volume");
+      const holed = committedSketch("datum:xy", [pipelineRect("bar", 0, 0, 20, 40), pipelineCirc("hole", 3, 5, 4)]).sketch;
+      const profile = [...detectSketchProfiles(holed.sketch)].sort((a: SketchProfile, b: SketchProfile) => b.areaMm2 - a.areaMm2).find((candidate: SketchProfile) => (candidate.holes?.length ?? 0) > 0)!;
+      const perforated = solidOf(await buildSolid(holed, "sweep", { sweepDirectionMm: [0, 0, 1], valueMm: 20, sweepTwistDeg: 90, profileIds: [profile.ref!] }));
+      const perforatedReport = meshReport(perforated.positionsMm, perforated.indices);
+      near(perforatedReport.signedVolume, (800 - Math.PI * 16) * 20, 800 * 20 * 0.004, "a twisted bar with a hole keeps its volume");
+      equal(perforatedReport.badEdges, 0, "the twisted bar with a hole is closed");
+    }
+  },
+  {
+    name: "region R2-05: a twisted sweep along a path in another sketch is built from stations along the path too",
+    run: async () => {
+      const first = committedSketch("datum:xy", [pipelineRect("bar", 0, 0, 20, 10)]);
+      const second = committedSketch("datum:xz", [pipelineLine("p1", [0, 0], [0, 60])], { project: first.project, featureId: "feature:p" });
+      const lookup = sketchLookupOf(designOf(second.project));
+      const profile = detectSketchProfiles(first.sketch.sketch)[0]!;
+      for (const twist of [30, 90, 180]) {
+        const built = await rebuildFeature({ id: "feature:x", name: "x", kind: "sweep", suppressed: false, sketchFeatureId: first.sketch.id, valueMm: 60, bodyId: "general-body:x", profileIds: [profile.id], sweepPath: { sketchFeatureId: "feature:p", entityIds: ["entity:p1"] }, sweepTwistDeg: twist }, first.sketch, "#b9c2c8", lookup);
+        const body = solidOf(built);
+        const report = meshReport(body.positionsMm, body.indices);
+        near(report.signedVolume, 12000, 24, `path sweep twist ${twist}: volume`);
+        assert(report.triangles > 12 + twist / 2, `path sweep twist ${twist}: stations between the ends (${report.triangles} triangles)`);
+      }
     }
   }
 ];
