@@ -39,6 +39,8 @@ const FIELD = {
   minor: field("minor", "Minor radius", "length"),
   sweep: field("sweep", "Sweep", "angle"),
   circumradius: field("radius", "Circumradius", "length"),
+  apothem: field("radius", "Apothem", "length"),
+  sideLength: field("radius", "Side length", "length"),
   halfLength: field("length", "Half length", "length"),
   overall: field("length", "Overall length", "length")
 } as const;
@@ -62,7 +64,10 @@ const polar = (baseIndex: number, length: DynamicField | null = FIELD.length, an
 /** Tools that have no typed absolute first point (their first click picks existing geometry). */
 const NO_ABSOLUTE_FIRST: ReadonlySet<SketchTool> = new Set<SketchTool>(["blend"]);
 
-function modeFor(tool: SketchTool, placedPoints: number): Mode | undefined {
+/** How the Polygon tool reads its second click (see POLYGON_MODES): the typed number is the corner radius, the apothem or the side length. */
+export type PolygonFieldMode = "inscribed" | "circumscribed" | "edge";
+
+function modeFor(tool: SketchTool, placedPoints: number, polygonMode: PolygonFieldMode = "inscribed"): Mode | undefined {
   if (tool === "select") return undefined;
   if (placedPoints < 1) return NO_ABSOLUTE_FIRST.has(tool) ? undefined : { kind: "absolute" };
   const last = placedPoints - 1;
@@ -92,7 +97,7 @@ function modeFor(tool: SketchTool, placedPoints: number): Mode | undefined {
     case "ellipse": return placedPoints === 1 ? polar(0, FIELD.major) : placedPoints === 2 ? { kind: "offset", field: FIELD.minor, factor: 1 } : undefined;
     case "arc-center": return placedPoints === 1 ? polar(0, FIELD.radius) : placedPoints === 2 ? { kind: "sweep" } : undefined;
     case "arc-tangent": return placedPoints === 1 ? polar(0, null) : placedPoints === 2 ? polar(0) : undefined;
-    case "polygon": return placedPoints === 1 ? polar(0, FIELD.circumradius) : undefined;
+    case "polygon": return placedPoints === 1 ? polar(0, polygonMode === "circumscribed" ? FIELD.apothem : polygonMode === "edge" ? FIELD.sideLength : FIELD.circumradius) : undefined;
     case "slot": return placedPoints === 1 ? polar(0) : placedPoints === 2 ? { kind: "offset", field: FIELD.width, factor: 0.5 } : undefined;
     case "slot-straight": return placedPoints === 1 ? polar(0, FIELD.overall) : placedPoints === 2 ? { kind: "offset", field: FIELD.width, factor: 0.5 } : undefined;
     default: return undefined;
@@ -115,8 +120,8 @@ function fieldsOfMode(mode: Mode | undefined): readonly DynamicField[] {
  * The fields a tool offers for the point it is about to place, or none when typed input does not apply. With no point placed
  * yet the fields are the absolute X and Y of the first point.
  */
-export function dynamicFieldsFor(tool: SketchTool, placedPoints: number): readonly DynamicField[] {
-  return fieldsOfMode(modeFor(tool, placedPoints));
+export function dynamicFieldsFor(tool: SketchTool, placedPoints: number, polygonMode: PolygonFieldMode = "inscribed"): readonly DynamicField[] {
+  return fieldsOfMode(modeFor(tool, placedPoints, polygonMode));
 }
 
 const toDegrees = (radians: number): number => {

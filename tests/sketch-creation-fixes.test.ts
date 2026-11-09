@@ -502,10 +502,10 @@ export const sketchCreationFixTests: readonly TestCase[] = [
       ];
       let project = emptyProject();
       for (const entity of accepted) project = mustApply(project, [entity]);
+      // (Wave 3, F11: the per-edit limit of 200 no longer exists; the limit is what one text object records, 400.)
       const text = buildSketchText([0, 0], "B".repeat(40), { heightMm: 10 }, ids);
-      assert(!text.ok, "40 B characters need more than 200 curves");
-      assert(/200/u.test(text.diagnostics[0]!.message), `the message names the limit: ${text.diagnostics[0]!.message}`);
-      equal(TEXT_MAX_ENTITIES, 200, "the text limit is the per-edit limit");
+      assert(text.ok && text.value.entities.length > 200, "40 B characters need more than 200 curves and are accepted");
+      equal(TEXT_MAX_ENTITIES, 400, "the text limit is the curve count one text object can record");
       const fits = must(buildSketchText([0, 0], "AB 12", { heightMm: 10 }, ids));
       mustApply(emptyProject(), fits.entities);
     }

@@ -20,6 +20,8 @@ export interface AutoConstraintInput {
   /** The sketch before the new shape was added. */
   readonly sketch: WorkbenchSketch;
   readonly newId: () => string;
+  /** The new shape is an arc whose stored mid is the middle of its sweep (a half-circle slot cap): a point placed there is joined to that exact point, not just put on the arc. */
+  readonly exactArcMid?: boolean;
 }
 
 const SAME = 1e-7;
@@ -43,7 +45,7 @@ function circleThrough(a: Vec2, b: Vec2, c: Vec2): { readonly center: Vec2; read
 }
 
 /** Where a defining point of the entity is, if it has that point. */
-function refLocation(entity: SketchEntity, ref: SketchPointRef): Vec2 | undefined {
+export function refLocation(entity: SketchEntity, ref: SketchPointRef): Vec2 | undefined {
   switch (entity.kind) {
     case "line": return ref === "start" ? entity.start : ref === "end" ? entity.end : ref === "mid" ? [(entity.start[0] + entity.end[0]) / 2, (entity.start[1] + entity.end[1]) / 2] : undefined;
     case "arc":
@@ -64,7 +66,7 @@ function refLocation(entity: SketchEntity, ref: SketchPointRef): Vec2 | undefine
 }
 
 /** The defining point of an entity at a position, in the order centre, ends, corners. A line's middle is not a placed point. */
-function refAt(entity: SketchEntity, point: Vec2): SketchPointRef | undefined {
+export function refAt(entity: SketchEntity, point: Vec2): SketchPointRef | undefined {
   const order: readonly SketchPointRef[] = ["center", "start", "end", "self", "corner-0", "corner-1", "corner-2", "corner-3", "mid"];
   for (const ref of order) {
     if (entity.kind === "line" && ref === "mid") continue;
@@ -76,7 +78,7 @@ function refAt(entity: SketchEntity, point: Vec2): SketchPointRef | undefined {
 }
 
 /** The defining point an inference landed on in an existing entity, if the live solver can move it. */
-function pointRefOf(entity: SketchEntity, candidate: Pick<InferenceCandidate, "selector" | "point">): SketchPointRef | undefined {
+export function pointRefOf(entity: SketchEntity, candidate: Pick<InferenceCandidate, "selector" | "point">): SketchPointRef | undefined {
   const selector: InferenceSelector | undefined = candidate.selector;
   let ref: SketchPointRef | undefined;
   if (entity.kind === "line") ref = selector === "start" ? "start" : selector === "end" ? "end" : selector === "mid" ? "mid" : undefined;
@@ -86,6 +88,13 @@ function pointRefOf(entity: SketchEntity, candidate: Pick<InferenceCandidate, "s
   else if (entity.kind === "point") ref = "self";
   return ref !== undefined && SOLVABLE_POINT_REFS[entity.kind].includes(ref) ? ref : undefined;
 }
+
+/**
+ * The live solver reads an arc's "mid" as the middle of its sweep, but the through-point of a 3-point arc is any point between its ends, so a
+ * Coincident that names an arc's mid pulls the arc (or whatever it touches) sideways and the edit is refused as a conflict. A point that is to
+ * meet an arc's through-point is therefore put ON the arc instead, which is what the designer drew and what the solver can hold.
+ */
+const isArcMid = (entity: SketchEntity, ref: SketchPointRef | undefined): boolean => entity.kind === "arc" && ref === "mid";
 
 /** The curves a point can be put on (see constraintFit): a line, circle, arc or ellipse. */
 const onCurveCapable = (entity: SketchEntity | undefined): entity is SketchEntity => entity !== undefined && (entity.kind === "line" || entity.kind === "circle" || entity.kind === "arc" || entity.kind === "ellipse");
@@ -174,8 +183,9 @@ export function autoConstraintsFor(input: AutoConstraintInput): readonly Workben
     const inference = placed[index];
     const primary = inference?.primary;
     if (ownRef === undefined || inference === undefined) return;
+    const throughPoint = input.exactArcMid !== true && isArcMid(entity, ownRef);
     if (primary?.kind === "origin" && primary.entityId === undefined) {
-      add({ kind: "coincident", entityIds: [SKETCH_ORIGIN_ID, entity.id], points: ["self", ownRef] });
+      add(throughPoint ? { kind: "coincident", entityIds: [SKETCH_ORIGIN_ID, entity.id], points: ["self", "curve"] } : { kind: "coincident", entityIds: [SKETCH_ORIGIN_ID, entity.id], points: ["self", ownRef] });
       return;
     }
     if (primary !== undefined && primary.entityId !== undefined) {
@@ -183,14 +193,18 @@ export function autoConstraintsFor(input: AutoConstraintInput): readonly Workben
       if (other === undefined || other.id === entity.id) return;
       if (primary.kind === "endpoint" || primary.kind === "center") {
         const otherRef = pointRefOf(other, primary);
-        if (otherRef !== undefined) add({ kind: "coincident", entityIds: [other.id, entity.id], points: [otherRef, ownRef] });
+        if (otherRef === undefined) return;
+        // (An existing arc's "mid" snap is the middle of its sweep, which is exactly what the solver reads, so it is joined as usual.)
+        add({ kind: "coincident", entityIds: [other.id, entity.id], points: [otherRef, throughPoint ? "curve" : ownRef] });
         return;
       }
       if (primary.kind === "midpoint") {
-        if (other.kind === "line") add({ kind: "midpoint", entityIds: [entity.id, other.id], points: [ownRef] });
-        else if (other.kind === "arc") add({ kind: "coincident", entityIds: [other.id, entity.id], points: ["mid", ownRef] });
+        if (other.kind === "line") add(throughPoint ? { kind: "coincident", entityIds: [other.id, entity.id], points: ["mid", "curve"] } : { kind: "midpoint", entityIds: [entity.id, other.id], points: [ownRef] });
+        else if (other.kind === "arc") add(throughPoint ? { kind: "coincident", entityIds: [other.id, entity.id], points: ["mid", "curve"] } : { kind: "coincident", entityIds: [other.id, entity.id], points: ["mid", ownRef] });
         return;
       }
+      // A through-point of a 3-point arc that lands on a curve or a crossing cannot be held (it is free along the arc): nothing is recorded.
+      if (throughPoint && (primary.kind === "on-curve" || primary.kind === "intersection")) return;
       if (primary.kind === "on-curve" && onCurveCapable(other)) {
         add({ kind: "coincident", entityIds: [entity.id, other.id], points: [ownRef, "curve"] });
         return;
@@ -202,6 +216,7 @@ export function autoConstraintsFor(input: AutoConstraintInput): readonly Workben
       }
     }
     // A point level or plumb with the origin (and not merely with the point placed before it) lies on the X or Y axis.
+    if (throughPoint) return;
     const guides = inference.guides ?? [];
     const fromAnchor = (guide: InferenceGuide): boolean => inference.anchor !== undefined && near(guide.from, inference.anchor);
     if (guides.some((guide) => guide.kind === "horizontal" && near(guide.from, [0, 0]) && !fromAnchor(guide))) add({ kind: "coincident", entityIds: [entity.id, SKETCH_AXIS_X_ID], points: [ownRef, "curve"] });
@@ -274,8 +289,10 @@ export function dropConstraintFor(input: DropConstraintInput): WorkbenchSketchCo
     && constraint.entityIds.length === 2 && constraint.points !== undefined
     && ((constraint.entityIds[0] === firstId && constraint.points[0] === firstRef && constraint.entityIds[1] === secondId && constraint.points[1] === secondRef)
       || (constraint.entityIds[1] === firstId && constraint.points[1] === firstRef && constraint.entityIds[0] === secondId && constraint.points[0] === secondRef)));
+  const droppedMid = isArcMid(entity, ref);
   if (primary.kind === "origin" && primary.entityId === undefined) {
-    return joined(SKETCH_ORIGIN_ID, "self", entity.id, ref) ? undefined : { id: input.newId(), kind: "coincident", entityIds: [SKETCH_ORIGIN_ID, entity.id], points: ["self", ref] };
+    const toRef: SketchPointRef = droppedMid ? "curve" : ref;
+    return joined(SKETCH_ORIGIN_ID, "self", entity.id, toRef) ? undefined : { id: input.newId(), kind: "coincident", entityIds: [SKETCH_ORIGIN_ID, entity.id], points: ["self", toRef] };
   }
   if (primary.entityId === undefined) return undefined;
   const other = sketch.entities.find((candidate) => candidate.id === primary.entityId);
@@ -283,10 +300,11 @@ export function dropConstraintFor(input: DropConstraintInput): WorkbenchSketchCo
   if (primary.kind === "endpoint" || primary.kind === "center") {
     const otherRef = pointRefOf(other, primary);
     if (otherRef === undefined) return undefined;
+    if (droppedMid) return joined(other.id, otherRef, entity.id, "curve") ? undefined : { id: input.newId(), kind: "coincident", entityIds: [other.id, entity.id], points: [otherRef, "curve"] };
     return joined(other.id, otherRef, entity.id, ref) ? undefined : { id: input.newId(), kind: "coincident", entityIds: [other.id, entity.id], points: [otherRef, ref] };
   }
   if (primary.kind === "midpoint" && other.kind === "line" && entity.kind !== "line") {
-    return { id: input.newId(), kind: "midpoint", entityIds: [entity.id, other.id], points: [ref] };
+    return droppedMid ? { id: input.newId(), kind: "coincident", entityIds: [other.id, entity.id], points: ["mid", "curve"] } : { id: input.newId(), kind: "midpoint", entityIds: [entity.id, other.id], points: [ref] };
   }
   return undefined;
 }

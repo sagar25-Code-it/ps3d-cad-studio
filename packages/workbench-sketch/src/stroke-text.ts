@@ -1,4 +1,4 @@
-import { type SketchEntity, type Vec2, type WorkbenchResult } from "../../workbench-core/src/index.js";
+import { SKETCH_TEXT_MAX_ENTITIES, type SketchEntity, type Vec2, type WorkbenchResult } from "../../workbench-core/src/index.js";
 import { badShape, dist, turn, type ShapeIds, type SketchShape } from "./curve-math.js";
 
 /**
@@ -193,8 +193,8 @@ function glyphOf(character: string): Glyph | undefined {
 export const STROKE_FONT_CHARACTERS: string = [...Object.keys(GLYPHS), ...Object.keys(ALIASES), " "].sort().join("");
 
 export const TEXT_MAX_CHARACTERS = 40;
-/** A text is limited to 200 curves (a sketch holds 500 in all), so one piece of text cannot crowd out the rest of the drawing. */
-export const TEXT_MAX_ENTITIES = 200;
+/** A text is limited to the curves one text object can record (400; a sketch holds 500 in all, and one edit may add as many), so one piece of text cannot crowd out the rest of the drawing. */
+export const TEXT_MAX_ENTITIES = SKETCH_TEXT_MAX_ENTITIES;
 export const TEXT_MIN_HEIGHT_MM = 0.5;
 export const TEXT_MAX_HEIGHT_MM = 1_000;
 
@@ -333,6 +333,6 @@ export function buildSketchText(origin: Vec2, text: string, options: SketchTextO
     pen += (character === " " ? SPACE_ADVANCE : glyph!.width) + gap;
   }
   if (entities.length === 0) return badShape("Nothing to draw: the text is too small for its strokes to be at least 0.01 mm long.");
-  if (entities.length > TEXT_MAX_ENTITIES) return badShape(`This text would need ${entities.length} curves; one sketch edit takes at most ${TEXT_MAX_ENTITIES}. Use fewer characters, or place the text in two pieces.`);
+  if (entities.length > TEXT_MAX_ENTITIES) return badShape(`This text would need ${entities.length} curves; one piece of text takes at most ${TEXT_MAX_ENTITIES}. Use fewer characters, or place the text in two pieces.`);
   return { ok: true, value: { entities, constraints: [] } };
 }

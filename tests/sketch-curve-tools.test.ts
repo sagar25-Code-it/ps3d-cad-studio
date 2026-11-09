@@ -181,7 +181,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       // A quarter-turn centreline of radius 30 around the origin, half-width 4.
       const shape = must(buildThreePointArcSlot([30, 0], [30 * Math.SQRT1_2, 30 * Math.SQRT1_2], [0, 30], [34, 0], ids));
       equal(shape.entities.map((entity) => entity.kind).join(","), "arc,arc,arc,arc", "outer arc, cap, inner arc, cap");
-      equal(shape.constraints.map((constraint) => constraint.kind).sort().join(), "coincident,coincident,coincident,coincident,concentric,equal", "four joints (the arcs are joined by their real ends), equal caps and concentric side arcs (arc-to-arc tangency is by construction)");
+      equal(shape.constraints.map((constraint) => constraint.kind).sort().join(), "coincident,coincident,coincident,coincident,concentric,tangent,tangent,tangent,tangent", "four joints (the arcs are joined by their real ends), a Tangent at each joint and concentric side arcs (the caps are equal because of those)");
       const project = addThrough(emptyProject(), shape);
       const profiles = detectSketchProfiles(project.sketch);
       equal(profiles.length, 1, "closes into one profile");
@@ -233,7 +233,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       const spline = splineOf(shape.entities[0]);
       equal(spline.fitPoints[0]![0], 0, "starts on the first control point");
       equal(spline.fitPoints[spline.fitPoints.length - 1]![0], 60, "ends on the last control point");
-      assert(spline.fitPoints.length >= 10 && spline.fitPoints.length <= 24, "a sensible number of fit points");
+      assert(spline.fitPoints.length >= 10 && spline.fitPoints.length <= 64, "a sensible number of fit points (wave 3: as many as the 0.01 mm fit needs, up to the 64 a spline holds)");
       const exact = controlPointCurve(controls, false, 2000);
       const drawn = sampleSpline(spline.fitPoints, 16);
       let worst = 0;
@@ -477,8 +477,8 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       const arcStart = curveEnds(placed[1]!)[0]!.outward;
       near(lineEnd[0] + arcStart[0], 0, 1e-9, "the arc starts along the line's direction (x)");
       near(lineEnd[1] + arcStart[1], 0, 1e-9, "the arc starts along the line's direction (y)");
-      equal(project.sketch.constraints.filter((constraint) => constraint.kind === "tangent").length, 1, "one tangent relation");
-      equal(project.sketch.constraints.filter((constraint) => constraint.kind === "coincident").length, 3, "line-to-line joints, including the one that closes the loop (an arc's own ends cannot be joined)");
+      equal(project.sketch.constraints.filter((constraint) => constraint.kind === "tangent").length, 2, "the arc is tangent to the line before it, and the line that leaves it straight on is tangent to the arc");
+      equal(project.sketch.constraints.filter((constraint) => constraint.kind === "coincident").length, 5, "a joint at every junction, including the one that closes the loop");
       equal(detectSketchProfiles(project.sketch).length, 1, "closes into a single profile");
       const solid = await extrudedVolume(project.sketch.entities, 2);
       near(solid.volume, solid.area * 2, solid.area * 2 * 2e-3, "extrudes to profile area times height");

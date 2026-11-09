@@ -20,8 +20,8 @@ import {
   type SketchProfile,
   type SketchTool
 } from "../../../../packages/workbench-sketch/src/index.js";
-import { sketchToScreen } from "../../../../packages/workbench-sketch/src/camera.js";
-import { buildFitSpline } from "../../../../packages/workbench-sketch/src/spline-fit.js";
+import { gridSteps, sketchToScreen } from "../../../../packages/workbench-sketch/src/camera.js";
+import { buildFitSpline, tangentFromDegrees } from "../../../../packages/workbench-sketch/src/spline-fit.js";
 import { advanceArcSweepTrack, arcSweepDirection, startArcSweepTrack, type ArcSweepTrack } from "../../../../packages/workbench-sketch/src/arc-sweep.js";
 import { mergeTyped, typedIntentConstraints } from "../../../../packages/workbench-sketch/src/typed-intent.js";
 import { dynamicFieldsFor, measureFromCursor, parseDynamicNumber, type DynamicFieldId, type DynamicValues } from "../../../../packages/workbench-sketch/src/dynamic-input.js";
@@ -51,6 +51,9 @@ import { defaultLengthText, gridStepsForUnit, lengthTextFromDisplay, lengthTextT
 import { WORKING_PATH_SKETCH, chainFromCurve, describePath, pathCurvesOf, pathSketchChoices, pathSketchOf } from "../sweep-path-ui.js";
 import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
+import { profileSnapRelations, shapeSnapRelations } from "../../../../packages/workbench-sketch/src/shape-snap-relations.js";
+import { typedShapeIntent } from "../../../../packages/workbench-sketch/src/typed-shape-intent.js";
+import { inferTypedPoint } from "../../../../packages/workbench-sketch/src/typed-inference.js";
 import { autoConstraintsFor, dropConstraintFor, inheritedTangentDirection, tangentArcPoints, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
@@ -344,6 +347,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // The extra curve tools (rounded rectangle, conics, blend, profile, text ...): their palette numbers, and the Profile chain being drawn.
   const [curveFields, setCurveFields] = useSketchPref("curveFields", DEFAULT_CURVE_OPTION_FIELDS);
   const profileChain = useRef<ProfileChain | undefined>(undefined);
+  const profileStartSnap = useRef<PlacedPointInference | undefined>(undefined);
   // Reusable sketch blocks live in the browser (not in the project file); a blocked or missing localStorage just keeps them in memory.
   const [blockLibrary] = useState(() => createBlockLibrary((() => { try { return window.localStorage; } catch { return undefined; } })()));
   const [blockNames, setBlockNames] = useState<readonly string[]>(() => blockLibrary.list().map((block) => block.name));
@@ -608,6 +612,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }), [visibleSketch.constraints, visibleEntities]);
   const dimensionedIds = useMemo(() => new Set(drivingDimensions.map((view) => view.entity.id)), [drivingDimensions]);
   const dimensionModeWasActive = useRef(false);
+  // The Sketch palette's spline end directions (blank = free): they become the tangents a fit-point spline leaves and arrives with.
+  const splineTangents = useMemo(() => {
+    const parse = (text: string): Vec2 | undefined => text.trim() === "" ? undefined : tangentFromDegrees(Number(text));
+    const start = parse(curveFields.splineStartAngle);
+    const end = parse(curveFields.splineEndAngle);
+    return start === undefined && end === undefined ? undefined : { start, end };
+  }, [curveFields.splineStartAngle, curveFields.splineEndAngle]);
   const previewEntity = useMemo(() => {
     if (props.tool === "profile") {
       const chain = profileChain.current;
@@ -619,8 +630,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (props.tool === "spline") {
       if (pending.length < 1) return undefined;
       const rough = { id: "entity:tool-preview", kind: "spline" as const, fitPoints: [...pending, cursor], construction: false } satisfies SketchEntity;
-      if (pending.length < 2 || curveFields.splineMode === "uniform") return rough;
-      const shaped = buildFitSpline([...pending, cursor], curveFields.splineMode, "entity:tool-preview");
+      if (pending.length < 1 || (curveFields.splineMode === "uniform" && splineTangents === undefined)) return rough;
+      const shaped = buildFitSpline([...pending, cursor], curveFields.splineMode, "entity:tool-preview", splineTangents ?? {});
       return shaped.ok ? shaped.value : rough;
     }
     if (props.tool === "select") return undefined;
@@ -639,7 +650,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       return { id: "entity:tool-preview", kind: "line" as const, start: pending[pending.length - 1]!, end: cursor, construction: false } satisfies SketchEntity;
     }
     return undefined;
-  }, [cursor, pending, props.tool, curveFields.profileMode, curveFields.splineMode]);
+  }, [cursor, pending, props.tool, curveFields.profileMode, curveFields.splineMode, splineTangents]);
   const navigationPan = props.tool === "select" && props.viewportState.navigationMode === "pan";
   /** A whole polygon or slot is built from the points placed so far plus the cursor, so it can be previewed and then placed. */
   const buildShape = (tool: Exclude<SketchTool, "select">, points: readonly Vec2[]): WorkbenchResult<SketchShape> => {
@@ -965,12 +976,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (props.tool === "spline") {
       const last = pending.at(-1);
       const gap = last === undefined ? Infinity : Math.hypot(snapped.point[0] - last[0], snapped.point[1] - last[1]);
-      if (pending.length >= 3 && gap <= PICK_PIXELS * px) { finishSpline(pending); return; }
+      if (pending.length >= 2 && gap <= PICK_PIXELS * px) { finishSpline(pending); return; }
       if (gap < 0.01) return;
       if (pending.length >= SPLINE_MAX_FIT_POINTS) { props.onMessage(`A spline takes at most ${SPLINE_MAX_FIT_POINTS} fit points. Click the last point again or press Enter to finish.`); return; }
       const next = [...pending, snapped.point];
       setPending(next);
-      props.onMessage(`Fit-point spline: point ${next.length} accepted.${next.length >= 3 ? " Click the last point again or press Enter to finish." : ""}`);
+      props.onMessage(`Fit-point spline: point ${next.length} accepted.${next.length >= 2 ? " Click the last point again or press Enter to finish (two points make a straight spline)." : ""}`);
       return;
     }
     if (props.tool === "select") {
@@ -995,7 +1006,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     lastPlaced.current = point;
     // What typed input did that the user may not expect (a negative size flipped, an angle wrapped) is appended to the status line once.
     const say = (message: string): void => { const notes = typedNotes.current; typedNotes.current = []; props.onMessage(notes.length === 0 ? message : `${message} ${notes.join(" ")}`); };
-    if (props.tool === "profile") { placeProfilePoint(point); return; }
+    if (props.tool === "profile") { placeProfilePoint(point, found); return; }
     const points = [...pending, point];
     const previous = pending.at(-1);
     const placed: readonly PlacedPointInference[] = [
@@ -1032,8 +1043,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       }
       // A polygon whose centre was snapped to the origin or to other geometry is located by it.
       const centreRelations = autoConstrain && props.tool === "polygon" ? keepResolvableConstraints(polygonCentreRelations(shape.value, polygonMode, placed, props.sketch, () => `constraint:auto-${crypto.randomUUID()}`), props.sketch.entities.map((entity) => entity.id), shape.value.entities.map((entity) => entity.id)).kept : [];
-      const shapeRelations = [...shape.value.constraints, ...centreRelations];
-      const accepted = applyDrawn({ label: `Added ${sketchToolLabel(props.tool).toLowerCase()} (${shape.value.entities.length} curves, ${shapeRelations.length} relations)`, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shapeRelations });
+      // Every other click that was snapped to geometry joins the matching point of the shape, and a size that was typed is kept as its dimension.
+      const newShapeId = (): string => `constraint:auto-${crypto.randomUUID()}`;
+      const snapRelations = autoConstrain ? keepResolvableConstraints(shapeSnapRelations({ tool: props.tool, shape: shape.value, placed, sketch: props.sketch, newId: newShapeId, ...(props.tool === "polygon" && polygonMode !== "edge" ? { skip: new Set([0]) } : {}) }), props.sketch.entities.map((entity) => entity.id), shape.value.entities.map((entity) => entity.id)).kept : [];
+      const typedShapeRelations = typedShapeIntent({ tool: props.tool, shape: shape.value, typed: typedTrail.current, newId: newShapeId });
+      typedTrail.current = {};
+      const extraRelations = [...centreRelations, ...snapRelations, ...typedShapeRelations];
+      const shapeRelations = [...shape.value.constraints, ...extraRelations];
+      const shapeLabel = `Added ${sketchToolLabel(props.tool).toLowerCase()} (${shape.value.entities.length} curves, ${shapeRelations.length} relations)`;
+      let accepted = applyDrawn({ label: shapeLabel, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shapeRelations });
+      // If the solver refuses the snap or typed-size relations, the shape itself is still drawn with the relations that make it what it is.
+      if (accepted === false && extraRelations.length > 0) accepted = applyDrawn({ label: shapeLabel, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shape.value.constraints });
       if (accepted === false) return;
       setPending([]);
       say(`Added ${sketchToolLabel(props.tool).toLowerCase()} with ${shape.value.entities.length} curve${shape.value.entities.length === 1 ? "" : "s"} and ${shape.value.constraints.length} relation${shape.value.constraints.length === 1 ? "" : "s"}.`);
@@ -1084,7 +1104,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     say(`Added ${sketchToolLabel(props.tool)}${relationNote} with stable ID ${built.value.id}.`);
   };
 
-  const dynamicFields = useMemo(() => dynamicFieldsFor(props.tool, pending.length), [props.tool, pending.length]);
+  const dynamicFields = useMemo(() => dynamicFieldsFor(props.tool, pending.length, polygonMode), [props.tool, pending.length, polygonMode]);
   const liveValues = useMemo(() => measureFromCursor(props.tool, pending, cursor, props.tool === "arc-center" ? arcTrack.current : undefined), [props.tool, pending, cursor]);
   const setField = (id: DynamicFieldId, value: string): void => setFieldText((current) => {
     const { [id]: _previous, ...rest } = current;
@@ -1107,23 +1127,24 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setDynamicFocused(false);
     typedNotes.current = result.notes;
     // The guides of a typed 0 / 90 / 180 / 270 degree angle make the same Horizontal / Vertical relation a snapped point does.
-    const found: InferenceResult = { point: result.point, snapped: result.guides.length > 0, guides: result.guides };
+    // A typed point that lands on an endpoint, a centre, the origin or a curve is joined to it, exactly as a clicked one is.
+    const found: InferenceResult = inferTypedPoint(result.point, props.sketch, anchorFor(props.tool, pending), result.guides);
     if (props.tool === "spline" || props.tool === "spline-control") {
       const next = [...pending, result.point];
       if (props.tool === "spline" && next.length > SPLINE_MAX_FIT_POINTS) { props.onMessage(`A spline takes at most ${SPLINE_MAX_FIT_POINTS} fit points. Press Enter to finish.`); return false; }
       lastPlaced.current = result.point;
       setPending(next);
       setFieldText({});
-      props.onMessage(`${sketchToolLabel(props.tool)}: point ${next.length} accepted (typed).${next.length >= 3 ? " Press Enter to finish." : ""}${result.notes.length === 0 ? "" : ` ${result.notes.join(" ")}`}`);
+      props.onMessage(`${sketchToolLabel(props.tool)}: point ${next.length} accepted (typed).${next.length >= 2 ? " Press Enter to finish." : ""}${result.notes.length === 0 ? "" : ` ${result.notes.join(" ")}`}`);
       typedNotes.current = [];
       return true;
     }
-    placePoint(result.point, "typed", found, result.typed);
+    placePoint(found.point, "typed", found, result.typed);
     return true;
   };
 
   const finishSpline = (points: readonly Vec2[]): void => {
-    const built = buildFitSpline(points, curveFields.splineMode, `entity:user-${crypto.randomUUID()}`);
+    const built = buildFitSpline(points, curveFields.splineMode, `entity:user-${crypto.randomUUID()}`, splineTangents ?? {});
     if (!built.ok) { props.onMessage(built.diagnostics[0]?.message ?? "The spline was rejected."); setPending([]); return; }
     addDrawn(built.value);
     setPending([]);
@@ -1150,10 +1171,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
 
   /** One click of the Profile tool: the first click starts the chain, each later click adds a line or a tangent arc; ending on the start closes the loop. */
-  const placeProfilePoint = (point: Vec2): void => {
+  const placeProfilePoint = (point: Vec2, found?: InferenceResult): void => {
     const chain = profileChain.current;
+    const snapOf = (at: Vec2): PlacedPointInference | undefined => found?.primary === undefined ? undefined : { point: at, primary: found.primary, guides: found.guides };
     if (chain === undefined) {
       profileChain.current = startProfileChain(point);
+      profileStartSnap.current = snapOf(point);
       setPending([point]);
       props.onMessage("Profile: start placed. Click the next point; pick Tangent arc in the Sketch palette to curve into it, click the start again to close, Esc to stop.");
       return;
@@ -1161,11 +1184,19 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
     const step = extendProfileChain(chain, point, curveFields.profileMode, PICK_PIXELS * px, ids);
     if (!step.ok) { props.onMessage(`${step.diagnostics[0]?.message ?? "The segment was rejected."} Place the point somewhere else, or press Esc to stop.`); return; }
-    const { constraints, chain: next, closed } = step.value;
+    const { chain: next, closed } = step.value;
     const entity = entityForDrawMode(step.value.entity, drawAsConstruction);
+    // The start of the first segment and the end of any segment that were snapped to other geometry are joined to it, like any drawn curve's.
+    const snapPlaced = [chain.segments === 0 ? profileStartSnap.current : undefined, closed ? undefined : snapOf(next.tail)].filter((entry): entry is PlacedPointInference => entry !== undefined);
+    const snapRelations = autoConstrain && snapPlaced.length > 0
+      ? keepResolvableConstraints(profileSnapRelations({ entity, placed: snapPlaced, own: step.value.constraints, sketch: props.sketch, newId: () => `constraint:auto-${crypto.randomUUID()}` }), props.sketch.entities.map((existing) => existing.id), [entity.id]).kept
+      : [];
+    const constraints = [...step.value.constraints, ...snapRelations];
     let accepted: boolean | void = undefined;
     if (constraints.length > 0) accepted = props.onApplyEdit({ label: `Added profile ${entity.kind} ${next.segments}`, removeEntityIds: [], updateEntities: [], addEntities: [entity], addConstraints: constraints });
-    // If the solver refused the relations, the segment itself is still drawn.
+    // If the solver refused the snap relations, the segment is drawn with the joints that hold the outline together.
+    if (accepted === false && snapRelations.length > 0 && step.value.constraints.length > 0) accepted = props.onApplyEdit({ label: `Added profile ${entity.kind} ${next.segments}`, removeEntityIds: [], updateEntities: [], addEntities: [entity], addConstraints: step.value.constraints });
+    // If the solver refused the relations altogether, the segment itself is still drawn.
     if (constraints.length === 0 || accepted === false) props.onAddEntity(entity);
     if (closed) {
       profileChain.current = undefined;
@@ -1658,7 +1689,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       case "finish":
         if (props.tool === "spline-control") { if (pending.length >= 3) finishControlSpline(pending, false); return; }
         if (props.tool === "profile") { profileChain.current = undefined; setPending([]); props.onMessage("Profile finished."); return; }
-        if (pending.length >= 3) finishSpline(pending);
+        if (pending.length >= 2) finishSpline(pending);
         return;
       case "type-value": {
         const first = dynamicFields[0];

@@ -1,3 +1,4 @@
+import { sketchPointsProblem } from "./entity-limits.js";
 import { failure, type SketchEntity, type Vec2, type WorkbenchResult, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
 
 /**
@@ -36,6 +37,8 @@ export function joinRing(ring: readonly SketchEntity[], ids: ShapeIds): Workbenc
  * by the cap radius.
  */
 export function buildSlotOverall(firstEnd: Vec2, secondEnd: Vec2, widthPoint: Vec2, ids: ShapeIds): WorkbenchResult<SketchShape> {
+  const unusable = sketchPointsProblem([firstEnd, secondEnd, widthPoint]);
+  if (unusable !== undefined) return bad(unusable);
   const axis: Vec2 = [secondEnd[0] - firstEnd[0], secondEnd[1] - firstEnd[1]];
   const overall = Math.hypot(axis[0], axis[1]);
   if (overall < 0.1) return bad("The slot's end-to-end length must be at least 0.1 mm.");
@@ -51,6 +54,8 @@ export function buildSlotOverall(firstEnd: Vec2, secondEnd: Vec2, widthPoint: Ve
 
 /** Center-to-center slot: the two end centres, then a point whose distance from the axis is the half-width. */
 export function buildSlot(first: Vec2, second: Vec2, widthPoint: Vec2, ids: ShapeIds): WorkbenchResult<SketchShape> {
+  const unusable = sketchPointsProblem([first, second, widthPoint]);
+  if (unusable !== undefined) return bad(unusable);
   const axis: Vec2 = [second[0] - first[0], second[1] - first[1]];
   const length = Math.hypot(axis[0], axis[1]);
   if (length < 0.05) return bad("The two slot centres must be at least 0.05 mm apart.");

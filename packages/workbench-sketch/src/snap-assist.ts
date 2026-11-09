@@ -172,7 +172,9 @@ export function assistedInference(input: AssistedInferenceInput): InferenceResul
     : raw;
   if (anchor === undefined) return base;
 
-  const forcing = directionLockApplies(tool, input.placedCount) && (modifiers.shift || (settings.ortho && !modifiers.ctrl));
+  // The sticky ortho lock is for drawing directions: it must not turn every rectangle into a square. Only Shift (asked for on the spot) squares one.
+  const orthoLocks = settings.ortho && !modifiers.ctrl && !SQUARE_TOOLS.has(tool);
+  const forcing = directionLockApplies(tool, input.placedCount) && (modifiers.shift || orthoLocks);
   if (forcing) {
     const locked = constrain(tool, anchor, pointer);
     const label = locked.kind === "square" ? "Square" : modifiers.shift ? "Constrained" : "Ortho";

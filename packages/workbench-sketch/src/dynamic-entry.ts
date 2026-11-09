@@ -33,8 +33,33 @@ const DECIMAL_COMMA = /^([+-]?\d*),(\d+)(\s*[a-zA-Z]*)$/;
 export type EntryUnit = "mm" | "in";
 const MM_PER_INCH = 25.4;
 
+/** Inches to millimetres without the binary-float tail (3 * 25.4 is 76.19999999999999): rounded to 10 decimals, far below any tolerance. */
+function cleanInches(inches: number): number {
+  return Number((inches * MM_PER_INCH).toFixed(10));
+}
+
 /** A number written with both a comma and a point (1,000.5): neither a decimal comma nor something the expression engine can read. */
 const COMMA_AND_POINT = /^[+-]?\d[\d,]*,\d[\d,]*\.\d+\s*[a-zA-Z]*$|^[+-]?\d+\.\d+,\d+/;
+
+/**
+ * What to tell someone who typed both a comma and a point in one number. A comma here is a decimal comma (7,5 is 7.5), so the number has two
+ * decimal marks; the message names the two ways to write it. (It used to tell the user to write what they had typed.)
+ */
+export function mixedSeparatorMessage(body: string): string {
+  const unit = /[a-zA-Z]+$/u.exec(body.trim())?.[0] ?? "";
+  const number = body.trim().slice(0, body.trim().length - unit.length).trim();
+  const lastPoint = number.lastIndexOf(".");
+  const lastComma = number.lastIndexOf(",");
+  // 1,000.5 groups thousands with commas; 1.000,5 groups them with points and keeps a decimal comma.
+  const groupedWithComma = lastPoint > lastComma;
+  const sign = number.startsWith("-") ? "-" : "";
+  const digits = number.replace(/^[+-]/u, "");
+  const plain = groupedWithComma ? sign + digits.replace(/,/gu, "") : sign + digits.replace(/\./gu, "").replace(",", ".");
+  // A comma that groups digits in threes (1,000.5) is a thousands comma, which this input does not take.
+  if (groupedWithComma && /^\d{1,3}(,\d{3})+\.\d+$/u.test(digits)) return "Write " + plain + (unit === "" ? "" : " " + unit) + " without the thousands comma: a comma here is a decimal comma (7,5 is 7.5).";
+  const reading = /^-?\d+(\.\d+)?$/u.test(plain) ? "Did you mean " + plain + (unit === "" ? "" : " " + unit) + "? " : "";
+  return number + " mixes a decimal point and a comma. " + reading + "Write one decimal mark only (a point, as in 7.5, or a comma, as in 7,5) and no thousands separators.";
+}
 
 /** Makes `1/2in` mean half an inch (the engine reads it as one over two inches), `7,5 mm` seven and a half, and `45°` forty-five degrees. */
 function friendlyText(rawText: string): string {
@@ -61,7 +86,7 @@ export function parseFieldEntry(text: string, field: DynamicField, evaluate: Eva
     if (field.kind !== "coordinate") return { ok: false, message: `${prefix} only works in the X and Y fields, or as a pair such as ${prefix}12,5.` };
   }
   if (body === "" || body === "-" || body === "+") return { ok: false, message: `Type ${KIND_WORDS[field.kind]} for ${field.label.toLowerCase()}.` };
-  if (COMMA_AND_POINT.test(body)) return { ok: false, message: `Write ${body.replace(/,(?=\d{3}(\D|$))/g, "")} without the thousands comma: a comma here is a decimal comma (7,5 is 7.5).` };
+  if (COMMA_AND_POINT.test(body)) return { ok: false, message: mixedSeparatorMessage(body) };
   const evaluated = evaluate(friendlyText(body));
   if (!evaluated.ok) return { ok: false, message: evaluated.message };
   const quantity = evaluated.quantity;
@@ -74,7 +99,7 @@ export function parseFieldEntry(text: string, field: DynamicField, evaluate: Eva
   if (!Number.isFinite(quantity.value)) return { ok: false, message: `${field.label} is not a finite number.` };
   // A bare number is in the document's unit; the field is millimetres underneath, so a bare 2 in an inch document is 50.8.
   const bare = isScalar && field.kind !== "angle";
-  return { ok: true, value: bare && unit === "in" ? quantity.value * MM_PER_INCH : quantity.value, prefix };
+  return { ok: true, value: bare && unit === "in" ? cleanInches(quantity.value) : quantity.value, prefix };
 }
 
 /**

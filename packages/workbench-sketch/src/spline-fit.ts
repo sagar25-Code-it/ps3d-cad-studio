@@ -69,7 +69,66 @@ function spanCounts(lengths: readonly number[]): readonly number[] {
  * clicked; the other two keep the clicked points and add fit points between them (up to 64 in all), so the curve follows the
  * chord-length or centripetal curve and does not loop when clicks are unevenly spaced.
  */
-export function buildFitSpline(points: readonly Vec2[], parameterization: SplineParameterization, id: string): WorkbenchResult<SketchEntity> {
+export function buildFitSpline(points: readonly Vec2[], parameterization: SplineParameterization, id: string, tangents: SplineEndTangents = {}): WorkbenchResult<SketchEntity> {
+  if (points.length < 2) return failure("INVALID_OPERATION", "A spline needs at least two points.", [], "Click a second point.");
+  const conditions = tangents.start !== undefined || tangents.end !== undefined;
+  const through = withEndConditions(points, tangents);
+  if (!through.ok) return through;
+  // The loops of a uniform curve through unevenly spaced points would bend the end conditions: an end tangent uses the centripetal spacing.
+  const mode: SplineParameterization = conditions && parameterization === "uniform" ? "centripetal" : parameterization;
+  return fitThrough(through.value, mode, id);
+}
+
+/** The direction a spline leaves its first point and arrives at its last, as unit vectors (undefined leaves that end free). */
+export interface SplineEndTangents {
+  readonly start?: Vec2 | undefined;
+  readonly end?: Vec2 | undefined;
+}
+
+/** The unit vector of a direction written in degrees counter-clockwise from +X, or undefined for blank/invalid text. */
+export function tangentFromDegrees(degrees: number | undefined): Vec2 | undefined {
+  if (degrees === undefined || !Number.isFinite(degrees)) return undefined;
+  const radians = (degrees * Math.PI) / 180;
+  return [Math.cos(radians), Math.sin(radians)];
+}
+
+/** How far along an end tangent the helper fit point sits, as a fraction of the gap to the next point. */
+const TANGENT_REACH = 0.25;
+
+/**
+ * The fit points a spline really passes through: two clicks become a straight spline (the middle point is the midpoint), and an end tangent
+ * adds one fit point a quarter of the way to the next point along that direction. A fit-point spline leaves its first point along the chord to
+ * the second fit point, so the curve leaves with exactly the asked direction; the extra point is an ordinary fit point and can be dragged.
+ */
+function withEndConditions(points: readonly Vec2[], tangents: SplineEndTangents): WorkbenchResult<readonly Vec2[]> {
+  const unit = (v: Vec2 | undefined): Vec2 | undefined => {
+    if (v === undefined) return undefined;
+    const length = Math.hypot(v[0], v[1]);
+    return length < 1e-9 || !Number.isFinite(length) ? undefined : [v[0] / length, v[1] / length];
+  };
+  const start = unit(tangents.start);
+  const end = unit(tangents.end);
+  if ((tangents.start !== undefined && start === undefined) || (tangents.end !== undefined && end === undefined)) return failure("INVALID_OPERATION", "A spline end direction must be a finite angle.", [], "Type an angle in degrees, or clear the field.");
+  let fit: Vec2[] = [...points];
+  if (fit.length === 2) {
+    const [a, b] = fit as [Vec2, Vec2];
+    if (distance(a, b) < MIN_GAP_MM) return failure("INVALID_OPERATION", "The two spline points must be at least 0.01 mm apart.", [], "Place the second point further away.");
+    // Without end directions a two-point spline is the straight line through its points, kept as a spline with the midpoint as its third fit point.
+    if (start === undefined && end === undefined) return { ok: true, value: [a, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], b] };
+  }
+  if (start !== undefined) {
+    const reach = TANGENT_REACH * distance(fit[0]!, fit[1]!);
+    fit = [fit[0]!, [fit[0]![0] + start[0] * reach, fit[0]![1] + start[1] * reach], ...fit.slice(1)];
+  }
+  if (end !== undefined) {
+    const last = fit[fit.length - 1]!;
+    const reach = TANGENT_REACH * distance(last, fit[fit.length - 2]!);
+    fit = [...fit.slice(0, -1), [last[0] - end[0] * reach, last[1] - end[1] * reach], last];
+  }
+  return { ok: true, value: fit };
+}
+
+function fitThrough(points: readonly Vec2[], parameterization: SplineParameterization, id: string): WorkbenchResult<SketchEntity> {
   const classic = buildSketchEntity("spline", points, id);
   if (!classic.ok || parameterization === "uniform") return classic;
   const alpha = parameterization === "chord-length" ? 1 : 0.5;

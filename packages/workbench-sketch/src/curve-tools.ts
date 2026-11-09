@@ -4,6 +4,8 @@ import { buildCenterline, buildCenterpointArcSlot, buildMidpointLine, buildParal
 import { buildEllipticalArc } from "./ellipse-arc.js";
 import { buildTangentCircleThree, buildTangentCircleTwo } from "./tangent-circles.js";
 import { buildConicByRho, buildConicFromFivePoints, buildControlPointSpline, buildHyperbola, buildParabola } from "./conic-curves.js";
+import { sketchPointsProblem } from "./entity-limits.js";
+import { FIT_TOLERANCE_NOTE } from "./fit-tolerance.js";
 import { badShape, type ShapeIds, type SketchShape } from "./curve-math.js";
 import { insertSketchBlock, type SketchBlock } from "./sketch-blocks.js";
 import { buildSketchText } from "./stroke-text.js";
@@ -84,11 +86,11 @@ export const CURVE_TOOL_PROMPTS: Readonly<Record<CurveToolId, readonly string[]>
   "rectangle-rounded": ["first corner", "opposite corner"],
   "slot-arc-three-point": ["start of the centreline arc", "a point on the arc", "end of the arc", "a point for the half-width"],
   "slot-arc-center": ["bend centre", "start of the centreline arc", "direction of the arc end", "a point for the half-width"],
-  "spline-control": ["control point (click the first one again or press Enter to finish)"],
-  parabola: ["start", "end", "the point where the end tangents meet"],
-  hyperbola: ["centre", "vertex", "a point on the branch"],
-  conic: ["start", "end", "the point where the end tangents meet"],
-  "conic-five": ["point 1", "point 2", "point 3", "point 4", "point 5"],
+  "spline-control": [`control point (click the first one again or press Enter to finish; stored as a spline within ${FIT_TOLERANCE_NOTE})`],
+  parabola: [`start (stored as a spline within ${FIT_TOLERANCE_NOTE})`, "end", "the point where the end tangents meet"],
+  hyperbola: [`centre (stored as a spline within ${FIT_TOLERANCE_NOTE})`, "vertex", "a point on the branch"],
+  conic: [`start (stored as a spline within ${FIT_TOLERANCE_NOTE})`, "end", "the point where the end tangents meet"],
+  "conic-five": [`point 1 (stored as a spline within ${FIT_TOLERANCE_NOTE})`, "point 2", "point 3", "point 4", "point 5"],
   "ellipse-arc": ["centre of the ellipse", "end of the major axis", "a point that sets the minor radius", "where the arc starts", "where the arc ends (counter-clockwise from the start)"],
   "circle-tangent-3": ["near the first curve", "near the second curve", "near the third curve"],
   "circle-tangent-2": ["near the first curve", "near the second curve (the radius is in the Sketch palette)"],
@@ -171,6 +173,10 @@ export function buildCurveTool(tool: FixedCurveToolId, points: readonly Vec2[], 
   if (points.length !== FIXED_POINTS[tool]) {
     return { ok: false, diagnostics: [{ code: "INVALID_OPERATION", message: `${CURVE_TOOL_LABELS[tool]} takes ${FIXED_POINTS[tool]} points.`, relatedIds: [], recovery: "Place the remaining points or press Esc to cancel." }] };
   }
+  // Every curve tool refuses a click that is not a finite number or lies beyond the sketch limit, with the limit named (the single-curve builders already did).
+  const unusable = sketchPointsProblem(points);
+  if (unusable !== undefined) return badShape(unusable);
+  if (!Number.isFinite(options.cornerRadiusMm) || !Number.isFinite(options.rho) || !Number.isFinite(options.blendTension) || !Number.isFinite(options.centerlineReachMm)) return badShape("A tool setting in the Sketch palette is not a finite number.", "Type the setting again.");
   switch (tool) {
     case "line-midpoint": return buildMidpointLine(p(0), p(1), ids);
     case "centerline": return buildCenterline(p(0), p(1), options.centerlineReachMm, ids);

@@ -49,6 +49,17 @@ export function typedIntentConstraints(input: TypedIntentInput): readonly Workbe
   } else if (entity.kind === "circle") {
     if (tool === "circle" && usable(typed.radius)) found.push({ id: input.newId(), kind: "radius", entityIds: [entity.id], valueMm: Math.abs(typed.radius), dimension: "radius" });
     if (tool === "circle-two-point" && usable(typed.diameter)) found.push({ id: input.newId(), kind: "radius", entityIds: [entity.id], valueMm: Math.abs(typed.diameter) / 2, dimension: "radius" });
+  } else if (entity.kind === "arc" && tool === "arc-center") {
+    // A typed radius and a typed sweep are the arc's size: the radius and, with it, the arc length the sweep covers.
+    if (usable(typed.radius)) found.push({ id: input.newId(), kind: "radius", entityIds: [entity.id], valueMm: Math.abs(typed.radius), dimension: "radius" });
+    if (usable(typed.radius) && typed.sweep !== undefined && Number.isFinite(typed.sweep) && Math.abs(typed.sweep) > 1e-6 && Math.abs(typed.sweep) < 360) {
+      const length = Math.abs(typed.radius) * (Math.abs(typed.sweep) * Math.PI) / 180;
+      if (length >= MIN_DIMENSION_MM) found.push({ id: input.newId(), kind: "arc-length", entityIds: [entity.id], valueMm: Number(length.toFixed(9)) });
+    }
+  } else if (entity.kind === "ellipse") {
+    // The major radius is typed along the first axis and the minor radius off it.
+    if (usable(typed.major)) found.push({ id: input.newId(), kind: "radius", entityIds: [entity.id], valueMm: Math.abs(typed.major), dimension: "major-radius" });
+    if (usable(typed.minor)) found.push({ id: input.newId(), kind: "radius", entityIds: [entity.id], valueMm: Math.abs(typed.minor), dimension: "minor-radius" });
   }
   return found;
 }

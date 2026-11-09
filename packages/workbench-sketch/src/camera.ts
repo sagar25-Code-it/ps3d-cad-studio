@@ -141,8 +141,10 @@ export function sketchToScreen(point: Vec2, rect: ScreenRect, camera: SketchCame
  * line every fifth minor line.
  */
 export function gridSteps(baseMm: number, mmPerPx: number, minPixels = 14): { readonly minorMm: number; readonly majorMm: number } {
-  const base = baseMm > 0 ? baseMm : 1;
-  const wanted = Math.max(minPixels * mmPerPx, 1e-9);
+  const base = Number.isFinite(baseMm) && baseMm > 0 ? baseMm : 1;
+  // A scale that is not a number (or not finite) must not turn the whole grid into NaN: it is clamped to what a screen can show.
+  const perPixel = Number.isNaN(mmPerPx) ? 1 : Math.min(Math.max(mmPerPx, 1e-9), 1e9);
+  const wanted = Math.max((Number.isFinite(minPixels) ? minPixels : 14) * perPixel, 1e-9);
   const baseMantissa = base / 10 ** Math.floor(Math.log10(base) + 1e-12);
   const decimalLadder = [1, 2, 5].some((mantissa) => Math.abs(baseMantissa - mantissa) < 1e-9);
   const anchor = decimalLadder ? 1 : base;

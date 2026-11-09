@@ -16,6 +16,7 @@ import { sketchAutoConstraintTests } from "./sketch-auto-constraints.test.js";
 import { sketchDragTests } from "./sketch-drag.test.js";
 import { sketchDimensionLayoutTests } from "./sketch-dimension-layout.test.js";
 import { sketchShapeTests } from "./sketch-shapes.test.js";
+import { sketchEveryShape3Tests, sketchFit3Tests, sketchHotkeys3Tests, sketchSpline3Tests, sketchBuilderGuards3Tests, sketchShapeSnaps3Tests, sketchTypedEntry3Tests, sketchEllipseCrossing3Tests, sketchSnapRelations3Tests, sketchArcSlots3Tests, sketchShapes3Tests } from "./sketch-shapes3.test.js";
 import { sketchArcSlotJointTests, sketchShapeJointTests } from "./sketch-shape-joints.test.js";
 import { sketchRegularPolygonTests } from "./sketch-regular-polygon.test.js";
 import { sketchCornerJoinTests } from "./sketch-corner-joins.test.js";
@@ -138,6 +139,7 @@ import { pipeline3TimelineTests } from "./pipeline3-timeline.test.js";
 import { pipeline3UnitTests } from "./pipeline3-units.test.js";
 import { pipeline3SweepPathTests } from "./pipeline3-sweep-path.test.js";
 import { pipeline3PlaneTests } from "./pipeline3-plane.test.js";
+import { merge3InteractionTests } from "./merge3-interactions.test.js";
 import { sketchEdit3Tests, sketchEdit3RepairTests, sketchEdit3PatternTests, sketchEdit3SummaryTests } from "./sketch-edit3.test.js";
 import { sketchEdit3MirrorTests } from "./sketch-edit3-mirror.test.js";
 import { sketchEdit3ClipboardTests } from "./sketch-edit3-clipboard.test.js";
@@ -306,6 +308,18 @@ const tests: readonly TestCase[] = [
   ...sketchEdit3ClipboardTests,
   ...sketchEdit3RedundancyTests,
   ...sketchEdit3OffsetTests,
+  ...merge3InteractionTests,
+  ...sketchShapes3Tests,
+  ...sketchArcSlots3Tests,
+  ...sketchSnapRelations3Tests,
+  ...sketchEllipseCrossing3Tests,
+  ...sketchTypedEntry3Tests,
+  ...sketchShapeSnaps3Tests,
+  ...sketchBuilderGuards3Tests,
+  ...sketchSpline3Tests,
+  ...sketchHotkeys3Tests,
+  ...sketchFit3Tests,
+  ...sketchEveryShape3Tests,
 ];
 let failures = 0;
 
