@@ -3,7 +3,7 @@ import type { SketchRelationSet } from "../../parametric-sketch-core/src/types.j
 import { explainOrientationCollapse, ORIENTATION_RECOVERY } from "./sketch-orientation-explain.js";
 import { applyExtraConstraints } from "./sketch-solve-extras.js";
 import { friendlySolveMessage } from "./sketch-messages.js";
-import { livePointOf } from "./sketch-measure.js";
+import { arcShape, livePointOf } from "./sketch-measure.js";
 import { toSolverAnchors, type LiveAnchor } from "./sketch-anchors.js";
 import { turnAcrossLines } from "./sketch-quarter-turn.js";
 import { refractionRefusal, seedRefractions } from "./sketch-refraction.js";
@@ -205,11 +205,18 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
       // A circle that nothing holds would have to change size to reach geometry that far away. A routine Tangent should not be refused for
       // that and should not resize a hole either: the radius is held and the circle travels to the contact instead.
       if (!radiiHeld) {
-        // The radius outranks where the partners sit: they give way (the line travels, the other circle moves) instead of splitting the difference.
-        const own = (options.anchors ?? (focusEntityIds ?? []).map((entityId): LiveAnchor => ({ entityId, ref: "self", priority: 2 }))).filter((anchor) => !resize.partnerIds.includes(anchor.entityId));
+        const own = options.anchors ?? (focusEntityIds ?? []).map((entityId): LiveAnchor => ({ entityId, ref: "self", priority: 2 }));
         const held = resize.circleIds.map((entityId): LiveAnchor => ({ entityId, ref: "radius", priority: 2 }));
-        const moved = runSimultaneousSolve(sketch, focusEntityIds, drag, { ...options, anchors: [...own, ...held] }, true);
-        if (moved.ok) return { ...moved, notes: [...resize.keptNotes, ...moved.notes] };
+        // The partners keep their places first (the circle travels); if that still bends the radius (the circle cannot move), they give way instead.
+        const holdsRadius = (report: LiveSketchSolveReport): boolean => report.ok && resize.circleIds.every((id) => {
+          const before = sketch.entities.find((entity) => entity.id === id);
+          const after = report.entities.find((entity) => entity.id === id);
+          return before !== undefined && after !== undefined && before.kind === after.kind && (before.kind !== "circle" || after.kind !== "circle" || Math.abs(before.radiusMm - after.radiusMm) <= 1e-6) && (before.kind !== "arc" || after.kind !== "arc" || Math.abs(arcRadius(before) - arcRadius(after)) <= 1e-6);
+        });
+        for (const anchors of [[...own, ...held], [...own.filter((anchor) => !resize.partnerIds.includes(anchor.entityId)), ...held]]) {
+          const moved = runSimultaneousSolve(sketch, focusEntityIds, drag, { ...options, anchors }, true);
+          if (moved.ok && holdsRadius(moved)) return { ...moved, notes: [...resize.keptNotes, ...moved.notes] };
+        }
       }
       return { ok: false, message: resize.message, relatedIds: resize.relatedIds, recovery: "Move the circle (or the line) close to where it should touch first, or dimension the radius so it is held and the other geometry moves instead." };
     }
@@ -303,6 +310,10 @@ export function toLiveSets(sets: readonly SketchRelationSet[], kind: "redundant"
     result.push({ kind, constraintIds: ids, labels, message: set.message, ...(set.implied === undefined ? {} : { impliedConstraintId: liveConstraintId(set.implied) }) });
   }
   return result;
+}
+
+function arcRadius(arc: Extract<SketchEntity, { kind: "arc" }>): number {
+  return arcShape(arc.start, arc.mid, arc.end)?.radiusMm ?? 0;
 }
 
 function describeChange(before: SketchEntity, after: SketchEntity): string {
