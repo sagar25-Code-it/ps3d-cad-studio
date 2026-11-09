@@ -106,7 +106,7 @@ no browser-profile, filesystem-secret, credential, or network discovery. See
 - HTTP 401: sign in/authorize again, or replace an expired/revoked personal
   token. Do not retry a leaked value.
 - HTTP 403: the browser Origin is not the production PS3D origin.
-- HTTP 413: reduce the complete JSON request below 1 MB.
+- HTTP 413: reduce the complete JSON request below 4 MB (one tool call, project included, may carry at most 4 MB; the deployed endpoint allows 64 kB more for the JSON-RPC envelope).
 - HTTP 429: wait until the returned reset time; the limit is 60 requests per
   minute per identity.
 - JSON-RPC `-32003`: the token lacks the tool's required scope.

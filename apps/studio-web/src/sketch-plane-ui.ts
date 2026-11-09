@@ -1,3 +1,4 @@
+import { DATUM_PLANE_AXES } from "./sketch-world.js";
 import type { SketchDatumPlane, SketchPlaneFrame, SketchPlaneTilt, WorkbenchSketch, WorkspaceId } from "../../../packages/workbench-core/src/index.js";
 
 /**
@@ -13,6 +14,22 @@ export const DATUM_PLANE_NAMES: Readonly<Record<SketchDatumPlane, { readonly nam
   "datum:yz": { name: "Right (YZ)", view: "Right view", hint: "Looking along +X" }
 };
 
+/**
+ * The sketch X and Y axes of a datum plane in world terms. The world is Z up, so on the Right (YZ) plane the sketch's vertical is world
+ * +Y (not up) and its horizontal runs along world -Z; saved projects depend on that mapping, so it is kept and shown wherever a plane
+ * is chosen or described (the plane dialog, the status line, the revolve axis choice).
+ */
+export function sketchAxesInWorld(plane: SketchDatumPlane): { readonly x: string; readonly y: string; readonly sentence: string } {
+  const key = plane === "datum:xz" ? "xz" : plane === "datum:yz" ? "yz" : "xy";
+  const axes = DATUM_PLANE_AXES[key];
+  return { x: axes.sketchX, y: axes.sketchY, sentence: `Sketch X runs along ${axes.sketchX}, sketch Y along ${axes.sketchY}` };
+}
+
+/** The line of small print under a plane in the plane dialog: the view direction and where the sketch axes point in the world. */
+export function datumPlaneHint(plane: SketchDatumPlane): string {
+  return `${DATUM_PLANE_NAMES[plane].hint} · ${sketchAxesInWorld(plane).sentence}`;
+}
+
 export type SketchPlaneShape = Pick<WorkbenchSketch, "plane" | "planeOffsetMm" | "planeTilt" | "planeFrame">;
 
 export interface SketchPlaneDescription {
@@ -22,7 +39,7 @@ export interface SketchPlaneDescription {
   readonly details: readonly string[];
   /** The text of the persistent chip: "Sketch plane: Top (XY) · offset 25 mm". */
   readonly chip: string;
-  /** A sentence for the status line: "Sketch plane: Top (XY), offset 25 mm." */
+  /** A sentence for the status line: "Sketch plane: Top (XY), offset 25 mm. Sketch X runs along world +X, sketch Y along world +Y." */
   readonly status: string;
 }
 
@@ -47,7 +64,8 @@ export function describeSketchPlane(sketch: SketchPlaneShape): SketchPlaneDescri
     name,
     details,
     chip: `Sketch plane: ${[name, ...details].join(" · ")}`,
-    status: `Sketch plane: ${[name, ...details].join(", ")}.`
+    // A plane through three points has its own axes (shown by the canvas); a datum plane says where its X and Y point in the world.
+    status: `Sketch plane: ${[name, ...details].join(", ")}.${sketch.planeFrame === undefined && sketch.planeTilt === undefined ? ` ${sketchAxesInWorld(sketch.plane).sentence}.` : ""}`
   };
 }
 

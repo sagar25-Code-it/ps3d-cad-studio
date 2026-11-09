@@ -25,6 +25,7 @@ import { createBessContainerAssembly, createCargoContainerAssembly, createElectr
 import { createElectromechanicalAssembly, electricalSignature } from "./electromechanical.js";
 import { createVehicleTemplate, vehicleHardPoints, VEHICLE_PARAMETER_RANGES } from "./vehicle.js";
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
+import { sketchPlacementProblem } from "./sketch-problem-messages.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
 import { resizeSketchEntity, setSketchDimension, solveSummary } from "./sketch-dimension-edit.js";
 import { checkNewConstraint } from "./sketch-constraint-check.js";
@@ -295,7 +296,7 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
         || typeof input.suppressed !== "boolean") return invalidOperation("The constraint relax payload is invalid.");
       break;
     case "set-sketch-plane":
-      if (!validSketchPlacementInput(input, common)) return invalidOperation(SKETCH_PLACEMENT_MESSAGE);
+      if (!validSketchPlacementInput(input, common)) return invalidOperation(sketchPlacementProblem(input, common));
       break;
     case "commit-design-sketch":
       if (!keys(input, [...common, "featureId", "name"]) || !stableId(input.featureId) || !shortText(input.name, 1, 120)) return invalidOperation("The sketch feature payload is invalid.");
@@ -306,7 +307,7 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       if (!keys(input, [...common, "featureId"]) || !stableId(input.featureId)) return invalidOperation("The timeline feature ID is invalid.");
       break;
     case "new-design-sketch":
-      if (!validSketchPlacementInput(input, common)) return invalidOperation(SKETCH_PLACEMENT_MESSAGE);
+      if (!validSketchPlacementInput(input, common)) return invalidOperation(sketchPlacementProblem(input, common));
       break;
     case "add-design-solid":
     case "update-design-solid":
@@ -656,6 +657,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       return changed({ ...project, activeWorkspace: operation.workspace }, [project.id], `Opened ${workspaceLabel(operation.workspace)} workspace.`);
     case "add-sketch-entity": {
       if (project.sketch.entities.some((entity) => entity.id === operation.entity.id)) return invalidOperation("The sketch entity ID already exists.");
+      if (project.sketch.entities.length >= WORKBENCH_LIMITS.maxEntities) return failure("RESOURCE_LIMIT", `The sketch already holds ${project.sketch.entities.length} entities, the most a sketch may have (${WORKBENCH_LIMITS.maxEntities}).`, [project.sketch.id], "Delete curves you no longer need, or continue the drawing in a second sketch.");
       return changed({ ...project, sketch: { ...project.sketch, entities: [...project.sketch.entities, operation.entity] } }, [operation.entity.id], `Added ${sketchEntityName({ entities: [...project.sketch.entities, operation.entity] }, operation.entity.id)}.`);
     }
     case "delete-sketch-entity": {
@@ -672,6 +674,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "add-sketch-constraint": {
       if (project.sketch.constraints.some((constraint) => constraint.id === operation.constraint.id)) return invalidOperation("The sketch constraint ID already exists.");
+      if (project.sketch.constraints.length >= WORKBENCH_LIMITS.maxConstraints) return failure("RESOURCE_LIMIT", `The sketch already holds ${project.sketch.constraints.length} relations and dimensions, the most a sketch may have (${WORKBENCH_LIMITS.maxConstraints}).`, [project.sketch.id], "Delete relations that are no longer needed.");
       // A relation that cannot mean anything (a horizontal circle, a radius on a line, a line parallel to itself) is refused with the reason.
       const refusal = checkNewConstraint(project, operation.constraint);
       if (refusal !== undefined) return refusal;
@@ -1521,8 +1524,6 @@ function validSketchPlacementInput(input: Record<string, unknown>, common: reado
   if (Object.hasOwn(input, "face") && (!validSketchPlaneFace(input.face) || Object.hasOwn(input, "tilt") || Object.hasOwn(input, "frame"))) return false;
   return true;
 }
-
-const SKETCH_PLACEMENT_MESSAGE = "The sketch plane must be datum:xy, datum:xz or datum:yz, with a finite offset up to 100000 mm and, if tilted, an x, y or z axis and an angle up to 180°; or datum:xy with a frame of unit, perpendicular axes and no offset or tilt.";
 
 function finite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);

@@ -1,5 +1,5 @@
 import type { SketchEntity, Vec2 } from "../../workbench-core/src/index.js";
-import { chordErrorBoundMm } from "../../workbench-core/src/index.js";
+import { chordErrorBoundMm, ENVELOPE_LIMITS } from "../../workbench-core/src/index.js";
 import { arcCircle, arcStepCount, CHORD_TOLERANCE_MM, flattenSpline, isClosedFitSpline } from "./curve-sampling.js";
 
 /**
@@ -712,8 +712,29 @@ interface RawEdge {
   pieceCount: number;
 }
 
+/**
+ * The size of the smallest feature (a line, a rectangle side, a radius, a curve) that the model accepts but that is within four gap
+ * tolerances of the gap itself, or Infinity when there is none. The gap tolerance (0.01 mm) equals the smallest geometry a sketch may
+ * hold (ENVELOPE_LIMITS.minGeometryMm), so a 0.01 mm rectangle was accepted by the validators and then closed up and dropped here.
+ * The arrangement narrows its tolerance to a quarter of such a feature, so everything the model accepts yields a profile.
+ */
+function smallestSmallFeatureMm(entities: readonly SketchEntity[]): number {
+  const floor = ENVELOPE_LIMITS.minGeometryMm * (1 - 1e-9);
+  let smallest = Infinity;
+  const consider = (size: number): void => { if (Number.isFinite(size) && size >= floor && size < smallest) smallest = size; };
+  for (const entity of entities) {
+    if (entity.kind === "line") consider(dist(entity.start, entity.end));
+    else if (entity.kind === "rectangle") { consider(entity.widthMm); consider(entity.heightMm); }
+    else if (entity.kind === "circle") consider(entity.radiusMm);
+    else if (entity.kind === "ellipse") consider(Math.min(entity.majorRadiusMm, entity.minorRadiusMm));
+    else if (entity.kind === "arc") consider(dist(entity.start, entity.end));
+  }
+  return smallest;
+}
+
 export function buildArrangement(entities: readonly SketchEntity[], options: { readonly gapToleranceMm?: number; readonly chordToleranceMm?: number } = {}): Arrangement {
-  const tol = Math.max(options.gapToleranceMm ?? PROFILE_GAP_TOLERANCE_MM, 1e-9);
+  const requested = Math.max(options.gapToleranceMm ?? PROFILE_GAP_TOLERANCE_MM, 1e-9);
+  const tol = Math.max(Math.min(requested, smallestSmallFeatureMm(entities) / 4), 1e-9);
   const chordTol = options.chordToleranceMm;
   const skipped: { entityId: string; reason: string }[] = [];
   const curves = buildCurves(entities, tol, chordTol, skipped);

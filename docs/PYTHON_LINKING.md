@@ -10,11 +10,11 @@ The client in `sdk/python` implements:
 - modern `server/discover` negotiation in a disposable probe process plus
   2025-era initialize/initialized fallback;
 - `tools/list` and `tools/call` over newline-framed JSON-RPC stdio;
-- twelve typed tool helpers for the AI guide, stateless collaboration-agent
+- thirteen typed tool helpers for the AI guide, stateless collaboration-agent
   handshake, built-in engineering-intent planning, deterministic command discovery,
   capabilities, project inspection, all-workspace design health, read-only vehicle analysis, generic
   operation preview, electromechanical catalog inspection,
-  circuit-to-linked-3D preview, and confirmed apply;
+  circuit-to-linked-3D preview, building a solid from a finished sketch (`prepare_design_solid`), and confirmed apply;
 - a finite request timeout and captured stderr tail for diagnostics;
 - explicit argv with `shell=False` and a non-secret environment allowlist.
 

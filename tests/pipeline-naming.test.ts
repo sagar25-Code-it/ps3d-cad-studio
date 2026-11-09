@@ -29,7 +29,8 @@ export const pipelineNamingTests: readonly TestCase[] = [
       assert(!blank.ok && /cannot be blank/u.test(message(blank)), `a whitespace name says it is blank: ${message(blank)}`);
       assert(!/design timeline is invalid/u.test(message(blank)), "and no longer blames the whole timeline");
       const taken = pipelineApply(project, { kind: "rename-design-feature", featureId: "feature:s1", name: "sketch 3" });
-      assert(taken.ok && /already called "Sketch 3"/u.test(taken.value.summary), `renaming to a taken name is allowed but warned about: ${taken.ok ? taken.value.summary : message(taken)}`);
+      // Wave 2 (re-audit P19): a rename to a name another feature has is refused, with the free name offered, so two features never share one.
+      assert(!taken.ok && /already called "Sketch 3"/u.test(message(taken)) && /Sketch 3 [(]3[)]/iu.test(taken.diagnostics.map((diagnostic) => diagnostic.recovery ?? "").join(" ")), `renaming to a taken name is refused and offers a free one: ${taken.ok ? taken.value.summary : message(taken)}`);
       const fine = pipelineRun(project, { kind: "rename-design-feature", featureId: "feature:s1", name: "  Base profile  " });
       assert(namesOf(fine).includes("Base profile"), "a good name is trimmed and kept");
       const same = pipelineApply(project, { kind: "rename-design-feature", featureId: "feature:s1", name: "Sketch 1" });

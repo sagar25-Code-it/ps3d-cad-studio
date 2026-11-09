@@ -345,7 +345,7 @@ export const sketchExchangeTests: readonly TestCase[] = [
       assert(!planned.ok && messageOf(planned).includes("no lines"), "but there is nothing to import, and the message says so");
       // N-05: an unreadable number is refused with its line, never replaced by 0 (that put a wrong line in the sketch).
       const nan = parseDxf(ringDxf(pairs(0, "LINE", 10, "abc", 20, 0, 11, "NaN", 21, 5)));
-      assert(!nan.ok && /unreadable number "abc"/u.test(messageOf(nan)) && /line d+/u.test(messageOf(nan)), "unreadable numbers are refused and the message names the number and its line: " + messageOf(nan));
+      assert(!nan.ok && /unreadable number "abc"/u.test(messageOf(nan)) && /line [0-9]+/u.test(messageOf(nan)), "unreadable numbers are refused and the message names the number and its line: " + messageOf(nan));
     }
   },
   {

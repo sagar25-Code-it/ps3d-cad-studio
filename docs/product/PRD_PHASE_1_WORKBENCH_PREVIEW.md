@@ -166,7 +166,7 @@ qualification gates mature.
 - Remote Streamable HTTP and OAuth are deferred to the deployment phase.
 - Provide a Python 3.11+ standard-library client that implements modern MCP
   discovery with 2025-era initialize fallback, tools/list, tools/call, and typed
-  helpers for all twelve PS3D tools. It must use
+  helpers for all thirteen PS3D tools. It must use
   explicit argv, `shell=False`, a finite timeout, and no network or automatic
   project/secret discovery.
 
@@ -185,7 +185,7 @@ qualification gates mature.
   filesystem access.
 - Exact schemas, finite-number checks, count limits, string limits, and
   deterministic error responses on all project and MCP inputs.
-- MCP call size is capped at 1 MB; entities 500; components 100; mates 200;
+- MCP call size is capped at 4 MB (MCP_CALL_MAX_BYTES, shared by the local server and the deployed transport); entities 500; components 100; mates 200;
   audit entries 500; surface tessellation 48 × 48 maximum.
 - Existing restrictive CSP and production dependency boundary remain.
 

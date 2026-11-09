@@ -68,10 +68,10 @@ function chordRatio(ring: readonly SplinePoint[], closed: boolean): number {
 
 /** From this ratio of neighbouring chords the tangents are kept from swinging the curve far outside its fit points. */
 const OVERSHOOT_LIMIT_RATIO = 3;
-/** The share of a cubic's end tangent (perpendicular to the chord) that shows as its largest sideways excursion: 4/27. */
-const EXCURSION_PER_TANGENT = 4 / 27;
+/** The share of a cubic's end tangent (perpendicular to the chord) that shows as its largest sideways excursion: 4/27 from each end, and the two ends of a span add up, so 8/27. */
+const EXCURSION_PER_TANGENT = 8 / 27;
 /** A tangent is never shortened below this share, so the curve keeps leaving the point in the direction it is heading. */
-const MIN_TANGENT_KEEP = 0.1;
+const MIN_TANGENT_KEEP = 0.05;
 
 /**
  * Keeps the curve near its fit points when they are unevenly spaced. A Catmull-Rom tangent at a point between a short and a very long
@@ -92,7 +92,7 @@ function limitedTangent(at: (index: number) => SplinePoint, index: number, hasPr
     const length = Math.hypot(dx, dy);
     if (length < 1e-12) return;
     const off = (point: SplinePoint): number => Math.abs((point[0] - current[0]) * dy - (point[1] - current[1]) * dx) / length;
-    const slack = Math.max(0.3 * Math.max(off(outerBefore), off(outerAfter)), 0.005 * length);
+    const slack = Math.max(0.2 * Math.max(off(outerBefore), off(outerAfter)), 0.002 * length);
     // The part of the tangent across the chord is what swings the curve sideways.
     const across = Math.abs(tangent[0] * dy - tangent[1] * dx) / length;
     const reach = EXCURSION_PER_TANGENT * scale * across;

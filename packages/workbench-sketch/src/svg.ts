@@ -679,7 +679,7 @@ function number(text: string | undefined, fallback = 0): number {
 /** The fit points a PS3D-written path carries (3 to 64 of them), mapped through the element's matrix; undefined when absent or unusable. */
 function fitPointsOf(text: string | undefined, matrix: Matrix): Vec2[] | undefined {
   if (text === undefined) return undefined;
-  const values = text.split(/[s,]+/u).filter((part) => part !== "").map(Number);
+  const values = text.split(/[\s,]+/u).filter((part) => part !== "").map(Number);
   if (values.length < 6 || values.length % 2 === 1 || values.length > 128 || values.some((value) => !Number.isFinite(value))) return undefined;
   const points: Vec2[] = [];
   for (let index = 0; index + 1 < values.length; index += 2) points.push(apply(matrix, [values[index]!, values[index + 1]!]));
@@ -789,7 +789,7 @@ export function parseSvg(text: string, options: SvgReadOptions = {}): ParseResul
   };
   visit(svg, IDENTITY, "SVG");
   // A drawing PS3D wrote says where its own origin sits in the sketch; move the curves back there.
-  const origin = (svg.attrs["data-ps3d-origin"] ?? "").split(/s+/u).map(Number);
+  const origin = (svg.attrs["data-ps3d-origin"] ?? "").split(/\s+/u).map(Number);
   if (origin.length === 2 && origin.every(Number.isFinite)) {
     const shift: Vec2 = [origin[0]! / units.mmPerUnit, origin[1]! / units.mmPerUnit];
     for (let index = 0; index < curves.length; index += 1) curves[index] = shiftedCurve(curves[index]!, shift);

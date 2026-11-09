@@ -302,6 +302,23 @@ class Ps3dClient:
             )
         )
 
+    def prepare_design_solid(
+        self,
+        project: Mapping[str, Any],
+        solid: Mapping[str, Any],
+        guide_acknowledgement: Mapping[str, Any],
+    ) -> JsonObject:
+        return _structured(
+            self.call_tool(
+                "ps3d_prepare_design_solid",
+                {
+                    "project": dict(project),
+                    "solid": dict(solid),
+                    "guideAcknowledgement": dict(guide_acknowledgement),
+                },
+            )
+        )
+
     def preview(
         self,
         project: Mapping[str, Any],

@@ -17,21 +17,28 @@ export const CHORD_ERROR_RELATIVE = 5e-4;
 /** The most edges one full turn of a circle is given. */
 export const MAX_FULL_CIRCLE_FACETS = 4096;
 
-/** The chord error allowed for a curve of this radius or overall size; a caller can pass a coarser `capMm`. */
-export function chordErrorBoundMm(sizeMm: number, capMm: number = CHORD_ERROR_CAP_MM): number {
-  const relative = Number.isFinite(sizeMm) && sizeMm > 0 ? sizeMm * CHORD_ERROR_RELATIVE : CHORD_ERROR_FLOOR_MM;
-  return Math.min(capMm, Math.max(CHORD_ERROR_FLOOR_MM, relative));
+/**
+ * The finer rule for geometry whose volume or length matters most per edge, a sweep along a path: 1/10,000 of the radius and at most
+ * 0.002 mm, so a swept pipe is within about 0.015 percent of its analytic volume (the ordinary rule gives 0.07 percent). Callers fall back to
+ * the ordinary rule when the finer one would not fit the triangle budget of a stored mesh.
+ */
+export const FINE_CHORD_ERROR = { capMm: 0.002, relative: 1e-4 } as const;
+
+/** The chord error allowed for a curve of this radius or overall size; a caller can pass a coarser cap or another relative share. */
+export function chordErrorBoundMm(sizeMm: number, capMm: number = CHORD_ERROR_CAP_MM, relative: number = CHORD_ERROR_RELATIVE): number {
+  const share = Number.isFinite(sizeMm) && sizeMm > 0 ? sizeMm * relative : CHORD_ERROR_FLOOR_MM;
+  return Math.min(capMm, Math.max(CHORD_ERROR_FLOOR_MM, share));
 }
 
 /** The widest angle one straight edge may span on a circle of this radius without leaving the chord error bound. */
-export function maxChordStepRadians(radiusMm: number, capMm: number = CHORD_ERROR_CAP_MM): number {
-  const tolerance = chordErrorBoundMm(radiusMm, capMm);
+export function maxChordStepRadians(radiusMm: number, capMm: number = CHORD_ERROR_CAP_MM, relative: number = CHORD_ERROR_RELATIVE): number {
+  const tolerance = chordErrorBoundMm(radiusMm, capMm, relative);
   return radiusMm > tolerance ? 2 * Math.acos(1 - tolerance / radiusMm) : Math.PI / 2;
 }
 
 /** Edges for a full circle of this radius, rounded up to a multiple of four so the four quadrant points are always vertices. */
-export function fullCircleFacets(radiusMm: number, capMm: number = CHORD_ERROR_CAP_MM, maximum: number = MAX_FULL_CIRCLE_FACETS): number {
-  const step = maxChordStepRadians(radiusMm, capMm);
+export function fullCircleFacets(radiusMm: number, capMm: number = CHORD_ERROR_CAP_MM, maximum: number = MAX_FULL_CIRCLE_FACETS, relative: number = CHORD_ERROR_RELATIVE): number {
+  const step = maxChordStepRadians(radiusMm, capMm, relative);
   const wanted = Math.ceil((2 * Math.PI) / step);
   return Math.min(maximum - (maximum % 4), Math.max(16, Math.ceil(wanted / 4) * 4));
 }

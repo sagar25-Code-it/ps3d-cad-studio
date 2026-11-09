@@ -52,6 +52,7 @@ import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { validatePartFeatureStack } from "./part-features.js";
 import { MODEL_ENVELOPE, sketchEntityProblem } from "./envelope.js";
 import { describeByteLimit, MCP_CALL_MAX_BYTES, PROJECT_FILE_MAX_BYTES } from "./envelope-limits.js";
+import { sketchShapeProblem } from "./sketch-problem-messages.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
 import { AUDIT_CHECKPOINT_KIND, AUDIT_MAX_ENTRIES } from "./audit-archive.js";
 
@@ -256,7 +257,7 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
     || !finiteRange(value.gridMm, 0.1, 100) || !finiteRange(value.snapToleranceMm, 0.01, 10)
     || !Array.isArray(value.entities) || value.entities.length > WORKBENCH_LIMITS.maxEntities
     || !Array.isArray(value.constraints) || value.constraints.length > WORKBENCH_LIMITS.maxConstraints) {
-    return invalid("The primary sketch is invalid or exceeds its limits.");
+    return invalid(sketchShapeProblem(value, WORKBENCH_LIMITS));
   }
   const entityIds = new Set<string>();
   for (const entity of value.entities) {

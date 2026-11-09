@@ -392,10 +392,14 @@ export function renameDesignFeature(project: WorkbenchProject, featureId: string
   if (!history.features.some((candidate) => candidate.id === featureId)) return missing(featureId, "The timeline feature does not exist.");
   const name = nameInput.trim();
   if (name === "") return fail("INVALID_OPERATION", "The feature name cannot be blank.", [featureId], "Type at least one character for the name.");
-  // A name another feature already has is allowed (parameter expressions that refer to it are then flagged as ambiguous), but said out loud.
+  // Names in the timeline are unique (commit numbers a clash itself): a rename to a taken name is refused and offers the free one.
   const clash = history.features.find((candidate) => candidate.id !== featureId && sameName(candidate.name, name));
+  if (clash !== undefined) {
+    const free = uniqueFeatureName(history, name, featureId);
+    return fail("INVALID_OPERATION", `Another timeline feature is already called "${clash.name}", and two features cannot share a name (expressions that refer to a name would not know which one is meant).`, [featureId, clash.id], `Choose a different name, for example "${free}".`);
+  }
   const next: DesignHistory = { ...history, features: history.features.map((candidate): DesignFeature => candidate.id === featureId ? { ...candidate, name } : candidate) };
-  return changed(withHistory(project, next), [featureId], `Renamed the feature to ${name}.${clash === undefined ? "" : ` Another feature is already called "${clash.name}", so expressions that refer to that name are ambiguous until one is renamed.`}`);
+  return changed(withHistory(project, next), [featureId], `Renamed the feature to ${name}.`);
 }
 
 // ---------------------------------------------------------------------------------------------

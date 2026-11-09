@@ -217,7 +217,8 @@ export const sketchChromeTests: TestCase[] = [
       const three = describeSketchPlane({ plane: "datum:xy", planeFrame: { originMm: [1, 2, 3], uAxis: [1, 0, 0], normal: [0, 0, 1] } });
       equal(three.name, "Plane through three points", "three-point plane name");
       equal(three.chip, "Sketch plane: Plane through three points · origin (1, 2, 3) mm", "three-point chip shows the origin");
-      equal(describeSketchPlane({ plane: "datum:xy", planeOffsetMm: 10 }).status, "Sketch plane: Top (XY), offset 10 mm.", "status sentence");
+      // Re-audit P22: the status line also says where the sketch X and Y axes point in the world.
+      equal(describeSketchPlane({ plane: "datum:xy", planeOffsetMm: 10 }).status, "Sketch plane: Top (XY), offset 10 mm. Sketch X runs along world +X, sketch Y along world +Y.", "status sentence");
       equal(Object.keys(DATUM_PLANE_NAMES).length, 3, "three datum planes");
     }
   },

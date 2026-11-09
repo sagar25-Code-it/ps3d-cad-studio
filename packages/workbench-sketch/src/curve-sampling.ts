@@ -1,4 +1,4 @@
-import { chordErrorBoundMm, type Vec2 } from "../../workbench-core/src/index.js";
+import { chordErrorBoundMm, FINE_CHORD_ERROR, type Vec2 } from "../../workbench-core/src/index.js";
 import { isPeriodicSpline, splineDerivativesAt, splineSpanCount } from "../../workbench-core/src/spline-curvature.js";
 
 /**
@@ -101,16 +101,20 @@ export function splinePositionAt(fitPoints: readonly Vec2[], span: number, s: nu
 }
 
 /** An arc sampled to the shared relative chord-error rule: use this where the points become part of a solid (a sweep path, a rail). */
-export function sampleArcToBound(start: Vec2, mid: Vec2, end: Vec2): readonly Vec2[] {
-  return sampleArcWith(start, mid, end, undefined);
+export function sampleArcToBound(start: Vec2, mid: Vec2, end: Vec2, options: { readonly fine?: boolean } = {}): readonly Vec2[] {
+  if (options.fine !== true) return sampleArcWith(start, mid, end, undefined);
+  // The finer rule (FINE_CHORD_ERROR) for a sweep path, whose swept volume follows the length of the sampled path.
+  const circle = arcCircle(start, mid, end);
+  return sampleArcWith(start, mid, end, circle === undefined ? undefined : chordErrorBoundMm(circle.radiusMm, FINE_CHORD_ERROR.capMm, FINE_CHORD_ERROR.relative));
 }
 
 /**
  * A spline sampled to the shared relative chord-error rule (see flattenSpline): where the points become part of a solid (a sweep path, a
  * rail, a surface curve) a 2000 mm span gets as many edges as it needs and a small spline only a few.
  */
-export function sampleSplineToBound(fitPoints: readonly Vec2[]): readonly Vec2[] {
-  return fitPoints.length < 3 ? fitPoints : flattenSpline(fitPoints).points;
+export function sampleSplineToBound(fitPoints: readonly Vec2[], options: { readonly fine?: boolean } = {}): readonly Vec2[] {
+  if (fitPoints.length < 3) return fitPoints;
+  return flattenSpline(fitPoints, options.fine === true ? chordErrorBoundMm(extentOf(fitPoints), FINE_CHORD_ERROR.capMm, FINE_CHORD_ERROR.relative) : undefined).points;
 }
 
 /** The coarsest chord error the default spline sampling for drawing and hit testing allows: 0.02 mm, far below a pixel at any zoom. */

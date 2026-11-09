@@ -1,4 +1,4 @@
-import { ENVELOPE_LIMITS, failure, type SketchEntity, type Vec2, type WorkbenchResult, type WorkbenchSketch } from "../../workbench-core/src/index.js";
+import { ENVELOPE_LIMITS, failure, SPLINE_MAX_FIT_POINTS, type SketchEntity, type Vec2, type WorkbenchResult, type WorkbenchSketch } from "../../workbench-core/src/index.js";
 import type { SketchEditPlan } from "./edit-tools.js";
 
 /**
@@ -401,7 +401,7 @@ function curveToEntity(curve: RawCurve, id: string, construction: boolean): Sket
     }
     case "spline": {
       const fit = curve.fit.filter((point, index) => index === 0 || dist(point, curve.fit[index - 1]!) >= MIN_GEOMETRY_MM);
-      if (fit.length >= 3) return { id, kind: "spline", fitPoints: fit.slice(0, 24), construction };
+      if (fit.length >= 3) return { id, kind: "spline", fitPoints: fit.slice(0, SPLINE_MAX_FIT_POINTS), construction };
       return fit.length === 2 ? { id, kind: "line", start: fit[0]!, end: fit[1]!, construction } : "tiny";
     }
     case "point":

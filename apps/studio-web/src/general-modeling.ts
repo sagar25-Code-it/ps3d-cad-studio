@@ -16,8 +16,8 @@ type WorldPoint = readonly [number, number, number];
  * sketch (profileOutlineMm: within 1/2,000 of the radius, at most 0.01 mm), so the outline of an extrusion, a sweep and a loft is as
  * round as the sketch curve at any size. `maxFacets` caps a round outline for a caller that multiplies it by another count (a revolve).
  */
-export function profilePolygonMm(boundary: SketchProfile["boundary"], maxFacets?: number): readonly PolygonPoint[] {
-  return profileOutlineMm(boundary, maxFacets === undefined ? {} : { maxFacets }).map((point) => [point[0], point[1]] as PolygonPoint);
+export function profilePolygonMm(boundary: SketchProfile["boundary"], maxFacets?: number, fine = false): readonly PolygonPoint[] {
+  return profileOutlineMm(boundary, { ...(maxFacets === undefined ? {} : { maxFacets }), ...(fine ? { fine: true } : {}) }).map((point) => [point[0], point[1]] as PolygonPoint);
 }
 
 /** The coarser faceting a revolve gives the round outline of its profile (the file grows with the facets times the turns): see adaptiveFacetCount. */

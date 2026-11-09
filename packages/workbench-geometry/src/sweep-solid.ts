@@ -167,6 +167,12 @@ export interface PathSweepInput {
   /** Which way the profile's x axis points at the start; it is made perpendicular to the first tangent. */
   readonly startU: V3;
   readonly twistDeg?: number;
+  /**
+   * The true direction of the path at its first and last point when it starts or ends on a curve (the sampled path's first chord leans
+   * into the bend by half a step). The end caps are cut square to these instead of to the chord, so a pipe along an arc ends flat.
+   */
+  readonly startTangent?: V3;
+  readonly endTangent?: V3;
 }
 
 /**
@@ -207,6 +213,13 @@ export function sweepAlongPath(input: PathSweepInput): SolidMeshResult {
   const centre = loopCentroid(oriented.outer);
   const twistRad = ((Number.isFinite(input.twistDeg) ? input.twistDeg! : 0) * Math.PI) / 180;
   const stationCount = points.length;
+  const capNormal = (tangent: V3 | undefined, chord: V3): V3 | undefined => {
+    const wanted = tangent === undefined ? undefined : unit(tangent);
+    // Only a small correction: the true direction must lie within 20 degrees of the chord, and point the same way.
+    return wanted !== undefined && dot(wanted, chord) > 0.94 ? wanted : undefined;
+  };
+  const startNormal = closed ? undefined : capNormal(input.startTangent, tangents[0]!);
+  const endNormal = closed ? undefined : capNormal(input.endTangent, tangents[segments - 1]!);
   const rings: V3[][] = [];
   for (let station = 0; station < stationCount; station += 1) {
     const angle = total > 0 ? twistRad * (distances[station]! / total) : 0;
@@ -225,7 +238,15 @@ export function sweepAlongPath(input: PathSweepInput): SolidMeshResult {
       const b = centre[1] + dx * sinA + dy * cosA;
       if (isStart || isEnd) {
         const frame = frames[isStart ? 0 : segments - 1]!;
-        ring.push(add(origin, add(scale(frame.u, a), scale(frame.v, b))));
+        const flat = add(scale(frame.u, a), scale(frame.v, b));
+        const normal = isStart ? startNormal : endNormal;
+        if (normal === undefined) {
+          ring.push(add(origin, flat));
+        } else {
+          // Slide the point along the chord direction onto the plane square to the true path direction.
+          const chord = isStart ? tangents[0]! : tangents[segments - 1]!;
+          ring.push(add(origin, add(flat, scale(chord, -dot(flat, normal) / dot(chord, normal)))));
+        }
         continue;
       }
       // Mitre: carry the offset along the incoming piece to the bisector plane of the joint.
