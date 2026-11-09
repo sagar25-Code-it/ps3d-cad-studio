@@ -11,5 +11,20 @@ export function halvedExpression(diameterExpression: string): string {
 /** The diameter expression that `halvedExpression` wrapped, or the whole expression when it was not wrapped that way. */
 export function unhalvedExpression(radiusExpression: string): string {
   const wrapped = /^\((.*)\) \/ 2$/u.exec(radiusExpression);
-  return wrapped?.[1] ?? `(${radiusExpression}) * 2`;
+  // The brackets must be one pair around everything: "(a) / 2 + (b) / 2" starts and ends like a wrapper but is not one.
+  if (wrapped?.[1] !== undefined && closesAtEnd(wrapped[1])) return wrapped[1];
+  return `(${radiusExpression}) * 2`;
+}
+
+/** Whether the text between a wrapper's outer brackets is balanced, so the first bracket really closes at the last one. */
+function closesAtEnd(inner: string): boolean {
+  let depth = 0;
+  for (const char of inner) {
+    if (char === "(") depth += 1;
+    else if (char === ")") {
+      depth -= 1;
+      if (depth < 0) return false;
+    }
+  }
+  return depth === 0;
 }

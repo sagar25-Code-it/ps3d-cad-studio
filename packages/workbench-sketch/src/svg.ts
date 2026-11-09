@@ -232,8 +232,13 @@ function parseXml(text: string): XmlElement | string {
     index = cursor + 1;
   }
   const svg = root.children.find((child) => localName(child.name) === "svg");
+  // Elements still open at the end of the text: the file stops before its closing tags (a half-saved or half-downloaded drawing).
+  if (svg !== undefined && stack.length > 1) UNCLOSED_ELEMENTS.set(svg, stack.slice(1).map((element) => element.name));
   return svg ?? "There is no <svg> element in this file.";
 }
+
+/** The names of the elements a parsed document left open, keyed by its root, so the reader can say the file was cut off. */
+const UNCLOSED_ELEMENTS = new WeakMap<XmlElement, readonly string[]>();
 
 function localName(name: string): string {
   const colon = name.indexOf(":");
@@ -798,6 +803,8 @@ export function parseSvg(text: string, options: SvgReadOptions = {}): ParseResul
   for (const curve of curves) counts.set(curve.layer, (counts.get(curve.layer) ?? 0) + 1);
   const layers = [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
   const warnings = [...context.warnings];
+  const unclosed = UNCLOSED_ELEMENTS.get(svg);
+  if (unclosed !== undefined) warnings.unshift(`The SVG looks cut off: <${unclosed[unclosed.length - 1]!}> is never closed (${unclosed.length === 1 ? "no </" + unclosed[0]! + ">" : "the closing tags are missing"}). ${curves.length} curve${curves.length === 1 ? " was" : "s were"} read before the file stops; everything after that point is missing. Export the drawing again before relying on this outline.`);
   const skippedTypes = Object.entries(skipped);
   if (skippedTypes.length > 0) warnings.push(`Skipped ${skippedTypes.map(([type, count]) => `${count} ${type}`).join(", ")}: only paths and basic shapes are imported (convert text to outlines first).`);
   if (units.source !== "file") warnings.push(`The SVG does not give a physical size (width and height with a unit), so ${units.name} are assumed. Check the scale before importing.`);

@@ -17,7 +17,8 @@ import {
   SKETCH_DIMENSION_RANGE_MM,
   type BindingResult
 } from "./parameter-graph.js";
-import { locateDimensionConstraint, redriveDimension } from "./sketch-dimension-edit.js";
+import { locateDimensionConstraint, redriveDimension, restateDimensionSummary } from "./sketch-dimension-edit.js";
+import { dimensionTargetValue } from "./sketch-measure.js";
 import type { DesignFeature, DesignHistory, DesignParameter, DesignSolidFeature, SketchEntity, WorkbenchOperation, WorkbenchProject, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 import { isSketchDatumEntityId } from "./types.js";
 import { reconcileSketchObjects } from "./sketch-objects.js";
@@ -388,7 +389,13 @@ export function settleDesignExpressions(before: WorkbenchProject, operation: Wor
   }
   const changedIds = [...new Set([...result.value.changedIds, ...applied.changedIds])];
   const note = applied.updated === 0 ? "" : ` ${applied.updated} bound value${applied.updated === 1 ? "" : "s"} followed the change.`;
-  return { ok: true, value: { project: applied.project, changedIds, summary: `${summary}${note}` } };
+  let stated = summary;
+  if (operation.kind === "set-sketch-dimension" && operation.expression !== undefined) {
+    const bound = locateDimensionConstraint(applied.project.sketch, { entityId: operation.entityId, dimension: operation.dimension, ...(operation.secondEntityId === undefined ? {} : { secondEntityId: operation.secondEntityId }), ...(operation.points === undefined ? {} : { points: operation.points }) });
+    const evaluated = bound === undefined ? undefined : dimensionTargetValue(bound);
+    if (evaluated !== undefined) stated = restateDimensionSummary(summary, operation, evaluated);
+  }
+  return { ok: true, value: { project: applied.project, changedIds, summary: `${stated}${note}` } };
 }
 
 // ---------------------------------------------------------------------------------------------

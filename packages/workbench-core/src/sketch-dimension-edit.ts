@@ -276,3 +276,14 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
     }
   };
 }
+
+/**
+ * The summary of a set-sketch-dimension request whose value came from an expression: the typed `valueMm` is only a placeholder there, so
+ * the sentence names the evaluated value the sketch was driven to.
+ */
+export function restateDimensionSummary(summary: string, operation: SetDimension, evaluated: number): string {
+  const typed = `${operation.dimension} of ${operation.entityId} to ${formatNumber(operation.valueMm)}${unitLabel(operation.dimension)}`;
+  const actual = `${operation.dimension} of ${operation.entityId} to ${formatNumber(evaluated)}${unitLabel(operation.dimension)}`;
+  if (typed === actual || !summary.includes(typed)) return summary;
+  return summary.replace(typed, `${actual} (from ${operation.expression ?? "its expression"})`);
+}

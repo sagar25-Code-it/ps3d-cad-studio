@@ -47,6 +47,16 @@ function num(value: number): string {
   return trimmed === "-0" ? "0" : trimmed;
 }
 
+/**
+ * A number with 15 significant digits, for the values an ellipse is rebuilt from (the major-axis vector and the axis ratio): nine decimals
+ * would leave the reader with 11.9999999996 for a radius of 12.
+ */
+function exact(value: number): string {
+  if (!Number.isFinite(value) || Math.abs(value) < 1e-12) return "0";
+  const text = String(Number(value.toPrecision(15)));
+  return /e/iu.test(text) ? value.toFixed(12).replace(/0+$/u, "").replace(/\.$/u, "") : text;
+}
+
 class DxfWriter {
   private readonly lines: string[] = [];
   private nextHandle = 0x100;
@@ -184,9 +194,9 @@ export function writeSketchDxf(sketch: WorkbenchSketch, options: DxfWriteOptions
         const c = mapPoint(entity.center, factor);
         const radians = (entity.rotationDeg * Math.PI) / 180;
         body.pair(10, c[0]); body.pair(20, c[1]); body.pair(30, 0);
-        body.pair(11, entity.majorRadiusMm * factor * Math.cos(radians)); body.pair(21, entity.majorRadiusMm * factor * Math.sin(radians)); body.pair(31, 0);
+        body.pair(11, exact(entity.majorRadiusMm * factor * Math.cos(radians))); body.pair(21, exact(entity.majorRadiusMm * factor * Math.sin(radians))); body.pair(31, 0);
         body.pair(210, 0); body.pair(220, 0); body.pair(230, 1);
-        body.pair(40, entity.minorRadiusMm / entity.majorRadiusMm);
+        body.pair(40, exact(entity.minorRadiusMm / entity.majorRadiusMm));
         body.pair(41, 0); body.pair(42, 2 * Math.PI);
         break;
       }
@@ -365,6 +375,21 @@ function sectionsOf(pairs: readonly Pair[]): ReadonlyMap<string, readonly Pair[]
     }
   }
   return sections;
+}
+
+/**
+ * Whether a file that parsed cleanly still stops early: a DXF ends its entities with ENDSEC and the file with "0 EOF". A download cut at a
+ * group boundary has valid pairs all the way and just ends, so the missing end markers are the only sign.
+ */
+function truncationProblem(pairs: readonly Pair[]): string | undefined {
+  const start = pairs.findIndex((pair, index) => pair[0] === 0 && pair[1] === "SECTION" && pairs[index + 1]?.[0] === 2 && pairs[index + 1]![1].toUpperCase() === "ENTITIES");
+  if (start < 0) return undefined;
+  let cursor = start + 2;
+  while (cursor < pairs.length && !(pairs[cursor]![0] === 0 && pairs[cursor]![1] === "ENDSEC")) cursor += 1;
+  if (cursor >= pairs.length) return "The file looks cut off: its ENTITIES section is never closed (there is no ENDSEC).";
+  const last = pairs[pairs.length - 1]!;
+  if (!(last[0] === 0 && last[1].toUpperCase() === "EOF")) return "The file looks cut off: it does not end with the EOF marker.";
+  return undefined;
 }
 
 function recordsOf(pairs: readonly Pair[]): readonly DxfRecord[] {
@@ -549,7 +574,9 @@ function ellipseCurves(record: DxfRecord, layer: string, toleranceUnits: number)
   const start = firstNumber(record, 41, 0);
   let end = firstNumber(record, 42, TWO_PI);
   if (end <= start) end += TWO_PI;
-  if (Math.abs(end - start - TWO_PI) < 1e-6) return [{ kind: "ellipse", center, major, minor, rotationDeg, layer }];
+  // The file holds nine decimals, so a radius read back from the axis vector and the ratio carries noise (11.999999999612 for 12): snap it.
+  const tidy = (value: number): number => Number(value.toFixed(9));
+  if (Math.abs(end - start - TWO_PI) < 1e-6) return [{ kind: "ellipse", center, major: tidy(major), minor: tidy(minor), rotationDeg: tidy(rotationDeg), layer }];
   // An elliptical arc has no sketch entity; follow it with a spline.
   const rotation = Math.atan2(axis[1], axis[0]);
   const steps = Math.max(32, Math.ceil(((end - start) * 180) / Math.PI / 2));
@@ -660,6 +687,8 @@ export function parseDxf(text: string, options: DxfReadOptions = {}): ParseResul
   const counts = new Map<string, number>();
   for (const curve of curves) counts.set(curve.layer, (counts.get(curve.layer) ?? 0) + 1);
   const layers = [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
+  const cutOff = truncationProblem(pairs);
+  if (cutOff !== undefined) warnings.unshift(`${cutOff} ${curves.length} curve${curves.length === 1 ? " was" : "s were"} read before the file stops; everything after that point is missing. Export the drawing again before relying on this outline.`);
   const skippedTypes = Object.entries(skipped);
   if (skippedTypes.length > 0) warnings.push(`Skipped ${skippedTypes.map(([type, count]) => `${count} ${type}`).join(", ")}: only lines, arcs, circles, ellipses, polylines, splines and points are imported.`);
   if (units.source !== "file") warnings.push(`The file does not say what unit it uses; ${units.name} are assumed. Check the scale before importing.`);

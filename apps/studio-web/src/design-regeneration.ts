@@ -78,7 +78,9 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     return { ok: false, message: `${feature.name}: a ${feature.kind} is built from one region, but ${groups.length} separate regions are selected. Select a single region, or use an extrude or revolve for several.` };
   }
   if (groups.length > 1 && feature.kind === "revolve" && feature.thinWallMm !== undefined) return { ok: false, message: `${feature.name}: a thin revolve follows one outline. Select a single region.` };
-  const warnings = [...region.value.warnings, ...(feature.edge !== undefined && groups.some((group) => group.holes.length > 0) ? ["The chamfer or fillet is applied to the outline; the holes keep their sharp edges."] : [])];
+  const regionWarnings = region.value.warnings;
+  // A note about what the chamfer or fillet did belongs to a build that happened; it is not part of the reason a build failed.
+  const warnings = [...regionWarnings, ...(feature.edge !== undefined && groups.some((group) => group.holes.length > 0) ? ["The chamfer or fillet is applied to the outline; the holes keep their sharp edges."] : [])];
   const plane = planeKeyOf(sketch.plane);
   if (feature.kind === "sheet-lofted-bend") {
     const lofted = loftedBendBody(feature, profiles, region.value.outer, plane, color);
@@ -173,7 +175,7 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     ...(feature.kind === "draft" && feature.draftAngleDeg !== undefined ? { draftAngleDeg: feature.draftAngleDeg } : {}),
     ...(feature.kind === "draft" && feature.draftNeutralFace !== undefined ? { draftNeutralFace: feature.draftNeutralFace } : {})
   });
-  if (!built.ok) return { ok: false, message: warnings.length === 0 ? built.message : `${built.message} ${warnings.join(" ")}` };
+  if (!built.ok) return { ok: false, message: regionWarnings.length === 0 ? built.message : `${built.message} ${regionWarnings.join(" ")}` };
   const started = sweep === undefined || sweep.startDeg === 0 ? built.body : { ...built.body, positionsMm: startRevolveAt(built.body.positionsMm, plane, sweep.startDeg) };
   const placed = shifted(started, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0));
   // A sketch on an angle or three-point plane is built on its datum plane and then moved onto that plane, which keeps the face names.
