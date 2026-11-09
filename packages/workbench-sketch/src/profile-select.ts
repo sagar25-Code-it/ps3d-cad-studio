@@ -904,7 +904,7 @@ export function lostProfileRefs(profiles: readonly SketchProfile[], ids: readonl
     if (matchProfileRef(id, profiles, false) !== undefined || (shapes !== undefined && matchProfileRef(id, shapes, false) !== undefined) || matchProfileRef(id, profiles) !== undefined) continue;
     const round = round2;
     const pieces = ambiguousProfileMatches(id, profiles);
-    lost.push(parsed.areaMm2 !== undefined && parsed.centroid !== undefined ? `a region of about ${round(parsed.areaMm2)} mm² near (${round(parsed.centroid[0])}, ${round(parsed.centroid[1])})${pieces > 1 ? `, split by new geometry into ${pieces} regions of about the same size` : ""}` : shortId(parsed.base));
+    lost.push(parsed.areaMm2 !== undefined && parsed.centroid !== undefined ? `a region of about ${round(parsed.areaMm2)} mm² near (${round(parsed.centroid[0])}, ${round(parsed.centroid[1])})${pieces > 1 ? `, split by new geometry into ${pieces} regions of about the same size` : ""}` : `${shortId(parsed.base)}, which an older file stored it by name only (no size or place), so it cannot be told apart from the other regions once its curves were replaced by a fillet, chamfer, split or trim`);
   }
   return lost;
 }

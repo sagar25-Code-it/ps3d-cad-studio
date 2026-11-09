@@ -1,9 +1,19 @@
 import { rebuildSolidFeature } from "../apps/studio-web/src/design-regeneration.js";
 import { detectSketchProfiles, type SketchProfile } from "../packages/workbench-sketch/src/index.js";
 import type { SketchEntity } from "../packages/workbench-core/src/index.js";
-import { assert, near, type TestCase } from "./test-kit.js";
+import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { circ, line, rect, sketchFeatureOf, sketchOf, solidFeature } from "./region-wave2-kit.js";
 import { meshReport } from "./region-wave3-kit.js";
+import { designOf, type DesignSketchFeature, type DesignSolidFeature } from "../packages/workbench-core/src/index.js";
+import { filletCorners } from "../packages/workbench-sketch/src/edit-tools.js";
+import { profileBaseOf } from "../packages/workbench-sketch/src/profile-regions.js";
+import { commitWorkingSketchAtomically } from "../apps/studio-web/src/sketch-session.js";
+import { isLegacyProfileId } from "../apps/studio-web/src/legacy-profile-refs.js";
+import * as editKit from "./sketch-edit-kit.js";
+import { breakAtIntersections } from "../packages/workbench-sketch/src/break-intersections.js";
+import { analyzeSketch } from "../packages/workbench-sketch/src/sketch-repair.js";
+import { applyWorkbenchOperation } from "../packages/workbench-core/src/index.js";
+import { buildSolid, committedSketch, pipelineRun, solidOf } from "./pipeline-kit.js";
 
 /**
  * Region engine, wave 3, stored references: what a feature keeps when the sketch under it changes (a hole that gets an outline drawn
@@ -104,6 +114,80 @@ export const regionWave3SelectTests: readonly TestCase[] = [
       }
       const quiet = await rebuildSolidFeature(solidFeature("extrude", { profileIds: [ref] }), sketchFeatureOf(sketchOf([rect("plate", [0, 0], 80, 10)])));
       assert(quiet.ok && (quiet.warnings ?? []).length === 0, "an unchanged sketch says nothing");
+    }
+  },
+  {
+    name: "region P-05: a feature that stored a bare legacy profile id is upgraded from the committed sketch when the sketch is finished, so it survives a fillet with two regions left (was 'no longer exists')",
+    run: async () => {
+      const square = (prefix: string, at: number): SketchEntity[] => [
+        line(`${prefix}0`, [at, 0], [at + 20, 0]), line(`${prefix}1`, [at + 20, 0], [at + 20, 20]), line(`${prefix}2`, [at + 20, 20], [at, 20]), line(`${prefix}3`, [at, 20], [at, 0])
+      ];
+      const joints = (prefix: string) => [["j0", "0", "1"], ["j1", "1", "2"], ["j2", "2", "3"], ["j3", "3", "0"]].map(([id, a, b]) => editKit.constraint(`${prefix}${id!}`, "coincident", [`${prefix}${a!}`, `${prefix}${b!}`], { points: ["end", "start"] }));
+      const { project, sketch } = committedSketch("datum:xy", [...square("s", 0), ...square("t", 40)], { constraints: [...joints("s"), ...joints("t")] });
+      const first = detectSketchProfiles(sketch.sketch).find((profile) => profile.centroid[0] < 20)!;
+      const legacy = profileBaseOf(first.id);
+      assert(isLegacyProfileId(legacy) && !isLegacyProfileId(first.id), `${legacy} is a bare id and ${first.id} is a full one`);
+      const feature: DesignSolidFeature = { id: "feature:extrude-1", name: "Extrude 1", kind: "extrude", suppressed: false, sketchFeatureId: sketch.id, profileIds: [legacy], valueMm: 10, bodyId: "general-body:extrude-1" };
+      const body = solidOf(await buildSolid(sketch, "extrude", { profileIds: [legacy] }));
+      let current = pipelineRun(project, { kind: "add-design-solid", feature, body });
+      current = pipelineRun(current, { kind: "edit-design-sketch", featureId: sketch.id });
+      const fillet = filletCorners(editKit.context(current), ["entity:s0", "entity:s1"], 3);
+      const edited = editKit.commitOk(current, fillet);
+      const finished = await commitWorkingSketchAtomically(edited, { featureId: "feature:sketch-9", name: "Sketch 9" });
+      assert(finished.ok, `Finish is accepted: ${finished.ok ? "" : finished.message}`);
+      if (!finished.ok) return;
+      equal(finished.value.failed.length, 0, `the feature rebuilds after the fillet: ${finished.value.failed.map((result) => result.message).join(" | ")}`);
+      const stored = designOf(finished.value.project).features.find((candidate): candidate is DesignSolidFeature => candidate.id === "feature:extrude-1" && candidate.kind !== "sketch")!;
+      assert(!stored.profileIds.some(isLegacyProfileId), `the stored id was upgraded to a full reference: ${stored.profileIds.join(", ")}`);
+      const rebuilt = (finished.value.project.part.generalBodies ?? []).find((candidate) => candidate.id === "general-body:extrude-1")!;
+      near(volumeOf(rebuilt), (400 - ((4 - Math.PI) * 9) / 4) * 10, 5, "and it is the filleted plate, not the other square");
+    }
+  },
+  {
+    name: "region P-05: a bare id whose curves are already gone is reported by feature name with the reason, never guessed (two regions left)",
+    run: async () => {
+      const filletedSquare: SketchEntity[] = [line("a", [3, 0], [17, 0]), line("b", [17, 0], [17, 14]), line("c", [17, 14], [3, 14]), line("d", [3, 14], [3, 0])];
+      const other: SketchEntity[] = [line("o0", [40, 0], [60, 0]), line("o1", [60, 0], [60, 20]), line("o2", [60, 20], [40, 20]), line("o3", [40, 20], [40, 0])];
+      const sketch = sketchFeatureOf(sketchOf([...filletedSquare, ...other]));
+      const built = await rebuildSolidFeature({ ...solidFeature("extrude", { profileIds: ["profile:loop-0badc0de"] }), name: "Extrude 7" }, sketch);
+      assert(!built.ok && built.message.includes("Extrude 7") && /older file stored it by name only/u.test(built.message) && /pick the profile again/u.test(built.message), `the message names the feature, the reason and the fix: ${built.ok ? "accepted" : built.message}`);
+      void ({} as DesignSketchFeature);
+    }
+  },
+  {
+    name: "region R2-07: break at intersections joins the pieces that meet at a crossing, so resizing the divider keeps its regions, and Validate no longer calls the square an open chain",
+    run: () => {
+      const square = [editKit.line("s0", [0, 0], [20, 0]), editKit.line("s1", [20, 0], [20, 20]), editKit.line("s2", [20, 20], [0, 20]), editKit.line("s3", [0, 20], [0, 0])];
+      const joints = [["j0", "s0", "s1"], ["j1", "s1", "s2"], ["j2", "s2", "s3"], ["j3", "s3", "s0"]].map(([id, a, b]) => editKit.constraint(id!, "coincident", [a!, b!], { points: ["end", "start"] }));
+      const project = editKit.projectWith([...square, editKit.line("d", [-3, 10], [23, 10])], joints);
+      assert(detectSketchProfiles(project.sketch).length === 2, "the divider splits the square into two regions");
+      const broken = editKit.commitOk(project, breakAtIntersections(editKit.context(project)));
+      const lines = broken.sketch.entities.filter((entity) => entity.kind === "line");
+      // Every end that lies at a crossing is tied to the others there.
+      const coincident = broken.sketch.constraints.filter((constraint) => constraint.kind === "coincident" && constraint.points !== undefined);
+      const key = (id: string, point: string): string => `${id}|${point}`;
+      const parent = new Map<string, string>();
+      const find = (value: string): string => { let current = value; while ((parent.get(current) ?? current) !== current) current = parent.get(current)!; return current; };
+      for (const constraint of coincident) parent.set(find(key(constraint.entityIds[0]!, constraint.points![0]!)), find(key(constraint.entityIds[1]!, constraint.points![1]!)));
+      for (const crossing of [[0, 10], [20, 10]] as const) {
+        const here: string[] = [];
+        for (const entity of lines) {
+          if (entity.kind !== "line") continue;
+          if (Math.hypot(entity.start[0] - crossing[0], entity.start[1] - crossing[1]) < 0.05) here.push(key(entity.id, "start"));
+          if (Math.hypot(entity.end[0] - crossing[0], entity.end[1] - crossing[1]) < 0.05) here.push(key(entity.id, "end"));
+        }
+        assert(here.length >= 4, `four line ends meet at (${crossing.join(", ")}): ${here.length}`);
+        equal(new Set(here.map(find)).size, 1, `the ends at (${crossing.join(", ")}) are one joint`);
+      }
+      // The middle piece of the divider is resized: the regions must follow it.
+      const middle = lines.find((entity) => entity.kind === "line" && Math.abs(Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]) - 20) < 0.01 && Math.abs(entity.start[1] - 10) < 0.01 && Math.abs(entity.end[1] - 10) < 0.01)!;
+      const resized = applyWorkbenchOperation(broken, { kind: "set-sketch-dimension", operationId: "operation:r2-07-resize", expectedRevision: broken.revision, entityId: middle.id, dimension: "length", valueMm: 30 });
+      assert(resized.ok, `the divider is resized: ${resized.ok ? "" : resized.diagnostics[0]?.message}`);
+      if (!resized.ok) return;
+      const faces = detectSketchProfiles(resized.value.project.sketch);
+      equal(faces.length, 2, "the two regions are still there after the resize");
+      const report = analyzeSketch(editKit.context(broken));
+      assert(!report.issues.some((issue) => issue.category === "open-chain" && issue.severity === "warning"), `Validate does not report an open chain: ${report.issues.map((issue) => issue.title).join(" | ")}`);
     }
   }
 ];

@@ -70,7 +70,7 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   const sketch = sketchFeature.sketch;
   const profiles = detectSketchProfiles(sketch);
   const lost = lostProfileRefs(profiles, feature.profileIds);
-  if (lost.length > 0) return { ok: false, message: `${feature.name}: a profile this feature was built on no longer exists in its sketch (${lost.join("; ")}). Edit the sketch to close it again, or delete the feature.` };
+  if (lost.length > 0) return { ok: false, message: `${feature.name}: a profile this feature was built on no longer exists in its sketch (${lost.join("; ")}). Edit the sketch to close it again, pick the profile again in this feature, or delete the feature.` };
   // The holes of a region are holes in every solid built from it (a thin-wall revolve follows the outline alone, and the other kinds take the outline only).
   const region = resolveProfileRegion(profiles, feature.profileIds, { includeIslands: feature.kind === "extrude" || feature.kind === "sweep" || feature.kind === "loft" || (feature.kind === "revolve" && feature.thinWallMm === undefined) });
   if (!region.ok) return { ok: false, message: `${feature.name}: ${region.diagnostics[0]?.message ?? "The sketch has no closed profile for this feature."}` };
