@@ -311,6 +311,45 @@ export const sketchSolverWave3Tests: readonly TestCase[] = [
       assert(snug.ok && /Resized circle wheel from radius 3 to 7/u.test(snug.value.summary), "a nearby gap resizes the free circle and the status says how");
     }
   }
+,
+  {
+    name: "Wave3 R2-7: typing the angle read off a drawing keeps the side the lines are on (the shaft chamfer stays above the shaft top; a +20 degree line set to 30 goes to +30), a negative value takes the other side",
+    run: () => {
+      const shaft = projectWith([line("s1", [0, 12], [3, 15]), line("s2", [3, 15], [30, 15])]);
+      const forty5 = setDimension(shaft, "s1", "angle", 45, { second: "s2" });
+      const s1 = get(forty5, "s1", "line");
+      assert(s1.end[1] > s1.start[1], `the chamfer still rises to the shaft top: ${JSON.stringify(s1)}`);
+      near(s1.end[1] - s1.start[1], s1.end[0] - s1.start[0], 1e-6, "at 45 degrees");
+      const rad = (20 * Math.PI) / 180;
+      const tilted = projectWith([line("l", [10, 5], [10 + 40 * Math.cos(rad), 5 + 40 * Math.sin(rad)])]);
+      const direction = (project: WorkbenchProject): number => {
+        const l = get(project, "l", "line");
+        return (Math.atan2(l.end[1] - l.start[1], l.end[0] - l.start[0]) * 180) / Math.PI;
+      };
+      near(direction(setDimension(tilted, "l", "angle", 30, { second: "sketch:axis-x" })), 30, 1e-6, "30 turns the +20 degree line to +30, not -30");
+      near(direction(setDimension(tilted, "l", "angle", -30, { second: "sketch:axis-x" })), -30, 1e-6, "-30 takes the other side on request");
+      near(direction(setDimension(tilted, "l", "angle", 330, { second: "sketch:axis-x" })), 30, 1e-6, "a directed value over 180 is taken exactly as typed (330 from the line to the axis is +30)");
+      const below = projectWith([line("l", [10, 5], [10 + 40 * Math.cos(-rad), 5 + 40 * Math.sin(-rad)])]);
+      near(direction(setDimension(below, "l", "angle", 30, { second: "sketch:axis-x" })), -30, 1e-6, "a -20 degree line set to 30 goes to -30");
+      const result = apply(tilted, { kind: "set-sketch-dimension", entityId: "entity:l", secondEntityId: "sketch:axis-x", dimension: "angle", valueMm: 30 });
+      assert(result.ok && /stored as 330/u.test(result.value.summary) && /enter -30 for the other side/u.test(result.value.summary), `the status says which side was taken: ${result.ok ? result.value.summary : ""}`);
+    }
+  },
+  {
+    name: "Wave3 R2-11: a dimension bound to an expression reports the value it really has, and statuses name the curve",
+    run: () => {
+      let project = projectWith([line("b", [0, 0], [10, 0])]);
+      const params = apply(project, { kind: "set-design-parameters", parameters: [{ name: "W", expression: "100", unit: "mm", comment: "" }] });
+      assert(params.ok, "the parameter is accepted");
+      if (!params.ok) return;
+      project = params.value.project;
+      const bound = apply(project, { kind: "set-sketch-dimension", entityId: "entity:b", dimension: "length", valueMm: 1, expression: "W" });
+      assert(bound.ok, `the expression-bound length applies: ${bound.ok ? "" : bound.diagnostics[0]?.message}`);
+      if (!bound.ok) return;
+      near(lengthOf(get(bound.value.project, "b", "line")), 100, 1e-9, "the line is 100 mm long");
+      assert(/to 100 mm/u.test(bound.value.summary) && !/to 1 mm/u.test(bound.value.summary) && !/entity:/u.test(bound.value.summary), `the status shows the evaluated value and a name: ${bound.value.summary}`);
+    }
+  }
 ];
 
 // Keep the helpers referenced for the tests added below.
