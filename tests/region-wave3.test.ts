@@ -244,6 +244,59 @@ export const regionWave3Tests: readonly TestCase[] = [
         assert(report.triangles > 12 + twist / 2, `path sweep twist ${twist}: stations between the ends (${report.triangles} triangles)`);
       }
     }
+  },
+  {
+    name: "region R2-08: a sweep and a loft of a region with a crossing circle say so (the warnings were dropped on the special builder path)",
+    run: async () => {
+      const entities = [rect("p", [20, 20], 20, 40), circ("c", [29, 20], 3), circ("t", [20, 8], 3)];
+      const sketch = sketchFeatureOf(sketchOf(entities));
+      for (const extra of [{ kind: "sweep" as const, valueMm: 10, sweepDirectionMm: [0, 0, 1] as const }, { kind: "loft" as const, valueMm: 10, loftTopScale: 0.7 }]) {
+        const built = await rebuildSolidFeature(solidFeature(extra.kind, extra), sketch);
+        assert(built.ok, `${extra.kind} builds: ${built.ok ? "" : built.message}`);
+        if (!built.ok) continue;
+        assert((built.warnings ?? []).some((note) => note.includes("crosses the outline")), `the ${extra.kind} reports the circle that was left out: ${JSON.stringify(built.warnings ?? null)}`);
+      }
+    }
+  },
+  {
+    name: "region N2-08: lofting two profiles on one plane is refused by name instead of adding a zero-volume body, and perpendicular profiles get a message that explains the elbow",
+    run: async () => {
+      const first = committedSketch("datum:xy", [pipelineCirc("c", 0, 0, 10)]);
+      const loftOf = async (second: ReturnType<typeof committedSketch>) => {
+        const lookup = sketchLookupOf(designOf(second.project));
+        const target = detectSketchProfiles(second.sketch.sketch)[0]!;
+        return rebuildFeature({ id: "feature:l", name: "l", kind: "loft", suppressed: false, sketchFeatureId: first.sketch.id, valueMm: 50, bodyId: "general-body:l", profileIds: [detectSketchProfiles(first.sketch.sketch)[0]!.id], loftSecondarySketchFeatureId: second.sketch.id, loftSecondaryProfileIds: [target.id] }, first.sketch, "#b9c2c8", lookup);
+      };
+      const samePlane = await loftOf(committedSketch("datum:xy", [pipelineRect("r", 0, 0, 30, 30)], { project: first.project, featureId: "feature:b" }));
+      assert(!samePlane.ok && samePlane.message.includes("same plane") && samePlane.message.includes("no height"), `same plane: ${samePlane.ok ? "accepted" : samePlane.message}`);
+      const elbow = await loftOf(committedSketch("datum:xz", [pipelineRect("r", 0, 0, 30, 30)], { project: first.project, featureId: "feature:b", offsetMm: -60 }));
+      assert(!elbow.ok && elbow.message.includes("perpendicular") && elbow.message.includes("sweep along a path") && !elbow.message.includes("no area"), `elbow: ${elbow.ok ? "accepted" : elbow.message}`);
+      const facing = await loftOf(committedSketch("datum:xy", [pipelineRect("r", 0, 0, 30, 30)], { project: first.project, featureId: "feature:b", offsetMm: 60 }));
+      assert(facing.ok, `parallel planes still loft: ${facing.ok ? "" : facing.message}`);
+      const tilted = await loftOf(committedSketch("datum:xy", [pipelineRect("r", 0, 0, 30, 30)], { project: first.project, featureId: "feature:b", offsetMm: 60, tilt: { axis: "y", angleDeg: 30 } }));
+      assert(tilted.ok, `a tilted second profile still lofts: ${tilted.ok ? "" : tilted.message}`);
+      if (tilted.ok) near(meshReport(tilted.body.positionsMm, tilted.body.indices).signedVolume, 33274, 100, "the tilted loft keeps its volume");
+    }
+  },
+  {
+    name: "region N2-09: sweepDirectionMm is a WORLD direction on a tilted sketch plane: the world normal is a plain extrude and (0, 0, 1) is a sheared sweep",
+    run: async () => {
+      const ring = [pipelineCirc("o", 0, 0, 10), pipelineCirc("i", 0, 0, 6)];
+      const tilted = committedSketch("datum:xy", ring, { tilt: { axis: "y", angleDeg: 30 } }).sketch;
+      const profile = [...detectSketchProfiles(tilted.sketch)].sort((a: SketchProfile, b: SketchProfile) => b.areaMm2 - a.areaMm2).find((candidate: SketchProfile) => (candidate.holes?.length ?? 0) > 0)!;
+      const area = Math.PI * (100 - 36);
+      const along = async (direction: readonly [number, number, number]) => {
+        const body = solidOf(await buildSolid(tilted, "sweep", { sweepDirectionMm: direction, valueMm: 50, profileIds: [profile.ref!] }));
+        return meshReport(body.positionsMm, body.indices).signedVolume;
+      };
+      const normal: readonly [number, number, number] = [Math.sin(Math.PI / 6), 0, Math.cos(Math.PI / 6)];
+      near(await along(normal), area * 50, area * 50 * 0.01, "the world normal of the tilted plane sweeps straight (the volume of an extrude)");
+      near(await along([0, 0, 1]), area * 50 * Math.cos(Math.PI / 6), area * 50 * 0.01, "(0, 0, 1) is oblique to the tilted plane: the volume is the section times the height along the normal");
+      const flat = committedSketch("datum:xy", ring).sketch;
+      const flatProfile = [...detectSketchProfiles(flat.sketch)].sort((a: SketchProfile, b: SketchProfile) => b.areaMm2 - a.areaMm2).find((candidate: SketchProfile) => (candidate.holes?.length ?? 0) > 0)!;
+      const flatBody = solidOf(await buildSolid(flat, "sweep", { sweepDirectionMm: [0, 0, 1], valueMm: 50, profileIds: [flatProfile.ref!] }));
+      near(meshReport(flatBody.positionsMm, flatBody.indices).signedVolume, area * 50, area * 50 * 0.01, "on a plain datum plane the direction is unchanged");
+    }
   }
 ];
 

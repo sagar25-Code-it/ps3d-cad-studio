@@ -13,6 +13,7 @@ import { applyBodyEdit } from "./body-edit-replay.js";
 import { revolveAboutChosenAxis } from "./revolve-feature.js";
 import { followSketchFace } from "./sketch-face-follow.js";
 import { buildLoftFeature, buildSweepFeature, needsSweepLoftBuilder, type SketchLookup } from "./sweep-loft-feature.js";
+import { sweepDirectionInDatumFrame } from "./sweep-direction.js";
 
 /**
  * Rebuilds the solids of the parametric timeline. The kernel is asynchronous, so the work happens here and its results
@@ -110,7 +111,8 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   if ((feature.kind === "sweep" || feature.kind === "loft") && needsSweepLoftBuilder(feature, region.value.holes.length)) {
     const special = feature.kind === "sweep" ? await buildSweepFeature(feature, sketchFeature, region.value, color, sketchLookup) : await buildLoftFeature(feature, sketchFeature, region.value, color, sketchLookup);
     if (!special.ok) return special;
-    return { ok: true, body: special.body, ...(special.warning === undefined ? {} : { warning: special.warning }) };
+    // What the region detector said (a crossing circle left out, a hole that touches the outline) holds for a sweep and a loft as well.
+    return { ok: true, body: special.body, ...(special.warning === undefined ? {} : { warning: special.warning }), ...(warnings.length === 0 ? {} : { warnings }) };
   }
   const built = await createGeneralSolidBody({
     profile: region.value.outer,
@@ -123,7 +125,7 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     name: feature.name,
     color,
     ...(feature.edge === undefined ? {} : { edge: feature.edge }),
-    ...(feature.kind === "sweep" && feature.sweepDirectionMm !== undefined ? { sweepDirectionMm: feature.sweepDirectionMm } : {}),
+    ...(feature.kind === "sweep" && feature.sweepDirectionMm !== undefined ? { sweepDirectionMm: sweepDirectionInDatumFrame(feature.sweepDirectionMm, sketch) } : {}),
     ...(feature.kind === "sweep" && feature.sweepPathEntityId !== undefined ? (() => {
       const pathEntity = sketch.entities.find((entity) => entity.id === feature.sweepPathEntityId);
       if (pathEntity === undefined) return {};

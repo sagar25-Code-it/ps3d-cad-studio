@@ -440,6 +440,27 @@ function planeBasis(normal: V3): { readonly e1: V3; readonly e2: V3 } {
   return { e1, e2: cross(normal, e1) };
 }
 
+/**
+ * Why two profiles cannot be lofted from where they are, in words, or undefined when they can. Two profiles on one plane enclose no height
+ * (the body would be flat, with no volume); profiles whose planes run along the line between them (an elbow) would be capped edge-on and fold.
+ */
+function loftPlacementProblem(input: LoftInput, centreFrom: V3, centreTo: V3): string | undefined {
+  const normalFrom = unit(loopNormal(input.from.outer));
+  const normalTo = unit(loopNormal(input.to.outer));
+  if (normalFrom === undefined || normalTo === undefined) return undefined;
+  const parallel = length(cross(normalFrom, normalTo)) < 1e-6;
+  let height = 0;
+  for (const point of input.to.outer) height = Math.max(height, Math.abs(dot(sub(point, centreFrom), normalFrom)));
+  if (parallel && height < 0.01) {
+    return "Both loft profiles lie on the same plane, so the loft would have no height and no volume. Put the second profile on a different plane (a plane offset or another datum plane) or in a sketch of its own, or loft one profile to a top scale.";
+  }
+  const travel = unit(sub(centreTo, centreFrom));
+  if (travel !== undefined && Math.min(Math.abs(dot(normalFrom, travel)), Math.abs(dot(normalTo, travel))) < 0.2) {
+    return "These loft profiles sit on planes that run along the line between them (perpendicular planes, as in an elbow), so each end would be capped edge-on and the loft would fold. Put the profiles on planes that face each other, tilt one of them by less than about 70 degrees, or build the elbow as a sweep along a path.";
+  }
+  return undefined;
+}
+
 /** Lofts between two profiles that may lie on different planes. Loops are matched by order (outer, then holes) and aligned to twist as little as possible. */
 export function loftProfiles(input: LoftInput): SolidMeshResult {
   if (input.from.holes.length !== input.to.holes.length) {
@@ -447,6 +468,8 @@ export function loftProfiles(input: LoftInput): SolidMeshResult {
   }
   const centreFrom = loopCentroid3(input.from.outer);
   const centreTo = loopCentroid3(input.to.outer);
+  const problem = loftPlacementProblem(input, centreFrom, centreTo);
+  if (problem !== undefined) return { ok: false, message: problem };
   let travel = unit(sub(centreTo, centreFrom));
   if (travel === undefined) travel = unit(loopNormal(input.from.outer));
   if (travel === undefined) return { ok: false, message: "The first profile has no area." };
@@ -490,10 +513,18 @@ export function loftProfiles(input: LoftInput): SolidMeshResult {
   const loopSizes = aligned.map((pair) => pair.a.length);
   // Cap each end in its own plane, wound counter-clockwise about the direction of travel.
   const capOf = (pick: (pair: { a: V3[]; b: V3[] }) => V3[]): { readonly ok: true; readonly triangles: readonly number[] } | { readonly ok: false; readonly message: string } => {
-    const { e1, e2 } = planeBasis(direction);
+    // The cap is triangulated in the plane of its own profile (a tilted profile seen along the direction of travel is foreshortened), then
+    // wound counter-clockwise about the direction of travel.
+    const ringOuter = pick(aligned[0]!);
+    const own = unit(loopNormal(ringOuter)) ?? direction;
+    const { e1, e2 } = planeBasis(own);
     const project = (point: V3): P2 => [dot(point, e1), dot(point, e2)];
     const loops = aligned.map((pair) => pick(pair).map(project));
-    return capTriangles({ outer: loops[0]!, holes: loops.slice(1) });
+    const triangles = capTriangles({ outer: loops[0]!, holes: loops.slice(1) });
+    if (!triangles.ok || dot(own, direction) >= 0) return triangles;
+    const turned: number[] = [];
+    for (let index = 0; index + 2 < triangles.triangles.length; index += 3) turned.push(triangles.triangles[index]!, triangles.triangles[index + 2]!, triangles.triangles[index + 1]!);
+    return { ok: true, triangles: turned };
   };
   const startCap = capOf((pair) => pair.a);
   if (!startCap.ok) return startCap;
