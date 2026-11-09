@@ -68,6 +68,7 @@ import { firstNonFinitePath, MODEL_ENVELOPE, sketchEntityProblem, solidEnvelopeP
 import { AUDIT_KEEP_FULL, compactAudit } from "./audit-archive.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
 import { applySketchObjectsEdit, explicitObjectIds, reconcileSketchObjects, validSketchObjectsEdit } from "./sketch-objects.js";
+import { constraintPayloadProblem, describeGivenValue, parameterTableProblem, sketchObjectsProblem } from "./operation-payload-problems.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/iu;
@@ -104,7 +105,24 @@ const VEHICLE_BRAKE_PARAMETERS: readonly VehicleParameterKey[] = [
  */
 const VALIDATED_PROJECTS = new WeakSet<object>();
 
+/**
+ * Applies one operation. A payload whose shape the checks did not foresee never escapes as an exception: the call comes back as a refused
+ * operation that names the operation and what the engine could not read, so a caller always gets a result to show.
+ */
 export function applyWorkbenchOperation(
+  projectInput: WorkbenchProject,
+  operationInput: WorkbenchOperation
+): WorkbenchResult<AppliedWorkbenchOperation> {
+  try {
+    return applyWorkbenchOperationChecked(projectInput, operationInput);
+  } catch (error) {
+    const kind = isRecord(operationInput) && typeof (operationInput as { kind?: unknown }).kind === "string" ? String((operationInput as { kind: string }).kind).slice(0, 60) : "this";
+    const detail = error instanceof Error ? error.message.slice(0, 160) : "unexpected value";
+    return failure("INVALID_OPERATION", `The ${kind} operation has a payload the engine could not read (${detail}).`, [], "Compare the payload with the field list of this operation in the capability list; every list, id and number must be present and of the right type.");
+  }
+}
+
+function applyWorkbenchOperationChecked(
   projectInput: WorkbenchProject,
   operationInput: WorkbenchOperation
 ): WorkbenchResult<AppliedWorkbenchOperation> {
@@ -254,7 +272,11 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       if (!keys(input, [...common, "entityId"]) || !stableId(input.entityId)) return invalidOperation("The sketch entity ID is invalid.");
       break;
     case "add-sketch-constraint":
-      if (!keys(input, [...common, "constraint"]) || !isRecord(input.constraint)) return invalidOperation("The sketch constraint payload is invalid.");
+      if (!keys(input, [...common, "constraint"]) || !isRecord(input.constraint)) return invalidOperation(constraintPayloadProblem(input.constraint) ?? "The sketch constraint payload needs exactly one field, constraint.");
+      {
+        const problem = constraintPayloadProblem(input.constraint);
+        if (problem !== undefined) return invalidOperation(problem);
+      }
       break;
     case "delete-sketch-constraint":
       if (!keys(input, [...common, "constraintId"]) || !stableId(input.constraintId)) return invalidOperation("The sketch constraint ID is invalid.");
@@ -289,6 +311,10 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
       for (const entity of [...(input.updateEntities as readonly unknown[]), ...(input.addEntities as readonly unknown[])]) {
         const problem = sketchEntityProblem(entity);
         if (problem !== undefined) return envelopeFailure(problem);
+      }
+      for (const [index, constraint] of (input.addConstraints as readonly unknown[]).entries()) {
+        const problem = constraintPayloadProblem(constraint, index);
+        if (problem !== undefined) return invalidOperation(problem);
       }
       break;
     case "set-sketch-constraints-suppressed":
@@ -336,7 +362,7 @@ export function validateWorkbenchOperation(input: unknown): WorkbenchResult<Work
         || input.parameters.some((parameter) => !keys(parameter, ["name", "expression", "unit", "comment"]) || typeof parameter.name !== "string" || typeof parameter.expression !== "string"
           || !["mm", "deg", ""].includes(String(parameter.unit)) || typeof parameter.comment !== "string")
         || (Object.hasOwn(input, "renames") && (!boundedList(input.renames, 200, isRecord)
-          || input.renames.some((rename) => !keys(rename, ["from", "to"]) || typeof rename.from !== "string" || typeof rename.to !== "string")))) return invalidOperation("The parameter table is invalid.");
+          || input.renames.some((rename) => !keys(rename, ["from", "to"]) || typeof rename.from !== "string" || typeof rename.to !== "string")))) return invalidOperation(parameterTableProblem(input) ?? "The parameter table is invalid.");
       break;
     case "set-design-feature-suppressed":
       if (!keys(input, [...common, "featureId", "suppressed"]) || !stableId(input.featureId) || typeof input.suppressed !== "boolean") return invalidOperation("The suppress request is invalid.");
@@ -1385,12 +1411,21 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   const removed = new Set(operation.removeEntityIds);
   for (const id of removed) if (!existing.has(id)) return broken(id, "A sketch entity to remove does not exist.");
   const updates = new Map(operation.updateEntities.map((entity) => [entity.id, entity] as const));
-  if (updates.size !== operation.updateEntities.length) return invalidOperation("The sketch edit updates the same entity twice.");
+  if (updates.size !== operation.updateEntities.length) {
+    const seenIds = new Set<string>();
+    const twice = operation.updateEntities.find((entity) => seenIds.size === seenIds.add(entity.id).size)?.id;
+    return invalidOperation(`The sketch edit updates ${twice ?? "the same entity"} twice; list each curve once in updateEntities.`);
+  }
   for (const id of updates.keys()) {
-    if (!existing.has(id) || removed.has(id)) return invalidOperation("A sketch entity to update does not exist or is also removed.");
+    if (!existing.has(id)) return broken(id, "A sketch entity to update does not exist.");
+    if (removed.has(id)) return invalidOperation(`The sketch edit both removes and updates ${id}; it can do only one of the two.`);
   }
   const addedIds = operation.addEntities.map((entity) => entity.id);
-  if (new Set(addedIds).size !== addedIds.length || addedIds.some((id) => existing.has(id))) return invalidOperation("A new sketch entity reuses an existing ID.");
+  if (new Set(addedIds).size !== addedIds.length || addedIds.some((id) => existing.has(id))) {
+    const seenIds = new Set<string>();
+    const reused = addedIds.find((id) => existing.has(id) || seenIds.size === seenIds.add(id).size);
+    return invalidOperation(`A new sketch entity reuses the ID ${reused ?? "of another curve"}; give each new curve an ID that is not in the sketch yet.`);
+  }
   const entities = [...sketch.entities.filter((entity) => !removed.has(entity.id)).map((entity) => updates.get(entity.id) ?? entity), ...operation.addEntities];
   if (entities.length > WORKBENCH_LIMITS.maxEntities) return failure("RESOURCE_LIMIT", "The sketch would exceed its entity limit.", [sketch.id], "Delete entities or use a smaller pattern count.");
   const removedConstraints = new Set(operation.removeConstraintIds ?? []);
@@ -1398,7 +1433,11 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   const dropped = sketch.constraints.filter((constraint) => constraint.entityIds.some((id) => removed.has(id)));
   const constraints = [...sketch.constraints.filter((constraint) => !constraint.entityIds.some((id) => removed.has(id)) && !removedConstraints.has(constraint.id)), ...operation.addConstraints];
   if (constraints.length > WORKBENCH_LIMITS.maxConstraints) return failure("RESOURCE_LIMIT", "The sketch reached its constraint record limit.", [sketch.id], "Delete a constraint before applying this edit.");
-  if (new Set(constraints.map((constraint) => constraint.id)).size !== constraints.length) return invalidOperation("A new constraint reuses an existing ID.");
+  if (new Set(constraints.map((constraint) => constraint.id)).size !== constraints.length) {
+    const seenIds = new Set<string>();
+    const reused = constraints.find((constraint) => seenIds.size === seenIds.add(constraint.id).size)?.id;
+    return invalidOperation(`A new constraint reuses the ID ${reused ?? "of another relation"}; give each new relation an ID that is not in the sketch yet.`);
+  }
   const next = applySketchObjectsEdit({ ...sketch, entities, constraints }, operation.objects);
   const focus = [...updates.keys(), ...addedIds, ...operation.addConstraints.flatMap((constraint) => constraint.entityIds)];
   const solved = solveLiveSketch(next, focus);
@@ -1457,6 +1496,27 @@ function sketchEditPayloadMessage(input: Record<string, unknown>): string {
     if (Array.isArray(list) && list.length > maximum) return `The sketch edit lists ${list.length} items in ${name}; one edit may carry at most ${maximum}. Split it into several edits.`;
   }
   if (typeof input.label !== "string" || input.label.length < 1 || input.label.length > 80) return "The sketch edit needs a label of 1 to 80 characters.";
+  if (Object.hasOwn(input, "objects")) {
+    const problem = sketchObjectsProblem(input.objects);
+    if (problem !== undefined) return problem;
+  }
+  for (const field of ["removeEntityIds", "removeConstraintIds"] as const) {
+    const list = input[field];
+    if (!Array.isArray(list)) continue;
+    const bad = Array.from(list).findIndex((id) => !stableId(id));
+    if (bad >= 0) return `The sketch edit's ${field} entry ${bad + 1} must be a stable id like "entity:l1", but it is ${describeGivenValue(list[bad])}.`;
+  }
+  for (const field of ["updateEntities", "addEntities", "addConstraints"] as const) {
+    const list = input[field];
+    if (!Array.isArray(list)) continue;
+    const bad = Array.from(list).findIndex((item) => !isRecord(item));
+    if (bad >= 0) return `The sketch edit's ${field} entry ${bad + 1} must be an object, but it is ${describeGivenValue(list[bad])}.`;
+  }
+  const unknownField = Object.keys(input).find((key) => !["operationId", "expectedRevision", "kind", "removeEntityIds", "updateEntities", "addEntities", "addConstraints", "removeConstraintIds", "label", "objects"].includes(key));
+  if (unknownField !== undefined) return `The sketch edit has a field "${unknownField}" that it does not take (it takes removeEntityIds, updateEntities, addEntities, addConstraints, removeConstraintIds, label and objects).`;
+  for (const field of ["removeEntityIds", "updateEntities", "addEntities", "addConstraints"] as const) {
+    if (!Object.hasOwn(input, field)) return `The sketch edit is missing its ${field} list (use an empty list when there is nothing to put in it).`;
+  }
   return "The sketch edit payload is invalid: check removeEntityIds, updateEntities, addEntities, addConstraints and label.";
 }
 
@@ -1470,7 +1530,9 @@ function invalidOperation(message: string): WorkbenchResult<never> {
 }
 
 function broken(id: string, message: string): WorkbenchResult<never> {
-  return failure("BROKEN_REFERENCE", message, [id], "Refresh the project and select an existing stable ID.");
+  // The message names the thing that is missing, not just its kind ("The sketch entity does not exist (entity:l9).").
+  const named = message.includes(id) || !message.endsWith(".") ? message : `${message.slice(0, -1)} (${id}).`;
+  return failure("BROKEN_REFERENCE", named, [id], "Refresh the project and select an existing stable ID.");
 }
 
 function partFeatureFailure(result: Extract<PartFeatureResult<unknown>, { readonly ok: false }>): WorkbenchResult<never> {
@@ -1496,7 +1558,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function boundedList<T>(value: unknown, max: number, guard: (item: unknown) => item is T): value is readonly T[] {
-  return Array.isArray(value) && value.length <= max && value.every(guard);
+  // Array.from reads a hole in a sparse list as undefined, which every() would skip.
+  return Array.isArray(value) && value.length <= max && Array.from(value).every(guard);
 }
 
 function keys(value: Record<string, unknown>, expected: readonly string[]): boolean {

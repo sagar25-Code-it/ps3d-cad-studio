@@ -129,6 +129,7 @@ import { sketchUi2InputTests } from "./sketch-ui2-input.test.js";
 import { sketchUi2WorkspaceTests } from "./sketch-ui2-workspace.test.js";
 import { sketchUi2CanvasTests } from "./sketch-ui2-canvas.test.js";
 import { pipeline3IoTests } from "./pipeline3-io.test.js";
+import { pipeline3PayloadTests } from "./pipeline3-payload.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import type { TestCase } from "./test-kit.js";
@@ -273,6 +274,7 @@ const tests: readonly TestCase[] = [
   ...sketchUi2WorkspaceTests,
   ...sketchUi2CanvasTests,
   ...pipeline3IoTests,
+  ...pipeline3PayloadTests,
 ];
 let failures = 0;
 

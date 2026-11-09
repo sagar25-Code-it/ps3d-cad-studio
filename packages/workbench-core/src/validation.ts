@@ -285,7 +285,7 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   return { ok: true, value: value as unknown as WorkbenchSketch };
 }
 
-const CONSTRAINT_KINDS = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed", "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"];
+export const CONSTRAINT_KINDS = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed", "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"];
 
 function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): value is WorkbenchSketchConstraint {
   // A reference perimeter may sum a whole chain of curves; a refraction names three lines and a symmetry three curves.

@@ -317,7 +317,20 @@ export const WORKBENCH_MCP_TOOLS: readonly McpToolDefinition[] = [
   }
 ];
 
+/**
+ * Runs one MCP tool call. A call whose arguments break an assumption of a tool never throws out of the handler: it comes back as an error
+ * result that names the tool, so the host shows a reason instead of a failed request.
+ */
 export async function handleWorkbenchMcpTool(name: string, args: unknown): Promise<WorkbenchMcpResult> {
+  try {
+    return await handleWorkbenchMcpToolChecked(name, args);
+  } catch (failure) {
+    const detail = failure instanceof Error ? failure.message.slice(0, 160) : "unexpected value";
+    return error("INVALID_PARAMS", `${name.slice(0, 60)} could not read its arguments (${detail}). Check every field against the tool's input schema and the capability list, then call again.`);
+  }
+}
+
+async function handleWorkbenchMcpToolChecked(name: string, args: unknown): Promise<WorkbenchMcpResult> {
   if (encodedSize(args) > WORKBENCH_LIMITS.maxMcpInputBytes) return error("RESOURCE_LIMIT", `The MCP tool input is ${Math.round(encodedSize(args) / 1000)} kB; one call may carry at most ${describeByteLimit(WORKBENCH_LIMITS.maxMcpInputBytes)}. Send a smaller project: delete bodies you no longer need before the call.`);
   if (name === "ps3d_guide") {
     if (!isRecord(args) || Object.keys(args).length !== 0) return error("INVALID_PARAMS", "ps3d_guide accepts no arguments.");
