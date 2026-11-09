@@ -64,7 +64,9 @@ export const sketchInteractionTests: readonly TestCase[] = [
       equal(resolveSketchHotkey(press("Delete"), { ...idle, selectionCount: 3, curveSelectionCount: 3 })?.kind, "delete-selection", "Delete removes the selected curves");
       equal(resolveSketchHotkey(press("Delete"), idle), undefined, "Delete with no selection does nothing");
       equal(resolveSketchHotkey(press("Enter"), { ...idle, tool: "spline", pendingPoints: 3 })?.kind, "finish", "Enter finishes a spline with three points");
-      equal(resolveSketchHotkey(press("Enter"), { ...idle, tool: "spline", pendingPoints: 2 }), undefined, "Enter waits for enough spline points");
+      equal(resolveSketchHotkey(press("Enter"), { ...idle, tool: "spline", pendingPoints: 2 })?.kind, "finish", "Enter finishes a spline with two points (a straight spline, wave 3 T26)");
+      equal(resolveSketchHotkey(press("Enter"), { ...idle, tool: "spline", pendingPoints: 1 }), undefined, "Enter waits for a second spline point");
+      equal(resolveSketchHotkey(press("Enter"), { ...idle, tool: "spline-control", pendingPoints: 2 }), undefined, "Enter waits for enough control points");
       equal(resolveSketchHotkey(press("Enter"), idle), undefined, "Enter is otherwise left alone");
     }
   },

@@ -14,6 +14,7 @@ import { gridSteps } from "../packages/workbench-sketch/src/camera.js";
 import { buildSlot, buildSlotOverall } from "../packages/workbench-sketch/src/shapes.js";
 import { buildFitSpline, tangentFromDegrees } from "../packages/workbench-sketch/src/spline-fit.js";
 import { sampleSpline } from "../packages/workbench-sketch/src/index.js";
+import { DEFAULT_SKETCH_KEYMAP, SKETCH_KEYMAP_COMMANDS, resolveSketchHotkey, sketchToolHotkeyChip } from "../packages/workbench-sketch/src/hotkeys.js";
 import { PROFILE_CHAINS, autoId, drawShape, inferPlaced, typedLineChain, arcSlotProblem, addShape, drawEntity, emptyProject3, tryAdd, profileProject, stressProblem, wholeProblem } from "./sketch-shapes3-kit.js";
 import { arcRadius, dimension, shapeIds } from "./sketch-shape-kit.js";
 
@@ -539,6 +540,30 @@ export const sketchSpline3Tests: readonly TestCase[] = [
       near(Math.abs(wrap180(direction(samples[0]!, samples[1]!) - 0)), 0, 0.2, "start direction");
       near(Math.abs(wrap180(direction(samples.at(-2)!, samples.at(-1)!) - 90)), 0, 0.2, "end direction");
       assert(!buildFitSpline(clicks, "uniform", "entity:bad", { start: [0, 0] }).ok, "a zero direction is refused with a message");
+    }
+  }
+];
+
+export const sketchHotkeys3Tests: readonly TestCase[] = [
+  {
+    name: "Curve creation N9: the elliptical-arc and both tangent-circle tools have default keys, no key is shared, and each key starts its tool",
+    run: () => {
+      const wanted: readonly (readonly [string, string])[] = [["tool:ellipse-arc", "Shift+E"], ["tool:circle-tangent-3", "H"], ["tool:circle-tangent-2", "Shift+H"]];
+      const claimed = new Map<string, string>();
+      for (const command of SKETCH_KEYMAP_COMMANDS) {
+        if (command.defaultKey === undefined) continue;
+        assert(!claimed.has(command.defaultKey), `${command.defaultKey} is claimed twice: ${claimed.get(command.defaultKey)} and ${command.id}`);
+        claimed.set(command.defaultKey, command.id);
+      }
+      const idle = { tool: "select" as const, pendingPoints: 0, dynamicFieldCount: 0, curveSelectionCount: 0 };
+      for (const [id, key] of wanted) {
+        equal(DEFAULT_SKETCH_KEYMAP.keys[id as "tool:ellipse-arc"], key, `${id} defaults to ${key}`);
+        const tool = id.slice(5);
+        const shift = key.startsWith("Shift+");
+        const action = resolveSketchHotkey({ key: key.replace("Shift+", "").toLowerCase(), shift, ctrl: false, alt: false, meta: false } as never, idle as never, DEFAULT_SKETCH_KEYMAP);
+        assert(action?.kind === "tool" && action.tool === tool, `${key} starts ${tool}`);
+        assert(sketchToolHotkeyChip(tool as "ellipse-arc", DEFAULT_SKETCH_KEYMAP) !== undefined, `${tool} shows a key chip`);
+      }
     }
   }
 ];

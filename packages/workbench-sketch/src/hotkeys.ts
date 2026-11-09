@@ -129,9 +129,9 @@ export const SKETCH_KEYMAP_COMMANDS: readonly SketchCommandInfo[] = [
   c("tool:arc", "3-point arc", "Draw", "A"),
   c("tool:arc-center", "Centerpoint arc", "Draw", "Shift+A"),
   c("tool:arc-tangent", "Tangent arc", "Draw"),
-  c("tool:ellipse-arc", "Elliptical arc", "Draw"),
-  c("tool:circle-tangent-3", "3-tangent circle", "Draw"),
-  c("tool:circle-tangent-2", "2-tangent circle", "Draw"),
+  c("tool:ellipse-arc", "Elliptical arc", "Draw", "Shift+E"),
+  c("tool:circle-tangent-3", "3-tangent circle", "Draw", "H"),
+  c("tool:circle-tangent-2", "2-tangent circle", "Draw", "Shift+H"),
   c("tool:polygon", "Polygon", "Draw", "G"),
   c("tool:slot", "Slot", "Draw", "U"),
   c("tool:slot-straight", "Straight slot", "Draw", "Shift+U"),
@@ -489,7 +489,7 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
   if (key === "Enter") {
     if (context.dynamicFieldCount > 0 && context.dynamicTyped === true) return { kind: "commit-dynamic" };
     if (context.tool === "line" && context.pendingPoints >= 1) return { kind: "end-chain" };
-    return ((context.tool === "spline" || context.tool === "spline-control") && context.pendingPoints >= 3) || (context.tool === "profile" && context.pendingPoints >= 1) ? { kind: "finish" } : undefined;
+    return (((context.tool === "spline" && context.pendingPoints >= 2) || (context.tool === "spline-control" && context.pendingPoints >= 3))) || (context.tool === "profile" && context.pendingPoints >= 1) ? { kind: "finish" } : undefined;
   }
   if (key === "Tab") {
     if (context.dynamicFieldCount > 0) return { kind: "focus-dynamic", backwards: input.shift };
