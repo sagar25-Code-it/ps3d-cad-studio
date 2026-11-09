@@ -131,6 +131,7 @@ import { sketchUi2CanvasTests } from "./sketch-ui2-canvas.test.js";
 import { sketchEdit3Tests, sketchEdit3RepairTests, sketchEdit3PatternTests } from "./sketch-edit3.test.js";
 import { sketchEdit3MirrorTests } from "./sketch-edit3-mirror.test.js";
 import { sketchEdit3ClipboardTests } from "./sketch-edit3-clipboard.test.js";
+import { sketchEdit3RedundancyTests } from "./sketch-edit3-redundancy.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import type { TestCase } from "./test-kit.js";
@@ -279,6 +280,7 @@ const tests: readonly TestCase[] = [
   ...sketchEdit3PatternTests,
   ...sketchEdit3MirrorTests,
   ...sketchEdit3ClipboardTests,
+  ...sketchEdit3RedundancyTests,
 ];
 let failures = 0;
 

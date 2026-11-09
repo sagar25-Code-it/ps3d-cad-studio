@@ -189,6 +189,16 @@ function splitLine(context: SketchEditContext, line: Line, pick: Vec2, boundarie
   });
 }
 
+/** Whether the line's end is joined (Coincident) to the other curve. */
+function touchesAtEnd(sketch: WorkbenchSketch, lineId: string, otherId: string | undefined): boolean {
+  if (otherId === undefined) return false;
+  return sketch.constraints.some((candidate) => {
+    if (candidate.kind !== "coincident" || candidate.suppressed === true || !candidate.entityIds.includes(lineId) || !candidate.entityIds.includes(otherId)) return false;
+    const index = candidate.entityIds.indexOf(lineId);
+    return candidate.points?.[index] === "end";
+  });
+}
+
 /** Which relations on a split line survive on its first piece, move to the second piece, or stop being true. */
 function migrateLineSplit(context: SketchEditContext, line: Line, secondId: string): { readonly add: WorkbenchSketchConstraint[]; readonly remove: string[]; readonly note: string } {
   const add: WorkbenchSketchConstraint[] = [];
@@ -202,6 +212,11 @@ function migrateLineSplit(context: SketchEditContext, line: Line, secondId: stri
     } else if (constraint.kind === "coincident" || constraint.kind === "midpoint") {
       if (ref === "end") { remove.push(constraint.id); add.push(repoint(context, constraint, line.id, secondId)); }
       else if (ref === "mid" || (constraint.kind === "midpoint" && index === 1)) { remove.push(constraint.id); dropped += 1; }
+    } else if (constraint.kind === "tangent" && touchesAtEnd(context.sketch, line.id, constraint.entityIds.find((id) => id !== line.id))) {
+      // The tangent is held where the line meets the curve: that is the end of the second piece now, so the tangency goes with it
+      // (left on the first piece it would only be a distance to the carrier line, which the solver cannot tell from a collinear joint).
+      remove.push(constraint.id);
+      add.push(repoint(context, constraint, line.id, secondId));
     } else if (constraint.kind === "equal" || constraint.kind === "distance" || constraint.kind === "symmetry") {
       remove.push(constraint.id);
       dropped += 1;
