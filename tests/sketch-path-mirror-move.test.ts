@@ -258,7 +258,7 @@ export const sketchPathMirrorMoveTests: readonly TestCase[] = [
       assert(polygon.ok, "polygon built");
       if (!polygon.ok) return;
       const polyOutcome = withDynamicMirror(context(project), "entity:axis", { label: "Added polygon", removeEntityIds: [], updateEntities: [], addEntities: polygon.value.entities, addConstraints: polygon.value.constraints });
-      equal(polyOutcome.mirrored, 5, "five sides mirrored");
+      equal(polyOutcome.mirrored, 6, "five sides and the guide circle mirrored");
       project = commitOk(project, polyOutcome.plan);
       equal(detectSketchProfiles(project.sketch).length, 4, "the polygon and its image add two more profiles");
 
@@ -266,7 +266,7 @@ export const sketchPathMirrorMoveTests: readonly TestCase[] = [
       const rect: SketchEntity = { id: "entity:rect", kind: "rectangle", center: [25, -30], widthMm: 6, heightMm: 2, rotationDeg: 30, construction: false };
       const shapesOutcome = withDynamicMirror(context(project), "entity:axis", { label: "Added shapes", removeEntityIds: [], updateEntities: [], addEntities: [dot, rect], addConstraints: [] });
       project = commitOk(project, shapesOutcome.plan);
-      const circles = project.sketch.entities.filter((entity) => entity.kind === "circle");
+      const circles = project.sketch.entities.filter((entity) => entity.kind === "circle" && !entity.construction);
       equal(circles.length, 2, "the circle has an image");
       near2((circles.find((entity) => entity.id !== "entity:dot") as { center: readonly [number, number] }).center, [-15, -20], "at the mirrored centre");
       const rects = project.sketch.entities.filter((entity) => entity.kind === "rectangle") as Extract<SketchEntity, { kind: "rectangle" }>[];

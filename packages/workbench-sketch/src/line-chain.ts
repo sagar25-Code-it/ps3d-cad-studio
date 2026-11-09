@@ -1,4 +1,4 @@
-import type { SketchEntity, Vec2, WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
+import { SKETCH_AXIS_X_ID, SKETCH_AXIS_Y_ID, SKETCH_ORIGIN_ID, type SketchEntity, type Vec2, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
 import type { PlacedPointInference } from "./auto-constraints.js";
 import type { ProfileChain } from "./blend-profile.js";
 
@@ -74,7 +74,8 @@ export function keepResolvableConstraints(
   existingIds: Iterable<string>,
   addedIds: Iterable<string> = []
 ): { readonly kept: readonly WorkbenchSketchConstraint[]; readonly dropped: readonly WorkbenchSketchConstraint[] } {
-  const known = new Set<string>([...existingIds, ...addedIds]);
+  // The origin and the axes are always there: a relation to them is never dangling.
+  const known = new Set<string>([...existingIds, ...addedIds, SKETCH_ORIGIN_ID, SKETCH_AXIS_X_ID, SKETCH_AXIS_Y_ID]);
   const kept: WorkbenchSketchConstraint[] = [];
   const dropped: WorkbenchSketchConstraint[] = [];
   for (const constraint of constraints) (constraint.entityIds.every((id) => known.has(id)) ? kept : dropped).push(constraint);

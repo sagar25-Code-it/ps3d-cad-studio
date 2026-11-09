@@ -19,20 +19,28 @@ function addShape(shape: SketchShape) {
 
 export const sketchShapeTests: readonly TestCase[] = [
   {
-    name: "a regular polygon is N equal sides joined end to end, sized by its corner, and bounds one closed profile",
+    name: "a regular polygon is N equal sides joined end to end on a construction circle, sized by its corner, and bounds one closed profile",
     run: () => {
       const built = buildPolygon([10, 5], [30, 5], 6, ids);
       assert(built.ok, "the hexagon builds");
-      const { entities, constraints } = built.value;
+      const { entities: all, constraints } = built.value;
+      equal(all.length, 7, "six sides and the guide circle");
+      const entities = all.filter((entity) => !entity.construction);
       equal(entities.length, 6, "six sides");
-      equal(constraints.filter((constraint) => constraint.kind === "coincident").length, 6, "six joints, including the one that closes the loop");
+      const guide = all.find((entity) => entity.construction);
+      assert(guide?.kind === "circle", "the guide is a construction circle");
+      near(guide.radiusMm, 20, 1e-9, "its radius is the corner radius");
+      near(guide.center[0], 10, 1e-9, "centred on the clicked centre (x)");
+      near(guide.center[1], 5, 1e-9, "centred on the clicked centre (y)");
+      equal(constraints.filter((constraint) => constraint.kind === "coincident" && constraint.points?.[1] === "start").length, 6, "six joints, including the one that closes the loop");
+      equal(constraints.filter((constraint) => constraint.kind === "coincident" && constraint.points?.[1] === "curve").length, 6, "every corner sits on the guide circle");
       equal(constraints.filter((constraint) => constraint.kind === "equal").length, 5, "every side equals the first");
       const side = entities[0]!;
       assert(side.kind === "line", "sides are lines");
       near(Math.hypot(side.end[0] - side.start[0], side.end[1] - side.start[1]), 20, 1e-9, "a hexagon's side equals its circumradius");
       near(side.start[0], 30, 1e-9, "the first corner is where the user clicked (x)");
       near(side.start[1], 5, 1e-9, "the first corner is where the user clicked (y)");
-      const sketch = { ...createWorkbenchProject("project:test-poly").sketch, entities, constraints: [] };
+      const sketch = { ...createWorkbenchProject("project:test-poly").sketch, entities: all, constraints: [] };
       const profiles = detectSketchProfiles(sketch);
       equal(profiles.length, 1, "the sides close into one profile");
       near(profiles[0]!.areaMm2, (3 * Math.sqrt(3) / 2) * 400, 1e-6, "with the area of a regular hexagon of radius 20");
@@ -55,9 +63,9 @@ export const sketchShapeTests: readonly TestCase[] = [
       const built = buildPolygon([0, 0], [15, 4], 5, ids);
       assert(built.ok, "the pentagon builds");
       const applied = addShape(built.value);
-      assert(applied.ok, `the pentagon and its 9 relations apply in one edit: ${applied.ok ? "" : applied.diagnostics[0]?.message ?? ""}`);
-      equal(applied.value.project.sketch.entities.length, 5, "five sides were added");
-      equal(applied.value.project.sketch.constraints.length, 9, "and nine relations");
+      assert(applied.ok, `the pentagon and its 14 relations apply in one edit: ${applied.ok ? "" : applied.diagnostics[0]?.message ?? ""}`);
+      equal(applied.value.project.sketch.entities.length, 6, "five sides and the guide circle were added");
+      equal(applied.value.project.sketch.constraints.length, 14, "and fourteen relations: 5 joints, 5 corners on the circle, 4 equal sides");
       equal(applied.value.project.revision, 1, "as one revision");
     }
   },

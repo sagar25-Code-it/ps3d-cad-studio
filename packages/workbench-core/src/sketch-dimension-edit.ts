@@ -1,5 +1,5 @@
 import { constraintFit } from "./constraint-fit.js";
-import { anchorsForDimension, preserveForConstraint } from "./sketch-anchors.js";
+import { anchorsAfterResize, anchorsForDimension, preserveForConstraint } from "./sketch-anchors.js";
 import { arcShape, dimensionTargetValue, ellipsePerimeterMm, measureDimensionConstraint } from "./sketch-measure.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
 import { describeConstraint, entityKindOf, entityNames } from "./sketch-translate.js";
@@ -128,7 +128,7 @@ export function redriveDimension(sketch: WorkbenchSketch, constraint: WorkbenchS
   const baseSketch: WorkbenchSketch = { ...sketch, entities: resized === undefined || target === undefined ? sketch.entities : sketch.entities.map((entity) => entity.id === target.id ? resized : entity) };
   const entityMap = new Map(baseSketch.entities.map((entity) => [entity.id, entity] as const));
   // Once the curve has its new size by direct resize it is the reference and its neighbours follow; otherwise only part of it is held.
-  const anchors = resized !== undefined && target !== undefined ? [{ entityId: target.id, ref: "self" as const, priority: 2 as const }] : anchorsForDimension(constraint, entityMap, sketch.constraints);
+  const anchors = resized !== undefined && target !== undefined ? anchorsAfterResize(target, entityMap, sketch.constraints) : anchorsForDimension(constraint, entityMap, sketch.constraints);
   const solved = solveLiveSketch(baseSketch, real, { anchors, preserve: preserveForConstraint(constraint, entityMap), keepChains: false });
   if (!solved.ok) return { ok: false, applied: solveFailure(solved, sketch, constraint) as Extract<Applied, { readonly ok: false }> };
   const nextSketch: WorkbenchSketch = { ...baseSketch, entities: solved.entities };

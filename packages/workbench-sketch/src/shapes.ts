@@ -10,9 +10,7 @@ export interface SketchShape {
   readonly constraints: readonly WorkbenchSketchConstraint[];
 }
 
-export const POLYGON_MIN_SIDES = 3;
-export const POLYGON_MAX_SIDES = 64;
-export const POLYGON_DEFAULT_SIDES = 6;
+export { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, POLYGON_MODES, buildEdgePolygon, buildPolygon, type PolygonMode, type RegularPolygonShape, type ShapeSizeDimension } from "./regular-polygon.js";
 
 const bad = (message: string): WorkbenchResult<SketchShape> => failure("INVALID_OPERATION", message, [], "Place the points somewhere else, or press Esc to start over.");
 
@@ -21,35 +19,15 @@ export interface ShapeIds {
   readonly constraint: () => string;
 }
 
-/** Regular polygon from its centre and one corner (which sets the size and the turn). */
-export function buildPolygon(center: Vec2, corner: Vec2, sides: number, ids: ShapeIds): WorkbenchResult<SketchShape> {
-  if (!Number.isInteger(sides) || sides < POLYGON_MIN_SIDES || sides > POLYGON_MAX_SIDES) return bad(`A polygon needs between ${POLYGON_MIN_SIDES} and ${POLYGON_MAX_SIDES} sides.`);
-  const radius = Math.hypot(corner[0] - center[0], corner[1] - center[1]);
-  if (radius < 0.1) return bad("A polygon needs a radius of at least 0.1 mm.");
-  const turn = Math.atan2(corner[1] - center[1], corner[0] - center[0]);
-  const vertices = Array.from({ length: sides }, (_, index): Vec2 => {
-    const angle = turn + (index * 2 * Math.PI) / sides;
-    return [center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle)];
-  });
-  const sideLength = 2 * radius * Math.sin(Math.PI / sides);
-  if (sideLength < 0.01) return bad("The polygon's sides would be shorter than 0.01 mm.");
-  const entities: SketchEntity[] = vertices.map((start, index): SketchEntity => ({
-    id: ids.entity(),
-    kind: "line",
-    start,
-    end: vertices[(index + 1) % sides]!,
-    construction: false
-  }));
-  const constraints: WorkbenchSketchConstraint[] = [];
-  entities.forEach((entity, index) => {
-    const next = entities[(index + 1) % sides]!;
-    // Each side ends where the next one starts.
-    constraints.push({ id: ids.constraint(), kind: "coincident", entityIds: [entity.id, next.id], points: ["end", "start"] });
-    // Every side is as long as the first, which keeps the polygon regular when one is resized.
-    if (index > 0) constraints.push({ id: ids.constraint(), kind: "equal", entityIds: [entities[0]!.id, entity.id] });
-  });
-  return { ok: true, value: { entities, constraints } };
+/**
+ * Coincident joints that close a ring of curves: the end of each piece sits on the start of the next, the last on the first.
+ * Lines and arcs are both joined by their real ends, so the simultaneous solver moves an arc end with the line it touches and
+ * the outline stays one closed profile when a side is edited or dragged.
+ */
+export function joinRing(ring: readonly SketchEntity[], ids: ShapeIds): WorkbenchSketchConstraint[] {
+  return ring.map((entity, index): WorkbenchSketchConstraint => ({ id: ids.constraint(), kind: "coincident", entityIds: [entity.id, ring[(index + 1) % ring.length]!.id], points: ["end", "start"] }));
 }
+
 
 /**
  * Straight (overall) slot: the user clicks the two OUTER endpoints (the outermost points of the two caps) and a width
@@ -86,11 +64,8 @@ export function buildSlot(first: Vec2, second: Vec2, widthPoint: Vec2, ids: Shap
   const bottom: SketchEntity = { id: ids.entity(), kind: "line", start: at(second, 0, -half), end: at(first, 0, -half), construction: false };
   const startCap: SketchEntity = { id: ids.entity(), kind: "arc", start: at(first, 0, -half), mid: at(first, -half, 0), end: at(first, 0, half), construction: false };
   const constraints: WorkbenchSketchConstraint[] = [
-    // The loop stays closed: every side ends where the next cap starts, so a length edit moves the caps with the sides.
-    { id: ids.constraint(), kind: "coincident", entityIds: [top.id, endCap.id], points: ["end", "start"] },
-    { id: ids.constraint(), kind: "coincident", entityIds: [endCap.id, bottom.id], points: ["end", "start"] },
-    { id: ids.constraint(), kind: "coincident", entityIds: [bottom.id, startCap.id], points: ["end", "start"] },
-    { id: ids.constraint(), kind: "coincident", entityIds: [startCap.id, top.id], points: ["end", "start"] },
+    // Every side ends where the next cap begins, so a side edited or dragged takes the cap with it.
+    ...joinRing([top, endCap, bottom, startCap], ids),
     // The sides touch the caps without a kink, and both caps have the same radius.
     { id: ids.constraint(), kind: "tangent", entityIds: [top.id, endCap.id] },
     { id: ids.constraint(), kind: "tangent", entityIds: [bottom.id, endCap.id] },

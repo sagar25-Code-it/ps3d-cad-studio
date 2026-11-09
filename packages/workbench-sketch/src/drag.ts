@@ -106,6 +106,10 @@ export function dragSketchHandle(sketch: WorkbenchSketch, entityId: string, hand
     if (handle.kind === "body") return liveDrag(sketch, entityId, "center", [circle.center[0] + delta[0], circle.center[1] + delta[1]]);
     if (handle.kind === "arc-point") {
       if (isFixed(sketch, entityId)) return fail(fixedNote);
+      // An arc that is part of a shape (joined, tangent, equal to its twin ...) is dragged by that point like a line end: the point is
+      // pinned under the pointer and the relations relax around it. Rewriting the arc's three points first would change its radius
+      // and make the equal-radius twins follow a distorted arc.
+      if (sketch.constraints.some((constraint) => constraint.suppressed !== true && constraint.entityIds.includes(entityId))) return liveDrag(sketch, entityId, handle.which, pointerMm);
       const next = { ...entity, [handle.which]: pointerMm } as typeof entity;
       if (circumcircleOf(next.start, next.mid, next.end) === undefined || Math.abs((next.mid[0] - next.start[0]) * (next.end[1] - next.start[1]) - (next.mid[1] - next.start[1]) * (next.end[0] - next.start[0])) < 1e-4) {
         return fail("The three arc points would be in a straight line.");

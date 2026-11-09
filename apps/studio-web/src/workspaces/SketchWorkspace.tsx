@@ -38,15 +38,17 @@ import { copySketchSelection, cutSketchSelection, nextPasteNumber, parseClipboar
 import { keyLabelForCommand, sketchHotkeyHelp, type SketchHotkeyAction } from "../../../../packages/workbench-sketch/src/hotkeys.js";
 import { DRAW_CONSTRUCTION_OFF_MESSAGE, DRAW_CONSTRUCTION_ON_MESSAGE, entityForDrawMode, planForDrawMode } from "../../../../packages/workbench-sketch/src/draw-construction.js";
 import { findTextObject, planSketchText, planSketchTextEdit, textSpecFromFields } from "../../../../packages/workbench-sketch/src/sketch-text.js";
-import type { SketchTextObject } from "../../../../packages/workbench-core/src/index.js";
+import type { SketchTextObject, WorkbenchResult } from "../../../../packages/workbench-core/src/index.js";
 import { SketchExportPanel, SketchImportPanel, SketchUnderlayPanel, type UnderlayPickState } from "./sketch/SketchExchangePanel.js";
 import { SketchPatternPanel } from "./sketch/SketchPatternPanel.js";
 import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
-import { autoConstraintsFor, dropConstraintFor, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
+import { autoConstraintsFor, dropConstraintFor, inheritedTangentDirection, tangentArcPoints, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
-import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, buildPolygon, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
+import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, POLYGON_MODES, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
+import { relationPointsOf, type RelationPoint } from "../../../../packages/workbench-sketch/src/relation-points.js";
+import { POLYGON_MODE_LABELS, buildPolygonByMode, parsePolygonMode, polygonCentreRelations } from "../../../../packages/workbench-sketch/src/polygon-modes.js";
 import { buildControlPointSpline, buildCurveTool, isFixedCurveTool } from "../../../../packages/workbench-sketch/src/curve-tools.js";
 import { extendProfileChain, startProfileChain, type ProfileChain } from "../../../../packages/workbench-sketch/src/blend-profile.js";
 import { DEFAULT_CURVE_OPTION_FIELDS, SketchCurveOptionsPanel, curveOptionsFromFields } from "./SketchCurveOptions.js";
@@ -141,37 +143,6 @@ interface DimensionEditState {
   readonly storedValue: number | undefined;
   /** True when the dimension was already a reference one when the editor opened. */
   readonly wasReference: boolean;
-}
-
-/** A defining point of an entity that Coincident and Midpoint can be anchored to. */
-interface RelationPoint {
-  readonly id: string;
-  readonly entityId: string;
-  readonly ref: SketchPointRef;
-  readonly point: Vec2;
-  readonly label: string;
-}
-
-/** The points of an entity the live solver can move, with where they are. Arc ends and rectangle corners are not offered. */
-function relationPoints(entity: SketchEntity): readonly RelationPoint[] {
-  const make = (ref: SketchPointRef, point: Vec2, label: string): RelationPoint => ({ id: `relation-point:${entity.id}:${ref}`, entityId: entity.id, ref, point, label });
-  const offered = SOLVABLE_POINT_REFS[entity.kind];
-  const found: RelationPoint[] = [];
-  if (entity.kind === "line") {
-    if (offered.includes("start")) found.push(make("start", entity.start, "Line start"));
-    if (offered.includes("end")) found.push(make("end", entity.end, "Line end"));
-    if (offered.includes("mid")) found.push(make("mid", [(entity.start[0] + entity.end[0]) / 2, (entity.start[1] + entity.end[1]) / 2], "Line midpoint"));
-  } else if (entity.kind === "circle") {
-    found.push(make("center", entity.center, "Circle center"));
-  } else if (entity.kind === "ellipse") {
-    found.push(make("center", entity.center, "Ellipse center"));
-  } else if (entity.kind === "arc") {
-    const circle = sketchCircumcircle(entity.start, entity.mid, entity.end);
-    if (circle !== undefined) found.push(make("center", circle.center, "Arc center"));
-  } else if (entity.kind === "point") {
-    found.push(make("self", entity.point, "Sketch point"));
-  }
-  return found;
 }
 
 /** How each datum plane maps the sketch's horizontal and vertical directions onto the world axes (see general-modeling.ts placeOnPlane). */
@@ -343,6 +314,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [dimensionEdit, setDimensionEdit] = useState<DimensionEditState | undefined>(undefined);
   const [dimensionText, setDimensionText] = useState("");
   const [polygonSides, setPolygonSides] = useSketchPref("polygonSides", String(POLYGON_DEFAULT_SIDES));
+  const [polygonModeText, setPolygonMode] = useSketchPref("polygonMode", "inscribed");
+  const polygonMode = parsePolygonMode(polygonModeText);
   // The editor's Reference checkbox: a reference dimension is measured and never moves the geometry.
   const [dimensionReference, setDimensionReference] = useState(false);
   // The extra curve tools (rounded rectangle, conics, blend, profile, text ...): their palette numbers, and the Profile chain being drawn.
@@ -601,13 +574,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [cursor, pending, props.tool, curveFields.profileMode, curveFields.splineMode]);
   const navigationPan = props.tool === "select" && props.viewportState.navigationMode === "pan";
   /** A whole polygon or slot is built from the points placed so far plus the cursor, so it can be previewed and then placed. */
-  const buildShape = (tool: Exclude<SketchTool, "select">, points: readonly Vec2[]): ReturnType<typeof buildPolygon> => {
+  const buildShape = (tool: Exclude<SketchTool, "select">, points: readonly Vec2[]): WorkbenchResult<SketchShape> => {
     const ids = { entity: (): string => `entity:user-${crypto.randomUUID()}`, constraint: (): string => `constraint:user-${crypto.randomUUID()}` };
     if (isFixedCurveTool(tool)) {
       const options = curveOptionsFromFields(curveFields, { entities: props.sketch.entities, centerlineReachMm: Math.max(1000, camera.camera.widthMm * 3 + Math.hypot(camera.camera.centerMm[0], camera.camera.centerMm[1])), pickReachMm: Math.max(props.sketch.snapToleranceMm, PICK_PIXELS * px), block: blockLibrary.get(curveFields.blockChoice) });
       return buildCurveTool(tool, points, options, ids);
     }
-    if (tool === "polygon") return buildPolygon(points[0]!, points[1]!, Math.round(Number(polygonSides)), ids);
+    if (tool === "polygon") return buildPolygonByMode(points[0]!, points[1]!, Math.round(Number(polygonSides)), polygonMode, ids);
     if (tool === "slot-straight") return buildSlotOverall(points[0]!, points[1]!, points[2]!, ids);
     return buildSlot(points[0]!, points[1]!, points[2]!, ids);
   };
@@ -621,7 +594,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (!isShapeTool(props.tool) || pending.length !== requiredSketchPoints(props.tool) - 1) return undefined;
     const built = buildShape(props.tool, [...pending, cursor]);
     return built.ok ? built.value : undefined;
-  }, [props.tool, pending, cursor, polygonSides, curveFields, props.sketch.entities]);
+  }, [props.tool, pending, cursor, polygonSides, polygonMode, curveFields, props.sketch.entities]);
   const dynamicMirrorEntity = useMemo(() => {
     const axis = props.sketch.entities.find((entity) => entity.id === dynamicMirrorAxis);
     return axis?.kind === "line" ? axis : undefined;
@@ -848,6 +821,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     toleranceMm: SNAP_PIXELS * px,
     gridMm: grid.minorMm,
     anchor: anchorFor(props.tool, pending),
+    placedCount: pending.length,
     settings: assist,
     modifiers
   });
@@ -955,6 +929,18 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     ];
     if (points.length === 1 && props.tool === "line") lineChain.current = startLineChain(point, placed[0]);
     if (props.tool === "arc-center" && points.length === 2) arcTrack.current = startArcSweepTrack(points[0]!, points[1]!);
+    // A tangent arc that starts on the end of a line or arc leaves it along its tangent: the direction click is not asked for.
+    if (props.tool === "arc-tangent" && points.length === 1) {
+      const inherited = inheritedTangentDirection(placed[0]!, props.sketch);
+      if (inherited !== undefined) {
+        const reach = Math.max(1, 20 * px);
+        const direction: Vec2 = [point[0] + inherited.direction[0] * reach, point[1] + inherited.direction[1] * reach];
+        setPending([point, direction]);
+        setPendingInference([placed[0]!, { point: direction }]);
+        say(`Tangent arc: it leaves the curve along its tangent. Next: the end of the arc.`);
+        return;
+      }
+    }
     if (points.length < requiredSketchPoints(props.tool)) {
       setPending(points);
       setPendingInference(placed);
@@ -969,7 +955,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         props.onMessage(`${shape.diagnostics[0]?.message ?? "The shape was rejected."} Place the last point somewhere else, or press Esc to start over.`);
         return;
       }
-      const accepted = applyDrawn({ label: `Added ${sketchToolLabel(props.tool).toLowerCase()} (${shape.value.entities.length} curves, ${shape.value.constraints.length} relations)`, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shape.value.constraints });
+      // A polygon whose centre was snapped to the origin or to other geometry is located by it.
+      const centreRelations = autoConstrain && props.tool === "polygon" ? keepResolvableConstraints(polygonCentreRelations(shape.value, polygonMode, placed, props.sketch, () => `constraint:auto-${crypto.randomUUID()}`), props.sketch.entities.map((entity) => entity.id), shape.value.entities.map((entity) => entity.id)).kept : [];
+      const shapeRelations = [...shape.value.constraints, ...centreRelations];
+      const accepted = applyDrawn({ label: `Added ${sketchToolLabel(props.tool).toLowerCase()} (${shape.value.entities.length} curves, ${shapeRelations.length} relations)`, removeEntityIds: [], updateEntities: [], addEntities: shape.value.entities, addConstraints: shapeRelations });
       if (accepted === false) return;
       setPending([]);
       say(`Added ${sketchToolLabel(props.tool).toLowerCase()} with ${shape.value.entities.length} curve${shape.value.entities.length === 1 ? "" : "s"} and ${shape.value.constraints.length} relation${shape.value.constraints.length === 1 ? "" : "s"}.`);
@@ -979,7 +968,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       // A typed sweep names its own way round (positive is counter-clockwise), so it does not depend on where the pointer happened to travel.
       arcTrack.current = { angle: Math.atan2(point[1] - points[0]![1], point[0] - points[0]![0]), sweepRad: (typed.sweep * Math.PI) / 180 };
     } else if (props.tool === "arc-center" && arcTrack.current !== undefined) arcTrack.current = advanceArcSweepTrack(arcTrack.current, points[0]!, point);
-    const built = buildSketchEntity(props.tool, points, `entity:user-${crypto.randomUUID()}`, arcBuildOptions());
+    const built = buildSketchEntity(props.tool, props.tool === "arc-tangent" ? tangentArcPoints(points, placed, props.sketch) : points, `entity:user-${crypto.randomUUID()}`, arcBuildOptions());
     if (!built.ok) {
       // Keep the points already placed so one bad click does not throw the whole gesture away.
       props.onMessage(`${built.diagnostics[0]?.message ?? "Sketch entity rejected."} Place the last point somewhere else, or press Esc to start over.`);
@@ -1021,7 +1010,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
 
   const dynamicFields = useMemo(() => dynamicFieldsFor(props.tool, pending.length), [props.tool, pending.length]);
-  const liveValues = useMemo(() => measureFromCursor(props.tool, pending, cursor), [props.tool, pending, cursor]);
+  const liveValues = useMemo(() => measureFromCursor(props.tool, pending, cursor, props.tool === "arc-center" ? arcTrack.current : undefined), [props.tool, pending, cursor]);
   const setField = (id: DynamicFieldId, value: string): void => setFieldText((current) => {
     const { [id]: _previous, ...rest } = current;
     return value === "" ? rest : { ...rest, [id]: value };
@@ -1940,7 +1929,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {showDimensions && visibleEntities.filter((entity) => !dimensionedIds.has(entity.id)).map((entity) => <SketchDimensionGlyph key={`dimension:${entity.id}`} entity={entity} px={px} label={(value) => formatLengthLabel(value, dimensionDisplay)} />)}
         <ConstraintGlyphLayer glyphs={glyphs} px={px} selectedIds={selectedConstraintIds} hoveredId={hoverConstraintId} interactive={interactive} titles={constraintTitles} onHover={setHoverConstraintId} onSelect={selectConstraint} />
         {measureMode && <MeasureOverlay state={measureState} px={px} />}
-        {pickRelation !== null && visibleEntities.flatMap(relationPoints).map((handle) => <rect
+        {pickRelation !== null && visibleEntities.flatMap(relationPointsOf).map((handle) => <rect
           key={handle.id}
           className={`relation-point${pickedPoint?.id === handle.id ? " selected" : ""}`}
           data-relation-point={handle.id}
@@ -2045,6 +2034,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
         <PaletteToggle label="Draw as construction (Q)" active={drawAsConstruction} onToggle={(next) => { setDrawAsConstruction(next); props.onMessage(next ? DRAW_CONSTRUCTION_ON_MESSAGE : DRAW_CONSTRUCTION_OFF_MESSAGE); }} />
         {props.tool === "polygon" && <label className="palette-number"><span>Polygon sides</span><input type="number" min={POLYGON_MIN_SIDES} max={POLYGON_MAX_SIDES} step={1} value={polygonSides} aria-label="Number of polygon sides" onChange={(event) => setPolygonSides(event.target.value)} /></label>}
+        {props.tool === "polygon" && <label className="palette-number"><span>Polygon size by</span><select value={polygonMode} aria-label="How the polygon is sized" title="Inscribed: centre, then a corner. Circumscribed: centre, then the middle of a side. Edge: the two ends of one side." onChange={(event) => setPolygonMode(parsePolygonMode(event.target.value))}>{POLYGON_MODES.map((mode) => <option key={mode} value={mode}>{POLYGON_MODE_LABELS[mode]}</option>)}</select></label>}
         <SketchCurveOptionsPanel tool={props.tool} fields={curveFields} onChange={setCurveFields} blockNames={blockNames} selectedCount={selectedEntities.length} onSaveBlock={saveSelectionAsBlock} textEdit={textEditId === null ? undefined : { onApply: () => placeText(), onCancel: () => { setTextEditId(null); props.onMessage("Text editing cancelled."); } }} />
         {props.tool === "select" && selectedEntity !== undefined && findTextObject(props.sketch, selectedEntity.id) !== undefined && <button className="palette-action" title="Re-open this text (or double-click it)" onClick={() => startTextEdit(findTextObject(props.sketch, selectedEntity.id)!)}><CommandIcon name="edit" />Edit text</button>}
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
@@ -2488,6 +2478,9 @@ function InferenceMarks({ inference, px }: { readonly inference: InferenceResult
       case "on-curve": return <><circle cx={x} cy={y} r={s * 0.8} /><circle cx={x} cy={y} r={1.2 * px} className="dot" /></>;
       case "perpendicular": return <path d={`M ${x - s} ${y + s} V ${y - s * 0.2} H ${x + s} M ${x - s} ${y + s} H ${x + s}`} />;
       case "tangent": return <><circle cx={x} cy={y - s * 0.6} r={s * 0.6} /><path d={`M ${x - s * 1.3} ${y + s * 0.6} H ${x + s * 1.3}`} /></>;
+      case "parallel": return <path d={`M ${x - s} ${y + s * 0.2} L ${x + s * 0.2} ${y - s} M ${x - s * 0.2} ${y + s} L ${x + s} ${y - s * 0.2}`} />;
+      case "equal": return <path d={`M ${x - s} ${y - s * 0.4} H ${x + s} M ${x - s} ${y + s * 0.4} H ${x + s}`} />;
+      case "collinear": return <><path d={`M ${x - s * 1.4} ${y} H ${x + s * 1.4}`} /><circle cx={x} cy={y} r={1.4 * px} className="dot" /></>;
       case "grid": return <path d={`M ${x - s * 0.7} ${y} H ${x + s * 0.7} M ${x} ${y - s * 0.7} V ${y + s * 0.7}`} />;
       default: return null;
     }

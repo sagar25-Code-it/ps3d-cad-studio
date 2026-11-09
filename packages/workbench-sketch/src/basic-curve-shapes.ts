@@ -1,5 +1,6 @@
 import { type SketchEntity, type Vec2, type WorkbenchResult, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
 import { add, badShape, circumcircle, dist, normalize, polar, scale, sub, turn, type ShapeIds, type SketchShape } from "./curve-math.js";
+import { joinRing } from "./shapes.js";
 
 /**
  * Line, rectangle and slot variants that are placed as real lines and arcs (never as a new entity kind), together
@@ -90,13 +91,10 @@ export function buildRoundedRectangle(cornerA: Vec2, cornerB: Vec2, radiusMm: nu
   const left = line([x0, y1 - r], [x0, y0 + r]);
   const cornerBL = arc([x0, y0 + r], [x0 + r - k, y0 + r - k], [x0 + r, y0]);
   const ring: readonly SketchEntity[] = [bottom, cornerBR, right, cornerTR, top, cornerTL, left, cornerBL];
-  const constraints: WorkbenchSketchConstraint[] = [];
+  // Every joint is a coincident pair of real ends (the outline stays closed) held tangent: line, arc, line, arc ...
+  const constraints: WorkbenchSketchConstraint[] = joinRing(ring, ids);
   ring.forEach((entity, index) => {
-    // Every joint is a tangent line-and-arc pair: line, arc, line, arc ...
-    // The joint also shares its end point, so an edit of one side drags the corner arc along instead of tearing the loop.
-    const next = ring[(index + 1) % ring.length]!;
-    constraints.push({ id: ids.constraint(), kind: "coincident", entityIds: [entity.id, next.id], points: ["end", "start"] });
-    constraints.push({ id: ids.constraint(), kind: "tangent", entityIds: [entity.id, next.id] });
+    constraints.push({ id: ids.constraint(), kind: "tangent", entityIds: [entity.id, ring[(index + 1) % ring.length]!.id] });
   });
   constraints.push(
     { id: ids.constraint(), kind: "equal", entityIds: [cornerBR.id, cornerTR.id] },
@@ -144,6 +142,7 @@ export function buildArcSlot(arc: CenterlineArc, halfWidthMm: number, ids: Shape
   // The four joints are tangent by construction. They are not recorded as Tangent relations because the live solver
   // only enforces tangency between a line and an arc, and would misread an arc-to-arc pair as a conflict.
   const constraints: WorkbenchSketchConstraint[] = [
+    ...joinRing([outer, endCap, inner, startCap], ids),
     { id: ids.constraint(), kind: "equal", entityIds: [endCap.id, startCap.id] },
     { id: ids.constraint(), kind: "concentric", entityIds: [outer.id, inner.id] }
   ];

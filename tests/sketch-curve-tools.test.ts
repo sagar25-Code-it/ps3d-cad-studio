@@ -181,7 +181,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       // A quarter-turn centreline of radius 30 around the origin, half-width 4.
       const shape = must(buildThreePointArcSlot([30, 0], [30 * Math.SQRT1_2, 30 * Math.SQRT1_2], [0, 30], [34, 0], ids));
       equal(shape.entities.map((entity) => entity.kind).join(","), "arc,arc,arc,arc", "outer arc, cap, inner arc, cap");
-      equal(shape.constraints.map((constraint) => constraint.kind).sort().join(), "concentric,equal", "equal caps and concentric side arcs (arc-to-arc tangency is by construction)");
+      equal(shape.constraints.map((constraint) => constraint.kind).sort().join(), "coincident,coincident,coincident,coincident,concentric,equal", "four joints (the arcs are joined by their real ends), equal caps and concentric side arcs (arc-to-arc tangency is by construction)");
       const project = addThrough(emptyProject(), shape);
       const profiles = detectSketchProfiles(project.sketch);
       equal(profiles.length, 1, "closes into one profile");

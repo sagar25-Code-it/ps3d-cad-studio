@@ -1,6 +1,7 @@
 import type { SketchEntity, Vec2, WorkbenchResult } from "../../workbench-core/src/index.js";
 import { badShape, sampleCurveToFitPoints, splineFromPoints, type ShapeIds, type SketchShape } from "./curve-math.js";
 import { nearestOnEllipse } from "./ellipse-geometry.js";
+import { tidyPoint } from "./clean-numbers.js";
 import { buildSketchEntity, sampleSpline } from "./index.js";
 
 /**
@@ -38,7 +39,7 @@ function pointAt(ellipse: Ellipse, t: number): Vec2 {
   const radians = (ellipse.rotationDeg * Math.PI) / 180;
   const x = ellipse.majorRadiusMm * Math.cos(t);
   const y = ellipse.minorRadiusMm * Math.sin(t);
-  return [ellipse.center[0] + x * Math.cos(radians) - y * Math.sin(radians), ellipse.center[1] + x * Math.sin(radians) + y * Math.cos(radians)];
+  return tidyPoint([ellipse.center[0] + x * Math.cos(radians) - y * Math.sin(radians), ellipse.center[1] + x * Math.sin(radians) + y * Math.cos(radians)]);
 }
 
 /** The largest distance from the spline through `fit` to the ellipse, measured at ten samples per span. */

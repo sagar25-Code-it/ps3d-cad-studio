@@ -91,18 +91,19 @@ export const sketchSolverSimultaneousTests: readonly TestCase[] = [
       assert(hexagon.ok, "the hexagon builds");
       if (!hexagon.ok) return;
       let hex = projectWith(hexagon.value.entities, hexagon.value.constraints);
+      const hexSides = (project: typeof hex): Line[] => project.sketch.entities.filter((entity): entity is Line => entity.kind === "line");
       const first = hexagon.value.entities[0]!.id.replace("entity:", "");
       for (const side of [10, 40, 200]) {
         hex = setDimension(hex, first, "length", side);
-        for (const entity of hex.sketch.entities) near(lengthOf(entity as Line), side, 1e-6, `every side of the hexagon is ${side} after the edit`);
-        const joined = hex.sketch.entities.every((entity, index, all) => {
-          const next = all[(index + 1) % all.length] as Line;
-          return Math.hypot((entity as Line).end[0] - next.start[0], (entity as Line).end[1] - next.start[1]) < 1e-6;
+        for (const entity of hexSides(hex)) near(lengthOf(entity), side, 1e-6, `every side of the hexagon is ${side} after the edit`);
+        const joined = hexSides(hex).every((entity, index, all) => {
+          const next = all[(index + 1) % all.length]!;
+          return Math.hypot(entity.end[0] - next.start[0], entity.end[1] - next.start[1]) < 1e-6;
         });
         assert(joined, `the hexagon stays closed at side ${side}`);
       }
-      const vertex = (hex.sketch.entities[2] as Line).start;
-      const dragged = dragSketchHandle(hex.sketch, hex.sketch.entities[2]!.id, { kind: "point", ref: "start" }, vertex, [vertex[0] + 3, vertex[1] + 4]);
+      const vertex = hexSides(hex)[2]!.start;
+      const dragged = dragSketchHandle(hex.sketch, hexSides(hex)[2]!.id, { kind: "point", ref: "start" }, vertex, [vertex[0] + 3, vertex[1] + 4]);
       assert(dragged.ok, `a hexagon vertex drags: ${dragged.ok ? "" : dragged.message}`);
 
       // Slot: the arc radius 5 to 12.
