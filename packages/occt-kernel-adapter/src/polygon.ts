@@ -109,19 +109,45 @@ function checkLoops(outer: readonly Point2[], holes: readonly (readonly Point2[]
       edges.push({ loop: loopIndex, index, count: loop.length, from: loop[index]!, to: loop[(index + 1) % loop.length]! });
     }
   });
+  // A grid over the unit box keeps the crossing test near-linear: a plate with hundreds of holes has tens of thousands of edges, and
+  // comparing every pair took seconds. Each edge is compared only with the edges that share a grid cell; the lowest offending pair is
+  // still the one reported, as with the plain double loop.
+  const cells = Math.max(1, Math.min(512, Math.ceil(Math.sqrt(edges.length))));
+  const grid: number[][] = Array.from({ length: cells * cells }, () => []);
+  const cellOf = (value: number): number => Math.max(0, Math.min(cells - 1, Math.floor(value * cells)));
+  const pad = 1e-9;
+  const spans = edges.map((edge): readonly [number, number, number, number] => [
+    cellOf(Math.min(edge.from[0], edge.to[0]) - pad), cellOf(Math.max(edge.from[0], edge.to[0]) + pad),
+    cellOf(Math.min(edge.from[1], edge.to[1]) - pad), cellOf(Math.max(edge.from[1], edge.to[1]) + pad)
+  ]);
+  spans.forEach((span, edgeIndex) => {
+    for (let cx = span[0]; cx <= span[1]; cx += 1) for (let cy = span[2]; cy <= span[3]; cy += 1) grid[cy * cells + cx]!.push(edgeIndex);
+  });
+  const stamp = new Int32Array(edges.length).fill(-1);
   for (let first = 0; first < edges.length; first += 1) {
-    for (let second = first + 1; second < edges.length; second += 1) {
-      const left = edges[first]!;
-      const right = edges[second]!;
-      if (left.loop === right.loop) {
-        const adjacent = right.index === left.index + 1 || (left.index === 0 && right.index === left.count - 1);
-        if (adjacent) continue;
+    const left = edges[first]!;
+    const span = spans[first]!;
+    let hit = -1;
+    for (let cx = span[0]; cx <= span[1]; cx += 1) {
+      for (let cy = span[2]; cy <= span[3]; cy += 1) {
+        for (const second of grid[cy * cells + cx]!) {
+          if (second <= first || stamp[second] === first) continue;
+          stamp[second] = first;
+          if (hit >= 0 && second > hit) continue;
+          const right = edges[second]!;
+          if (left.loop === right.loop) {
+            const adjacent = right.index === left.index + 1 || (left.index === 0 && right.index === left.count - 1);
+            if (adjacent) continue;
+          }
+          if (segmentsIntersect(left.from, left.to, right.from, right.to)) hit = second;
+        }
       }
-      if (segmentsIntersect(left.from, left.to, right.from, right.to)) {
-        throw new Error(left.loop === right.loop
-          ? (left.loop === 0 ? "The profile outline crosses itself." : `Hole ${left.loop} crosses itself.`)
-          : "A hole crosses the profile outline or another hole.");
-      }
+    }
+    if (hit >= 0) {
+      const right = edges[hit]!;
+      throw new Error(left.loop === right.loop
+        ? (left.loop === 0 ? "The profile outline crosses itself." : `Hole ${left.loop} crosses itself.`)
+        : "A hole crosses the profile outline or another hole.");
     }
   }
   holes.forEach((hole, index) => {
@@ -167,10 +193,7 @@ function bridgeHole(ring: readonly number[], hole: readonly number[], points: re
   let tried = 0;
   for (const start of holeOrder) {
     const holePoint = start.point;
-    const candidates = ring
-      .map((pointIndex, position) => ({ position, distance: squaredDistance(points[pointIndex]!, holePoint) }))
-      .sort((left, right) => left.distance - right.distance);
-    for (const { position } of candidates) {
+    for (const { position } of nearestRingCorners(ring, holePoint, points)) {
       tried += 1;
       if (tried > MAX_BRIDGE_ATTEMPTS) break;
       const ringPoint = points[ring[position]!]!;
@@ -183,6 +206,31 @@ function bridgeHole(ring: readonly number[], hole: readonly number[], points: re
     if (tried > MAX_BRIDGE_ATTEMPTS) break;
   }
   throw new Error("A hole could not be connected to the profile outline.");
+}
+
+/**
+ * The ring corners nearest to a point, nearest first. The first dozens are found in one pass without sorting the whole ring (a plate with
+ * hundreds of holes has a ring of tens of thousands of corners and one search per hole); the rest follow in a full sort only when the
+ * nearest ones were all refused, which is rare.
+ */
+function* nearestRingCorners(ring: readonly number[], target: Point2, points: readonly Point2[]): Generator<{ readonly position: number }> {
+  const KEEP = 48;
+  const best: { position: number; distance: number }[] = [];
+  for (let position = 0; position < ring.length; position += 1) {
+    const distance = squaredDistance(points[ring[position]!]!, target);
+    if (best.length === KEEP && distance >= best[KEEP - 1]!.distance) continue;
+    let slot = best.length < KEEP ? best.length : KEEP - 1;
+    if (best.length < KEEP) best.push({ position, distance }); else best[slot] = { position, distance };
+    while (slot > 0 && best[slot - 1]!.distance > best[slot]!.distance) { const swap = best[slot - 1]!; best[slot - 1] = best[slot]!; best[slot] = swap; slot -= 1; }
+  }
+  for (const entry of best) yield entry;
+  if (ring.length <= KEEP) return;
+  const taken = new Set(best.map((entry) => entry.position));
+  const rest = ring
+    .map((pointIndex, position) => ({ position, distance: squaredDistance(points[pointIndex]!, target) }))
+    .filter((entry) => !taken.has(entry.position))
+    .sort((left, right) => left.distance - right.distance);
+  for (const entry of rest) yield entry;
 }
 
 function bridgeIsClear(from: Point2, to: Point2, ring: readonly number[], hole: readonly number[], otherHoles: readonly (readonly number[])[], points: readonly Point2[]): boolean {
@@ -205,18 +253,67 @@ function bridgeIsClear(from: Point2, to: Point2, ring: readonly number[], hole: 
   return true;
 }
 
+/**
+ * Ear clipping on a linked ring with a grid over its vertices. A candidate ear is checked only against the vertices that fall inside its
+ * own bounding box, and the scan resumes where the last ear was cut, so a plate with hundreds of holes (tens of thousands of ring
+ * vertices) clips in near-linear time instead of testing every vertex against every ear.
+ */
 function earClip(ringInput: readonly number[], points: readonly Point2[]): number[] {
-  const ring = [...ringInput];
+  const count = ringInput.length;
+  const pointOf = Int32Array.from(ringInput);
+  const before = new Int32Array(count);
+  const after = new Int32Array(count);
+  const alive = new Uint8Array(count).fill(1);
+  for (let node = 0; node < count; node += 1) { before[node] = (node + count - 1) % count; after[node] = (node + 1) % count; }
+  const cells = Math.max(1, Math.min(256, Math.ceil(Math.sqrt(count))));
+  const grid: number[][] = Array.from({ length: cells * cells }, () => []);
+  const cellOf = (value: number): number => Math.max(0, Math.min(cells - 1, Math.floor(value * cells)));
+  for (let node = 0; node < count; node += 1) {
+    const point = points[pointOf[node]!]!;
+    grid[cellOf(point[1]) * cells + cellOf(point[0])]!.push(node);
+  }
+  const pad = 1e-7;
+  const blockedBy = (previousIndex: number, currentIndex: number, nextIndex: number, previous: Point2, current: Point2, next: Point2): boolean => {
+    const x0 = cellOf(Math.min(previous[0], current[0], next[0]) - pad);
+    const x1 = cellOf(Math.max(previous[0], current[0], next[0]) + pad);
+    const y0 = cellOf(Math.min(previous[1], current[1], next[1]) - pad);
+    const y1 = cellOf(Math.max(previous[1], current[1], next[1]) + pad);
+    for (let cy = y0; cy <= y1; cy += 1) {
+      for (let cx = x0; cx <= x1; cx += 1) {
+        for (const node of grid[cy * cells + cx]!) {
+          if (alive[node] === 0) continue;
+          const other = pointOf[node]!;
+          if (other === previousIndex || other === currentIndex || other === nextIndex) continue;
+          const candidate = points[other]!;
+          if (samePosition(candidate, previous) || samePosition(candidate, current) || samePosition(candidate, next)) continue;
+          if (pointInTriangle(candidate, previous, current, next)) return true;
+        }
+      }
+    }
+    return false;
+  };
   const triangles: number[] = [];
-  let guard = ring.length * ring.length + 16;
-  while (ring.length > 3 && guard > 0) {
+  let remaining = count;
+  let cursor = 0;
+  const remove = (node: number): void => {
+    const previousNode = before[node]!;
+    const nextNode = after[node]!;
+    after[previousNode] = nextNode;
+    before[nextNode] = previousNode;
+    alive[node] = 0;
+    remaining -= 1;
+    cursor = previousNode;
+  };
+  let guard = count + 16;
+  while (remaining > 3 && guard > 0) {
     guard -= 1;
     let clipped = false;
-    let straightPosition = -1;
-    for (let position = 0; position < ring.length; position += 1) {
-      const previousIndex = ring[(position + ring.length - 1) % ring.length]!;
-      const currentIndex = ring[position]!;
-      const nextIndex = ring[(position + 1) % ring.length]!;
+    let straightNode = -1;
+    let node = cursor;
+    for (let step = 0; step < remaining; step += 1, node = after[node]!) {
+      const previousIndex = pointOf[before[node]!]!;
+      const currentIndex = pointOf[node]!;
+      const nextIndex = pointOf[after[node]!]!;
       const previous = points[previousIndex]!;
       const current = points[currentIndex]!;
       const next = points[nextIndex]!;
@@ -226,43 +323,36 @@ function earClip(ringInput: readonly number[], points: readonly Point2[]): numbe
           // A vertex that sits on the straight line between its neighbours is a real corner of the walls (for example the point where
           // two bridges meet a hole). Dropping it would leave the cap edge spanning a vertex the wall still uses, a T-junction that opens the
           // mesh; keep it until a neighbour has been clipped, and only emit a sliver for it when nothing else can be clipped.
-          if (straightPosition < 0) straightPosition = position;
+          if (straightNode < 0) straightNode = node;
           continue;
         }
         // A repeated vertex or a zero-width spike adds no area and has no partner edge to open; drop it without emitting a triangle.
-        ring.splice(position, 1);
+        remove(node);
         clipped = true;
         break;
       }
       if (area < 0) continue;
-      let blocked = false;
-      for (const other of ring) {
-        if (other === previousIndex || other === currentIndex || other === nextIndex) continue;
-        const candidate = points[other]!;
-        if (samePosition(candidate, previous) || samePosition(candidate, current) || samePosition(candidate, next)) continue;
-        if (pointInTriangle(candidate, previous, current, next)) { blocked = true; break; }
-      }
-      if (blocked) continue;
+      if (blockedBy(previousIndex, currentIndex, nextIndex, previous, current, next)) continue;
       triangles.push(previousIndex, currentIndex, nextIndex);
-      ring.splice(position, 1);
+      remove(node);
       clipped = true;
       break;
     }
-    if (!clipped && straightPosition >= 0) {
-      const previousIndex = ring[(straightPosition + ring.length - 1) % ring.length]!;
-      const currentIndex = ring[straightPosition]!;
-      const nextIndex = ring[(straightPosition + 1) % ring.length]!;
+    if (!clipped && straightNode >= 0) {
       // A zero-area triangle keeps every edge paired: previous-current and current-next pair with the bridge side, next-previous with the ring.
-      triangles.push(previousIndex, currentIndex, nextIndex);
-      ring.splice(straightPosition, 1);
+      triangles.push(pointOf[before[straightNode]!]!, pointOf[straightNode]!, pointOf[after[straightNode]!]!);
+      remove(straightNode);
       clipped = true;
     }
     if (!clipped) throw new Error("The profile could not be triangulated; it may cross itself or be degenerate.");
   }
-  if (ring.length === 3) {
-    const [a, b, c] = [points[ring[0]!]!, points[ring[1]!]!, points[ring[2]!]!];
+  if (remaining === 3) {
+    const first = cursor;
+    const second = after[first]!;
+    const third = after[second]!;
+    const [a, b, c] = [points[pointOf[first]!]!, points[pointOf[second]!]!, points[pointOf[third]!]!];
     if (Math.abs(orient(a, b, c)) > DEGENERATE_AREA
-      || isStraightThrough(a, b, c) || isStraightThrough(b, c, a) || isStraightThrough(c, a, b)) triangles.push(ring[0]!, ring[1]!, ring[2]!);
+      || isStraightThrough(a, b, c) || isStraightThrough(b, c, a) || isStraightThrough(c, a, b)) triangles.push(pointOf[first]!, pointOf[second]!, pointOf[third]!);
   }
   return triangles;
 }

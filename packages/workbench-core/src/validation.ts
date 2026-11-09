@@ -51,7 +51,7 @@ import { createVehicleTemplate, solveVehicleGeometry, VEHICLE_PARAMETER_RANGES }
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { validatePartFeatureStack } from "./part-features.js";
 import { MODEL_ENVELOPE, sketchEntityProblem } from "./envelope.js";
-import { describeByteLimit, MCP_CALL_MAX_BYTES, PROJECT_FILE_MAX_BYTES } from "./envelope-limits.js";
+import { describeByteLimit, MAX_BODY_MESH_NUMBERS, MCP_CALL_MAX_BYTES, PROJECT_FILE_MAX_BYTES } from "./envelope-limits.js";
 import { sketchShapeProblem } from "./sketch-problem-messages.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
 import { AUDIT_CHECKPOINT_KIND, AUDIT_MAX_ENTRIES } from "./audit-archive.js";
@@ -422,11 +422,11 @@ function validateGeneralSolidBody(value: unknown): value is GeneralSolidBody {
     || !stableId(value.id) || !shortText(value.name, 1, 120)
     || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)) return false;
   const positions = value.positionsMm;
-  if (!Array.isArray(positions) || positions.length < 12 || positions.length % 3 !== 0 || positions.length > 300_000
+  if (!Array.isArray(positions) || positions.length < 12 || positions.length % 3 !== 0 || positions.length > MAX_BODY_MESH_NUMBERS
     || positions.some((entry) => typeof entry !== "number" || !Number.isFinite(entry) || Math.abs(entry) > 1_000_000)) return false;
   const vertexCount = positions.length / 3;
   const indices = value.indices;
-  if (!Array.isArray(indices) || indices.length < 3 || indices.length % 3 !== 0 || indices.length > 300_000
+  if (!Array.isArray(indices) || indices.length < 3 || indices.length % 3 !== 0 || indices.length > MAX_BODY_MESH_NUMBERS
     || indices.some((entry) => typeof entry !== "number" || !Number.isInteger(entry) || entry < 0 || entry >= vertexCount)) return false;
   if (Object.hasOwn(value, "feature")) {
     const feature = value.feature;

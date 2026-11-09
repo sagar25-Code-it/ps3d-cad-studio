@@ -5,6 +5,9 @@ import type { SketchEntity } from "../packages/workbench-core/src/index.js";
 import { assert, equal, type TestCase } from "./test-kit.js";
 import { circ, rect, sketchFeatureOf, sketchOf, solidFeature } from "./region-wave2-kit.js";
 import { meshReport } from "./region-wave3-kit.js";
+import { applyWorkbenchOperation, designOf, solidEnvelopeProblem, type DesignSketchFeature, type GeneralSolidBody, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { commitWorkingSketchAtomically } from "../apps/studio-web/src/sketch-session.js";
+import { buildSolid, circ as pipelineCirc, committedSketch, pipelineApply, pipelineRun, rect as pipelineRect, solidOf } from "./pipeline-kit.js";
 
 /**
  * Region engine, wave 3: the second re-audit found plates with a row of four equal holes (or a 12-hole bolt circle) that extrude to
@@ -140,6 +143,65 @@ export const regionWave3Tests: readonly TestCase[] = [
         }
         offset += loop.length;
       }
+    }
+  },
+  {
+    name: "region R2-06 / N2-02: plates with 100, 200 and 400 round holes are built closed, added to the timeline and finish in a few seconds (was refused above 83 holes)",
+    run: async () => {
+      for (const count of [100, 200, 400]) {
+        const started = Date.now();
+        const side = Math.ceil(Math.sqrt(count));
+        const holes = Array.from({ length: count }, (_, index) => pipelineCirc(`h${index}`, (index % side) * 8 + 6, Math.floor(index / side) * 8 + 6, 2));
+        const size = side * 8 + 4;
+        const { project, sketch } = committedSketch("datum:xy", [pipelineRect("plate", size / 2, size / 2, size, size), ...holes]);
+        const rebuilt = await buildSolid(sketch, "extrude");
+        const body = solidOf(rebuilt);
+        const notes = rebuilt.ok ? rebuilt.warnings ?? [] : [];
+        if (count === 400) assert(notes.some((note) => note.includes("edges instead of")), `thinned holes are announced: ${notes.join(" | ")}`);
+        else if (count === 100) assert(notes.length === 0, "a plate within the budget keeps full-roundness holes and says nothing");
+        const report = meshReport(body.positionsMm, body.indices);
+        equal(report.badEdges, 0, `${count} holes: every edge is shared by exactly two triangles`);
+        const expected = (size * size - count * Math.PI * 4) * 10;
+        assert(Math.abs(report.signedVolume - expected) < expected * 0.02, `${count} holes: volume ${report.signedVolume.toFixed(0)} against ${expected.toFixed(0)}`);
+        const feature = { id: "feature:extrude-1", name: "Extrude 1", kind: "extrude" as const, suppressed: false, sketchFeatureId: sketch.id, profileIds: [], valueMm: 10, bodyId: "general-body:extrude-1" };
+        const added = pipelineApply(project, { kind: "add-design-solid", feature, body });
+        assert(added.ok, `${count} holes: the solid is stored: ${added.ok ? "" : added.diagnostics[0]?.message ?? ""}`);
+        assert(Date.now() - started < 15_000, `${count} holes build and store in under 15 s (took ${Date.now() - started} ms)`);
+      }
+    }
+  },
+  {
+    name: "region N2-02: adding 100 holes to a stored 8x8 perforated plate and finishing the sketch rebuilds the solid (was refused with 'The rebuild results are invalid')",
+    run: async () => {
+      const holes = Array.from({ length: 64 }, (_, index) => pipelineCirc(`h${index}`, (index % 8) * 30 + 20, Math.floor(index / 8) * 30 + 20, 3));
+      const { project, sketch } = committedSketch("datum:xy", [pipelineRect("plate", 130, 130, 260, 260), ...holes]);
+      const body = solidOf(await buildSolid(sketch, "extrude"));
+      const feature = { id: "feature:extrude-1", name: "Extrude 1", kind: "extrude" as const, suppressed: false, sketchFeatureId: sketch.id, profileIds: [], valueMm: 10, bodyId: "general-body:extrude-1" };
+      let current: WorkbenchProject = pipelineRun(project, { kind: "add-design-solid", feature, body });
+      current = pipelineRun(current, { kind: "edit-design-sketch", featureId: sketch.id });
+      const extra = Array.from({ length: 100 }, (_, index) => pipelineCirc(`x${index}`, (index % 10) * 24 + 8, Math.floor(index / 10) * 24 + 8 + 0 * index, 1));
+      current = pipelineRun(current, { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: extra, addConstraints: [], label: "More holes" });
+      const finished = await commitWorkingSketchAtomically(current, { featureId: "feature:sketch-9", name: "Sketch 9" });
+      assert(finished.ok, `Finish Sketch is accepted: ${finished.ok ? "" : finished.message}`);
+      if (!finished.ok) return;
+      equal(finished.value.failed.length, 0, "no dependent solid failed to rebuild");
+      const stored = (finished.value.project.part.generalBodies ?? []).find((candidate: GeneralSolidBody) => candidate.id === "general-body:extrude-1");
+      assert(stored !== undefined && stored.positionsMm.length / 3 > 100_000, "the rebuilt plate holds more than the old 100,000-vertex limit");
+      assert(finished.value.rebuilt.every((result) => result.body !== undefined), "the rebuilt solid travels with the result");
+      void designOf; void applyWorkbenchOperation;
+    }
+  },
+  {
+    name: "region R2-06: a solid over the stored-vertex limit is refused with the real limit and the reason, and a batch of rebuild results names the feature",
+    run: () => {
+      const huge = { id: "general-body:x", name: "x", visible: true, color: "#b9c2c8", positionsMm: new Array(1_900_000).fill(1), indices: [0, 1, 2] };
+      const problem = solidEnvelopeProblem({ kind: "extrude", valueMm: 5 }, huge);
+      assert(problem !== undefined && problem.message.includes("600,000") && problem.message.includes("round holes"), `the message names the limit and the cause: ${problem?.message ?? "none"}`);
+      const project = committedSketch("datum:xy", [pipelineRect("p", 0, 0, 10, 10)]).project;
+      const refused = pipelineApply(project, { kind: "regenerate-design", results: [{ featureId: "feature:extrude-1", body: huge as unknown as GeneralSolidBody }] });
+      assert(!refused.ok, "the oversize rebuild result is refused");
+      const text = refused.ok ? "" : refused.diagnostics[0]?.message ?? "";
+      assert(text.includes("feature:extrude-1") && text.includes("600,000"), `the refusal names the feature and the limit instead of 'The rebuild results are invalid': ${text}`);
     }
   }
 ];

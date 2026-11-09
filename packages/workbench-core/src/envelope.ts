@@ -1,5 +1,5 @@
 import { circleThroughThreePoints } from "./arc-geometry.js";
-import { ENVELOPE_LIMITS } from "./envelope-limits.js";
+import { ENVELOPE_LIMITS, MAX_BODY_MESH_NUMBERS, MAX_BODY_VERTICES } from "./envelope-limits.js";
 import { SPLINE_MAX_FIT_POINTS, SPLINE_MIN_FIT_POINTS } from "./spline-limits.js";
 import type { WorkbenchDiagnostic } from "./types.js";
 
@@ -185,7 +185,26 @@ export function solidEnvelopeProblem(feature: unknown, body: unknown): EnvelopeP
         return { code: "OUTSIDE_SUPPORTED_ENVELOPE", message: `The solid reaches ${mm(Math.abs(entry))} mm from the origin; a model must stay within ${mm(MODEL_ENVELOPE.maxBodyCoordinateMm)} mm. Reduce the offset, distance or size of the feature.` };
       }
     }
-    if (positions.length > 300_000) return { code: "RESOURCE_LIMIT", message: `The solid has ${(positions.length / 3).toLocaleString("en-US")} vertices; at most 100,000 can be stored. Simplify the shape.` };
+    if (positions.length > MAX_BODY_MESH_NUMBERS) {
+      const vertices = positions.length / 3;
+      return { code: "RESOURCE_LIMIT", message: `The solid has ${vertices.toLocaleString("en-US")} vertices and a model stores at most ${MAX_BODY_VERTICES.toLocaleString("en-US")} per solid. Every triangle keeps its own three vertices, so a plate with round holes costs about 1,200 vertices per hole (fewer when the holes are coarser); this one is about ${Math.round(vertices / MAX_BODY_VERTICES * 100)}% over. Use fewer or simpler holes, split the part into two solids, or build the repeats from a pattern.` };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Why a batch of rebuild results was refused, in words: the first solid that does not fit the model (too many vertices, out of range) named
+ * with its feature, or undefined when the problem is not a body at all. The operation itself only says the results are invalid.
+ */
+export function rebuildResultProblem(results: readonly unknown[]): string | undefined {
+  for (const result of results) {
+    if (!isRecord(result)) continue;
+    const bodies = [result.body, ...(Array.isArray(result.pieces) ? (result.pieces as readonly unknown[]) : [])];
+    for (const body of bodies) {
+      const problem = body === undefined ? undefined : solidEnvelopeProblem(undefined, body);
+      if (problem !== undefined) return `The rebuilt solid of ${typeof result.featureId === "string" ? result.featureId : "a feature"} cannot be stored: ${problem.message}`;
+    }
   }
   return undefined;
 }

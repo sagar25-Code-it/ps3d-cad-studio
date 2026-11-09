@@ -1,9 +1,10 @@
 import type { GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
-import { splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
+import { MAX_BODY_MESH_NUMBERS, MAX_BODY_VERTICES, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
 import { adaptiveFacetCount, booleanMeshes, splitMeshPieces, revolveAxisRelation, revolveSegmentsForRadius, tessellateDome, tessellateExtrude, tessellateHelix, tessellateLoft, tessellateLoftTwoProfiles, tessellateBentStrip, tessellateRevolve, tessellateRevolveRegion, tessellateSweep, tessellateSweepPath, type BooleanMode, type TessellatePlane } from "../../../packages/workbench-geometry/src/index.js";
 import { evaluateProfilePrism, evaluateProfileRevolution, stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { profileOutlineMm, stableEntityToken, type SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import type { ProfileEdgeGroup, ProfileHole } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
+import { planHoleFacets } from "./many-holes.js";
 
 /** Sketch-plane identifier shared with the solid builder UI. */
 export type SketchPlane = TessellatePlane;
@@ -166,8 +167,8 @@ export interface CreateGeneralSolidRequest {
 }
 
 /** Maps a hole profile to the kernel's hole loop; the id comes from its sketch entities so wall names survive edits. */
-function kernelHole(profile: SketchProfile, plane: SketchPlane): ProfileHole {
-  const points = profilePolygonMm(profile.boundary).map((point) => placeOnPlane(point, plane));
+function kernelHole(profile: SketchProfile, plane: SketchPlane, maxFacets?: number): ProfileHole {
+  const points = profilePolygonMm(profile.boundary, maxFacets).map((point) => placeOnPlane(point, plane));
   const id = stableEntityToken(profile.entityIds);
   const groups = curveEdgeGroups(profile.boundary, `face.hole-${id}-seg`);
   return {
@@ -186,7 +187,7 @@ function revolveWithHoles(request: CreateGeneralSolidRequest, polygonMm: readonl
   try {
     const mesh = tessellateRevolveRegion(polygonMm, (request.holes ?? []).map((hole) => profilePolygonMm(hole.boundary)), request.valueMm, request.plane);
     if (mesh.positionsMm.length < 9 || mesh.indices.length < 3) return { ok: false, message: "The profile could not be converted into a solid." };
-    if (mesh.positionsMm.length / 3 > 99_000) return { ok: false, message: "The revolved region has too many vertices to store. Use fewer holes or a smaller angle." };
+    if (mesh.positionsMm.length / 3 > MAX_BODY_VERTICES) return { ok: false, message: `The revolved region has ${(mesh.positionsMm.length / 3).toLocaleString("en-US")} vertices and a solid holds at most ${MAX_BODY_VERTICES.toLocaleString("en-US")}. Use fewer holes or a smaller angle.` };
     return { ok: true, body: { ...base, positionsMm: Array.from(mesh.positionsMm), indices: Array.from(mesh.indices) } };
   } catch (error) {
     return { ok: false, message: `The solid kernel could not revolve this profile: ${error instanceof Error ? error.message : "a hole crosses the outline"}` };
@@ -194,7 +195,7 @@ function revolveWithHoles(request: CreateGeneralSolidRequest, polygonMm: readonl
 }
 
 export type CreateGeneralSolidResult =
-  | { readonly ok: true; readonly body: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[] }
+  | { readonly ok: true; readonly body: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; /** Something worth telling the user that did not stop the build (the holes of a very perforated plate were given fewer edges). */ readonly note?: string }
   | { readonly ok: false; readonly message: string };
 
 /** Joins solids that do not touch into one body: their meshes side by side, their faces named per region. */
@@ -239,14 +240,16 @@ async function createRegionGroups(request: CreateGeneralSolidRequest): Promise<C
   if (request.operation !== "extrude" && request.operation !== "revolve") return { ok: false, message: `A ${request.operation} is built from one region; several regions are selected. Select a single region.` };
   if (request.edge !== undefined) return { ok: false, message: "Chamfer and fillet are not available when several regions are selected. Treat the edges after the extrusion, or select one region." };
   const built: GeneralSolidBody[] = [];
+  const notes: string[] = [];
   for (const [index, group] of groups.entries()) {
     const { extraGroups: _extra, holes: _holes, ...single } = request;
     void _extra; void _holes;
     const part = await createGeneralSolidBody({ ...single, profile: group.profile, ...((group.holes ?? []).length === 0 ? {} : { holes: group.holes }), bodyId: index === 0 ? request.bodyId : `${request.bodyId}.region-${index + 1}` });
     if (!part.ok) return { ok: false, message: groups.length > 1 ? `Region ${index + 1} of ${groups.length}: ${part.message}` : part.message };
     built.push(part.body);
+    if (part.note !== undefined) notes.push(part.note);
   }
-  return { ok: true, body: mergeRegionBodies(built, { id: request.bodyId, name: request.name, color: request.color }) };
+  return { ok: true, body: mergeRegionBodies(built, { id: request.bodyId, name: request.name, color: request.color }), ...(notes.length === 0 ? {} : { note: notes.join(" ") }) };
 }
 
 /**
@@ -442,6 +445,8 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
     }
     const holes = request.holes ?? [];
     const outerGroups = curveEdgeGroups(request.profile.boundary, "face.seg");
+    const facetPlan = planHoleFacets(request.profile.boundary, holes);
+    if (facetPlan.refusal !== undefined) return { ok: false, message: facetPlan.refusal };
     try {
       const prism = await evaluateProfilePrism({
         operationId: request.bodyId,
@@ -452,7 +457,7 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
         // A circle is one cylindrical face, not 72 planar ones: the faceted loop is only its tessellation.
         ...(request.profile.boundary.kind === "circle" ? { smoothSides: true } : {}),
         ...(outerGroups === undefined ? {} : { edgeGroups: outerGroups }),
-        ...(holes.length === 0 ? {} : { holes: holes.map((hole) => kernelHole(hole, request.plane)) }),
+        ...(holes.length === 0 ? {} : { holes: holes.map((hole) => kernelHole(hole, request.plane, facetPlan.maxFacets)) }),
         ...(request.edge === undefined ? {} : { cornerTreatment: { kind: request.edge.kind, sizeMeters: request.edge.sizeMm / 1000 } })
       });
       if (prism.indices.length < 3) return { ok: false, message: "The profile could not be converted into a solid." };
@@ -467,7 +472,8 @@ export async function createGeneralSolidBody(request: CreateGeneralSolidRequest)
             faces: prism.faces.map((face) => ({ role: face.role, key: face.key, areaMm2: face.areaSquareMeters * 1e6 })),
             faceTriangles: prism.faceTriangles
           }
-        }
+        },
+        ...(facetPlan.note === undefined ? {} : { note: facetPlan.note })
       };
     } catch (error) {
       const detail = error instanceof Error ? error.message : "";
@@ -552,7 +558,7 @@ export async function combineGeneralBodies(request: CombineGeneralBodiesRequest)
   });
   const combined = booleanMeshes(input(request.target), input(request.tool), request.mode, request.allowSplit === true ? { allowSplit: true } : {});
   if (!combined.ok) return { ok: false, message: combined.message };
-  if (combined.value.positionsMm.length > 300_000 || combined.value.indices.length > 300_000) return { ok: false, message: "The result has too many triangles to store. Simplify one of the bodies and try again." };
+  if (combined.value.positionsMm.length > MAX_BODY_MESH_NUMBERS || combined.value.indices.length > MAX_BODY_MESH_NUMBERS) return { ok: false, message: `The result has ${(combined.value.positionsMm.length / 3).toLocaleString("en-US")} vertices and a solid holds at most ${MAX_BODY_VERTICES.toLocaleString("en-US")}. Simplify one of the bodies and try again.` };
 
   const sourceRole = (source: "target" | "tool", face: number): string => {
     const body = source === "target" ? request.target : request.tool;

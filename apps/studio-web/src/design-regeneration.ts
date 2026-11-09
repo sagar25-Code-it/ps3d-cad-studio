@@ -177,7 +177,8 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   const started = sweep === undefined || sweep.startDeg === 0 ? built.body : { ...built.body, positionsMm: startRevolveAt(built.body.positionsMm, plane, sweep.startDeg) };
   const placed = shifted(started, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0));
   // A sketch on an angle or three-point plane is built on its datum plane and then moved onto that plane, which keeps the face names.
-  return { ok: true, body: isPlaced(sketch) ? { ...placed, positionsMm: placePositions(placed.positionsMm, sketch) } : placed, ...(warnings.length === 0 ? {} : { warnings }) };
+  const allWarnings = built.note === undefined ? warnings : [...warnings, built.note];
+  return { ok: true, body: isPlaced(sketch) ? { ...placed, positionsMm: placePositions(placed.positionsMm, sketch) } : placed, ...(allWarnings.length === 0 ? {} : { warnings: allWarnings }) };
 }
 
 /**

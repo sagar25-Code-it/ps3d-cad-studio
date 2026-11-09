@@ -1,4 +1,5 @@
 import type { DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
+import { MAX_BODY_MESH_NUMBERS, MAX_BODY_VERTICES } from "../../../packages/workbench-core/src/index.js";
 import {
   boundsTouch, concatMeshes, invertAffine, meshBounds, patternTransforms, transformDirection, transformMesh, transformPoint, transformPositions,
   type Affine, type PatternContext
@@ -88,7 +89,7 @@ async function joinCopies(current: GeneralSolidBody, transforms: readonly Affine
     if (!combined.ok) return { ok: false, message: `Copy ${index + 1} could not be joined to the body: ${combined.message}` };
     result = { ...combined.body, color: current.color };
   }
-  if (result.positionsMm.length > 300_000 || result.indices.length > 300_000) return { ok: false, message: "The joined pattern has too many triangles to store. Use fewer copies or a simpler body." };
+  if (result.positionsMm.length > MAX_BODY_MESH_NUMBERS || result.indices.length > MAX_BODY_MESH_NUMBERS) return { ok: false, message: `The joined pattern has ${(result.positionsMm.length / 3).toLocaleString("en-US")} vertices and a solid holds at most ${MAX_BODY_VERTICES.toLocaleString("en-US")}. Use fewer copies or a simpler body.` };
   return { ok: true, body: result };
 }
 
