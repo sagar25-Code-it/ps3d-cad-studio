@@ -6,7 +6,8 @@ import { splitAt } from "../packages/workbench-sketch/src/split-jog.js";
 import { trimAt } from "../packages/workbench-sketch/src/trim-extend.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { solveLiveSketch } from "../packages/workbench-core/src/sketch-solve.js";
-import { applyOk, con, ctx, ids, line, ofKind, projectWith, rect, relationsOf } from "./edit-test-kit.js";
+import { analyzeSketch, repairAll } from "../packages/workbench-sketch/src/sketch-repair.js";
+import { applyOk, circle, con, ctx, ids, line, ofKind, projectWith, rect, relationsOf } from "./edit-test-kit.js";
 
 /** Wave 3 regression tests for the sketch edit tools (re-audit 2: Edit tools R2-1 to R2-5, E07, E10, N3; UX R2-1, R2-5). */
 
@@ -188,3 +189,34 @@ function dofOfSplitWidth(project: WorkbenchProject): number {
   const xs = project.sketch.entities.filter((e): e is Line => e.kind === "line" && !e.construction).flatMap((e) => [e.start[0], e.end[0]]).filter((x) => x <= 100.0001);
   return Math.round(Math.max(...xs) - Math.min(...xs));
 }
+
+export const sketchEdit3RepairTests: readonly TestCase[] = [
+  {
+    name: "Wave 3 UX R2-5: Sketch Repair reads a Diameter dimension as a diameter (no false Conflict, right label, Fix all keeps the valid Equal)",
+    run: () => {
+      let project = projectWith([circle("a", [0, 0], 5), circle("b", [40, 0], 5)]);
+      project = run(project, { kind: "set-sketch-dimension", entityId: "entity:a", dimension: "diameter", valueMm: 10 });
+      project = run(project, { kind: "set-sketch-dimension", entityId: "entity:b", dimension: "radius", valueMm: 5 });
+      project = run(project, { kind: "add-sketch-constraint", constraint: { id: "constraint:eq", kind: "equal", entityIds: ["entity:a", "entity:b"] } });
+      const report = analyzeSketch(ctx(project));
+      equal(report.errors, 0, "a healthy sketch reports no error");
+      assert(report.usableForSolid, "and stays usable for a solid");
+      assert(!report.issues.some((issue) => /conflict/iu.test(issue.title)), "no Conflict issue");
+      assert(report.issues.every((issue) => !/Radius on entity:a|Radius on a\b/u.test(`${issue.title} ${issue.detail}`)), "the diameter is not labelled as a radius");
+      const fixed = repairAll(ctx(project));
+      assert(fixed.sketch.constraints.some((c) => c.kind === "radius" && c.dimension === "diameter"), "Fix all keeps the diameter dimension");
+      assert(!fixed.applied.some((text) => /Relax the equal/iu.test(text)), "and does not relax the Equal");
+      // Both circles dimensioned by diameter and joined by Equal: a plain redundancy, never a conflict.
+      let twin = projectWith([circle("a", [0, 0], 5), circle("b", [40, 0], 5)]);
+      twin = run(twin, { kind: "set-sketch-dimension", entityId: "entity:a", dimension: "diameter", valueMm: 10 });
+      twin = run(twin, { kind: "set-sketch-dimension", entityId: "entity:b", dimension: "diameter", valueMm: 10 });
+      twin = run(twin, { kind: "add-sketch-constraint", constraint: { id: "constraint:eq", kind: "equal", entityIds: ["entity:a", "entity:b"] } });
+      equal(analyzeSketch(ctx(twin)).errors, 0, "two equal diameters are not an error");
+      // One circle with both a Radius and the matching Diameter.
+      let both = projectWith([circle("a", [0, 0], 5)]);
+      both = run(both, { kind: "set-sketch-dimension", entityId: "entity:a", dimension: "radius", valueMm: 5 });
+      both = run(both, { kind: "set-sketch-dimension", entityId: "entity:a", dimension: "diameter", valueMm: 10 });
+      equal(analyzeSketch(ctx(both)).errors, 0, "a radius and the matching diameter on one circle are redundant, not conflicting");
+    }
+  }
+];

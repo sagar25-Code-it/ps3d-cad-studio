@@ -87,7 +87,8 @@ function kindLabel(kind: string): string {
 }
 
 function describeConstraint(constraint: WorkbenchSketchConstraint): string {
-  return `${kindLabel(constraint.kind)} on ${constraint.entityIds.map(short).join(" and ")}`;
+  const name = constraint.kind === "radius" ? (constraint.dimension === "diameter" ? "Diameter" : constraint.dimension === "major-radius" ? "Major radius" : constraint.dimension === "minor-radius" ? "Minor radius" : "Radius") : kindLabel(constraint.kind);
+  return `${name} on ${constraint.entityIds.map(short).join(" and ")}`;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -211,8 +212,9 @@ function findRelationProblems(sketch: WorkbenchSketch): readonly RelationFinding
     } else if (constraint.kind === "equal" && constraint.entityIds.length === 2) {
       outcome = sizes.equal(first!, second!);
       others = active.filter((c) => c.id !== constraint.id && (c.kind === "equal" || c.kind === "radius" || c.kind === "distance") && c.entityIds.some((id) => constraint.entityIds.includes(id)));
-    } else if ((constraint.kind === "radius" || constraint.kind === "distance") && constraint.valueMm !== undefined && constraint.entityIds.length === 1 && (constraint.kind === "radius" || constraint.dimension === "length") && entities.get(first!)?.kind !== "rectangle") {
-      outcome = sizes.dimension(first!, constraint.valueMm);
+    } else if ((constraint.kind === "radius" || constraint.kind === "distance") && constraint.valueMm !== undefined && constraint.entityIds.length === 1 && (constraint.kind === "radius" || constraint.dimension === "length") && entities.get(first!)?.kind !== "rectangle" && entities.get(first!)?.kind !== "ellipse") {
+      // A Diameter dimension holds twice the radius its size class is measured in.
+      outcome = sizes.dimension(first!, constraint.kind === "radius" && constraint.dimension === "diameter" ? constraint.valueMm / 2 : constraint.valueMm);
       others = active.filter((c) => c.id !== constraint.id && (c.kind === "equal" || c.kind === "radius" || c.kind === "distance") && c.entityIds.some((id) => constraint.entityIds.includes(id)));
       if (outcome === "redundant" && earlier !== undefined) outcome = "redundant";
     }
