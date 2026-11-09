@@ -8,6 +8,7 @@ import { PS3D_AI_COMMAND_RECIPES, createPs3dCollaborationGuide, handleWorkbenchM
 import { detectSketchProfiles, profileOutlineMm, sampleSpline, sampleSplineToBound } from "../packages/workbench-sketch/src/index.js";
 import { parseDxf, writeSketchDxf } from "../packages/workbench-sketch/src/dxf.js";
 import { parseSvg, writeSketchSvg } from "../packages/workbench-sketch/src/svg.js";
+import { DEFAULT_SKETCH_TEXT_SPEC, planSketchText } from "../packages/workbench-sketch/src/sketch-text.js";
 import { planDrawingImport, type ParsedDrawing } from "../packages/workbench-sketch/src/sketch-exchange.js";
 import type { SketchEditPlan } from "../packages/workbench-sketch/src/edit-tools.js";
 import { MAX_PROJECT_BYTES, assertProjectFileSize } from "../apps/studio-web/src/file-workspace.js";
@@ -379,6 +380,29 @@ export const pipelineWave2Tests: readonly TestCase[] = [
       assert(Math.abs(swept.volume - arcExact) / arcExact < 0.0003, `the arc sweep volume ${swept.volume.toFixed(1)} is within 0.03 percent of ${arcExact.toFixed(1)} (it was 6279 against 6283)`);
       near(swept.lo[2], 0, 0.002, "the first cap is flat on the profile plane (it dipped to z = -0.157 when cut square to the first chord)");
       near(swept.hi[2], 25, 0.01, "and the arc rises to its top at 20 plus half the section");
+
+      // A spline path (fit points in the XZ sketch) is accepted too: the pipe is the section times the length of the sampled spline.
+      const fit: readonly (readonly [number, number])[] = [[0, 0], [0, 25], [20, 50], [50, 60]];
+      const splinePath = committedSketch("datum:xz", [{ id: "entity:s", kind: "spline", fitPoints: fit, construction: false }], { project: arcProfile.project, featureId: "feature:s2" });
+      const splineLookup = sketchLookupOf(designOf(splinePath.project));
+      const along = meshStats(solidOf(await rebuildSolidFeature(solidFeature("sweep", arcProfile.sketch, { sweepPath: { sketchFeatureId: "feature:s2", entityIds: ["entity:s"] } }), arcProfile.sketch, "#b9c2c8", splineLookup)));
+      const sampled = sampleSplineToBound(fit, { fine: true });
+      let pathLength = 0;
+      for (let index = 1; index < sampled.length; index += 1) pathLength += Math.hypot(sampled[index]![0] - sampled[index - 1]![0], sampled[index]![1] - sampled[index - 1]![1]);
+      assert(Math.abs(along.volume - 100 * pathLength) / (100 * pathLength) < 0.003, `a spline path sweeps the section along its length: ${along.volume.toFixed(1)} against ${(100 * pathLength).toFixed(1)}`);
+      near(along.lo[2], 0, 0.05, "starting on the profile plane");
+    }
+  },
+  {
+    name: "Wave2 P20: a text object far from the origin (50 m) is accepted like any other curve",
+    run: () => {
+      let serial = 0;
+      const planned = planSketchText({ newId: (prefix: string) => `${prefix}:w2t-${(serial += 1)}` }, [50_000, 0], { ...DEFAULT_SKETCH_TEXT_SPEC, text: "Far", heightMm: 8 });
+      assert(planned.ok, "the text is planned");
+      if (!planned.ok) return;
+      const empty = fresh();
+      const applied = pipelineApply({ ...empty, sketch: { ...empty.sketch, entities: [], constraints: [] } }, { kind: "apply-sketch-edit", ...planned.value } as never);
+      assert(applied.ok, `and applied (the object limit used to be 10 m): ${message(applied)}`);
     }
   }
 ];
