@@ -4,6 +4,7 @@ import { buildCenterline, buildCenterpointArcSlot, buildMidpointLine, buildParal
 import { buildEllipticalArc } from "./ellipse-arc.js";
 import { buildTangentCircleThree, buildTangentCircleTwo } from "./tangent-circles.js";
 import { buildConicByRho, buildConicFromFivePoints, buildControlPointSpline, buildHyperbola, buildParabola } from "./conic-curves.js";
+import { sketchPointsProblem } from "./entity-limits.js";
 import { badShape, type ShapeIds, type SketchShape } from "./curve-math.js";
 import { insertSketchBlock, type SketchBlock } from "./sketch-blocks.js";
 import { buildSketchText } from "./stroke-text.js";
@@ -171,6 +172,10 @@ export function buildCurveTool(tool: FixedCurveToolId, points: readonly Vec2[], 
   if (points.length !== FIXED_POINTS[tool]) {
     return { ok: false, diagnostics: [{ code: "INVALID_OPERATION", message: `${CURVE_TOOL_LABELS[tool]} takes ${FIXED_POINTS[tool]} points.`, relatedIds: [], recovery: "Place the remaining points or press Esc to cancel." }] };
   }
+  // Every curve tool refuses a click that is not a finite number or lies beyond the sketch limit, with the limit named (the single-curve builders already did).
+  const unusable = sketchPointsProblem(points);
+  if (unusable !== undefined) return badShape(unusable);
+  if (!Number.isFinite(options.cornerRadiusMm) || !Number.isFinite(options.rho) || !Number.isFinite(options.blendTension) || !Number.isFinite(options.centerlineReachMm)) return badShape("A tool setting in the Sketch palette is not a finite number.", "Type the setting again.");
   switch (tool) {
     case "line-midpoint": return buildMidpointLine(p(0), p(1), ids);
     case "centerline": return buildCenterline(p(0), p(1), options.centerlineReachMm, ids);

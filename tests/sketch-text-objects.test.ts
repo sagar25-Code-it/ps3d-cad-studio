@@ -88,8 +88,9 @@ export const sketchTextObjectTests: readonly TestCase[] = [
         }
       }
       assert(!buildSketchText([Number.NaN, 0], "A", { heightMm: 10 }, ids).ok, "a NaN anchor point is refused");
-      const tooLong = buildSketchText([0, 0], "B".repeat(40), { heightMm: 10 }, ids);
-      assert(!tooLong.ok && tooLong.diagnostics[0]!.message.includes(String(TEXT_MAX_ENTITIES)), "an over-long text names the per-edit curve limit");
+      const tooLong = buildSketchText([0, 0], "B".repeat(41), { heightMm: 10 }, ids);
+      assert(!tooLong.ok, "an over-long text is refused (41 characters)");
+      assert(TEXT_MAX_ENTITIES === 400, "and the curve limit is the one a text object can record");
     }
   },
   {

@@ -9,6 +9,9 @@ import { buildSketchEntity } from "../packages/workbench-sketch/src/index.js";
 import { extendProfileChain, startProfileChain } from "../packages/workbench-sketch/src/blend-profile.js";
 import { profileSnapRelations } from "../packages/workbench-sketch/src/shape-snap-relations.js";
 import { typedIntentConstraints } from "../packages/workbench-sketch/src/typed-intent.js";
+import { DEFAULT_CURVE_TOOL_OPTIONS, buildCurveTool } from "../packages/workbench-sketch/src/curve-tools.js";
+import { gridSteps } from "../packages/workbench-sketch/src/camera.js";
+import { buildSlot, buildSlotOverall } from "../packages/workbench-sketch/src/shapes.js";
 import { PROFILE_CHAINS, autoId, drawShape, inferPlaced, typedLineChain, arcSlotProblem, addShape, drawEntity, emptyProject3, tryAdd, profileProject, stressProblem, wholeProblem } from "./sketch-shapes3-kit.js";
 import { arcRadius, dimension, shapeIds } from "./sketch-shape-kit.js";
 
@@ -426,6 +429,61 @@ export const sketchShapeSnaps3Tests: readonly TestCase[] = [
       assert(withAxes.sketch.constraints.length === 2, "accepted by the project");
       const resized = dimension(withAxes, { entityId: "entity:t17-ellipse", dimension: "major-radius", valueMm: 14 });
       assert(resized.ok, `the major axis can be edited: ${resized.ok ? "" : resized.message}`);
+    }
+  }
+];
+
+export const sketchBuilderGuards3Tests: readonly TestCase[] = [
+  {
+    name: "Curve creation T18: every shape and curve builder refuses NaN and Infinity with a message instead of returning ok",
+    run: () => {
+      const O = DEFAULT_CURVE_TOOL_OPTIONS;
+      const ids = shapeIds();
+      const cases: readonly (readonly [string, () => { readonly ok: boolean }])[] = [
+        ["slot", () => buildSlot([0, 0], [Infinity, 0], [10, 3], ids)],
+        ["overall slot", () => buildSlotOverall([0, 0], [20, NaN], [10, 3], ids)],
+        ["polygon", () => buildPolygon([0, 0], [NaN, 1], 6, ids)],
+        ["edge polygon", () => buildEdgePolygon([0, 0], [Infinity, 1], 6, ids)],
+        ["polygon sides", () => buildPolygon([0, 0], [10, 0], NaN, ids)],
+        ["centerline", () => buildCurveTool("centerline", [[0, 0], [NaN, 1]], O, ids)],
+        ["midpoint line", () => buildCurveTool("line-midpoint", [[NaN, 0], [5, 5]], O, ids)],
+        ["parallelogram", () => buildCurveTool("parallelogram", [[0, 0], [10, 0], [NaN, 5]], O, ids)],
+        ["rounded rectangle", () => buildCurveTool("rectangle-rounded", [[0, 0], [NaN, 10]], O, ids)],
+        ["rounded rectangle radius", () => buildCurveTool("rectangle-rounded", [[0, 0], [40, 20]], { ...O, cornerRadiusMm: NaN }, ids)],
+        ["parabola", () => buildCurveTool("parabola", [[0, 0], [20, 0], [NaN, 12]], O, ids)],
+        ["conic rho", () => buildCurveTool("conic", [[0, 0], [20, 0], [10, 12]], { ...O, rho: NaN }, ids)],
+        ["arc slot", () => buildCurveTool("slot-arc-three-point", [[0, 0], [10, 6], [20, 0], [10, Infinity]], O, ids)],
+        ["text", () => buildCurveTool("text", [[NaN, 0]], { ...O, text: "A" }, ids)],
+        ["text height", () => buildCurveTool("text", [[0, 0]], { ...O, text: "A", textHeightMm: NaN }, ids)]
+      ];
+      for (const [name, build] of cases) {
+        const result = build();
+        assert(!result.ok, `${name} refuses a non-finite input`);
+        const refused = result as { readonly ok: false; readonly diagnostics: readonly { readonly message: string }[] };
+        assert(refused.diagnostics[0] !== undefined && refused.diagnostics[0].message.length > 10, `${name} says why`);
+      }
+      assert(buildSlot([0, 0], [20, 0], [10, 3], ids).ok, "a finite slot is still built");
+    }
+  },
+  {
+    name: "Curve creation T28: gridSteps with a scale or base that is not a finite number still returns finite steps",
+    run: () => {
+      for (const [base, perPixel] of [[1, NaN], [1, Infinity], [1, 0], [1, -5], [NaN, 1], [Infinity, 1], [-3, 1], [1, 1e-300], [1, 1e300]] as const) {
+        const steps = gridSteps(base, perPixel);
+        assert(Number.isFinite(steps.minorMm) && Number.isFinite(steps.majorMm) && steps.minorMm > 0 && steps.majorMm >= steps.minorMm, `gridSteps(${base}, ${perPixel}) is ${JSON.stringify(steps)}`);
+      }
+      const normal = gridSteps(1, 0.5);
+      assert(normal.minorMm === 10 || normal.minorMm === 5 || normal.minorMm === 2 || normal.minorMm === 1, `a normal zoom keeps its steps (${normal.minorMm})`);
+    }
+  },
+  {
+    name: "Curve creation F11: wide-letter text beyond the old 200-curve edit limit is accepted and applies",
+    run: () => {
+      const text = buildCurveTool("text", [[0, 0]], { ...DEFAULT_CURVE_TOOL_OPTIONS, text: "B".repeat(40) }, shapeIds());
+      assert(text.ok, `40 B characters build (${text.ok ? "" : text.diagnostics[0]?.message})`);
+      assert(text.value.entities.length > 200, `with more than 200 curves (${text.value.entities.length})`);
+      const added = tryAdd(emptyProject3(), text.value);
+      assert(added.ok, `and the project takes them: ${added.ok ? "" : added.message}`);
     }
   }
 ];

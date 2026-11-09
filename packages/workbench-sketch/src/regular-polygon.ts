@@ -1,4 +1,5 @@
 import { failure, type SketchEntity, type SketchPointRef, type Vec2, type WorkbenchResult, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
+import { sketchPointsProblem } from "./entity-limits.js";
 import type { ShapeIds, SketchShape } from "./shapes.js";
 
 /**
@@ -44,6 +45,8 @@ function checkSides(sides: number): WorkbenchResult<RegularPolygonShape> | undef
 export function buildPolygon(center: Vec2, point: Vec2, sides: number, ids: ShapeIds, mode: Exclude<PolygonMode, "edge"> = "inscribed"): WorkbenchResult<RegularPolygonShape> {
   const invalid = checkSides(sides);
   if (invalid !== undefined) return invalid;
+  const unusable = sketchPointsProblem([center, point]);
+  if (unusable !== undefined) return bad(unusable);
   const reach = Math.hypot(point[0] - center[0], point[1] - center[1]);
   if (reach < 0.1) return bad(mode === "circumscribed" ? "A polygon needs an apothem of at least 0.1 mm." : "A polygon needs a radius of at least 0.1 mm.");
   const heading = Math.atan2(point[1] - center[1], point[0] - center[0]);
@@ -57,6 +60,8 @@ export function buildPolygon(center: Vec2, point: Vec2, sides: number, ids: Shap
 export function buildEdgePolygon(edgeStart: Vec2, edgeEnd: Vec2, sides: number, ids: ShapeIds): WorkbenchResult<RegularPolygonShape> {
   const invalid = checkSides(sides);
   if (invalid !== undefined) return invalid;
+  const unusable = sketchPointsProblem([edgeStart, edgeEnd]);
+  if (unusable !== undefined) return bad(unusable);
   const dx = edgeEnd[0] - edgeStart[0];
   const dy = edgeEnd[1] - edgeStart[1];
   const side = Math.hypot(dx, dy);
