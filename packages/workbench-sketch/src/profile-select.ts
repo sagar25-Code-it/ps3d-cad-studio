@@ -157,6 +157,15 @@ function relate(a: Ring, b: Ring): Related {
   return { relation: "disjoint", touching };
 }
 
+/** What a region is called in a message: the curves that bound it (never a generated id), as "plate", "a and b" or "a, b and 5 more curves". */
+function regionName(profile: SketchProfile): string {
+  const names = [...new Set(profile.entityIds.map((id) => id.replace(/^entity:/u, "")))].map((name) => (name.length > 18 ? `${name.slice(0, 12)}…` : name));
+  if (names.length === 0) return "the region";
+  if (names.length === 1) return names[0]!;
+  if (names.length <= 3) return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]!}`;
+  return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more curves`;
+}
+
 const shortId = (id: string): string => {
   const bare = profileBaseOf(id).replace(/^profile:/u, "").replace(/^entity:/u, "");
   return bare.length > 18 ? `${bare.slice(0, 12)}…` : bare;
@@ -241,6 +250,11 @@ interface ExactPick {
   readonly profile: SketchProfile;
   /** Which of the region's holes are kept as holes; the rest are filled. */
   readonly keep: "all" | ReadonlySet<string>;
+  /**
+   * Holes the reference pinned that are no longer holes of this profile but still bound a region of the sketch (an outline was drawn around
+   * the hole, so the hole is now a region inside a bigger hole): filling the bigger hole leaves these out, so the hole stays.
+   */
+  readonly keepOut?: ReadonlySet<string>;
 }
 
 export function resolveProfileRegion(
@@ -265,19 +279,32 @@ export function resolveProfileRegion(
     if (found === undefined) return missing(id, profiles);
     if (found.how === "only") matchNotes.push(`The profile ${shortId(id)} was named in an older file and its curves have changed, so the only region the sketch has now was used. Select the region again to keep it for good.`);
     if (found.how === "geometry") {
-      const note = geometryMatchNote(parsed, found);
+      const note = geometryMatchNote(parsed, found, profiles);
       if (note !== undefined) matchNotes.push(note);
     }
     if (parsed.exact) {
       const holes = found.profile.holes ?? [];
       let keep: "all" | Set<string>;
+      let keepOut: Set<string> | undefined;
       if (parsed.holeKeys === "all" || parsed.holeKeys === undefined) keep = "all";
       else {
         const keys = new Set(parsed.holeKeys);
-        // A region found again by geometry may have had its hole redrawn; as many holes as before are the same holes.
-        keep = found.how === "geometry" && holes.length === keys.size ? "all" : new Set(holes.map((hole) => holeKeyOf(hole.id)).filter((key) => keys.has(key)));
+        const now = new Set(holes.map((hole) => holeKeyOf(hole.id)));
+        keep = new Set([...now].filter((key) => keys.has(key)));
+        // A pinned hole that is not a hole of the region any more is either still there as a region of its own (an outline drawn around it:
+        // the hole stays a hole inside the new, bigger one), or it was drawn again under other curves.
+        const lostKeys = [...keys].filter((key) => !now.has(key));
+        const standing = lostKeys.filter((key) => profiles.some((profile) => holeKeyOf(profile.id) === key));
+        if (standing.length > 0) keepOut = new Set(standing);
+        const gone = lostKeys.filter((key) => !standing.includes(key));
+        const strangers = holes.filter((hole) => !keys.has(holeKeyOf(hole.id)));
+        if (gone.length > 0 && strangers.length === gone.length) {
+          // As many new holes as pinned holes that vanished: the hole was drawn again. The new ones take their place, and it is said so.
+          for (const stranger of strangers) keep.add(holeKeyOf(stranger.id));
+          matchNotes.push(`The ${gone.length === 1 ? "hole" : "holes"} this region had (${describeRef(id)}) ${gone.length === 1 ? "was" : "were"} drawn again, so ${strangers.map((stranger) => regionName(stranger)).join(", ")} now ${strangers.length === 1 ? "takes" : "take"} its place as the hole. Check that it is the one you meant.`);
+        }
       }
-      exact.push({ profile: found.profile, keep });
+      exact.push({ profile: found.profile, keep, ...(keepOut === undefined ? {} : { keepOut }) });
     } else {
       outlines.push(found.profile);
       if (parsed.holeKeys !== undefined) pins.set(found.profile, parsed.holeKeys);
@@ -313,19 +340,67 @@ function withNotes(result: WorkbenchResult<ProfileRegion>, notes: readonly strin
 
 const round2 = (value: number): string => String(Math.round(value * 100) / 100);
 
-/** A region found again only by its shape is worth a line when it no longer looks like the region that was picked (new geometry cut into it). */
-function geometryMatchNote(parsed: ParsedProfileRef, found: MatchedProfile): string | undefined {
+/**
+ * The other regions that, together with the one a reference was found again as, make up the region it named: new geometry (a line
+ * 1 mm from the edge, a circle across it) divided the region and the reference went to one part. Undefined when nothing explains the
+ * lost area, which is what a fillet or a trim looks like.
+ */
+function dividingParts(parsed: ParsedProfileRef, found: MatchedProfile, profiles: readonly SketchProfile[]): readonly SketchProfile[] | undefined {
+  const wantedArea = parsed.areaMm2;
+  const wantedCentroid = parsed.centroid;
+  if (wantedArea === undefined || wantedCentroid === undefined || wantedArea <= 0) return undefined;
+  const foundArea = wantedArea * (found.areaRatio ?? 1);
+  if (foundArea >= 0.9995 * wantedArea) return undefined;
+  const lost = wantedArea - foundArea;
+  const size = Math.sqrt(wantedArea);
+  const near = profiles
+    .filter((profile) => profile !== found.profile && profile.id !== found.profile.id)
+    .map((profile) => ({ profile, signature: outlineSignature(profile) }))
+    .map((item) => ({ ...item, offset: Math.hypot(item.signature.centroid[0] - wantedCentroid[0], item.signature.centroid[1] - wantedCentroid[1]) }))
+    .filter((item) => item.signature.areaMm2 < 0.9 * wantedArea && item.signature.areaMm2 > 0 && item.offset <= 2 * size)
+    .sort((left, right) => left.offset - right.offset)
+    .slice(0, 8);
+  // The parts must add up to what was lost, to a tenth of it: a fillet takes a corner no other region fills, and a small circle nearby is not it.
+  const fits = (total: number): boolean => Math.abs(foundArea + total - wantedArea) <= 0.002 * wantedArea + 0.1 * lost;
+  for (let i = 0; i < near.length; i += 1) {
+    if (fits(near[i]!.signature.areaMm2)) return [near[i]!.profile];
+    for (let j = i + 1; j < near.length; j += 1) {
+      if (fits(near[i]!.signature.areaMm2 + near[j]!.signature.areaMm2)) return [near[i]!.profile, near[j]!.profile];
+      for (let k = j + 1; k < near.length; k += 1) if (fits(near[i]!.signature.areaMm2 + near[j]!.signature.areaMm2 + near[k]!.signature.areaMm2)) return [near[i]!.profile, near[j]!.profile, near[k]!.profile];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * A region found again only by its shape is worth a line when it no longer looks like the region that was picked: new geometry cut into it
+ * (said by name, with the part the feature no longer covers) or it changed size by more than a few percent (a fillet changes it by a
+ * fraction of a percent, and that is not worth a note).
+ */
+function geometryMatchNote(parsed: ParsedProfileRef, found: MatchedProfile, profiles: readonly SketchProfile[]): string | undefined {
   const ratio = found.areaRatio ?? 1;
   const shift = found.shiftMm ?? 0;
+  const wanted = parsed.areaMm2 ?? 0;
   const size = Math.sqrt(parsed.areaMm2 ?? 1);
+  const parts = dividingParts(parsed, found, profiles);
+  if (parts !== undefined) {
+    const rest = Math.max(0, wanted * (1 - ratio));
+    return `The region (${describeRef(parsed.id)}) was divided by new geometry: it was found again as the larger part (bounded by ${regionName(found.profile)}) of ${round2(wanted * ratio)} mm² (${Math.round(ratio * 100)}% of the original), and the other ${parts.length === 1 ? "part" : "parts"} (bounded by ${parts.map((part) => regionName(part)).join("; ")}, about ${round2(rest)} mm²) ${parts.length === 1 ? "is" : "are"} no longer in this feature. Select every part you want if you meant the whole region, or move the new curve away.`;
+  }
   if (Math.abs(ratio - 1) <= 0.05 && shift <= 0.05 * size) return undefined;
-  return `The region ${shortId(parsed.base)} of about ${round2(parsed.areaMm2 ?? 0)} mm² was found again by its shape, but the sketch changed it: the region used now covers ${round2((parsed.areaMm2 ?? 0) * ratio)} mm² (${Math.round(ratio * 100)}% of the original). Check that it is the one you meant, or select the region again.`;
+  return `The region (${describeRef(parsed.id)}) was found again by its shape, but the sketch changed it: the region used now covers ${round2(wanted * ratio)} mm² (${Math.round(ratio * 100)}% of the original). Check that it is the one you meant, or select the region again.`;
+}
+
+/** A stored reference in words: where the region was and how big, which the person can find on the canvas, or its loop name for an id with no size. */
+function describeRef(id: string): string {
+  const parsed = parseProfileRef(id);
+  return parsed.areaMm2 !== undefined && parsed.centroid !== undefined ? `a region of about ${round2(parsed.areaMm2)} mm² near (${round2(parsed.centroid[0])}, ${round2(parsed.centroid[1])})` : shortId(id);
 }
 
 function missing(id: string, profiles: readonly SketchProfile[] = []): WorkbenchResult<never> {
   const pieces = ambiguousProfileMatches(id, profiles);
-  if (pieces > 1) return failure("INVALID_OPERATION", `The selected profile ${shortId(id)} was split by new geometry into ${pieces} regions of about the same size, so it cannot tell which one you meant.`, [id], "Select the region you want again.");
-  return failure("INVALID_OPERATION", `The selected profile ${shortId(id)} no longer exists in the sketch.`, [id], "Select the profile again, or restore the curves that bounded it.");
+  if (pieces > 1) return failure("INVALID_OPERATION", `The selected profile (${describeRef(id)}) was split by new geometry into ${pieces} regions of about the same size, so it cannot tell which one you meant.`, [id], "Select the region you want again.");
+  return failure("INVALID_OPERATION", `The selected profile (${describeRef(id)}) no longer exists in the sketch.`, [id], "Select the profile again, or restore the curves that bounded it.");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -345,9 +420,9 @@ function outlineRegion(profiles: readonly SketchProfile[], universe: readonly Sk
       for (let j = i + 1; j < roots.length; j += 1) {
         const related = relate(rootRings[i]!, rootRings[j]!);
         if (related.relation === "cross") {
-          return failure("INVALID_OPERATION", `The selected profiles ${shortId(roots[i]!.id)} and ${shortId(roots[j]!.id)} overlap: their outlines cross, so they cannot be one region.`, [...roots[i]!.entityIds, ...roots[j]!.entityIds], "Select regions that do not overlap, or split the shapes at their intersection first (Break at intersections) and pick the pieces.");
+          return failure("INVALID_OPERATION", `The selected profiles ${regionName(roots[i]!)} and ${regionName(roots[j]!)} overlap: their outlines cross, so they cannot be one region.`, [...roots[i]!.entityIds, ...roots[j]!.entityIds], "Select regions that do not overlap, or split the shapes at their intersection first (Break at intersections) and pick the pieces.");
         }
-        if (related.relation === "same") { warnings.push(`${shortId(roots[j]!.id)} lies exactly on ${shortId(roots[i]!.id)}; the duplicate was ignored.`); parent[j] = -2; continue; }
+        if (related.relation === "same") { warnings.push(`${regionName(roots[j]!)} lies exactly on ${regionName(roots[i]!)}; the duplicate was ignored.`); parent[j] = -2; continue; }
         if (related.relation === "inside" && parent[j] !== -2) {
           if (parent[j] === -1 || grossArea(roots[parent[j]!]!) > grossArea(roots[i]!)) parent[j] = i;
         }
@@ -387,11 +462,11 @@ function outlineRegion(profiles: readonly SketchProfile[], universe: readonly Sk
     const related = relate(rootRing, ring);
     if (related.relation === "inside") {
       inside.push({ profile: candidate, ring });
-      if (related.touching) warnings.push(`${describe(candidate)} touches the outline of ${shortId(root.id)}; it is kept as a hole, but a hole that touches the edge leaves a zero-width wall. Move it inward or dimension it clear of the edge.`);
+      if (related.touching) warnings.push(`${describe(candidate)} touches the outline of ${regionName(root)}; it is kept as a hole, but a hole that touches the edge leaves a zero-width wall. Move it inward or dimension it clear of the edge.`);
     } else if (related.relation === "cross") {
-      warnings.push(`${describe(candidate)} crosses the outline of ${shortId(root.id)}, so it is not a hole and was left out. Select the regions you want (the pieces on either side of the crossing), or move it clear.`);
+      warnings.push(`${describe(candidate)} crosses the outline of ${regionName(root)}, so it is not a hole and was left out. Select the regions you want (the pieces on either side of the crossing), or move it clear.`);
     } else if (related.relation === "same") {
-      warnings.push(`${describe(candidate)} lies exactly on the outline of ${shortId(root.id)} and was ignored.`);
+      warnings.push(`${describe(candidate)} lies exactly on the outline of ${regionName(root)} and was ignored.`);
     }
   }
   // Two identical outlines drawn on top of each other are one hole.
@@ -532,8 +607,9 @@ function unionRegion(universe: readonly SketchProfile[], picks: readonly ExactPi
   const warnings: string[] = [];
   const included = new Map<string, SketchProfile>();
   for (const pick of picks) included.set(pick.profile.id, pick.profile);
-  // A hole that is not kept is filled with every face inside it.
+  // A hole that is not kept is filled with every face inside it, except the regions of holes the reference pinned (and what stands in them).
   for (const pick of picks) {
+    const standing = pick.keepOut === undefined ? [] : universe.filter((face) => pick.keepOut!.has(holeKeyOf(face.id))).map((face) => ringOf(face));
     for (const hole of pick.profile.holes ?? []) {
       const kept = includeIslands && (pick.keep === "all" || pick.keep.has(holeKeyOf(hole.id)));
       if (kept) continue;
@@ -542,7 +618,9 @@ function unionRegion(universe: readonly SketchProfile[], picks: readonly ExactPi
         if (included.has(face.id) || face.interiorPoint === undefined) continue;
         const point = face.interiorPoint;
         if (point[0] < ring.box[0] || point[0] > ring.box[2] || point[1] < ring.box[1] || point[1] > ring.box[3]) continue;
-        if (pointInRing(point, ring.points)) included.set(face.id, face);
+        if (!pointInRing(point, ring.points)) continue;
+        if (standing.some((pinned) => point[0] >= pinned.box[0] && point[0] <= pinned.box[2] && point[1] >= pinned.box[1] && point[1] <= pinned.box[3] && pointInRing(point, pinned.points))) continue;
+        included.set(face.id, face);
       }
     }
   }
@@ -587,7 +665,7 @@ function unionRegion(universe: readonly SketchProfile[], picks: readonly ExactPi
   // tangent to the outline, two holes meeting) would tie the outline and the hole into one figure-eight loop.
   const live = edges.filter((edge) => !edge.cancelled);
   const used = new Set<DirectedEdge>();
-  const loops: { ids: number[]; infos: EdgeInfo[] }[] = [];
+  const loops: { ids: number[]; infos: EdgeInfo[]; chained?: true }[] = [];
   for (const ring of rings) {
     if (ring.ids.length < 3 || ring.edges.some((edge) => edge === undefined || edge.cancelled)) continue;
     for (const edge of ring.edges) used.add(edge!);
@@ -624,7 +702,20 @@ function unionRegion(universe: readonly SketchProfile[], picks: readonly ExactPi
       }
       edge = best;
     }
-    if (ids.length >= 3) loops.push({ ids, infos });
+    if (ids.length >= 3) loops.push({ ids, infos, chained: true });
+  }
+  // Where the outline of the selection touches itself at a vertex (regions that meet only at a corner, a hole that reaches the outline at a
+  // corner) the loops cannot be built into one solid: the walls would meet along a single line. Say where, instead of letting the kernel
+  // report that "the profile outline crosses itself".
+  const pinch = findPinch(loops, registry.points);
+  if (pinch !== undefined) {
+    const place = `(${round2(pinch[0])}, ${round2(pinch[1])})`;
+    return failure("INVALID_OPERATION", `The selected regions meet only at the corner ${place}: the outline of the selection touches itself there, which would leave the solid joined along a single line. Select a region that also fills (or leaves out) a neighbour at that corner so the regions share an edge, or move the curves apart.`, picks.flatMap((pick) => pick.profile.entityIds), "Select regions that share an edge, or fix the curves that meet at that corner.");
+  }
+  // Separate pieces that touch at a corner are built as they are, but their walls meet along a line there: said, not hidden.
+  const touchingAt = cornersSharedByOutlines(loops, registry.points);
+  if (touchingAt.length > 0) {
+    warnings.push(`${touchingAt.length === 1 ? "Two selected regions meet" : `${touchingAt.length} places where selected regions meet`} only at a corner (${touchingAt.slice(0, 3).map((point) => `${round2(point[0])}, ${round2(point[1])}`).join("; ")}${touchingAt.length > 3 ? "; ..." : ""}); they are built as separate pieces whose walls touch along a line there. Select regions that share an edge if you want one solid.`);
   }
   // Classify: counter-clockwise loops are outlines, clockwise ones are holes.
   interface Described { readonly profile: SketchProfile; readonly ring: Ring }
@@ -677,6 +768,56 @@ function unionRegion(universe: readonly SketchProfile[], picks: readonly ExactPi
  * Whether a hole's ring lies inside an outline's ring. A hole that touches the outline (tangent, or within the tolerance) has corners
  * on the outline itself, where "inside" is undefined, so those corners are skipped and the rest decide: all of them inside.
  */
+/** The vertices that two or more counter-clockwise loops share (separate regions that meet at a corner). */
+function cornersSharedByOutlines(loops: readonly { readonly ids: readonly number[] }[], points: readonly Vec2[]): Vec2[] {
+  const owners = new Map<number, number>();
+  const shared = new Set<number>();
+  loops.forEach((loop, index) => {
+    let twice = 0;
+    for (let at = 0; at < loop.ids.length; at += 1) {
+      const p = points[loop.ids[at]!]!;
+      const q = points[loop.ids[(at + 1) % loop.ids.length]!]!;
+      twice += p[0] * q[1] - q[0] * p[1];
+    }
+    if (twice <= 0) return;
+    for (const id of new Set(loop.ids)) {
+      const other = owners.get(id);
+      if (other !== undefined && other !== index) shared.add(id);
+      owners.set(id, index);
+    }
+  });
+  return [...shared].map((id) => points[id]!);
+}
+
+/** A vertex a chained loop passes twice, or that a chained clockwise loop shares with another chained loop; undefined when the loops are clear of each other. */
+function findPinch(loops: readonly { readonly ids: readonly number[]; readonly chained?: true }[], points: readonly Vec2[]): Vec2 | undefined {
+  const owner = new Map<number, number>();
+  const area = (ids: readonly number[]): number => {
+    let twice = 0;
+    for (let index = 0; index < ids.length; index += 1) {
+      const p = points[ids[index]!]!;
+      const q = points[ids[(index + 1) % ids.length]!]!;
+      twice += p[0] * q[1] - q[0] * p[1];
+    }
+    return twice;
+  };
+  for (const [index, loop] of loops.entries()) {
+    if (loop.chained !== true) continue;
+    const seen = new Set<number>();
+    for (const id of loop.ids) {
+      if (seen.has(id)) return points[id];
+      seen.add(id);
+    }
+    const hole = area(loop.ids) < 0;
+    for (const id of seen) {
+      const other = owner.get(id);
+      if (other !== undefined && other !== index && (hole || area(loops[other]!.ids) < 0)) return points[id];
+      if (other === undefined || hole) owner.set(id, index);
+    }
+  }
+  return undefined;
+}
+
 function holeStandsIn(hole: Ring, outer: Ring): boolean {
   if (hole.box[0] < outer.box[0] - TOLERANCE_MM || hole.box[2] > outer.box[2] + TOLERANCE_MM || hole.box[1] < outer.box[1] - TOLERANCE_MM || hole.box[3] > outer.box[3] + TOLERANCE_MM) return false;
   const stride = Math.max(1, Math.floor(hole.points.length / 12));
@@ -695,7 +836,7 @@ function holeStandsIn(hole: Ring, outer: Ring): boolean {
  * Holes of a region that touch the outline or one another, or sit closer than the tolerance: a wall that thin cannot be built, and a
  * kernel refusal on its own ("a hole crosses the outline") does not say which holes are meant.
  */
-const holeName = (hole: SketchProfile): string => shortId(hole.entityIds[0] ?? hole.id);
+const holeName = (hole: SketchProfile): string => regionName(hole);
 
 function touchWarnings(groups: readonly { readonly outer: SketchProfile; readonly holes: readonly SketchProfile[] }[], includeOutline = true): string[] {
   const notes: string[] = [];
@@ -704,7 +845,7 @@ function touchWarnings(groups: readonly { readonly outer: SketchProfile; readonl
     const outerRing = ringOf(group.outer);
     const rings = group.holes.map((hole) => ({ hole, ring: ringOf(hole) }));
     if (includeOutline) for (const item of rings) {
-      if (relate(outerRing, item.ring).touching) notes.push(`The hole ${holeName(item.hole)} touches the outline of ${shortId(group.outer.id)} (or lies within ${TOLERANCE_MM} mm of it), which leaves a zero-width wall. Move it inward or dimension it clear of the edge.`);
+      if (relate(outerRing, item.ring).touching) notes.push(`The hole ${holeName(item.hole)} touches the outline of ${regionName(group.outer)} (or lies within ${TOLERANCE_MM} mm of it), which leaves a zero-width wall. Move it inward or dimension it clear of the edge.`);
     }
     // Sweep by left edge so only holes whose boxes (grown by the tolerance) overlap are compared.
     const order = [...rings].sort((left, right) => left.ring.box[0] - right.ring.box[0]);

@@ -7,6 +7,7 @@ import type { SketchEntity } from "../packages/workbench-core/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { circ, line, rect, sketchFeatureOf, sketchOf, solidFeature } from "./region-wave2-kit.js";
 import { meshReport } from "./region-wave3-kit.js";
+import { regionWave3SelectTests } from "./region-wave3-select.test.js";
 import { applyWorkbenchOperation, designOf, solidEnvelopeProblem, type DesignSketchFeature, type GeneralSolidBody, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { commitWorkingSketchAtomically } from "../apps/studio-web/src/sketch-session.js";
 import { rebuildSolidFeature as rebuildFeature } from "../apps/studio-web/src/design-regeneration.js";
@@ -327,6 +328,7 @@ export const regionWave3Tests: readonly TestCase[] = [
       const covered = profiles.reduce((sum, profile) => sum + profile.areaMm2, 0);
       assert(covered < union && covered > union - 100, `the faces cover the union (${covered.toFixed(1)})`);
     }
-  }
+  },
+  ...regionWave3SelectTests
 ];
 
