@@ -233,7 +233,7 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       const spline = splineOf(shape.entities[0]);
       equal(spline.fitPoints[0]![0], 0, "starts on the first control point");
       equal(spline.fitPoints[spline.fitPoints.length - 1]![0], 60, "ends on the last control point");
-      assert(spline.fitPoints.length >= 10 && spline.fitPoints.length <= 24, "a sensible number of fit points");
+      assert(spline.fitPoints.length >= 10 && spline.fitPoints.length <= 64, "a sensible number of fit points (wave 3: as many as the 0.01 mm fit needs, up to the 64 a spline holds)");
       const exact = controlPointCurve(controls, false, 2000);
       const drawn = sampleSpline(spline.fitPoints, 16);
       let worst = 0;

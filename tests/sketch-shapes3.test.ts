@@ -15,6 +15,9 @@ import { buildSlot, buildSlotOverall } from "../packages/workbench-sketch/src/sh
 import { buildFitSpline, tangentFromDegrees } from "../packages/workbench-sketch/src/spline-fit.js";
 import { sampleSpline } from "../packages/workbench-sketch/src/index.js";
 import { DEFAULT_SKETCH_KEYMAP, SKETCH_KEYMAP_COMMANDS, resolveSketchHotkey, sketchToolHotkeyChip } from "../packages/workbench-sketch/src/hotkeys.js";
+import { buildConicByRho, buildControlPointSpline, buildHyperbola, conicArcPoint, controlPointCurve } from "../packages/workbench-sketch/src/conic-curves.js";
+import { splineDeviationMm } from "../packages/workbench-sketch/src/fit-tolerance.js";
+import { CURVE_TOOL_PROMPTS } from "../packages/workbench-sketch/src/curve-tools.js";
 import { PROFILE_CHAINS, autoId, drawShape, inferPlaced, typedLineChain, arcSlotProblem, addShape, drawEntity, emptyProject3, tryAdd, profileProject, stressProblem, wholeProblem } from "./sketch-shapes3-kit.js";
 import { arcRadius, dimension, shapeIds } from "./sketch-shape-kit.js";
 
@@ -563,6 +566,57 @@ export const sketchHotkeys3Tests: readonly TestCase[] = [
         const action = resolveSketchHotkey({ key: key.replace("Shift+", "").toLowerCase(), shift, ctrl: false, alt: false, meta: false } as never, idle as never, DEFAULT_SKETCH_KEYMAP);
         assert(action?.kind === "tool" && action.tool === tool, `${key} starts ${tool}`);
         assert(sketchToolHotkeyChip(tool as "ellipse-arc", DEFAULT_SKETCH_KEYMAP) !== undefined, `${tool} shows a key chip`);
+      }
+    }
+  }
+];
+
+export const sketchFit3Tests: readonly TestCase[] = [
+  {
+    name: "Curve creation T13: conics of every rho stay within 0.02 mm of the exact curve (measured to the curve, not to its sample points)",
+    run: () => {
+      const ids = shapeIds();
+      for (const rho of [0.02, 0.1, 0.3, 0.5, 0.7, 0.9, 0.95, 0.98]) {
+        for (const [start, end, apex] of [[[0, 0], [60, 0], [30, 25]], [[0, 0], [60, 0], [30, 200]], [[0, 0], [10, 0], [5, 40]], [[0, 0], [60, 0], [5, 25]], [[0, 0], [250, 0], [125, 90]]] as const) {
+          const built = buildConicByRho(start, end, apex, rho, ids);
+          assert(built.ok, `rho ${rho} builds`);
+          const fit = (built.value.entities[0] as { fitPoints: readonly Vec2[] }).fitPoints;
+          const reference = Array.from({ length: 12001 }, (_, index): Vec2 => conicArcPoint(start, apex, end, rho, index / 12000));
+          const deviation = splineDeviationMm(fit, reference);
+          assert(deviation <= 0.02, `rho ${rho} over ${JSON.stringify([start, end, apex])}: ${deviation.toFixed(4)} mm`);
+        }
+      }
+    }
+  },
+  {
+    name: "Curve creation T13: hyperbola branches and open control-point splines stay within 0.02 mm of the exact curve",
+    run: () => {
+      const ids = shapeIds();
+      for (const [center, vertex, branch] of [[[0, 0], [10, 0], [20, 15]], [[0, 0], [10, 0], [100, 15]], [[0, 0], [10, 0], [12, 80]], [[0, 0], [30, 0], [40, 100]]] as const) {
+        const built = buildHyperbola(center, vertex, branch, ids);
+        assert(built.ok, "hyperbola builds");
+        const fit = (built.value.entities[0] as { fitPoints: readonly Vec2[] }).fitPoints;
+        const a = Math.hypot(vertex[0] - center[0], vertex[1] - center[1]);
+        const b = Math.abs(branch[1]) / Math.sqrt((branch[0] * branch[0]) / (a * a) - 1);
+        const tEnd = Math.asinh(Math.abs(branch[1]) / b);
+        const reference = Array.from({ length: 12001 }, (_, index): Vec2 => { const t = -tEnd + (2 * tEnd * index) / 12000; return [center[0] + a * Math.cosh(t), center[1] + b * Math.sinh(t)]; });
+        const deviation = splineDeviationMm(fit, reference);
+        assert(deviation <= 0.02, `hyperbola ${JSON.stringify([center, vertex, branch])}: ${deviation.toFixed(4)} mm`);
+      }
+      for (const controls of [[[0, 0], [10, 30], [30, 35], [50, 10], [60, 0]], [[0, 0], [20, 40], [40, -40], [60, 0]], [[0, 0], [5, 8], [12, -3], [20, 5]], [[0, 0], [100, 100], [200, -100], [300, 100], [400, 0]], [[0, 0], [50, 0], [50, 50], [0, 50], [0, 10]]] as readonly (readonly Vec2[])[]) {
+        const built = buildControlPointSpline(controls, false, false, ids);
+        assert(built.ok, "control spline builds");
+        const fit = (built.value.entities[0] as { fitPoints: readonly Vec2[] }).fitPoints;
+        const deviation = splineDeviationMm(fit, controlPointCurve(controls, false, 12000));
+        assert(deviation <= 0.02, `control-point spline ${JSON.stringify(controls)}: ${deviation.toFixed(4)} mm (the audit saw 0.104)`);
+      }
+    }
+  },
+  {
+    name: "Curve creation T13: the tool prompts of the conic and control-point tools state the tolerance they hold",
+    run: () => {
+      for (const tool of ["conic", "parabola", "hyperbola", "conic-five", "spline-control"] as const) {
+        assert(/0\.01 mm/u.test(CURVE_TOOL_PROMPTS[tool].join(" ")), `${tool}'s prompt states its tolerance`);
       }
     }
   }
