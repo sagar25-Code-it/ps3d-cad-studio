@@ -86,8 +86,10 @@ function linear(start: Vec2, end: Vec2, normal: Vec2, valueMm: number, pxMm: num
   };
 }
 
+export const linearDimensionLayout = linear;
+
 /** Prefer the side of a line that points up (and right for a vertical one) so text sits above it. */
-function upwardNormal(direction: Vec2): Vec2 {
+export function upwardNormal(direction: Vec2): Vec2 {
   const candidate: Vec2 = [-direction[1], direction[0]];
   return candidate[1] > 1e-9 || (Math.abs(candidate[1]) <= 1e-9 && candidate[0] >= 0) ? candidate : [-candidate[0], -candidate[1]];
 }

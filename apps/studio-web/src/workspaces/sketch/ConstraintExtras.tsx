@@ -2,6 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { SketchDimensionName, SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "../../../../../packages/workbench-core/src/index.js";
 import { SolverRelations } from "./SolverRelations.js";
 import { measureDimensionConstraint } from "../../../../../packages/workbench-core/src/sketch-measure.js";
+import { isSketchDatumEntityId } from "../../../../../packages/workbench-core/src/index.js";
+import { ellipseRadiusLayout, isEllipseRadiusConstraint, isPointDistanceConstraint, pointDistanceLayout } from "../../../../../packages/workbench-sketch/src/point-distance-layout.js";
+import type { DimensionOffsets } from "../../../../../packages/workbench-sketch/src/dimension-display.js";
+import { describeLength, formatLength, getDimensionLabelUnit } from "../../../../../packages/workbench-sketch/src/sketch-units.js";
+import { parseLengthField } from "../../../../../packages/workbench-sketch/src/edit-fields.js";
 import { splineEndFrame, type SplinePoint } from "../../../../../packages/workbench-core/src/spline-curvature.js";
 import type { SketchEditPlan } from "../../../../../packages/workbench-sketch/src/edit-tools.js";
 import {
@@ -9,8 +14,10 @@ import {
   arcLengthDimensionLayout,
   arrowHead,
   dimensionLayout,
+  DIMENSION_OFFSET_PX,
   perimeterDimensionLayout,
-  type DimensionLayout
+  type DimensionLayout,
+  type DimensionLayoutOptions
 } from "../../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { minimumRadiusCheck, nearestSmoothJoint, setSplineEndCurvature, setSplineTangent, splineTangentHandles } from "../../../../../packages/workbench-sketch/src/spline-helpers.js";
 import { createPierceEdit, type PierceHit } from "../../../../../packages/workbench-geometry/src/sketch-pierce.js";
@@ -33,14 +40,28 @@ const format = (value: number): string => String(Number(value.toFixed(3)));
 
 type Line = Extract<SketchEntity, { kind: "line" }>;
 
-/** The layout of any angle, arc-length or perimeter dimension, and of a driven radius or length, from the constraint and its live measurement. */
-export function extraDimensionLayout(sketch: Pick<WorkbenchSketch, "entities">, constraint: WorkbenchSketchConstraint, px: number): { readonly layout: DimensionLayout; readonly entityIds: readonly string[] } | undefined {
+/**
+ * The layout of any angle, arc-length, perimeter, distance-between-things or ellipse-radius dimension, and of a driven radius or length, from
+ * the constraint and its live measurement. `options` set where the dimension line stands (a dragged label) and how the value is written.
+ */
+export function extraDimensionLayout(sketch: Pick<WorkbenchSketch, "entities">, constraint: WorkbenchSketchConstraint, px: number, options?: DimensionLayoutOptions): { readonly layout: DimensionLayout; readonly entityIds: readonly string[] } | undefined {
   const driven = constraint.driven === true;
+  // The sketch origin and axes are not entities in the list: a dimension from the origin or to an axis is drawn from where they are.
   const entities = constraint.entityIds.map((id) => sketch.entities.find((entity) => entity.id === id));
-  if (entities.some((entity) => entity === undefined || entity.visible === false)) return undefined;
-  const [first, second] = entities as readonly SketchEntity[];
+  if (entities.some((entity, index) => (entity === undefined && !isSketchDatumEntityId(constraint.entityIds[index] ?? "")) || entity?.visible === false)) return undefined;
   const value = driven ? measureDimensionConstraint(sketch, constraint) : constraint.kind === "angle" ? constraint.valueDeg : constraint.valueMm;
-  if (value === undefined || first === undefined) return undefined;
+  const first = entities[0];
+  if (value === undefined) return undefined;
+  if (isPointDistanceConstraint(constraint)) {
+    const found = pointDistanceLayout(sketch, constraint, value, px, options);
+    return found === undefined ? undefined : { layout: withBrackets(found, driven)!, entityIds: constraint.entityIds };
+  }
+  if (first === undefined) return undefined;
+  const second = entities[1];
+  if (isEllipseRadiusConstraint(constraint) && first.kind === "ellipse") {
+    const found = ellipseRadiusLayout(first, constraint.dimension === "minor-radius" ? "minor-radius" : "major-radius", value, px, options);
+    return { layout: withBrackets(found, driven)!, entityIds: constraint.entityIds };
+  }
   let layout: DimensionLayout | undefined;
   if (constraint.kind === "angle" && first.kind === "line" && second?.kind === "line") layout = angleDimensionLayout(first as Line, second as Line, value, px, driven);
   else if (constraint.kind === "arc-length" && entities.length === 1) {
@@ -48,7 +69,7 @@ export function extraDimensionLayout(sketch: Pick<WorkbenchSketch, "entities">, 
     else if (first.kind === "line") layout = withBrackets(dimensionLayout(first, "length", value, px), driven);
   } else if (constraint.kind === "perimeter" && entities.length === 1) layout = perimeterDimensionLayout(first, value, px, driven);
   else if (driven && constraint.kind === "distance" && constraint.dimension !== undefined && (constraint.dimension === "length" || constraint.dimension === "width" || constraint.dimension === "height")) layout = withBrackets(dimensionLayout(first, constraint.dimension, value, px), true);
-  else if (driven && constraint.kind === "radius" && (first.kind === "circle")) layout = withBrackets(dimensionLayout(first, "radius", value, px), true);
+  else if (driven && constraint.kind === "radius" && (first.kind === "circle" || first.kind === "arc")) layout = withBrackets(dimensionLayout(first, "radius", constraint.dimension === "diameter" ? value / 2 : value, px, options), true);
   return layout === undefined ? undefined : { layout, entityIds: constraint.entityIds };
 }
 
@@ -69,6 +90,12 @@ function arcPath(layout: DimensionLayout): string | undefined {
 export function ExtraDimensionMarks(props: {
   readonly sketch: WorkbenchSketch;
   readonly px: number;
+  /** Where each dimension line stands off (screen pixels), by constraint id: the labels the person dragged. */
+  readonly offsets?: DimensionOffsets;
+  /** Writes a length in millimetres as label text (the Dimension display settings: decimals, unit). */
+  readonly format?: (valueMm: number) => string;
+  /** A press on the text of a dimension whose stand-off can be changed: the caller selects it and may start a drag. */
+  readonly onLabelPress?: (constraintId: string, event: React.PointerEvent, layoutAt: (offsetPx: number) => DimensionLayout | undefined, offsetPx: number, additive: boolean) => void;
   readonly onEdit?: (constraint: WorkbenchSketchConstraint, anchor: Vec2) => void;
   /** With this, a press on the text selects the dimension and a double-click edits it (reference dimensions too). Without it a press edits a driving dimension, as before. */
   readonly onSelect?: (constraintId: string, additive: boolean) => void;
@@ -76,12 +103,14 @@ export function ExtraDimensionMarks(props: {
 }): React.JSX.Element {
   const { sketch, px } = props;
   const marks = sketch.constraints.flatMap((constraint) => {
-    const isExtra = constraint.kind === "angle" || constraint.kind === "arc-length" || constraint.kind === "perimeter";
+    const isExtra = constraint.kind === "angle" || constraint.kind === "arc-length" || constraint.kind === "perimeter" || isPointDistanceConstraint(constraint) || isEllipseRadiusConstraint(constraint);
     if (!isExtra && constraint.driven !== true) return [];
-    const found = extraDimensionLayout(sketch, constraint, px);
-    return found === undefined ? [] : [{ constraint, ...found }];
+    const offsetPx = props.offsets?.[constraint.id];
+    const options: DimensionLayoutOptions = { ...(offsetPx === undefined ? {} : { offsetPx }), ...(props.format === undefined ? {} : { format: props.format }) };
+    const found = extraDimensionLayout(sketch, constraint, px, options);
+    return found === undefined ? [] : [{ constraint, offsetPx, options, ...found }];
   });
-  return <>{marks.map(({ constraint, layout }) => {
+  return <>{marks.map(({ constraint, layout, offsetPx, options }) => {
     const driven = constraint.driven === true;
     const path = arcPath(layout);
     const flip = (point: Vec2): string => `${point[0]},${-point[1]}`;
@@ -93,7 +122,15 @@ export function ExtraDimensionMarks(props: {
         ? <line x1={layout.dimensionLine.from[0]} y1={-layout.dimensionLine.from[1]} x2={layout.dimensionLine.to[0]} y2={-layout.dimensionLine.to[1]} />
         : <path d={path} fill="none" />}
       {layout.arrows.map((arrow, index) => <polygon key={index} className="arrow" points={arrowHead(arrow, px).map(flip).join(" ")} />)}
-      {(selecting || !driven) && <rect className="driving-dimension-hit" x={layout.textAt[0] - textWidth / 2} y={-layout.textAt[1] - 11 * px} width={textWidth} height={20 * px} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); if (props.onSelect !== undefined) props.onSelect(constraint.id, event.shiftKey || event.ctrlKey || event.metaKey); else props.onEdit?.(constraint, layout.textAt); }} onDoubleClick={(event) => { event.stopPropagation(); props.onEdit?.(constraint, layout.textAt); }} />}
+      {(selecting || !driven) && <rect className="driving-dimension-hit" x={layout.textAt[0] - textWidth / 2} y={-layout.textAt[1] - 11 * px} width={textWidth} height={20 * px} onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.stopPropagation();
+        const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+        const movable = layout.extensionLines.length > 0;
+        if (movable && props.onLabelPress !== undefined) props.onLabelPress(constraint.id, event, (offset) => extraDimensionLayout(sketch, constraint, px, { ...options, offsetPx: offset })?.layout, offsetPx ?? DIMENSION_OFFSET_PX, additive);
+        else if (props.onSelect !== undefined) props.onSelect(constraint.id, additive);
+        else props.onEdit?.(constraint, layout.textAt);
+      }} onDoubleClick={(event) => { event.stopPropagation(); props.onEdit?.(constraint, layout.textAt); }} />}
       <text className="driving-dimension-text" x={layout.textAt[0]} y={-layout.textAt[1] + 4 * px} style={{ fontSize: 12.5 * px, strokeWidth: 3.5 * px }} pointerEvents="none">{layout.label}</text>
     </g>;
   })}</>;
@@ -116,9 +153,9 @@ function dimensionTarget(selected: readonly SketchEntity[]): { readonly name: Sk
   const before = selected.at(-2);
   if (last?.kind === "line" && before?.kind === "line") return { name: "angle", first: before, second: last, label: "Angle between the last two lines", unit: "°" };
   if (selected.length === 1 && last !== undefined) {
-    if (last.kind === "arc") return { name: "arc-length", first: last, label: "Arc length", unit: "mm" };
-    if (last.kind === "line" || last.kind === "spline") return { name: "arc-length", first: last, label: last.kind === "line" ? "Length (reference)" : "Spline length (reference)", unit: "mm" };
-    if (last.kind === "circle" || last.kind === "rectangle" || last.kind === "ellipse") return { name: "perimeter", first: last, label: "Perimeter", unit: "mm" };
+    if (last.kind === "arc") return { name: "arc-length", first: last, label: "Arc length", unit: getDimensionLabelUnit() };
+    if (last.kind === "line" || last.kind === "spline") return { name: "arc-length", first: last, label: last.kind === "line" ? "Length (reference)" : "Spline length (reference)", unit: getDimensionLabelUnit() };
+    if (last.kind === "circle" || last.kind === "rectangle" || last.kind === "ellipse") return { name: "perimeter", first: last, label: "Perimeter", unit: getDimensionLabelUnit() };
   }
   return undefined;
 }
@@ -147,9 +184,12 @@ function ExtraDimensionSection(props: ExtrasProps): React.JSX.Element {
     driven: true
   };
   const measured = probe === undefined ? undefined : measureDimensionConstraint(props.sketch, probe);
-  const [text, setText] = useState(() => (measured === undefined ? "" : format(measured)));
-  const key = target === undefined ? "" : `${target.name}:${probe!.entityIds.join("|")}`;
-  useEffect(() => { setText(measured === undefined ? "" : format(measured)); }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const labelUnit = getDimensionLabelUnit();
+  /** A measured value as the field's text: degrees for an angle, the display unit for a length. */
+  const textOf = (value: number): string => (target?.name === "angle" ? format(value) : formatLength(value, labelUnit));
+  const [text, setText] = useState(() => (measured === undefined ? "" : textOf(measured)));
+  const key = target === undefined ? "" : `${target.name}:${probe!.entityIds.join("|")}:${labelUnit}`;
+  useEffect(() => { setText(measured === undefined ? "" : textOf(measured)); }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const existing = props.sketch.constraints.filter((constraint) => (constraint.kind === "angle" || constraint.kind === "arc-length" || constraint.kind === "perimeter") && constraint.entityIds.some((id) => props.selected.some((entity) => entity.id === id)));
   const drivingAllowed = target !== undefined && !(target.name === "arc-length" && target.first.kind !== "arc");
   return <section className="inspector-section extra-dimension-controller">
@@ -158,7 +198,7 @@ function ExtraDimensionSection(props: ExtrasProps): React.JSX.Element {
       ? <p className="empty-copy">Select two lines for an angle, an arc for its length, or a circle, rectangle or ellipse for its perimeter. Reference dimensions measure and never move anything.</p>
       : <form className="dimension-field" onSubmit={(event) => {
         event.preventDefault();
-        const value = Number(text.trim());
+        const value = target.name === "angle" ? Number(text.trim()) : parseLengthField(text, labelUnit);
         if (!Number.isFinite(value) || (target.name !== "angle" && value <= 0)) { props.onMessage(target.name === "angle" ? "Type an angle in degrees, 0 up to 360." : "Type a length greater than zero."); return; }
         props.onSetDimension(target.first.id, target.name, value, { ...(target.second === undefined ? {} : { secondEntityId: target.second.id }) });
       }}>
@@ -168,17 +208,17 @@ function ExtraDimensionSection(props: ExtrasProps): React.JSX.Element {
           <button type="submit" disabled={!drivingAllowed} title="Drive the geometry to this value and hold it">Drive</button>
           <button type="button" title="Measure only: a reference dimension never moves the geometry" onClick={() => props.onSetDimension(target.first.id, target.name, measured ?? 1, { driven: true, ...(target.second === undefined ? {} : { secondEntityId: target.second.id }) })}>Reference</button>
         </div></label>
-        {measured !== undefined && <small className="extra-measure">Now measures {format(measured)} {target.unit}.</small>}
+        {measured !== undefined && <small className="extra-measure">Now measures {textOf(measured)} {target.unit}.</small>}
       </form>}
     {existing.length > 0 && <ul className="extra-dimension-list">{existing.map((constraint) => {
       const value = measureDimensionConstraint(props.sketch, constraint);
-      const unit = constraint.kind === "angle" ? "°" : " mm";
+      const unit = constraint.kind === "angle" ? "°" : "";
       const first = props.sketch.entities.find((entity) => entity.id === constraint.entityIds[0]);
       const second = props.sketch.entities.find((entity) => entity.id === constraint.entityIds[1]);
       const name: SketchDimensionName = constraint.kind === "angle" ? "angle" : constraint.kind === "arc-length" ? "arc-length" : "perimeter";
       return <li key={constraint.id}>
         <b>{constraint.kind}</b>
-        <span>{constraint.driven === true ? "reference" : "driving"} {value === undefined ? "" : `${format(value)}${unit}`}</span>
+        <span>{constraint.driven === true ? "reference" : "driving"} {value === undefined ? "" : constraint.kind === "angle" ? `${format(value)}${unit}` : describeLength(value)}</span>
         {first !== undefined && constraint.entityIds.length <= 2 && <button type="button" title={constraint.driven === true ? "Make it a driving dimension at the measured value" : "Stop driving: keep the geometry and measure it"} onClick={() => props.onSetDimension(first.id, name, value ?? 1, { driven: constraint.driven !== true, ...(second === undefined ? {} : { secondEntityId: second.id }) })}>{constraint.driven === true ? "Make driving" : "Make reference"}</button>}
       </li>;
     })}</ul>}

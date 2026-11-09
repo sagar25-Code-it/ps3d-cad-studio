@@ -13,6 +13,8 @@ import {
 } from "../../../../../packages/workbench-core/src/index.js";
 import { entityNames } from "../../../../../packages/workbench-core/src/index.js";
 import { measureDimensionConstraint } from "../../../../../packages/workbench-core/src/sketch-measure.js";
+import { describeLength, formatLength, getDimensionLabelUnit, unitWord } from "../../../../../packages/workbench-sketch/src/sketch-units.js";
+import { parseLengthField } from "../../../../../packages/workbench-sketch/src/edit-fields.js";
 
 /**
  * Inspector section for the solver's location tools: distances between two points (aligned, horizontal, vertical), from the sketch
@@ -37,6 +39,8 @@ const POINT_LABELS: Readonly<Record<SketchPointRef, string>> = {
 };
 
 const format = (value: number): string => String(Number(value.toFixed(3)));
+/** A length in millimetres as the text of a field, in the unit the sketch is shown in. */
+const lengthText = (valueMm: number): string => formatLength(valueMm, getDimensionLabelUnit());
 const newId = (): string => `constraint:user-${crypto.randomUUID()}`;
 
 function pointChoices(entity: SketchEntity): readonly SketchPointRef[] {
@@ -87,7 +91,7 @@ export function SolverRelations(props: SolverRelationsProps): React.JSX.Element 
   const fit = probe === undefined ? undefined : constraintFit("distance", probe.entityIds.map((id) => (id === SKETCH_ORIGIN_ID ? "origin" : props.sketch.entities.find((entity) => entity.id === id)?.kind)), probe.points, { dimension: plan?.dimension as SketchDimensionName });
   const apply = (driven: boolean): void => {
     if (plan === undefined) return;
-    const value = driven ? measured ?? 0 : Number(text.trim());
+    const value = driven ? measured ?? 0 : parseLengthField(text, getDimensionLabelUnit());
     if (!driven && (!Number.isFinite(value) || value < 0)) { props.onMessage("Type a distance of zero or more."); return; }
     props.onSetDimension(plan.entityIds[0]!, plan.dimension, value, { secondEntityId: plan.entityIds[1]!, ...(plan.points === undefined ? {} : { points: plan.points }), ...(driven ? { driven: true } : {}) });
   };
@@ -122,12 +126,12 @@ export function SolverRelations(props: SolverRelationsProps): React.JSX.Element 
           <select aria-label="Distance direction" value={orientation} onChange={(event) => setOrientation(event.target.value as "aligned" | "horizontal" | "vertical")}>
             <option value="aligned">Aligned</option><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option>
           </select></label>}
-        <label><span>Distance (mm)</span><div>
-          <input aria-label="Distance in millimetres" inputMode="decimal" value={text} placeholder={measured === undefined ? "" : format(measured)} onChange={(event) => setText(event.target.value)} />
+        <label><span>Distance ({getDimensionLabelUnit()})</span><div>
+          <input aria-label={`Distance in ${unitWord(getDimensionLabelUnit())}`} inputMode="text" value={text} placeholder={measured === undefined ? "" : lengthText(measured)} onChange={(event) => setText(event.target.value)} />
           <button type="submit" disabled={fit?.ok === false} title={fit?.ok === false ? fit.reason : "Drive the geometry to this distance and hold it"}>Drive</button>
           <button type="button" disabled={fit?.ok === false} title="Measure only: a reference distance never moves the geometry" onClick={() => apply(true)}>Reference</button>
         </div></label>
-        {measured !== undefined && <small className="extra-measure">Now {format(measured)} mm.</small>}
+        {measured !== undefined && <small className="extra-measure">Now {describeLength(measured)}.</small>}
       </form>}
 
     {sizes.length > 0 && <div className="dimension-stack">{sizes.map((size) => <SizeField key={size.dimension} entityId={one!.id} size={size} sketch={props.sketch} onSetDimension={props.onSetDimension} />)}</div>}
@@ -150,11 +154,11 @@ export function SolverRelations(props: SolverRelationsProps): React.JSX.Element 
 export function PointDistanceField(props: { readonly between: { readonly entityId: string; readonly secondEntityId: string; readonly points: readonly [SketchPointRef, SketchPointRef] }; readonly measured: number; readonly delta: readonly [number, number]; readonly onSetDimension: SolverSetDimension; readonly onMessage: (message: string) => void }): React.JSX.Element {
   const [direction, setDirection] = useState<"aligned" | "horizontal" | "vertical">("aligned");
   const shown = direction === "horizontal" ? Math.abs(props.delta[0]) : direction === "vertical" ? Math.abs(props.delta[1]) : props.measured;
-  const [draft, setDraft] = useState(format(shown));
-  useEffect(() => { setDraft(format(shown)); }, [shown, direction]);
+  const [draft, setDraft] = useState(lengthText(shown));
+  useEffect(() => { setDraft(lengthText(shown)); }, [shown, direction]);
   return <form className="dimension-field" onSubmit={(event) => {
     event.preventDefault();
-    const value = Number(draft.trim());
+    const value = parseLengthField(draft, getDimensionLabelUnit());
     if (!Number.isFinite(value) || value < 0) { props.onMessage("Type a distance of zero or more."); return; }
     props.onSetDimension(props.between.entityId, direction, value, { secondEntityId: props.between.secondEntityId, points: props.between.points });
   }}>
@@ -163,22 +167,24 @@ export function PointDistanceField(props: { readonly between: { readonly entityI
         <option value="aligned">Aligned</option><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option>
       </select></label>
     <label><span>Distance between the two points</span><div>
-      <input aria-label="Distance in millimetres" inputMode="decimal" value={draft} onChange={(event) => setDraft(event.target.value)} />
+      <input aria-label={`Distance in ${unitWord(getDimensionLabelUnit())}`} inputMode="text" value={draft} onChange={(event) => setDraft(event.target.value)} />
       <button type="submit" title="Drive the second curve so the points are this far apart; the first stays">Drive</button>
     </div></label>
   </form>;
 }
 
 function SizeField(props: { readonly entityId: string; readonly size: { readonly label: string; readonly dimension: SketchDimensionName; readonly value: number }; readonly sketch: WorkbenchSketch; readonly onSetDimension: SolverSetDimension }): React.JSX.Element {
-  const [draft, setDraft] = useState(format(props.size.value));
-  useEffect(() => { setDraft(format(props.size.value)); }, [props.size.value, props.entityId]);
+  const angle = props.size.dimension === "angle";
+  const showSize = (value: number): string => (angle ? format(value) : lengthText(value));
+  const [draft, setDraft] = useState(showSize(props.size.value));
+  useEffect(() => { setDraft(showSize(props.size.value)); }, [props.size.value, props.entityId, getDimensionLabelUnit()]); // eslint-disable-line react-hooks/exhaustive-deps
   return <form className="dimension-field" onSubmit={(event) => {
     event.preventDefault();
-    const value = Number(draft.trim());
+    const value = angle ? Number(draft.trim()) : parseLengthField(draft, getDimensionLabelUnit());
     if (Number.isFinite(value) && (props.size.dimension === "angle" ? value >= 0 && value < 360 : value > 0)) props.onSetDimension(props.entityId, props.size.dimension, value);
   }}>
     <label><span>{props.size.label}</span><div>
-      <input aria-label={props.size.label} inputMode="decimal" value={draft} onChange={(event) => setDraft(event.target.value)} />
+      <input aria-label={angle ? props.size.label : `${props.size.label} (${getDimensionLabelUnit()})`} inputMode="text" value={draft} onChange={(event) => setDraft(event.target.value)} />
       <button type="submit" title="Drive the geometry to this value and hold it">Drive</button>
       <button type="button" title="Measure only" onClick={() => props.onSetDimension(props.entityId, props.size.dimension, props.size.value, { driven: true })}>Reference</button>
     </div></label>

@@ -31,7 +31,11 @@ export function createWorkbenchProject(projectId: string): WorkbenchProject {
         { id: "entity:center-guide", kind: "line", start: [-40, 0], end: [40, 0], construction: true }
       ],
       constraints: [
-        { id: "constraint:outline-fixed", kind: "fixed", entityIds: ["entity:mounting-outline"] },
+        // The plate is pinned by its centre only and dimensioned, so a new user can change its width and height (a Fix on the whole rectangle refused every dimension).
+        { id: "constraint:outline-fixed", kind: "fixed", entityIds: ["entity:mounting-outline"], points: ["center"] },
+        { id: "constraint:outline-level", kind: "horizontal", entityIds: ["entity:mounting-outline"] },
+        { id: "constraint:outline-width", kind: "distance", entityIds: ["entity:mounting-outline"], valueMm: 60, dimension: "width" },
+        { id: "constraint:outline-height", kind: "distance", entityIds: ["entity:mounting-outline"], valueMm: 40, dimension: "height" },
         { id: "constraint:centered-bore-fixed", kind: "fixed", entityIds: ["entity:centered-bore-profile"] },
         { id: "constraint:left-fixed", kind: "fixed", entityIds: ["entity:left-mount"] },
         { id: "constraint:right-fixed", kind: "fixed", entityIds: ["entity:right-mount"] },

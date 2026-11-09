@@ -656,6 +656,8 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       return changed({ ...project, activeWorkspace: operation.workspace }, [project.id], `Opened ${workspaceLabel(operation.workspace)} workspace.`);
     case "add-sketch-entity": {
       if (project.sketch.entities.some((entity) => entity.id === operation.entity.id)) return invalidOperation("The sketch entity ID already exists.");
+      // The cap gets its own message here, as it has in apply-sketch-edit, instead of the generic "invalid or exceeds its limits".
+      if (project.sketch.entities.length >= WORKBENCH_LIMITS.maxEntities) return failure("RESOURCE_LIMIT", `The sketch already holds ${project.sketch.entities.length} curves, which is the most it can have (${WORKBENCH_LIMITS.maxEntities}).`, [project.sketch.id], "Delete curves you no longer need, or move part of the drawing into another sketch, then draw again.");
       return changed({ ...project, sketch: { ...project.sketch, entities: [...project.sketch.entities, operation.entity] } }, [operation.entity.id], `Added ${sketchEntityName({ entities: [...project.sketch.entities, operation.entity] }, operation.entity.id)}.`);
     }
     case "delete-sketch-entity": {
@@ -672,6 +674,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "add-sketch-constraint": {
       if (project.sketch.constraints.some((constraint) => constraint.id === operation.constraint.id)) return invalidOperation("The sketch constraint ID already exists.");
+      if (project.sketch.constraints.length >= WORKBENCH_LIMITS.maxConstraints) return failure("RESOURCE_LIMIT", `The sketch already holds ${project.sketch.constraints.length} relations and dimensions, which is the most it can have (${WORKBENCH_LIMITS.maxConstraints}).`, [project.sketch.id], "Delete relations you no longer need, or relax and remove redundant ones (Validate Sketch lists them), then add this one.");
       // A relation that cannot mean anything (a horizontal circle, a radius on a line, a line parallel to itself) is refused with the reason.
       const refusal = checkNewConstraint(project, operation.constraint);
       if (refusal !== undefined) return refusal;
