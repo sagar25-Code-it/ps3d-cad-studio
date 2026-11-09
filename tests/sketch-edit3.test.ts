@@ -9,7 +9,7 @@ import { trimAt } from "../packages/workbench-sketch/src/trim-extend.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { solveLiveSketch } from "../packages/workbench-core/src/sketch-solve.js";
 import { analyzeSketch, repairAll } from "../packages/workbench-sketch/src/sketch-repair.js";
-import { applyOk, circle, con, ctx, ids, line, ofKind, projectWith, rect, relationsOf } from "./edit-test-kit.js";
+import { applyOk, circle, commit, con, ctx, ids, line, ofKind, projectWith, rect, relationsOf } from "./edit-test-kit.js";
 
 /** Wave 3 regression tests for the sketch edit tools (re-audit 2: Edit tools R2-1 to R2-5, E07, E10, N3; UX R2-1, R2-5). */
 
@@ -191,6 +191,21 @@ function dofOfSplitWidth(project: WorkbenchProject): number {
   const xs = project.sketch.entities.filter((e): e is Line => e.kind === "line" && !e.construction).flatMap((e) => [e.start[0], e.end[0]]).filter((x) => x <= 100.0001);
   return Math.round(Math.max(...xs) - Math.min(...xs));
 }
+
+export const sketchEdit3SummaryTests: readonly TestCase[] = [
+  {
+    name: "Wave 3 UX R2-1: a dimension an edit has to let go of is named in the status text, and a re-expressed one is not reported as lost",
+    run: () => {
+      const base = projectWith([line("a", [0, 0], [100, 0]), line("x", [40, -20], [40, 20])], [con("h", "horizontal", ["a"]), con("len", "distance", ["a"], { valueMm: 100, dimension: "length" })]);
+      const trimmed = commit(base, trimAt(ctx(base), "entity:a", [70, 0]));
+      if (!trimmed.ok) throw new Error(trimmed.message);
+      assert(/Dimensions let go: Length 100 on Line 1/u.test(trimmed.summary), `the summary names the dimension: ${trimmed.summary}`);
+      const rounded = commit(plate(), cornerByClickAt(plate(), [80, 0], 6));
+      if (!rounded.ok) throw new Error(rounded.message);
+      assert(!/let go/u.test(rounded.summary), `a fillet that keeps both size dimensions does not report them lost: ${rounded.summary}`);
+    }
+  }
+];
 
 export const sketchEdit3RepairTests: readonly TestCase[] = [
   {

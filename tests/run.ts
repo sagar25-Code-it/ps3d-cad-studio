@@ -128,7 +128,7 @@ import { sketchUi2EditTests } from "./sketch-ui2-edit.test.js";
 import { sketchUi2InputTests } from "./sketch-ui2-input.test.js";
 import { sketchUi2WorkspaceTests } from "./sketch-ui2-workspace.test.js";
 import { sketchUi2CanvasTests } from "./sketch-ui2-canvas.test.js";
-import { sketchEdit3Tests, sketchEdit3RepairTests, sketchEdit3PatternTests } from "./sketch-edit3.test.js";
+import { sketchEdit3Tests, sketchEdit3RepairTests, sketchEdit3PatternTests, sketchEdit3SummaryTests } from "./sketch-edit3.test.js";
 import { sketchEdit3MirrorTests } from "./sketch-edit3-mirror.test.js";
 import { sketchEdit3ClipboardTests } from "./sketch-edit3-clipboard.test.js";
 import { sketchEdit3RedundancyTests } from "./sketch-edit3-redundancy.test.js";
@@ -278,6 +278,7 @@ const tests: readonly TestCase[] = [
   ...sketchEdit3Tests,
   ...sketchEdit3RepairTests,
   ...sketchEdit3PatternTests,
+  ...sketchEdit3SummaryTests,
   ...sketchEdit3MirrorTests,
   ...sketchEdit3ClipboardTests,
   ...sketchEdit3RedundancyTests,
