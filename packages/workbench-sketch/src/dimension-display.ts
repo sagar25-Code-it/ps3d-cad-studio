@@ -66,7 +66,9 @@ export function parseDimensionInput(text: string, settings: DimensionDisplaySett
 
 /** True when typed text means the stored value, so the editor can close without re-driving the geometry. */
 export function sameDimensionValue(typedMm: number, storedMm: number): boolean {
-  return Math.abs(typedMm - storedMm) <= Math.max(1e-9, Math.abs(storedMm) * 1e-12);
+  // The editor writes the stored number with 12 significant digits, so what it reads back differs from the stored value by up to 5e-12 of
+  // itself (more once inches are converted back); a relative tolerance of 1e-10 absorbs that and nothing a person would type on purpose.
+  return Math.abs(typedMm - storedMm) <= Math.max(1e-9, Math.abs(storedMm) * 1e-10);
 }
 
 // ---------------------------------------------------------------------------------------------

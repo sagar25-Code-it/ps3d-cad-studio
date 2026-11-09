@@ -871,11 +871,13 @@ export function App(): React.JSX.Element {
     viewport.setOrientation(renderSettings.orientation);
   }, [renderSettings.projection, renderSettings.orientation]);
 
-  const switchWorkspace = (workspace: WorkspaceId): void => {
+  const switchWorkspace = (workspace: WorkspaceId, options: { readonly keepDiagnostic?: boolean } = {}): void => {
     setMasterCartOpen(false);
     setRenderStudioOpen(false);
     const current = projectRef.current;
     if (workspace === current.activeWorkspace) return;
+    // A footer diagnostic names the curves and relations of the workspace it came from: it does not follow the person to another one.
+    if (options.keepDiagnostic !== true) setDiagnostic(undefined);
     setContextMenu(undefined);
     setSelectedId(null);
     setMeasurePoints([]);
@@ -2460,13 +2462,14 @@ export function App(): React.JSX.Element {
   };
 
   const finishSketch = async (): Promise<void> => {
+    setDiagnostic(undefined);
     setStatus("working");
     lastSketchCommitRef.current = undefined;
     const sketchId = await commitWorkingSketch();
     const failedRebuild = lastSketchCommit()?.failed ?? [];
     setStatus(failedRebuild.length > 0 ? "error" : "ready");
     planeOfferRef.current = planeOfferAfterFinish(planeOfferRef.current);
-    switchWorkspace("part");
+    switchWorkspace("part", { keepDiagnostic: true });
     if (failedRebuild.length > 0) { setStatusText(`Finished the sketch, but ${failedRebuild.length} timeline step${failedRebuild.length === 1 ? "" : "s"} could not be rebuilt: ${failedRebuild[0]!.message}`); return; }
     const finished = sketchId === undefined
       ? "Sketch session finished. There was no closed geometry to record yet."
@@ -2480,11 +2483,12 @@ export function App(): React.JSX.Element {
 
   /** Cancel in the confirmation corner: throws away this session's sketch edits (one Undo step), then returns to Design. */
   const cancelSketch = (): void => {
+    setDiagnostic(undefined);
     setSketchCancelVersion((version) => version + 1);
     const outcome = cancelSketchSession(projectRef.current, sketchEntryRef.current);
     if (!outcome.ok) { setStatus("error"); setStatusText(outcome.message); return; }
     if (outcome.value.kind === "discarded") pushProject(outcome.value.project);
-    switchWorkspace("part");
+    switchWorkspace("part", { keepDiagnostic: true });
     setStatus("ready");
     setStatusText(outcome.value.kind === "discarded" ? `Cancelled the sketch. ${outcome.value.summary} Ctrl+Z brings the changes back.` : "Cancelled the sketch. There were no changes to discard.");
   };

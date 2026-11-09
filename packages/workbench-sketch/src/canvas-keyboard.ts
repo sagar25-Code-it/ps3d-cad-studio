@@ -1,4 +1,5 @@
 import type { SketchEntity } from "../../workbench-core/src/index.js";
+import { describeLengthNumber, describeUnitWord } from "./sketch-units.js";
 
 /**
  * Keyboard and touch access to the sketch canvas (audit Sketch edit E28). The canvas takes the keyboard focus; arrow keys walk
@@ -50,16 +51,17 @@ export function focusAfter(entities: readonly SketchEntity[], focusedId: string 
   return order[(index + step) % order.length]!.id;
 }
 
-const n = (value: number): string => String(Number(value.toFixed(2)));
+/** A coordinate or size in millimetres written in the unit the sketch is shown in (no symbol; the sentence says the unit word). */
+const n = (value: number): string => describeLengthNumber(value);
 
 /** "Line 3 of 12, length 25 mm, from 0, 0 to 25, 0", spoken when a curve takes the keyboard focus. */
 export function describeEntityForAccessibility(entity: SketchEntity, label: string, position: number, total: number, selected: boolean): string {
   const lead = `${label}, ${position} of ${total}`;
   let detail = "";
-  if (entity.kind === "line") detail = `length ${n(Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]))} millimetres, from ${n(entity.start[0])}, ${n(entity.start[1])} to ${n(entity.end[0])}, ${n(entity.end[1])}`;
-  else if (entity.kind === "circle") detail = `radius ${n(entity.radiusMm)} millimetres, centre ${n(entity.center[0])}, ${n(entity.center[1])}`;
-  else if (entity.kind === "rectangle") detail = `${n(entity.widthMm)} by ${n(entity.heightMm)} millimetres, centre ${n(entity.center[0])}, ${n(entity.center[1])}`;
-  else if (entity.kind === "ellipse") detail = `radii ${n(entity.majorRadiusMm)} and ${n(entity.minorRadiusMm)} millimetres, centre ${n(entity.center[0])}, ${n(entity.center[1])}`;
+  if (entity.kind === "line") detail = `length ${n(Math.hypot(entity.end[0] - entity.start[0], entity.end[1] - entity.start[1]))} ${describeUnitWord()}, from ${n(entity.start[0])}, ${n(entity.start[1])} to ${n(entity.end[0])}, ${n(entity.end[1])}`;
+  else if (entity.kind === "circle") detail = `radius ${n(entity.radiusMm)} ${describeUnitWord()}, centre ${n(entity.center[0])}, ${n(entity.center[1])}`;
+  else if (entity.kind === "rectangle") detail = `${n(entity.widthMm)} by ${n(entity.heightMm)} ${describeUnitWord()}, centre ${n(entity.center[0])}, ${n(entity.center[1])}`;
+  else if (entity.kind === "ellipse") detail = `radii ${n(entity.majorRadiusMm)} and ${n(entity.minorRadiusMm)} ${describeUnitWord()}, centre ${n(entity.center[0])}, ${n(entity.center[1])}`;
   else if (entity.kind === "arc") detail = `from ${n(entity.start[0])}, ${n(entity.start[1])} to ${n(entity.end[0])}, ${n(entity.end[1])}`;
   else if (entity.kind === "point") detail = `at ${n(entity.point[0])}, ${n(entity.point[1])}`;
   else detail = `${entity.fitPoints.length} fit points`;

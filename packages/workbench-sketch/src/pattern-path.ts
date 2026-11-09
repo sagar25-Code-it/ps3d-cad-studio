@@ -12,6 +12,8 @@ import {
   type WorkbenchSketch
 } from "../../workbench-core/src/index.js";
 import type { SketchEditContext, SketchEditPlan } from "./edit-tools.js";
+import { formatLengthField, parseLengthField, parseNumberField } from "./edit-fields.js";
+import type { SketchLengthUnit } from "./sketch-units.js";
 
 /**
  * Associative sketch patterns. A pattern object keeps its source curves and its layout (rectangular grid at any angle,
@@ -176,43 +178,57 @@ export const DEFAULT_PATTERN_FIELDS: PatternFields = {
   pathEntityId: "", spacing: "10", fit: false, start: "0", follow: true
 };
 
-/** Turns the palette's text fields into a pattern layout; the first unreadable number is named. */
-export function patternSpecFromFields(fields: PatternFields): WorkbenchResult<SketchPatternSpec> {
-  const read = (label: string, text: string): number | string => {
-    const value = Number(text.trim().replace(",", "."));
-    return text.trim() === "" || !Number.isFinite(value) ? `${label} must be a number.` : value;
+/**
+ * Turns the palette's text fields into a pattern layout; the first unreadable number is named. Lengths (spacings, the centre, the start
+ * distance) are typed in `unit` (default millimetres): a bare number is in it, `10mm` or `0.5 in` says its own, and `12,5` and `1,000.5` read.
+ */
+export function patternSpecFromFields(fields: PatternFields, unit: SketchLengthUnit = "mm"): WorkbenchResult<SketchPatternSpec> {
+  type Entry = readonly [label: string, text: string, kind?: "length"];
+  const read = ([label, text, kind]: Entry): number | string => {
+    const value = kind === "length" ? parseLengthField(text, unit) : parseNumberField(text);
+    return Number.isFinite(value) ? value : `${label} must be a ${kind === "length" ? "length" : "number"}.`;
   };
-  const numbers = (entries: readonly (readonly [string, string])[]): readonly number[] | string => {
+  const numbers = (entries: readonly Entry[]): readonly number[] | string => {
     const values: number[] = [];
-    for (const [label, text] of entries) {
-      const value = read(label, text);
+    for (const entry of entries) {
+      const value = read(entry);
       if (typeof value === "string") return value;
       values.push(value);
     }
     return values;
   };
   if (fields.kind === "rectangular") {
-    const values = numbers([["Count along the first direction", fields.countX], ["Count along the second direction", fields.countY], ["Spacing in the first direction", fields.dx], ["Spacing in the second direction", fields.dy], ["Angle", fields.angle]]);
+    const values = numbers([["Count along the first direction", fields.countX], ["Count along the second direction", fields.countY], ["Spacing in the first direction", fields.dx, "length"], ["Spacing in the second direction", fields.dy, "length"], ["Angle", fields.angle]]);
     if (typeof values === "string") return reject(values);
     return { ok: true, value: { kind: "rectangular", countX: Math.round(values[0]!), countY: Math.round(values[1]!), dxMm: values[2]!, dyMm: values[3]!, angleDeg: values[4]!, extent: fields.extent } };
   }
   if (fields.kind === "circular") {
-    const values = numbers([["Count", fields.count], ["Total angle", fields.totalAngle], ["Centre X", fields.centerX], ["Centre Y", fields.centerY]]);
+    const values = numbers([["Count", fields.count], ["Total angle", fields.totalAngle], ["Centre X", fields.centerX, "length"], ["Centre Y", fields.centerY, "length"]]);
     if (typeof values === "string") return reject(values);
     return { ok: true, value: { kind: "circular", count: Math.round(values[0]!), angleDeg: values[1]!, center: [values[2]!, values[3]!], rotate: fields.rotate } };
   }
-  const values = numbers([["Count", fields.count], ["Spacing", fields.spacing], ["Start distance", fields.start]]);
+  const values = numbers([["Count", fields.count], ["Spacing", fields.spacing, "length"], ["Start distance", fields.start, "length"]]);
   if (typeof values === "string") return reject(values);
-  if (fields.pathEntityId === "") return reject("Pick the path curve first.", [], "Select the path curve, then press Use selection as path.");
+  if (fields.pathEntityId === "") return reject("Pick the path curve first.", [], "Select the curves to repeat, then the path curve last, and press Apply.");
   return { ok: true, value: { kind: "path", pathEntityId: fields.pathEntityId, count: Math.round(values[0]!), spacingMm: values[1]!, fit: fields.fit, startMm: values[2]!, follow: fields.follow } };
 }
 
-/** Fills the palette fields from a stored layout so it can be edited. */
-export function patternFieldsFromSpec(spec: SketchPatternSpec): PatternFields {
+/** The default palette fields with their lengths written in `unit` (the millimetre defaults of an inch document are fractions of an inch). */
+export function defaultPatternFields(unit: SketchLengthUnit = "mm"): PatternFields {
+  if (unit === "mm") return DEFAULT_PATTERN_FIELDS;
+  const length = (text: string): string => formatLengthField(Number(text), unit);
+  const d = DEFAULT_PATTERN_FIELDS;
+  return { ...d, dx: length(d.dx), dy: length(d.dy), centerX: length(d.centerX), centerY: length(d.centerY), spacing: length(d.spacing), start: length(d.start) };
+}
+
+/** Fills the palette fields from a stored layout so it can be edited; lengths are written in `unit`. */
+export function patternFieldsFromSpec(spec: SketchPatternSpec, unit: SketchLengthUnit = "mm"): PatternFields {
   const text = (value: number): string => String(Math.round(value * 1e6) / 1e6);
-  if (spec.kind === "rectangular") return { ...DEFAULT_PATTERN_FIELDS, kind: "rectangular", countX: String(spec.countX), countY: String(spec.countY), dx: text(spec.dxMm), dy: text(spec.dyMm), angle: text(spec.angleDeg), extent: spec.extent };
-  if (spec.kind === "circular") return { ...DEFAULT_PATTERN_FIELDS, kind: "circular", count: String(spec.count), totalAngle: text(spec.angleDeg), centerX: text(spec.center[0]), centerY: text(spec.center[1]), rotate: spec.rotate };
-  return { ...DEFAULT_PATTERN_FIELDS, kind: "path", pathEntityId: spec.pathEntityId, count: String(spec.count), spacing: text(spec.spacingMm), fit: spec.fit, start: text(spec.startMm), follow: spec.follow };
+  const length = (valueMm: number): string => (unit === "mm" ? text(valueMm) : formatLengthField(valueMm, unit));
+  const base = defaultPatternFields(unit);
+  if (spec.kind === "rectangular") return { ...base, kind: "rectangular", countX: String(spec.countX), countY: String(spec.countY), dx: length(spec.dxMm), dy: length(spec.dyMm), angle: text(spec.angleDeg), extent: spec.extent };
+  if (spec.kind === "circular") return { ...base, kind: "circular", count: String(spec.count), totalAngle: text(spec.angleDeg), centerX: length(spec.center[0]), centerY: length(spec.center[1]), rotate: spec.rotate };
+  return { ...base, kind: "path", pathEntityId: spec.pathEntityId, count: String(spec.count), spacing: length(spec.spacingMm), fit: spec.fit, start: length(spec.startMm), follow: spec.follow };
 }
 
 export { SKETCH_PATTERN_MAX_INSTANCES };

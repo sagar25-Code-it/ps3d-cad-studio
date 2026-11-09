@@ -124,6 +124,10 @@ import { sketchUnderlayTests } from "./sketch-underlay.test.js";
 import { sketchExchangeUiTests } from "./sketch-exchange-ui.test.js";
 import { sketchChromeTests } from "./sketch-chrome.test.js";
 import { sketchCanvasUxTests } from "./sketch-canvas-ux.test.js";
+import { sketchUi2EditTests } from "./sketch-ui2-edit.test.js";
+import { sketchUi2InputTests } from "./sketch-ui2-input.test.js";
+import { sketchUi2WorkspaceTests } from "./sketch-ui2-workspace.test.js";
+import { sketchUi2CanvasTests } from "./sketch-ui2-canvas.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import type { TestCase } from "./test-kit.js";
@@ -263,6 +267,10 @@ const tests: readonly TestCase[] = [
   ...sketchRegularPolygonTests,
   ...sketchCornerJoinTests,
   ...sketchDrawInferenceTests,
+  ...sketchUi2EditTests,
+  ...sketchUi2InputTests,
+  ...sketchUi2WorkspaceTests,
+  ...sketchUi2CanvasTests,
 ];
 let failures = 0;
 

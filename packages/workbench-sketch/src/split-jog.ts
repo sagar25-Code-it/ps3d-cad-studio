@@ -8,6 +8,7 @@ import {
 } from "../../workbench-core/src/index.js";
 import { entityPoints, sampleSpline } from "./index.js";
 import { pinnedAmong } from "./sketch-clone.js";
+import { finishPlan } from "./edit-relations.js";
 import {
   arcEntity,
   arcFrame,
@@ -137,14 +138,28 @@ export function splitAt(context: SketchEditContext, targetId: string, pick: Vec2
   const snap = options.snapMm ?? context.sketch.snapToleranceMm;
   const others = context.sketch.entities.filter((entity) => entity.id !== targetId && entity.visible !== false && entity.kind !== "point");
   const boundaries = others.flatMap(curvesOf);
-  switch (target.kind) {
-    case "line": return splitLine(context, target, pick, boundaries, snap);
-    case "arc": return splitArc(context, target, pick, boundaries, snap);
-    case "circle": return splitCircle(context, target, pick, boundaries, snap);
-    case "rectangle": return splitRectangle(context, target, pick);
-    case "spline": return splitSpline(context, target, pick);
-    default: return reject(`Split applies to lines, arcs, circles, rectangles and splines; a ${target.kind} cannot be split.`, [target.id]);
-  }
+  const planned = ((): SketchEditResult => {
+    switch (target.kind) {
+      case "line": return splitLine(context, target, pick, boundaries, snap);
+      case "arc": return splitArc(context, target, pick, boundaries, snap);
+      case "circle": return splitCircle(context, target, pick, boundaries, snap);
+      case "rectangle": return splitRectangle(context, target, pick);
+      case "spline": return splitSpline(context, target, pick);
+      default: return reject(`Split applies to lines, arcs, circles, rectangles and splines; a ${target.kind} cannot be split.`, [target.id]);
+    }
+  })();
+  return checked(context, planned, target.id);
+}
+
+/**
+ * Runs a finished split or heal through the same settling every other edit gets: relations the new geometry makes untrue (an arc-length
+ * dimension on a half arc, a smooth join on half a spline, an Equal link to a curve whose neighbour moved) are removed with the edit instead
+ * of making the operation refuse it with a conflict, relations the other additions already imply are not added, and the entity limits are
+ * named. The curve being split or deleted may carry a Fixed relation: its pieces keep it.
+ */
+function checked(context: SketchEditContext, planned: SketchEditResult, targetId: string): SketchEditResult {
+  if (!planned.ok) return planned;
+  return finishPlan(context, planned.value, { allowPinned: [targetId], prune: true });
 }
 
 function splitLine(context: SketchEditContext, line: Line, pick: Vec2, boundaries: readonly Curve[], snap: number): SketchEditResult {
@@ -167,7 +182,8 @@ function splitLine(context: SketchEditContext, line: Line, pick: Vec2, boundarie
   return editPlan(`Split line at (${fmt(at[0])}, ${fmt(at[1])})${snapped ? " on a crossing" : ""}${migrated.note}`, {
     updateEntities: [first],
     addEntities: [second],
-    addConstraints: [...(pinned ? [] : [coincident(context, line.id, "end", second.id, "start"), relation(context, "collinear", [line.id, second.id])]), ...migrated.add],
+    // Joined end to end and parallel is exactly "one straight line in two pieces", with no equation twice: Collinear next to a joint repeats the offset the joint already fixes.
+    addConstraints: [...(pinned ? [] : [coincident(context, line.id, "end", second.id, "start"), relation(context, "parallel", [line.id, second.id])]), ...migrated.add],
     removeConstraintIds: migrated.remove
   });
 }
@@ -606,6 +622,10 @@ function meetingPoints(first: Healable, second: Healable): readonly Vec2[] {
 export function deleteCurveHeal(context: SketchEditContext, targetId: string): SketchEditResult {
   const target = find(context.sketch, targetId);
   if (target === undefined) return reject("Pick a curve to delete.");
+  return checked(context, healPlan(context, target), target.id);
+}
+
+function healPlan(context: SketchEditContext, target: SketchEntity): SketchEditResult {
   if (target.kind !== "line" && target.kind !== "arc") {
     return editPlan(`Deleted ${target.kind} (nothing to heal: it has no ends)`, { removeEntityIds: [target.id] });
   }

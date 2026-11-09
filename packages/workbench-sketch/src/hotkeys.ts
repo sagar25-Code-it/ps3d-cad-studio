@@ -129,6 +129,9 @@ export const SKETCH_KEYMAP_COMMANDS: readonly SketchCommandInfo[] = [
   c("tool:arc", "3-point arc", "Draw", "A"),
   c("tool:arc-center", "Centerpoint arc", "Draw", "Shift+A"),
   c("tool:arc-tangent", "Tangent arc", "Draw"),
+  c("tool:ellipse-arc", "Elliptical arc", "Draw"),
+  c("tool:circle-tangent-3", "3-tangent circle", "Draw"),
+  c("tool:circle-tangent-2", "2-tangent circle", "Draw"),
   c("tool:polygon", "Polygon", "Draw", "G"),
   c("tool:slot", "Slot", "Draw", "U"),
   c("tool:slot-straight", "Straight slot", "Draw", "Shift+U"),
@@ -451,6 +454,8 @@ export function keySpecOfInput(input: Pick<SketchHotkeyInput, "key" | "code" | "
 }
 
 export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHotkeyContext, keymap: SketchKeymap = activeKeymap): SketchHotkeyAction | undefined {
+  // AltGr (reported as Ctrl+Alt) is how many keyboards type @ and #: it starts typed input like the plain key does.
+  if (input.alt && input.ctrl && !input.meta && context.dynamicFieldCount > 0 && /^[@#+(]$/.test(input.key)) return { kind: "type-value", key: input.key };
   if (input.alt) return undefined;
   const key = input.key.length === 1 ? input.key.toLowerCase() : input.key;
   if (input.ctrl || input.meta) {
@@ -491,7 +496,8 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
     if (context.tool === "select" && (context.overlapUnderCursor ?? 0) >= 2) return { kind: "select-other" };
     return undefined;
   }
-  if (context.dynamicFieldCount > 0 && /^[0-9.,-]$/.test(input.key)) return { kind: "type-value", key: input.key };
+  // Digits, the decimal point and sign, and the openers of a prefixed or computed entry (#12,5  @10,5  +3  (2+3)*4) start typing into the first field. Ctrl+Alt together is AltGr, which types @ and # on many keyboards.
+  if (context.dynamicFieldCount > 0 && /^[0-9.,\-@#+(]$/.test(input.key)) return { kind: "type-value", key: input.key };
 
   const spec = keySpecOfInput(input);
   if (spec === undefined) return undefined;
@@ -517,7 +523,7 @@ export function sketchHotkeyHelp(keymap: SketchKeymap = activeKeymap): readonly 
   return [
     ...rows,
     { keys: "Tab / Shift+Tab", action: "Move into the typed-input fields (first / last field); over overlapping curves, Select Other" },
-    { keys: "0-9 . -", action: "While typed-input fields show: start typing the first value" },
+    { keys: "0-9 . - @ # + (", action: "While typed-input fields show: start typing the first value (# absolute point, @ relative to the last point)" },
     { keys: "Enter", action: "Place the typed point; end a line chain, finish a spline or profile" },
     { keys: "Esc", action: "Backs out one level: a drag, the points being placed, a pick mode, the dimension or edit tool, the drawing tool, then the selection" },
     { keys: "Backspace", action: "Remove the last placed point; with no points pending, delete the selected curves" },

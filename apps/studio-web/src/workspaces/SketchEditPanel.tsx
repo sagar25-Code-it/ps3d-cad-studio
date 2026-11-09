@@ -12,7 +12,6 @@ import {
   filletCorners,
   mirrorEntities,
   offsetEntities,
-  patternEntities,
   selectionBounds,
   stretchEntities,
   transformEntities,
@@ -23,6 +22,8 @@ import {
 } from "../../../../packages/workbench-sketch/src/edit-tools.js";
 import { cornerQuadrant } from "../../../../packages/workbench-sketch/src/corner-tools.js";
 import { parseDecimal } from "../../../../packages/workbench-sketch/src/edit-input.js";
+import { formatLengthField, parseLengthField, parseNumberField } from "../../../../packages/workbench-sketch/src/edit-fields.js";
+import type { SketchLengthUnit } from "../../../../packages/workbench-sketch/src/sketch-units.js";
 import { resolveMirrorAxis } from "../../../../packages/workbench-sketch/src/dynamic-mirror.js";
 import { breakAtIntersections } from "../../../../packages/workbench-sketch/src/break-intersections.js";
 import { describePath, healPathGaps, makePath, pathToSpline } from "../../../../packages/workbench-sketch/src/make-path.js";
@@ -137,6 +138,8 @@ interface SketchEditPanelProps {
   readonly onDynamicMirror?: (axisId: string | null) => void;
   /** The entities the edit would produce for the values typed now, drawn as a ghost on the canvas (empty clears it). */
   readonly onPreview?: (entities: readonly SketchEntity[]) => void;
+  /** The unit lengths are shown and typed in; a bare number in a length field is in it. The sketch itself is always millimetres. Default millimetres. */
+  readonly unit?: SketchLengthUnit;
 }
 
 type NewId = (prefix: "entity" | "constraint") => string;
@@ -154,30 +157,27 @@ function describePlan(plan: SketchEditPlan): string {
 
 /** Options and Apply for the selection-driven sketch edit tools. Trim and Extend act directly on canvas clicks. */
 export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element {
-  const [offset, setOffset] = useState("5");
+  const unit: SketchLengthUnit = props.unit ?? "mm";
+  /** A default length (millimetres) as the text of a field in the document's unit. */
+  const seed = (valueMm: number): string => formatLengthField(valueMm, unit);
+  /** A typed length in millimetres (NaN when unreadable) and a typed plain number. */
+  const len = (text: string): number => parseLengthField(text, unit);
+  const num = parseNumberField;
+  const [offset, setOffset] = useState(() => seed(5));
   const [offsetFlip, setOffsetFlip] = useState(false);
   const [offsetBoth, setOffsetBoth] = useState(false);
   const [offsetCorner, setOffsetCorner] = useState<OffsetCorner>("mitre");
   const [offsetChain, setOffsetChain] = useState<OffsetChainMode>("tangent");
-  const [layout, setLayout] = useState<"rectangular" | "circular">("rectangular");
-  const [countX, setCountX] = useState("3");
-  const [countY, setCountY] = useState("1");
-  const [stepX, setStepX] = useState("10");
-  const [stepY, setStepY] = useState("10");
-  const [patternAngle, setPatternAngle] = useState("0");
-  const [patternExtent, setPatternExtent] = useState(false);
-  const [count, setCount] = useState("6");
-  const [angle, setAngle] = useState("360");
   const [centerX, setCenterX] = useState("0");
   const [centerY, setCenterY] = useState("0");
   const [radius, setRadius] = useState(props.corner?.radius ?? DEFAULT_CORNER_PARAMS.radius);
   const [bevel, setBevel] = useState(props.corner?.bevel ?? DEFAULT_CORNER_PARAMS.bevel);
-  const [bevelSecond, setBevelSecond] = useState("2");
+  const [bevelSecond, setBevelSecond] = useState(() => seed(2));
   const [bevelAngle, setBevelAngle] = useState("45");
   const [radiusDimension, setRadiusDimension] = useState(true);
   const [cornerSide, setCornerSide] = useState<"auto" | "ne" | "nw" | "sw" | "se">("auto");
   const [mirrorAxis, setMirrorAxis] = useState<"line" | "x" | "y">("line");
-  const [moveX, setMoveX] = useState("10");
+  const [moveX, setMoveX] = useState(() => seed(10));
   const [moveY, setMoveY] = useState("0");
   const [rotateAngle, setRotateAngle] = useState("45");
   const [scaleFactor, setScaleFactor] = useState("2");
@@ -186,11 +186,12 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   const [copyMode, setCopyMode] = useState(false);
   const [windowX1, setWindowX1] = useState("0");
   const [windowY1, setWindowY1] = useState("0");
-  const [windowX2, setWindowX2] = useState("10");
-  const [windowY2, setWindowY2] = useState("10");
+  const [windowX2, setWindowX2] = useState(() => seed(10));
+  const [windowY2, setWindowY2] = useState(() => seed(10));
   const [chamferMode, setChamferMode] = useState<"equal" | "asymmetric" | "distance-angle">("equal");
   const [moveMode, setMoveMode] = useState<"offset" | "vector">("offset");
-  const interactive = !isClickEditTool(props.tool) && props.tool !== "make-path" && props.tool !== "dynamic-mirror";
+  // Pattern has its own panel (SketchPatternPanel: rectangular, circular and path layouts, ghost preview, Enter to apply).
+  const interactive = !isClickEditTool(props.tool) && props.tool !== "make-path" && props.tool !== "dynamic-mirror" && props.tool !== "pattern";
   const jog = props.jog ?? DEFAULT_JOG_PARAMS;
   const pathResult = useMemo(() => (props.tool === "make-path" && props.selectionIds.length > 0 ? makePath(props.sketch, props.selectionIds) : undefined), [props.tool, props.sketch, props.selectionIds]);
   const { stretchWindow, onStretchWindow, onCorner } = props;
@@ -198,13 +199,14 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   // A window drawn on the canvas fills the fields; a typed window is drawn on the canvas.
   useEffect(() => {
     if (stretchWindow === undefined) return;
-    setWindowX1(String(stretchWindow.x1)); setWindowY1(String(stretchWindow.y1)); setWindowX2(String(stretchWindow.x2)); setWindowY2(String(stretchWindow.y2));
+    setWindowX1(seed(stretchWindow.x1)); setWindowY1(seed(stretchWindow.y1)); setWindowX2(seed(stretchWindow.x2)); setWindowY2(seed(stretchWindow.y2));
   }, [stretchWindow]);
   useEffect(() => {
     if (props.tool !== "stretch" || onStretchWindow === undefined) return;
-    const values = [windowX1, windowY1, windowX2, windowY2].map(parseDecimal);
+    const values = [windowX1, windowY1, windowX2, windowY2].map(len);
     if (values.every(Number.isFinite)) onStretchWindow({ x1: values[0]!, y1: values[1]!, x2: values[2]!, y2: values[3]! });
-  }, [props.tool, windowX1, windowY1, windowX2, windowY2, onStretchWindow]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.tool, windowX1, windowY1, windowX2, windowY2, onStretchWindow, unit]);
   // The canvas reads the fillet and chamfer values when a vertex is clicked.
   useEffect(() => { onCorner?.({ radius, bevel }); }, [radius, bevel, onCorner]);
 
@@ -215,27 +217,23 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
     const picks = cornerSide === "auto" ? undefined : cornerQuadrant(props.sketch, ids, cornerSide);
     const cornerOptions = { ...(picks === undefined ? {} : { picks }), dimension: radiusDimension };
     switch (props.tool) {
-      case "offset": return offsetEntities(context, ids, parseDecimal(offset), { flip: offsetFlip, both: offsetBoth, corner: offsetCorner, chain: offsetChain });
+      case "offset": return offsetEntities(context, ids, len(offset), { flip: offsetFlip, both: offsetBoth, corner: offsetCorner, chain: offsetChain });
       case "mirror": return mirrorEntities(context, mirrorAxis === "line" ? ids : [...ids, mirrorAxis === "x" ? MIRROR_AXIS_X : MIRROR_AXIS_Y]);
       case "break": return breakAtIntersections(context, ids);
       case "corner": return cornerLines(context, ids, cornerOptions);
-      case "fillet": return filletCorners(context, ids, parseDecimal(radius), cornerOptions);
+      case "fillet": return filletCorners(context, ids, len(radius), cornerOptions);
       case "chamfer":
-        return chamferMode === "equal" ? chamferCorners(context, ids, parseDecimal(bevel), cornerOptions)
-          : chamferMode === "asymmetric" ? chamferCornersAsymmetric(context, ids, parseDecimal(bevel), parseDecimal(bevelSecond), cornerOptions)
-          : chamferCornersAngle(context, ids, parseDecimal(bevel), parseDecimal(bevelAngle), cornerOptions);
-      case "move": return transformEntities(context, ids, { kind: "move", dxMm: parseDecimal(moveX), dyMm: parseDecimal(moveY), copies: parseDecimal(copyCount) }, copyMode);
-      case "rotate": return transformEntities(context, ids, { kind: "rotate", angleDeg: parseDecimal(rotateAngle), center: [parseDecimal(centerX), parseDecimal(centerY)], copies: parseDecimal(copyCount) }, copyMode);
+        return chamferMode === "equal" ? chamferCorners(context, ids, len(bevel), cornerOptions)
+          : chamferMode === "asymmetric" ? chamferCornersAsymmetric(context, ids, len(bevel), len(bevelSecond), cornerOptions)
+          : chamferCornersAngle(context, ids, len(bevel), num(bevelAngle), cornerOptions);
+      case "move": return transformEntities(context, ids, { kind: "move", dxMm: len(moveX), dyMm: len(moveY), copies: num(copyCount) }, copyMode);
+      case "rotate": return transformEntities(context, ids, { kind: "rotate", angleDeg: num(rotateAngle), center: [len(centerX), len(centerY)], copies: num(copyCount) }, copyMode);
       case "scale": {
-        const factorY = scaleFactorY.trim() === "" ? undefined : parseDecimal(scaleFactorY);
-        return transformEntities(context, ids, { kind: "scale", factor: parseDecimal(scaleFactor), center: [parseDecimal(centerX), parseDecimal(centerY)], ...(factorY === undefined ? {} : { factorY }) }, copyMode);
+        const factorY = scaleFactorY.trim() === "" ? undefined : num(scaleFactorY);
+        return transformEntities(context, ids, { kind: "scale", factor: num(scaleFactor), center: [len(centerX), len(centerY)], ...(factorY === undefined ? {} : { factorY }) }, copyMode);
       }
-      case "offset-move": return offsetMoveEntities(context, ids, moveMode === "offset" ? { kind: "offset", distanceMm: parseDecimal(offset) } : { kind: "vector", dxMm: parseDecimal(moveX), dyMm: parseDecimal(moveY) });
-      case "stretch": return stretchEntities(context, ids, { x1: parseDecimal(windowX1), y1: parseDecimal(windowY1), x2: parseDecimal(windowX2), y2: parseDecimal(windowY2) }, parseDecimal(moveX), parseDecimal(moveY));
-      case "pattern":
-        return patternEntities(context, ids, layout === "rectangular"
-          ? { kind: "rectangular", countX: parseDecimal(countX), countY: parseDecimal(countY), dxMm: parseDecimal(stepX), dyMm: parseDecimal(stepY), angleDeg: Number.isFinite(parseDecimal(patternAngle)) ? parseDecimal(patternAngle) : 0, extent: patternExtent }
-          : { kind: "circular", count: parseDecimal(count), angleDeg: parseDecimal(angle), center: [parseDecimal(centerX), parseDecimal(centerY)] });
+      case "offset-move": return offsetMoveEntities(context, ids, moveMode === "offset" ? { kind: "offset", distanceMm: len(offset) } : { kind: "vector", dxMm: len(moveX), dyMm: len(moveY) });
+      case "stretch": return stretchEntities(context, ids, { x1: len(windowX1), y1: len(windowY1), x2: len(windowX2), y2: len(windowY2) }, len(moveX), len(moveY));
       default: return undefined;
     }
   };
@@ -246,7 +244,7 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
     let serial = 0;
     try { return plan((prefix) => `${prefix}:preview-${(serial += 1)}`); } catch { return undefined; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.tool, props.sketch, props.selectionIds, offset, offsetFlip, offsetBoth, offsetCorner, offsetChain, layout, countX, countY, stepX, stepY, patternAngle, patternExtent, count, angle, centerX, centerY, radius, bevel, bevelSecond, bevelAngle, radiusDimension, cornerSide, mirrorAxis, moveX, moveY, rotateAngle, scaleFactor, scaleFactorY, copyCount, copyMode, windowX1, windowY1, windowX2, windowY2, chamferMode, moveMode]);
+  }, [props.tool, props.sketch, props.selectionIds, unit, offset, offsetFlip, offsetBoth, offsetCorner, offsetChain, centerX, centerY, radius, bevel, bevelSecond, bevelAngle, radiusDimension, cornerSide, mirrorAxis, moveX, moveY, rotateAngle, scaleFactor, scaleFactorY, copyCount, copyMode, windowX1, windowY1, windowX2, windowY2, chamferMode, moveMode]);
   const onPreview = props.onPreview;
   useEffect(() => {
     if (onPreview === undefined) return;
@@ -271,9 +269,11 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
     else if (event.key === "Escape") { event.preventDefault(); props.onClose(); }
   };
 
-  const field = (label: string, value: string, onChange: (next: string) => void, unit?: string): React.JSX.Element => (
-    <label><span>{label}</span><div className="distance-entry"><input aria-label={label} inputMode="decimal" value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={keys} />{unit !== undefined && <small>{unit}</small>}</div></label>
-  );
+  /** A number field. A unit of "mm" marks a length: it is shown and read in the document's unit, whatever that is. */
+  const field = (label: string, value: string, onChange: (next: string) => void, fieldUnit?: string): React.JSX.Element => {
+    const shownUnit = fieldUnit === "mm" ? unit : fieldUnit;
+    return <label><span>{label}</span><div className="distance-entry"><input aria-label={fieldUnit === "mm" ? `${label} (${unit})` : label} inputMode="text" value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={keys} />{shownUnit !== undefined && <small>{shownUnit}</small>}</div></label>;
+  };
   const check = (label: string, value: boolean, onChange: (next: boolean) => void): React.JSX.Element => (
     <label className="check-row"><input type="checkbox" aria-label={label} checked={value} onChange={(event) => onChange(event.target.checked)} /><span>{label}</span></label>
   );
@@ -282,7 +282,7 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
       <button className="palette-action" title="Put the centre at the middle of the selection" onClick={() => {
         const bounds = selectionBounds(props.sketch, props.selectionIds);
         if (bounds === undefined) { props.onMessage("Select the entities first, then use their middle as the centre."); return; }
-        setCenterX(String(Number(((bounds.x1 + bounds.x2) / 2).toFixed(3)))); setCenterY(String(Number(((bounds.y1 + bounds.y2) / 2).toFixed(3))));
+        setCenterX(seed((bounds.x1 + bounds.x2) / 2)); setCenterY(seed((bounds.y1 + bounds.y2) / 2));
       }}><CommandIcon name="fit" />Centre of selection</button>
       <button className="palette-action" title="Put the centre at the sketch origin" onClick={() => { setCenterX("0"); setCenterY("0"); }}><CommandIcon name="coincident" />Origin</button>
     </div>
@@ -347,7 +347,7 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
       <button className="palette-action" onClick={() => {
         const bounds = selectionBounds(props.sketch, props.selectionIds);
         if (bounds === undefined) { props.onMessage("Select the entities first, then use their bounds as the window."); return; }
-        setWindowX1(String(Number(bounds.x1.toFixed(3)))); setWindowY1(String(Number(bounds.y1.toFixed(3)))); setWindowX2(String(Number(bounds.x2.toFixed(3)))); setWindowY2(String(Number(bounds.y2.toFixed(3))));
+        setWindowX1(seed(bounds.x1)); setWindowY1(seed(bounds.y1)); setWindowX2(seed(bounds.x2)); setWindowY2(seed(bounds.y2));
       }}><CommandIcon name="fit" />Use selection bounds</button>
       {field("Distance X", moveX, setMoveX, "mm")}{field("Distance Y", moveY, setMoveY, "mm")}
     </>}
@@ -363,18 +363,6 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
       {chamferMode === "asymmetric" && field("Second distance", bevelSecond, setBevelSecond, "mm")}
       {chamferMode === "distance-angle" && field("Angle from first line", bevelAngle, setBevelAngle, "°")}
       {sideSelect()}
-    </>}
-    {props.tool === "pattern" && <>
-      <label><span>Layout</span><select aria-label="Pattern layout" value={layout} onChange={(event) => setLayout(event.target.value as "rectangular" | "circular")}><option value="rectangular">Rectangular</option><option value="circular">Circular</option></select></label>
-      {layout === "rectangular" ? <>
-        {field("Count X", countX, setCountX)}{field(patternExtent ? "Total extent X" : "Spacing X", stepX, setStepX, "mm")}
-        {field("Count Y", countY, setCountY)}{field(patternExtent ? "Total extent Y" : "Spacing Y", stepY, setStepY, "mm")}
-        {field("Direction angle", patternAngle, setPatternAngle, "°")}
-        {check("Total extent instead of spacing", patternExtent, setPatternExtent)}
-      </> : <>
-        {field("Count", count, setCount)}{field("Total angle", angle, setAngle, "°")}
-        {field("Centre X", centerX, setCenterX, "mm")}{field("Centre Y", centerY, setCenterY, "mm")}{centreButtons()}
-      </>}
     </>}
     {interactive && props.selectionIds.length > 0 && preview !== undefined && <p className={`profile-help edit-preview ${preview.ok ? "" : "edit-preview-error"}`} role="status" aria-live="polite">{preview.ok ? describePlan(preview.value) : preview.diagnostics[0]?.message}</p>}
     {interactive && <button className="palette-action primary" onClick={apply}><CommandIcon name="cube-check" />Apply {SKETCH_EDIT_TOOL_LABELS[props.tool].toLowerCase()}</button>}
