@@ -116,7 +116,14 @@ export interface ProfileChain {
   readonly tailKind: "line" | "arc" | undefined;
   readonly firstId: string | undefined;
   readonly firstKind: "line" | "arc" | undefined;
+  /** Unit direction in which the first segment leaves the start (used to hold the closing joint tangent when it is). */
+  readonly firstTangent?: Vec2 | undefined;
   readonly segments: number;
+}
+
+/** True when a piece that ends heading `before` is continued by one that leaves heading `after` without a visible kink (within 0.06 degrees). */
+function meetsSmoothly(before: Vec2, after: Vec2): boolean {
+  return before[0] * after[0] + before[1] * after[1] > 0 && Math.abs(before[0] * after[1] - before[1] * after[0]) < 1e-3;
 }
 
 export function startProfileChain(point: Vec2): ProfileChain {
@@ -156,8 +163,9 @@ export function tangentArcFrom(anchor: Vec2, tangent: Vec2, end: Vec2): Workbenc
 }
 
 /**
- * Adds one segment to a Profile: a straight line, or an arc that leaves the previous segment tangentially. A line after a
- * line is joined by a Coincident relation, an arc is held Tangent to what precedes it. Ending within `closeToleranceMm` of
+ * Adds one segment to a Profile: a straight line, or an arc that leaves the previous segment tangentially. Every junction is a
+ * Coincident joint of the two real ends and the closing piece is joined to the first, so the outline cannot tear when it is edited;
+ * a tangent arc (and any piece that continues without a kink) is also held Tangent. Ending within `closeToleranceMm` of
  * the start (after at least two segments) snaps onto the start and closes the loop.
  */
 export function extendProfileChain(chain: ProfileChain, point: Vec2, mode: ProfileSegmentMode, closeToleranceMm: number, ids: ShapeIds): WorkbenchResult<ProfileStep> {
@@ -181,14 +189,20 @@ export function extendProfileChain(chain: ProfileChain, point: Vec2, mode: Profi
     kind = "arc";
   }
   const constraints: WorkbenchSketchConstraint[] = [];
+  const join = (aId: string, bId: string): WorkbenchSketchConstraint => ({ id: ids.constraint(), kind: "coincident", entityIds: [aId, bId], points: ["end", "start"] });
+  const hold = (aId: string, bId: string): WorkbenchSketchConstraint => ({ id: ids.constraint(), kind: "tangent", entityIds: [aId, bId] });
+  // Every junction is a Coincident pair of real ends (so no joint can open when the outline is edited or dragged), and a junction
+  // where the two pieces meet without a kink is also held Tangent: always where a tangent arc was asked for, and wherever a line
+  // or the closing piece happens to leave the previous piece along its direction.
   if (chain.tailId !== undefined) {
-    // The live solver only enforces tangency between a line and an arc, so an arc that follows an arc is tangent by construction only.
-    if (mode === "tangent-arc") { if (chain.tailKind === "line") constraints.push({ id: ids.constraint(), kind: "tangent", entityIds: [chain.tailId, id] }); }
-    else if (chain.tailKind === "line") constraints.push({ id: ids.constraint(), kind: "coincident", entityIds: [chain.tailId, id], points: ["end", "start"] });
+    constraints.push(join(chain.tailId, id));
+    const smooth = mode === "tangent-arc" || (kind === "line" && chain.tailKind === "arc" && chain.tailTangent !== undefined && meetsSmoothly(chain.tailTangent, tangent));
+    if (smooth) constraints.push(hold(chain.tailId, id));
   }
-  // Closing joint between two lines.
-  if (closes && kind === "line" && chain.firstKind === "line" && chain.firstId !== undefined) {
-    constraints.push({ id: ids.constraint(), kind: "coincident", entityIds: [id, chain.firstId], points: ["end", "start"] });
+  // The closing joint: the end of this piece is the start of the first one.
+  if (closes && chain.firstId !== undefined && chain.firstId !== id) {
+    constraints.push(join(id, chain.firstId));
+    if ((kind === "arc" || chain.firstKind === "arc") && chain.firstTangent !== undefined && meetsSmoothly(tangent, chain.firstTangent)) constraints.push(hold(id, chain.firstId));
   }
   const next: ProfileChain = {
     start: chain.start,
@@ -198,6 +212,7 @@ export function extendProfileChain(chain: ProfileChain, point: Vec2, mode: Profi
     tailKind: kind,
     firstId: chain.firstId ?? id,
     firstKind: chain.firstKind ?? kind,
+    firstTangent: chain.firstTangent ?? (chain.firstId === undefined ? tangent : undefined),
     segments: chain.segments + 1
   };
   return { ok: true, value: { entity, constraints, chain: next, closed: closes } };

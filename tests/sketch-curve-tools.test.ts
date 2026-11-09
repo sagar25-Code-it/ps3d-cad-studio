@@ -477,8 +477,8 @@ export const sketchCurveToolTests: readonly TestCase[] = [
       const arcStart = curveEnds(placed[1]!)[0]!.outward;
       near(lineEnd[0] + arcStart[0], 0, 1e-9, "the arc starts along the line's direction (x)");
       near(lineEnd[1] + arcStart[1], 0, 1e-9, "the arc starts along the line's direction (y)");
-      equal(project.sketch.constraints.filter((constraint) => constraint.kind === "tangent").length, 1, "one tangent relation");
-      equal(project.sketch.constraints.filter((constraint) => constraint.kind === "coincident").length, 3, "line-to-line joints, including the one that closes the loop (an arc's own ends cannot be joined)");
+      equal(project.sketch.constraints.filter((constraint) => constraint.kind === "tangent").length, 2, "the arc is tangent to the line before it, and the line that leaves it straight on is tangent to the arc");
+      equal(project.sketch.constraints.filter((constraint) => constraint.kind === "coincident").length, 5, "a joint at every junction, including the one that closes the loop");
       equal(detectSketchProfiles(project.sketch).length, 1, "closes into a single profile");
       const solid = await extrudedVolume(project.sketch.entities, 2);
       near(solid.volume, solid.area * 2, solid.area * 2 * 2e-3, "extrudes to profile area times height");

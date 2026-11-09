@@ -1,6 +1,7 @@
 import { constraintFit } from "./constraint-fit.js";
 import { anchorsAfterResize, anchorsForDimension, preserveForConstraint } from "./sketch-anchors.js";
 import { arcShape, dimensionTargetValue, ellipsePerimeterMm, measureDimensionConstraint } from "./sketch-measure.js";
+import { jointRelations, looseTouchingJoints, openedJoints } from "./sketch-open-joints.js";
 import { solveLiveSketch, type LiveSketchSolveReport } from "./sketch-solve.js";
 import { describeConstraint, entityKindOf, entityNames } from "./sketch-translate.js";
 import type { SketchDimensionName, SketchEntity, SketchPointRef, WorkbenchOperation, WorkbenchProject, WorkbenchResult, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
@@ -129,8 +130,22 @@ export function redriveDimension(sketch: WorkbenchSketch, constraint: WorkbenchS
   const entityMap = new Map(baseSketch.entities.map((entity) => [entity.id, entity] as const));
   // Once the curve has its new size by direct resize it is the reference and its neighbours follow; otherwise only part of it is held.
   const anchors = resized !== undefined && target !== undefined ? anchorsAfterResize(target, entityMap, sketch.constraints) : anchorsForDimension(constraint, entityMap, sketch.constraints);
-  const solved = solveLiveSketch(baseSketch, real, { anchors, preserve: preserveForConstraint(constraint, entityMap), keepChains: false });
+  const solveWith = (constraints: readonly WorkbenchSketchConstraint[]): LiveSketchSolveReport => solveLiveSketch(constraints === baseSketch.constraints ? baseSketch : { ...baseSketch, constraints }, real, { anchors, preserve: preserveForConstraint(constraint, entityMap), keepChains: false });
+  let solved = solveWith(baseSketch.constraints);
   if (!solved.ok) return { ok: false, applied: solveFailure(solved, sketch, constraint) as Extract<Applied, { readonly ok: false }> };
+  // Stale-geometry guard: curves that touched without a recorded joint must not be torn apart by this edit. They are held together for
+  // this solve; if that cannot be done the edit is refused instead of reporting success on an open outline.
+  const touching = looseTouchingJoints(sketch.entities, sketch.constraints);
+  if (touching.length > 0 && openedJoints(touching, solved.entities).length > 0) {
+    const healed = solveWith([...baseSketch.constraints, ...jointRelations(touching)]);
+    const stillOpen = healed.ok ? openedJoints(touching, healed.entities) : [];
+    if (!healed.ok || stillOpen.length > 0) {
+      const names = entityNames(sketch);
+      const first = (healed.ok ? stillOpen : openedJoints(touching, solved.entities))[0]!;
+      return { ok: false, applied: failure("CONSTRAINT_CONFLICT", `This edit would pull ${names.get(first.first.entityId) ?? "a curve"} away from ${names.get(first.second.entityId) ?? "the curve"} that it touches (${formatNumber(first.gapMm)} mm apart), opening the outline.`, [first.first.entityId, first.second.entityId], "Join the two ends with a Coincident relation and relax whatever holds them apart, then set the dimension again.") as Extract<Applied, { readonly ok: false }> };
+    }
+    solved = healed;
+  }
   const nextSketch: WorkbenchSketch = { ...baseSketch, entities: solved.entities };
   const measured = measureDimensionConstraint(nextSketch, constraint);
   if (measured !== undefined || resized === undefined) {
