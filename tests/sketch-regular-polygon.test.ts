@@ -1,10 +1,10 @@
-import { analyzeWorkbenchSketch } from "../packages/workbench-sketch/src/index.js";
+import { analyzeWorkbenchSketch, detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
 import { buildEdgePolygon, buildPolygon, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES } from "../packages/workbench-sketch/src/shapes.js";
 import { buildPolygonByMode, parsePolygonMode, polygonCentreRelations } from "../packages/workbench-sketch/src/polygon-modes.js";
 import { inferSketchPoint } from "../packages/workbench-sketch/src/inference.js";
-import { applyWorkbenchOperation } from "../packages/workbench-core/src/index.js";
+import { applyWorkbenchOperation, type SketchEntity, type WorkbenchProject, type WorkbenchSketchConstraint } from "../packages/workbench-core/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
-import { dimension, dragAndCommit, projectWith, shapeIds, shapeProblem } from "./sketch-shape-kit.js";
+import { dimension, dragAndCommit, projectWith, shapeIds, shapeProblem, worstJointGap } from "./sketch-shape-kit.js";
 
 /** T03 / T01 / N3: the Polygon tool builds a regular polygon (centre, guide circle, equal sides on it) that stays regular. */
 
@@ -136,6 +136,29 @@ export const sketchRegularPolygonTests: readonly TestCase[] = [
       assert(added.ok, `the polygon and its centre relation apply: ${added.ok ? "" : added.diagnostics[0]?.message}`);
       equal(analyzeWorkbenchSketch(added.value.project.sketch).degreesOfFreedom, 2, "size and turn are left");
       equal(polygonCentreRelations(shape, "edge", [{ point: [0, 0], primary: { kind: "origin", point: [0, 0], distanceMm: 0 } }], base.sketch, () => "constraint:x").length, 0, "edge mode has no centre click");
+    }
+  },
+  {
+    name: "Curve tools N3: dimensioning a side of a plain irregular polygon keeps it closed and irregular, and leaves the far sides alone",
+    run: () => {
+      const corners: readonly [number, number][] = [[0, 0], [20, 0], [26, 14], [10, 22], [-4, 12]];
+      const lines = corners.map((start, index): SketchEntity => ({ id: `entity:irr${index}`, kind: "line", start, end: corners[(index + 1) % corners.length]!, construction: false }));
+      const joints = lines.map((line, index): WorkbenchSketchConstraint => ({ id: `constraint:irr${index}`, kind: "coincident", entityIds: [line.id, lines[(index + 1) % lines.length]!.id], points: ["end", "start"] }) as WorkbenchSketchConstraint);
+      const shape = { entities: lines, constraints: joints } as unknown as Parameters<typeof projectWith>[0];
+      const project = projectWith(shape);
+      const lengthOf = (sketch: WorkbenchProject["sketch"], id: string): number => {
+        const line = sketch.entities.find((entity) => entity.id === id);
+        assert(line?.kind === "line", `${id} stays a line`);
+        return Math.hypot(line.end[0] - line.start[0], line.end[1] - line.start[1]);
+      };
+      const result = dimension(project, { entityId: "entity:irr0", dimension: "length", valueMm: 26 });
+      assert(result.ok, `the side edit is accepted: ${result.ok ? "" : result.message}`);
+      near(lengthOf(result.project.sketch, "entity:irr0"), 26, 1e-5, "the dimensioned side has its length");
+      equal(detectSketchProfiles(result.project.sketch).length, 1, "still one closed profile");
+      assert(worstJointGap(result.project.sketch) < 1e-6, "joints stay closed");
+      const lengths = lines.map((line) => lengthOf(result.project.sketch, line.id));
+      assert(Math.max(...lengths) - Math.min(...lengths) > 1, "the polygon was not forced regular");
+      for (const far of ["entity:irr2", "entity:irr3"]) near(lengthOf(result.project.sketch, far), lengthOf(project.sketch, far), 1e-5, `${far}, not touching the edited side, keeps its length`);
     }
   },
   {
