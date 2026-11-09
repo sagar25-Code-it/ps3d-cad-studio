@@ -487,7 +487,7 @@ export function translateSketch(sketch: WorkbenchSketch, options: TranslateOptio
  * A live arc runs start, middle, end in the order it was drawn; the solver's arc always runs counter-clockwise. For an arc drawn
  * clockwise the solver's start is the live end, so a reference to one of its ends has to name the other one.
  */
-function swapReversedArcEnds<T>(value: T, reversedArcs: ReadonlySet<string>): T {
+export function swapReversedArcEnds<T>(value: T, reversedArcs: ReadonlySet<string>): T {
   if (Array.isArray(value)) return value.map((item) => swapReversedArcEnds(item, reversedArcs)) as unknown as T;
   if (typeof value !== "object" || value === null) return value;
   const record = value as Record<string, unknown>;

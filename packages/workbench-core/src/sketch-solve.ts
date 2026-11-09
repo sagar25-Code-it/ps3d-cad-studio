@@ -3,7 +3,7 @@ import type { SketchRelationSet } from "../../parametric-sketch-core/src/types.j
 import { explainOrientationCollapse, ORIENTATION_RECOVERY } from "./sketch-orientation-explain.js";
 import { applyExtraConstraints } from "./sketch-solve-extras.js";
 import { toSolverAnchors, type LiveAnchor } from "./sketch-anchors.js";
-import { constraintComponent, fromSolverGeometry, liveConstraintId, solverSelector, translateSketch, type UnsolvedConstraint } from "./sketch-translate.js";
+import { constraintComponent, fromSolverGeometry, liveConstraintId, solverSelector, swapReversedArcEnds, translateSketch, type UnsolvedConstraint } from "./sketch-translate.js";
 import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 import type { SketchGeometry } from "../../parametric-sketch-core/src/types.js";
 
@@ -116,6 +116,10 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
     return { ok: false, message: "This kind of curve cannot be dragged by that point.", relatedIds: [drag.entityId], recovery: "Drag a line, circle, arc, rectangle or point." };
   }
   // Unless told otherwise, the curve the caller just edited is the reference and what is joined to it follows.
+  // The solver's arcs all run counter-clockwise: for an arc drawn clockwise the solver's start is the live end, so the dragged point names the other end.
+  // (Anchors keep the solver's own ends: an arc length dimension sweeps from the counter-clockwise start.)
+  const reversedArcs = new Set([...arcFrames].filter(([, frame]) => frame.reversed).map(([id]) => id));
+  const toSolverEnds = <T,>(value: T): T => (reversedArcs.size === 0 ? value : swapReversedArcEnds(value, reversedArcs));
   const anchors = toSolverAnchors(options.anchors ?? (drag === undefined ? (focusEntityIds ?? []).map((entityId): LiveAnchor => ({ entityId, ref: "self", priority: 2 })) : []));
   // A line joined to others at both ends belongs to a chain or a loop: when the chain is moved or pinned the line travels with it instead of stretching.
   // (A dragged corner still stretches its neighbours.)
@@ -124,7 +128,7 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
   const preserve = (options.preserve ?? []).filter(inDocument);
   const result = drag === undefined
     ? solveAnalyticSketch({ document, mode: "regenerate", anchors, preserve, preserveWeak: chained, labels: translation.labels, ...(options.keepChains === false ? { keepShape: true } : {}) })
-    : solveAnalyticSketch({ document, mode: "drag", anchors, preserve, labels: translation.labels, keepShape: true, dragTarget: { reference: { entityId: drag.entityId, selector: solverSelector(drag.point) }, positionMm: drag.positionMm } });
+    : solveAnalyticSketch({ document, mode: "drag", anchors, preserve, labels: translation.labels, keepShape: true, dragTarget: { reference: toSolverEnds({ entityId: drag.entityId, selector: solverSelector(drag.point) }), positionMm: drag.positionMm } });
   const errors = result.diagnostics.filter((diagnostic) => diagnostic.severity === "error" && !diagnostic.unsupported);
   if (result.status === "failed" || errors.length > 0) {
     const first = errors[0];
