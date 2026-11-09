@@ -49,6 +49,7 @@ import { isEllipseRadiusConstraint, isPointDistanceConstraint } from "../../../.
 import { convertLengthField, parseLengthField } from "../../../../packages/workbench-sketch/src/edit-fields.js";
 import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
+import { inferTypedPoint } from "../../../../packages/workbench-sketch/src/typed-inference.js";
 import { autoConstraintsFor, dropConstraintFor, inheritedTangentDirection, tangentArcPoints, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
@@ -1059,7 +1060,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     say(`Added ${sketchToolLabel(props.tool)}${relationNote} with stable ID ${built.value.id}.`);
   };
 
-  const dynamicFields = useMemo(() => dynamicFieldsFor(props.tool, pending.length), [props.tool, pending.length]);
+  const dynamicFields = useMemo(() => dynamicFieldsFor(props.tool, pending.length, polygonMode), [props.tool, pending.length, polygonMode]);
   const liveValues = useMemo(() => measureFromCursor(props.tool, pending, cursor, props.tool === "arc-center" ? arcTrack.current : undefined), [props.tool, pending, cursor]);
   const setField = (id: DynamicFieldId, value: string): void => setFieldText((current) => {
     const { [id]: _previous, ...rest } = current;
@@ -1082,7 +1083,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setDynamicFocused(false);
     typedNotes.current = result.notes;
     // The guides of a typed 0 / 90 / 180 / 270 degree angle make the same Horizontal / Vertical relation a snapped point does.
-    const found: InferenceResult = { point: result.point, snapped: result.guides.length > 0, guides: result.guides };
+    // A typed point that lands on an endpoint, a centre, the origin or a curve is joined to it, exactly as a clicked one is.
+    const found: InferenceResult = inferTypedPoint(result.point, props.sketch, anchorFor(props.tool, pending), result.guides);
     if (props.tool === "spline" || props.tool === "spline-control") {
       const next = [...pending, result.point];
       if (props.tool === "spline" && next.length > SPLINE_MAX_FIT_POINTS) { props.onMessage(`A spline takes at most ${SPLINE_MAX_FIT_POINTS} fit points. Press Enter to finish.`); return false; }
@@ -1093,7 +1095,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       typedNotes.current = [];
       return true;
     }
-    placePoint(result.point, "typed", found, result.typed);
+    placePoint(found.point, "typed", found, result.typed);
     return true;
   };
 

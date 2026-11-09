@@ -192,14 +192,13 @@ export function autoConstraintsFor(input: AutoConstraintInput): readonly Workben
       if (primary.kind === "endpoint" || primary.kind === "center") {
         const otherRef = pointRefOf(other, primary);
         if (otherRef === undefined) return;
-        if (throughPoint) { if (!isArcMid(other, otherRef)) add({ kind: "coincident", entityIds: [other.id, entity.id], points: [otherRef, "curve"] }); }
-        else if (isArcMid(other, otherRef)) add({ kind: "coincident", entityIds: [entity.id, other.id], points: [ownRef, "curve"] });
-        else add({ kind: "coincident", entityIds: [other.id, entity.id], points: [otherRef, ownRef] });
+        // (An existing arc's "mid" snap is the middle of its sweep, which is exactly what the solver reads, so it is joined as usual.)
+        add({ kind: "coincident", entityIds: [other.id, entity.id], points: [otherRef, throughPoint ? "curve" : ownRef] });
         return;
       }
       if (primary.kind === "midpoint") {
         if (other.kind === "line") add(throughPoint ? { kind: "coincident", entityIds: [other.id, entity.id], points: ["mid", "curve"] } : { kind: "midpoint", entityIds: [entity.id, other.id], points: [ownRef] });
-        else if (other.kind === "arc" && !throughPoint) add({ kind: "coincident", entityIds: [entity.id, other.id], points: [ownRef, "curve"] });
+        else if (other.kind === "arc") add(throughPoint ? { kind: "coincident", entityIds: [other.id, entity.id], points: ["mid", "curve"] } : { kind: "coincident", entityIds: [other.id, entity.id], points: ["mid", ownRef] });
         return;
       }
       // A through-point of a 3-point arc that lands on a curve or a crossing cannot be held (it is free along the arc): nothing is recorded.
@@ -299,8 +298,7 @@ export function dropConstraintFor(input: DropConstraintInput): WorkbenchSketchCo
   if (primary.kind === "endpoint" || primary.kind === "center") {
     const otherRef = pointRefOf(other, primary);
     if (otherRef === undefined) return undefined;
-    if (droppedMid) return isArcMid(other, otherRef) || joined(other.id, otherRef, entity.id, "curve") ? undefined : { id: input.newId(), kind: "coincident", entityIds: [other.id, entity.id], points: [otherRef, "curve"] };
-    if (isArcMid(other, otherRef)) return joined(entity.id, ref, other.id, "curve") ? undefined : { id: input.newId(), kind: "coincident", entityIds: [entity.id, other.id], points: [ref, "curve"] };
+    if (droppedMid) return joined(other.id, otherRef, entity.id, "curve") ? undefined : { id: input.newId(), kind: "coincident", entityIds: [other.id, entity.id], points: [otherRef, "curve"] };
     return joined(other.id, otherRef, entity.id, ref) ? undefined : { id: input.newId(), kind: "coincident", entityIds: [other.id, entity.id], points: [otherRef, ref] };
   }
   if (primary.kind === "midpoint" && other.kind === "line" && entity.kind !== "line") {

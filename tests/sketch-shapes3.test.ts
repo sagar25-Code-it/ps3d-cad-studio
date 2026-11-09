@@ -1,7 +1,11 @@
 import { type SketchEntity, type Vec2, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import { buildArcSlot, buildCenterpointArcSlot, buildThreePointArcSlot } from "../packages/workbench-sketch/src/basic-curve-shapes.js";
-import { PROFILE_CHAINS, arcSlotProblem, addShape, drawEntity, emptyProject3, tryAdd, profileProject, stressProblem, wholeProblem } from "./sketch-shapes3-kit.js";
+import { assistedInference, DEFAULT_SNAP_ASSIST } from "../packages/workbench-sketch/src/snap-assist.js";
+import { dynamicFieldsFor } from "../packages/workbench-sketch/src/dynamic-input.js";
+import { parseFieldEntry, plainEvaluator, resolveDynamicEntry } from "../packages/workbench-sketch/src/dynamic-entry.js";
+import { buildEdgePolygon, buildPolygon } from "../packages/workbench-sketch/src/shapes.js";
+import { PROFILE_CHAINS, typedLineChain, arcSlotProblem, addShape, drawEntity, emptyProject3, tryAdd, profileProject, stressProblem, wholeProblem } from "./sketch-shapes3-kit.js";
 import { arcRadius, dimension, shapeIds } from "./sketch-shape-kit.js";
 
 /**
@@ -186,6 +190,132 @@ export const sketchEllipseCrossing3Tests: readonly TestCase[] = [
         assert(added.ok, `accepted (${drawn.constraints.map((constraint) => constraint.kind).join(",")}): ${added.ok ? "" : added.message}`);
       }
       assert(snapped >= 3, `the pointer snapped to a crossing (${snapped})`);
+    }
+  }
+];
+
+const FOUR_SIDED: readonly { readonly texts: { readonly length?: string; readonly angle?: string; readonly x?: string; readonly y?: string } }[] = [
+  { texts: { x: "0", y: "0" } },
+  { texts: { length: "80", angle: "0" } },
+  { texts: { length: "50", angle: "90" } },
+  { texts: { length: "80", angle: "180" } },
+  { texts: { length: "50", angle: "270" } }
+];
+
+export const sketchTypedEntry3Tests: readonly TestCase[] = [
+  {
+    name: "UX flow R2-2: a typed outline back to its start is joined: the closing line is Coincident with the first line, and a length edit keeps the loop closed",
+    run: () => {
+      const { project, ids } = typedLineChain(emptyProject3(), FOUR_SIDED);
+      equal(ids.length, 4, "four lines");
+      const joints = project.sketch.constraints.filter((constraint) => constraint.kind === "coincident");
+      // Lines 2, 3 and 4 join the end of the line before; the closing line also ends on the start of the first (or the origin).
+      assert(joints.length >= 5, `every junction and the closing one are joined (found ${joints.length}: ${project.sketch.constraints.map((constraint) => constraint.kind).join(",")})`);
+      equal(wholeProblem(project), undefined, "closed as typed");
+      // All four lengths were typed, so they are driving dimensions: widening one side alone contradicts the opposite side and is refused,
+      // where the unjoined outline used to accept it and tear into a notched shape.
+      const refused = dimension(project, { entityId: ids[0]!, dimension: "length", valueMm: 100 });
+      assert(!refused.ok, "a contradiction with the typed opposite side is refused");
+      // Typing only the directions leaves the sizes free: the loop then follows an edit of one side.
+      const free = typedLineChain(emptyProject3(), [
+        { texts: { x: "0", y: "0" } },
+        { texts: { angle: "0" }, cursor: [80, 0] },
+        { texts: { angle: "90" }, cursor: [80, 50] },
+        { texts: { angle: "180" }, cursor: [0, 50] },
+        { texts: { angle: "270" }, cursor: [0, 0] }
+      ]);
+      equal(wholeProblem(free.project), undefined, "closed as typed");
+      const edited = dimension(free.project, { entityId: free.ids[0]!, dimension: "length", valueMm: 100 });
+      assert(edited.ok, `the first side can be resized: ${edited.ok ? "" : edited.message}`);
+      equal(wholeProblem(edited.project), undefined, "still one closed profile after the first side is 100");
+      const sides = edited.project.sketch.entities.filter((entity) => entity.kind === "line");
+      const bottom = sides[0]!;
+      const left = sides[3]!;
+      near(left.kind === "line" ? left.end[0] : NaN, 0, 1e-6, "the closing side still ends at the origin");
+      near(bottom.kind === "line" ? bottom.end[0] : NaN, 100, 1e-6, "the first side is 100 long");
+    }
+  },
+  {
+    name: "UX flow R2-2: a typed start on an existing line end is joined to it, and a typed start at the origin is Coincident with the origin",
+    run: () => {
+      const project = addShape(emptyProject3(), { entities: [line("entity:seed", [10, 0], [30, 20])], constraints: [] });
+      const onEnd = typedLineChain(project, [{ texts: { x: "30", y: "20" } }, { texts: { length: "15", angle: "0" } }]);
+      const lines = onEnd.project.sketch.constraints.filter((constraint) => constraint.kind === "coincident" && constraint.entityIds.includes("entity:seed"));
+      equal(lines.length, 1, "the typed start is Coincident with the seed line's end");
+      const atOrigin = typedLineChain(emptyProject3(), [{ texts: { x: "0", y: "0" } }, { texts: { length: "15", angle: "30" } }]);
+      assert(atOrigin.project.sketch.constraints.some((constraint) => constraint.kind === "coincident" && constraint.entityIds[0] === "sketch:origin"), "the typed origin joins the sketch origin");
+    }
+  },
+  {
+    name: "UX flow R2-2: a typed point that is not on anything gets no join, and is placed exactly where it was typed",
+    run: () => {
+      const { project } = typedLineChain(emptyProject3(), [{ texts: { x: "5", y: "5" } }, { texts: { length: "10", angle: "0" } }]);
+      equal(project.sketch.constraints.filter((constraint) => constraint.kind === "coincident").length, 0, "nothing to join");
+      const only = project.sketch.entities[0]!;
+      assert(only.kind === "line" && only.end[0] === 15 && only.end[1] === 5, "exactly (15, 5)");
+    }
+  },
+  {
+    name: "Curve creation F7: the sticky ortho lock does not turn a rectangle into a square; Shift still does, and a line is still locked",
+    run: () => {
+      for (const tool of ["rectangle", "rectangle-center", "rectangle-rounded"] as const) {
+        const ortho = assistedInference({ tool, pointer: [30, 12], sketch: emptyProject3().sketch, toleranceMm: 0.5, gridMm: undefined, anchor: [0, 0], placedCount: 1, settings: { ...DEFAULT_SNAP_ASSIST, ortho: true, snap: false } });
+        equal(ortho.point[1], 12, `${tool}: ortho keeps the height the pointer gave`);
+        const shift = assistedInference({ tool, pointer: [30, 12], sketch: emptyProject3().sketch, toleranceMm: 0.5, gridMm: undefined, anchor: [0, 0], placedCount: 1, settings: { ...DEFAULT_SNAP_ASSIST, snap: false }, modifiers: { ctrl: false, shift: true } });
+        equal(shift.point[1], 30, `${tool}: Shift still draws a square`);
+      }
+      const lineOrtho = assistedInference({ tool: "line", pointer: [30, 12], sketch: emptyProject3().sketch, toleranceMm: 0.5, gridMm: undefined, anchor: [0, 0], placedCount: 1, settings: { ...DEFAULT_SNAP_ASSIST, ortho: true, snap: false } });
+      equal(lineOrtho.point[1], 0, "a line is still locked level by ortho");
+    }
+  },
+  {
+    name: "Curve creation F8: the polygon field is labelled for what the number means in each mode, and the number means that",
+    run: () => {
+      equal(dynamicFieldsFor("polygon", 1, "inscribed")[0]!.label, "Circumradius", "inscribed");
+      equal(dynamicFieldsFor("polygon", 1, "circumscribed")[0]!.label, "Apothem", "circumscribed");
+      equal(dynamicFieldsFor("polygon", 1, "edge")[0]!.label, "Side length", "edge");
+      equal(dynamicFieldsFor("polygon", 1)[0]!.label, "Circumradius", "the default is unchanged");
+      const apothem = resolveDynamicEntry({ tool: "polygon", placed: [[0, 0]], cursor: [5, 0], fields: dynamicFieldsFor("polygon", 1, "circumscribed"), texts: { radius: "10" } });
+      assert(apothem.ok, "typed apothem");
+      const circumscribed = buildPolygon([0, 0], apothem.point, 6, shapeIds(), "circumscribed");
+      assert(circumscribed.ok, "builds");
+      near(circumscribed.value.sizeDimension.valueMm, 10, 1e-9, "the typed number is the apothem");
+      const side = resolveDynamicEntry({ tool: "polygon", placed: [[0, 0]], cursor: [5, 0], fields: dynamicFieldsFor("polygon", 1, "edge"), texts: { radius: "10" } });
+      assert(side.ok, "typed side");
+      const edge = buildEdgePolygon([0, 0], side.point, 6, shapeIds());
+      assert(edge.ok, "builds");
+      near(edge.value.sizeDimension.valueMm, 10, 1e-9, "the typed number is the side length");
+    }
+  },
+  {
+    name: "Curve creation F12: inch values typed as expressions carry no unit-conversion dust",
+    run: () => {
+      const length = dynamicFieldsFor("line", 1)[0]!;
+      const parsed = parseFieldEntry("3*2", length, plainEvaluator, "in");
+      assert(parsed.ok, "parses");
+      equal(parsed.value, 152.4, "6 in is exactly 152.4 mm");
+      const entry = resolveDynamicEntry({ tool: "line", placed: [[0, 0]], cursor: [1, 0], fields: dynamicFieldsFor("line", 1), texts: { length: "3*2", angle: "0" }, unit: "in" });
+      assert(entry.ok, "resolves");
+      equal(entry.typed.length, 152.4, "the stored dimension is exact");
+      const three = parseFieldEntry("3", length, plainEvaluator, "in");
+      assert(three.ok, "3 in parses");
+      equal(three.value, 76.2, "3 in");
+    }
+  },
+  {
+    name: "Curve creation F13: a number with both a comma and a point is told what to write instead of being told to write what it was",
+    run: () => {
+      const field = dynamicFieldsFor("line", 1)[0]!;
+      for (const text of ["1,5.5", "1.000,5", "1,000.5", "-2,5.25 mm"]) {
+        const parsed = parseFieldEntry(text, field);
+        assert(!parsed.ok, `${text} is refused`);
+        assert(!parsed.message.startsWith(`Write ${text} `), `the message does not just repeat the input: ${parsed.message}`);
+        assert(/decimal/iu.test(parsed.message), `it names the problem: ${parsed.message}`);
+      }
+      const grouped = parseFieldEntry("1,000.5", field);
+      assert(!grouped.ok && grouped.message.includes("1000.5"), "1,000.5 is offered as 1000.5");
+      const european = parseFieldEntry("1.000,5", field);
+      assert(!european.ok && european.message.includes("1000.5"), "1.000,5 is offered as 1000.5");
     }
   }
 ];

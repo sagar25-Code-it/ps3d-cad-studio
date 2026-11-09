@@ -159,3 +159,54 @@ export function drawEntity(tool: Exclude<SketchTool, "select">, project: Workben
   if (!built.ok) throw new Error(`the ${tool} did not build: ${built.diagnostics[0]?.message}`);
   return { entity: built.value, constraints: autoConstraintsFor({ tool, entity: built.value, placed, sketch: project.sketch, newId: autoId }), placed, points };
 }
+
+// ---------------------------------------------------------------- the typed-entry path
+
+import { dynamicFieldsFor, type DynamicValues } from "../packages/workbench-sketch/src/dynamic-input.js";
+import { resolveDynamicEntry, type EntryUnit } from "../packages/workbench-sketch/src/dynamic-entry.js";
+import { inferTypedPoint } from "../packages/workbench-sketch/src/typed-inference.js";
+import { typedIntentConstraints } from "../packages/workbench-sketch/src/typed-intent.js";
+
+export interface TypedStep {
+  readonly texts: Partial<Record<"x" | "y" | "length" | "angle", string>>;
+  /** Where the pointer is while the fields are typed (the fields left blank follow it). */
+  readonly cursor?: Vec2;
+}
+
+/**
+ * Draws a chain of lines the way the keyboard does it in the app: the first point and each next point come from typed fields, are inferred
+ * like a click (inferTypedPoint), built, given the relations the snaps and the typed values imply, and added in one edit each.
+ */
+export function typedLineChain(project: WorkbenchProject, steps: readonly TypedStep[], unit: EntryUnit = "mm"): { readonly project: WorkbenchProject; readonly ids: readonly string[] } {
+  let current = project;
+  const ids: string[] = [];
+  let previous: { readonly point: Vec2; readonly inference: PlacedPointInference } | undefined;
+  let typedTrail: DynamicValues = {};
+  for (const [index, step] of steps.entries()) {
+    const placedPoints: readonly Vec2[] = previous === undefined ? [] : [previous.point];
+    const fields = dynamicFieldsFor("line", placedPoints.length);
+    const entry = resolveDynamicEntry({ tool: "line", placed: placedPoints, cursor: step.cursor ?? previous?.point ?? [0, 0], fields, texts: step.texts, unit });
+    if (!entry.ok) throw new Error(`typed step ${index} was refused: ${entry.message}`);
+    const found = inferTypedPoint(entry.point, current.sketch, previous?.point, entry.guides);
+    typedTrail = { ...typedTrail, ...entry.typed };
+    const here: PlacedPointInference = { point: found.point, ...(found.primary === undefined ? {} : { primary: found.primary }), guides: found.guides, ...(previous === undefined ? {} : { anchor: previous.point }) };
+    if (previous === undefined) {
+      previous = { point: found.point, inference: here };
+      typedTrail = {};
+      continue;
+    }
+    const id = `entity:typed-${index}`;
+    const built = buildSketchEntity("line", [previous.point, found.point], id);
+    if (!built.ok) throw new Error(`typed step ${index} did not build: ${built.diagnostics[0]?.message}`);
+    const placed = [previous.inference, here];
+    const snapped = autoConstraintsFor({ tool: "line", entity: built.value, placed, sketch: current.sketch, newId: autoId });
+    const typedRelations = typedIntentConstraints({ tool: "line", entity: built.value, typed: typedTrail, newId: autoId }).filter((relation) => !snapped.some((existing) => existing.kind === relation.kind && relation.dimension === undefined));
+    typedTrail = {};
+    const added = tryAdd(current, { entities: [built.value], constraints: [...snapped, ...typedRelations] });
+    if (!added.ok) throw new Error(`typed step ${index} was refused: ${added.message}`);
+    current = added.project;
+    ids.push(id);
+    previous = { point: found.point, inference: { point: found.point, primary: { kind: "endpoint", point: found.point, entityId: id, selector: "end", distanceMm: 0 } } };
+  }
+  return { project: current, ids };
+}
