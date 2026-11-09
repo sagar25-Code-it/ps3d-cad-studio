@@ -93,7 +93,10 @@ export function buildRoundedRectangle(cornerA: Vec2, cornerB: Vec2, radiusMm: nu
   const constraints: WorkbenchSketchConstraint[] = [];
   ring.forEach((entity, index) => {
     // Every joint is a tangent line-and-arc pair: line, arc, line, arc ...
-    constraints.push({ id: ids.constraint(), kind: "tangent", entityIds: [entity.id, ring[(index + 1) % ring.length]!.id] });
+    // The joint also shares its end point, so an edit of one side drags the corner arc along instead of tearing the loop.
+    const next = ring[(index + 1) % ring.length]!;
+    constraints.push({ id: ids.constraint(), kind: "coincident", entityIds: [entity.id, next.id], points: ["end", "start"] });
+    constraints.push({ id: ids.constraint(), kind: "tangent", entityIds: [entity.id, next.id] });
   });
   constraints.push(
     { id: ids.constraint(), kind: "equal", entityIds: [cornerBR.id, cornerTR.id] },

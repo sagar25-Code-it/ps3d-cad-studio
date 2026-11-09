@@ -1,6 +1,9 @@
 import { dragLiveSketch, solveLiveSketch, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { filletCorners } from "../packages/workbench-sketch/src/edit-tools.js";
-import { analyzeWorkbenchSketch } from "../packages/workbench-sketch/src/index.js";
+import { analyzeWorkbenchSketch, detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
+import { buildRoundedRectangle } from "../packages/workbench-sketch/src/basic-curve-shapes.js";
+import { buildSlot, type ShapeIds } from "../packages/workbench-sketch/src/shapes.js";
+import type { SketchEntity, WorkbenchSketchConstraint } from "../packages/workbench-core/src/index.js";
 import { describeConstraint, entityOrdinalLabels, redundantConstraintIds } from "../packages/workbench-sketch/src/constraint-glyph-layout.js";
 import { analyzeSketch, repairAll } from "../packages/workbench-sketch/src/sketch-repair.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
@@ -338,6 +341,51 @@ export const sketchSolverWave2MoreTests: readonly TestCase[] = [
       assert(/the origin/.test(text) && !/missing/.test(text), `the record reads: ${text}`);
       const axis = describeConstraint({ id: "constraint:ax", kind: "coincident", entityIds: ["entity:p0", AXIS_X], points: ["start", "curve"] }, labels);
       assert(/the X axis/.test(axis), `and for an axis: ${axis}`);
+    }
+  },
+  {
+    name: "Re-audit solver S3: the app's own slot and rounded rectangle stay closed and keep their caps when a line or radius is edited",
+    run: () => {
+      let counter = 0;
+      const ids: ShapeIds = { entity: () => `entity:s3-${(counter += 1)}`, constraint: () => `constraint:s3-${(counter += 1)}` };
+      /** Largest distance between the end of each entity and the start of the next one around the ring. */
+      const worstGap = (project: WorkbenchProject): number => {
+        const ring = project.sketch.entities;
+        let worst = 0;
+        ring.forEach((entity, index) => {
+          const next = ring[(index + 1) % ring.length]!;
+          if ((entity.kind !== "line" && entity.kind !== "arc") || (next.kind !== "line" && next.kind !== "arc")) return;
+          worst = Math.max(worst, Math.hypot(entity.end[0] - next.start[0], entity.end[1] - next.start[1]));
+        });
+        return worst;
+      };
+      const build = (shape: { readonly entities: readonly SketchEntity[]; readonly constraints: readonly WorkbenchSketchConstraint[] }): WorkbenchProject => projectWith(shape.entities, shape.constraints);
+      const edit = (project: WorkbenchProject, entity: SketchEntity, dimension: "length" | "radius", valueMm: number): WorkbenchProject => run(project, { kind: "set-sketch-dimension", entityId: entity.id, dimension, valueMm });
+
+      const slotShape = buildSlot([0, 0], [40, 0], [20, 5], ids);
+      assert(slotShape.ok, "the slot builds");
+      const slot = build(slotShape.value);
+      const [top, endCap] = slot.sketch.entities;
+      for (const length of [80, 20]) {
+        const edited = edit(slot, top!, "length", length);
+        assert(worstGap(edited) < 1e-6, `slot line ${length}: the caps stay joined to the sides (gap ${worstGap(edited)}; it was 40 and 20 mm)`);
+        const cap = edited.sketch.entities.find((entity) => entity.id === endCap!.id) as Arc;
+        near(radiusOfArc(cap), 5, 1e-6, `slot line ${length}: the cap radius stays 5`);
+        assert(detectSketchProfiles(edited.sketch).length === 1, `slot line ${length}: it still bounds one profile`);
+      }
+
+      const roundedShape = buildRoundedRectangle([0, 0], [60, 40], 6, ids);
+      assert(roundedShape.ok, "the rounded rectangle builds");
+      const rounded = build(roundedShape.value);
+      const [bottom, corner] = rounded.sketch.entities;
+      for (const length of [50, 30]) {
+        const edited = edit(rounded, bottom!, "length", length);
+        assert(worstGap(edited) < 1e-6, `rounded rectangle bottom ${length}: the corners stay joined (gap ${worstGap(edited)}; it was 2 and 18 mm)`);
+        assert(detectSketchProfiles(edited.sketch).length === 1, `rounded rectangle bottom ${length}: it still bounds one profile`);
+      }
+      const smaller = edit(rounded, corner!, "radius", 3);
+      assert(worstGap(smaller) < 1e-6, `rounded rectangle radius 3: the corners stay joined (gap ${worstGap(smaller)}; it was 1.5 mm)`);
+      assert(detectSketchProfiles(smaller.sketch).length === 1, "rounded rectangle radius 3: it still bounds one profile");
     }
   },
   {
