@@ -9,6 +9,7 @@ import { describeBinderKind } from "../construction-ui.js";
 import { RELATIONS_EMPTY_HELP } from "../sketch-help-text.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, inferCommandIcon } from "./CommandIcon.js";
+import { baseGridLabel } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
 
 interface ProjectTreeProps {
   readonly project: WorkbenchProject;
@@ -255,7 +256,7 @@ function SketchNavigator({ project, sketchProfiles, selectedId, onSelect }: {
         {relations.map((constraint) => <TreeItem key={constraint.id} kind="sketch" id={constraint.id} label={relationNames.get(constraint.id) ?? constraint.kind.replaceAll("-", " ")} meta={`${constraint.entityIds.map((id) => entityNames.get(id) ?? "a curve").join(" + ")}${constraint.valueMm !== undefined ? ` · ${constraint.valueMm} mm` : ""}${constraint.suppressed === true ? " · suppressed" : ""}`} selectedId={selectedId} onSelect={onSelect} indent />)}
       </>}
       {tab === "refs" && <>
-        <TreeItem kind="datum" id={project.sketch.plane} label={`${planeKey} plane`} meta={`active sketch plane · ${project.sketch.gridMm} mm grid`} selectedId={selectedId} onSelect={onSelect} indent />
+        <TreeItem kind="datum" id={project.sketch.plane} label={`${planeKey} plane`} meta={`active sketch plane · ${baseGridLabel(project.sketch.gridMm, project.displayUnit ?? "mm")} grid`} selectedId={selectedId} onSelect={onSelect} indent />
         <TreeItem kind="datum" id="datum:origin" label="Origin" meta="projected into sketch" selectedId={selectedId} onSelect={onSelect} indent />
         {hiddenCount > 0 && <p className="tree-empty">{hiddenCount} entit{hiddenCount === 1 ? "y is" : "ies are"} hidden. Hidden entities do not bound a profile.</p>}
       </>}

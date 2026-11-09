@@ -20,7 +20,7 @@ import {
   type SketchProfile,
   type SketchTool
 } from "../../../../packages/workbench-sketch/src/index.js";
-import { gridSteps, sketchToScreen } from "../../../../packages/workbench-sketch/src/camera.js";
+import { sketchToScreen } from "../../../../packages/workbench-sketch/src/camera.js";
 import { buildFitSpline } from "../../../../packages/workbench-sketch/src/spline-fit.js";
 import { advanceArcSweepTrack, arcSweepDirection, startArcSweepTrack, type ArcSweepTrack } from "../../../../packages/workbench-sketch/src/arc-sweep.js";
 import { mergeTyped, typedIntentConstraints } from "../../../../packages/workbench-sketch/src/typed-intent.js";
@@ -47,6 +47,7 @@ import { MEASURE_CONTEXT, effectiveSolidResult, modalModeEnded, type ModalContex
 import { circleDimensionFacts, circleDimensionRequest, fixesBlockingDimension } from "../../../../packages/workbench-sketch/src/dimension-edit-model.js";
 import { isEllipseRadiusConstraint, isPointDistanceConstraint } from "../../../../packages/workbench-sketch/src/point-distance-layout.js";
 import { convertLengthField, parseLengthField } from "../../../../packages/workbench-sketch/src/edit-fields.js";
+import { defaultLengthText, gridStepsForUnit, lengthTextFromDisplay, lengthTextToDisplay } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
 import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
 import { autoConstraintsFor, dropConstraintFor, inheritedTangentDirection, tangentArcPoints, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
@@ -63,7 +64,7 @@ import { entitiesInSelectionBox, selectionBoxMode, selectionRect, type SketchSel
 import { DEFAULT_CORNER_PARAMS, DEFAULT_JOG_PARAMS, SKETCH_EDIT_TOOL_LABELS, SketchEditPanel, SketchRelationList, isClickEditTool, parseDecimal, type CornerParams, type JogParams, type SketchEditToolId, type StretchWindowRect } from "./SketchEditPanel.js";
 import { SketchRepairPanel } from "./SketchRepairPanel.js";
 import { ReachOptions } from "./ReachOptions.js";
-import { DEFAULT_REACH, buildReach, isReachTarget, type ReachSettings } from "../reach-settings.js";
+import { DEFAULT_REACH, buildReach, isReachTarget, validReach, type ReachSettings } from "../reach-settings.js";
 import { SketchGrid } from "./sketch/SketchGrid.js";
 import { ConstraintExtras, ExtraDimensionMarks, type ConstraintExtrasBridge, type SetDimensionRequest } from "./sketch/ConstraintExtras.js";
 import { angleDimensionLayout, type DimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
@@ -396,9 +397,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setStretchWindowState((current) => (current !== undefined && next !== undefined && current.x1 === next.x1 && current.y1 === next.y1 && current.x2 === next.x2 && current.y2 === next.y2) || (current === undefined && next === undefined) ? current : next);
   }, []);
   /** Jog values typed in the Jog panel, read when a line is clicked. */
-  const [jogParams, setJogParams] = useSketchPref<JogParams>("jogParams", { offset: convertLengthField(DEFAULT_JOG_PARAMS.offset, "mm", props.displayUnit ?? "mm"), width: convertLengthField(DEFAULT_JOG_PARAMS.width, "mm", props.displayUnit ?? "mm") });
+  const [jogParams, setJogParams] = useSketchPref<JogParams>("jogParams", { offset: defaultLengthText(Number(DEFAULT_JOG_PARAMS.offset), props.displayUnit ?? "mm"), width: defaultLengthText(Number(DEFAULT_JOG_PARAMS.width), props.displayUnit ?? "mm") });
   /** Fillet and chamfer values typed in their panel, read when a vertex is clicked. */
-  const [cornerParams, setCornerParams] = useState<CornerParams>(() => ({ radius: convertLengthField(DEFAULT_CORNER_PARAMS.radius, "mm", props.displayUnit ?? "mm"), bevel: convertLengthField(DEFAULT_CORNER_PARAMS.bevel, "mm", props.displayUnit ?? "mm") }));
+  const [cornerParams, setCornerParams] = useState<CornerParams>(() => ({ radius: defaultLengthText(Number(DEFAULT_CORNER_PARAMS.radius), props.displayUnit ?? "mm"), bevel: defaultLengthText(Number(DEFAULT_CORNER_PARAMS.bevel), props.displayUnit ?? "mm") }));
   /** The ghost of what the open edit tool would do for the values typed now. */
   const [editPreview, setEditPreview] = useState<readonly SketchEntity[]>([]);
   /** Power Trim: the path a press-and-drag has swept so far while the Trim tool is active. */
@@ -461,11 +462,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [shellOpenFace, setShellOpenFace] = useSketchPref<"top" | "bottom" | "none">("shellOpenFace", "top");
   const [draftAngle, setDraftAngle] = useSketchPref("draftAngle", "5");
   const [draftNeutralFace, setDraftNeutralFace] = useSketchPref<"top" | "bottom">("draftNeutralFace", "bottom");
-  const [reach, setReach] = useSketchPref<ReachSettings>("reach", DEFAULT_REACH);
+  const [storedReach, setReach] = useSketchPref<ReachSettings>("reach", DEFAULT_REACH);
   // Join and Cut only mean something with a solid to change, for an extrude or revolve. The choice is remembered for the session and project only (a Cut
   // remembered across projects left Create solid disabled in a new project with nothing to cut from) and reads as New body whenever it cannot apply.
   const [storedResult, setSolidResult] = useSketchPref<"new-body" | "join" | "cut">(`solidResult:${props.projectId}`, "new-body", { durable: false });
   const solidResult = effectiveSolidResult(storedResult, props.solidBodies.length, solidOp);
+  // A remembered "to" extent reads as a distance in a project with no solid to reach (the height field stays usable).
+  const reach = solidOp === "extrude" || solidOp === "revolve" ? validReach(storedReach, solidOp, props.targetBodies.length, solidResult === "cut" && props.solidBodies.length > 0) : storedReach;
   const resultProject = useRef(props.projectId);
   useEffect(() => {
     if (resultProject.current !== props.projectId) { resultProject.current = props.projectId; setSolidResult("new-body"); }
@@ -505,8 +508,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const before = previousUnit.current;
     if (before === unit) return;
     previousUnit.current = unit;
-    setJogParams((current) => ({ offset: convertLengthField(current.offset, before, unit), width: convertLengthField(current.width, before, unit) }));
-    setCornerParams((current) => ({ radius: convertLengthField(current.radius, before, unit), bevel: convertLengthField(current.bevel, before, unit) }));
+    // A value still at the starting default moves to the starting default of the new unit (2 mm to 1/16 in); anything typed is converted as it is.
+    const moved = (current: string, defaultMm: string): string => (parseLengthField(current, before) === Number(defaultMm) ? defaultLengthText(Number(defaultMm), unit) : convertLengthField(current, before, unit));
+    setJogParams((current) => ({ offset: moved(current.offset, DEFAULT_JOG_PARAMS.offset), width: moved(current.width, DEFAULT_JOG_PARAMS.width) }));
+    setCornerParams((current) => ({ radius: moved(current.radius, DEFAULT_CORNER_PARAMS.radius), bevel: moved(current.bevel, DEFAULT_CORNER_PARAMS.bevel) }));
   }, [unit]);
   const [selectedProfileIds, setSelectedProfileIds] = useState<readonly string[]>([]);
   // What a revolve turns about: "" is the sketch Y axis, "x" the sketch X axis, otherwise the ID of a line of this sketch (a centerline or construction line).
@@ -567,7 +572,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [visibleEntities]);
   const camera = useSketchCamera(fitExtents, `${props.projectId}:${props.sketch.plane}`, props.fitSerial);
   const px = camera.mmPerPx;
-  const grid = gridSteps(props.sketch.gridMm, px);
+  const grid = gridStepsForUnit(props.sketch.gridMm, px, props.displayUnit ?? "mm");
   // Friendly names for tooltips, chips and messages (derived from sketch order; see workbench-core/sketch-names.ts).
   const entityNames = useMemo(() => sketchEntityNames(workingSketch.entities), [workingSketch.entities]);
   const selectedEntity = workingSketch.entities.find((entity) => entity.id === selectionIds.at(-1));
@@ -2164,12 +2169,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {!paletteLayout.collapsed && <>
         <PaletteToggle label="Sketch grid" active={props.viewportState.gridVisible} onToggle={props.onGrid} />
         <PaletteToggle label={`Snap${keyLabelForCommand("toggle-snap", sketchKeymap) === undefined ? "" : ` (${keyLabelForCommand("toggle-snap", sketchKeymap)})`}`} active={snapEnabled} onToggle={setSnapEnabled} />
-        <SketchInputPalette settings={assist} gridMm={grid.minorMm} onChange={updateAssist} onOpenShortcuts={() => setShortcutEditorOpen(true)} />
+        <SketchInputPalette settings={assist} gridMm={grid.minorMm} unit={unit} onChange={updateAssist} onOpenShortcuts={() => setShortcutEditorOpen(true)} />
         <PaletteToggle label="Auto-constrain" active={autoConstrain} onToggle={setAutoConstrain} />
         <PaletteToggle label={`Draw as construction${keyHint("toggle-draw-construction")}`} active={drawAsConstruction} onToggle={(next) => { setDrawAsConstruction(next); props.onMessage(next ? DRAW_CONSTRUCTION_ON_MESSAGE : DRAW_CONSTRUCTION_OFF_MESSAGE); }} />
         {props.tool === "polygon" && <label className="palette-number"><span>Polygon sides</span><input type="number" min={POLYGON_MIN_SIDES} max={POLYGON_MAX_SIDES} step={1} value={polygonSides} aria-label="Number of polygon sides" onChange={(event) => setPolygonSides(event.target.value)} /></label>}
         {props.tool === "polygon" && <label className="palette-number"><span>Polygon size by</span><select value={polygonMode} aria-label="How the polygon is sized" title="Inscribed: centre, then a corner. Circumscribed: centre, then the middle of a side. Edge: the two ends of one side." onChange={(event) => setPolygonMode(parsePolygonMode(event.target.value))}>{POLYGON_MODES.map((mode) => <option key={mode} value={mode}>{POLYGON_MODE_LABELS[mode]}</option>)}</select></label>}
-        <SketchCurveOptionsPanel tool={props.tool} fields={curveFields} onChange={setCurveFields} blockNames={blockNames} selectedCount={selectedEntities.length} onSaveBlock={saveSelectionAsBlock} textEdit={textEditId === null ? undefined : { onApply: () => placeText(), onCancel: () => { setTextEditId(null); props.onMessage("Text editing cancelled."); } }} />
+        <SketchCurveOptionsPanel unit={unit} tool={props.tool} fields={curveFields} onChange={setCurveFields} blockNames={blockNames} selectedCount={selectedEntities.length} onSaveBlock={saveSelectionAsBlock} textEdit={textEditId === null ? undefined : { onApply: () => placeText(), onCancel: () => { setTextEditId(null); props.onMessage("Text editing cancelled."); } }} />
         {props.tool === "select" && selectedEntity !== undefined && findTextObject(props.sketch, selectedEntity.id) !== undefined && <button className="palette-action" title="Re-open this text (or double-click it)" onClick={() => startTextEdit(findTextObject(props.sketch, selectedEntity.id)!)}><CommandIcon name="edit" />Edit text</button>}
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
@@ -2209,8 +2214,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="sheet-flange">Sheet metal: flange</option>
               <option value="sheet-hem">Sheet metal: hem</option>
             </select>
-            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? "Sweep distance in millimetres" : "Height in millimetres"} type="number" min={solidOp === "revolve" ? 1 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : 1} value={solidValue} disabled={cutThroughAll || reachesTarget} onChange={(event) => setSolidValue(event.target.value)} />
-            <small>{solidOp === "revolve" ? "°" : "mm"}</small>
+            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? `Sweep distance in ${unitWord(unit)}` : `Height in ${unitWord(unit)}`} type="number" min={solidOp === "revolve" ? 1 : unit === "in" ? 0.005 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : unit === "in" ? 0.125 : 1} value={solidOp === "revolve" ? solidValue : lengthTextToDisplay(solidValue, unit)} disabled={cutThroughAll || reachesTarget} onChange={(event) => setSolidValue(solidOp === "revolve" ? event.target.value : lengthTextFromDisplay(event.target.value, unit))} />
+            <small>{solidOp === "revolve" ? "°" : unit}</small>
           </div>
           <small className="make-solid-plane">On the {planePlacement}</small>
           <div className="make-solid-row" aria-label="Result of the feature">

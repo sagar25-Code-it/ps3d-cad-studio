@@ -95,7 +95,7 @@ export function validateWorkbenchProject(rawInput: unknown, options?: { readonly
     "sketch", "part", "assembly", "surface", "drawing", "audit"
   ];
   if (!isRecord(input) || !requiredRoot.every((key) => Object.hasOwn(input, key))
-    || Object.keys(input).some((key) => !requiredRoot.includes(key) && key !== "electrical" && key !== "vehicle" && key !== "design")) {
+    || Object.keys(input).some((key) => !requiredRoot.includes(key) && key !== "electrical" && key !== "vehicle" && key !== "design" && key !== "displayUnit")) {
     return invalid("The project root has missing or unsupported fields.");
   }
   if (input.format !== WORKBENCH_FORMAT || input.schemaVersion !== WORKBENCH_SCHEMA_VERSION) {
@@ -107,6 +107,7 @@ export function validateWorkbenchProject(rawInput: unknown, options?: { readonly
     return invalid("The project identity, revision, unit, or workspace is invalid.");
   }
 
+  if (Object.hasOwn(input, "displayUnit") && input.displayUnit !== "mm" && input.displayUnit !== "in") return invalid("The project's display unit must be \"mm\" or \"in\".");
   const sketch = validateSketch(input.sketch);
   if (!sketch.ok) return sketch;
   const part = validatePart(input.part);

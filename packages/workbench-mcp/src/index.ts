@@ -77,7 +77,8 @@ const PROJECT_SCHEMA = {
     activeWorkspace: { enum: ["sketch", "part", "assembly", "surface", "drawing", "electrical", "vehicle", "automate"] },
     sketch: { type: "object" }, part: { type: "object" }, assembly: { type: "object" }, surface: { type: "object" },
     drawing: { type: "object" }, electrical: { type: "object" }, vehicle: { type: "object" }, audit: { type: "array", maxItems: 1000 },
-    design: { type: "object", description: "The parametric timeline: finished sketches and the solids built from them. Absent until the first sketch is finished." }
+    design: { type: "object", description: "The parametric timeline: finished sketches and the solids built from them. Absent until the first sketch is finished." },
+    displayUnit: { enum: ["mm", "in"], description: "How lengths are shown and typed; the model stays in millimetres. Optional." }
   }
 } as const;
 const OPERATION_SCHEMA = {
@@ -709,6 +710,7 @@ export function projectSummary(project: WorkbenchProject): Readonly<Record<strin
     revision: project.revision,
     activeWorkspace: project.activeWorkspace,
     unit: project.unit,
+    displayUnit: project.displayUnit ?? null,
     sketch: {
       entities: project.sketch.entities.length,
       constraints: project.sketch.constraints.length,

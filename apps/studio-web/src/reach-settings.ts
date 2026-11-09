@@ -134,3 +134,14 @@ export function buildReach(operation: "extrude" | "revolve", settings: ReachSett
   }
   return { ok: true, direction, params };
 }
+
+/**
+ * The reach settings as they apply to the project that is open. They are a remembered preference, so they can ask for something this
+ * project cannot do: a "to" extent with no solid to reach, Through all outside an extruded cut, a revolve extent on an extrude. Those read
+ * as a plain distance, which keeps the height field enabled and Create solid usable; the stored choice is left alone for a project that can use it.
+ */
+export function validReach(settings: ReachSettings, operation: "extrude" | "revolve", bodyCount: number, cutting: boolean): ReachSettings {
+  const offered = extentChoices(operation, cutting).some((choice) => choice.value === settings.extent);
+  const reachable = !isReachTarget(settings.extent) || bodyCount > 0;
+  return offered && reachable ? settings : { ...settings, extent: "distance" };
+}

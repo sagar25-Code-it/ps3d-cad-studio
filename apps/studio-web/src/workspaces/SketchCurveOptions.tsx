@@ -7,6 +7,8 @@ import { DEFAULT_CURVE_TOOL_OPTIONS, type CurveToolOptions } from "../../../../p
 import { TEXT_MAX_CHARACTERS } from "../../../../packages/workbench-sketch/src/stroke-text.js";
 import type { SketchTool } from "../../../../packages/workbench-sketch/src/index.js";
 import { SPLINE_PARAMETERIZATION_LABELS, type SplineParameterization } from "../../../../packages/workbench-sketch/src/spline-fit.js";
+import { lengthTextFromDisplay, lengthTextToDisplay } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
+import type { SketchLengthUnit } from "../../../../packages/workbench-sketch/src/sketch-units.js";
 
 /**
  * The numbers the extra curve tools read from the Sketch palette, kept as the text the user typed so a half-typed value
@@ -85,6 +87,8 @@ export function curveOptionsFromFields(fields: CurveOptionFields, context: Curve
 }
 
 interface PanelProps {
+  /** The document's unit: the length fields (corner and circle radius, text height) are shown and typed in it; they are kept in millimetres. */
+  readonly unit?: SketchLengthUnit;
   /** Text being re-edited: Apply re-draws it with the palette settings, Cancel leaves it as it was. */
   readonly textEdit?: { readonly onApply: () => void; readonly onCancel: () => void } | undefined;
   readonly tool: SketchTool;
@@ -97,11 +101,17 @@ interface PanelProps {
 }
 
 /** The palette controls of whichever extra curve tool is active; nothing for the other tools. */
-export function SketchCurveOptionsPanel({ tool, fields, onChange, blockNames, selectedCount, onSaveBlock, textEdit }: PanelProps): React.JSX.Element | null {
+export function SketchCurveOptionsPanel({ tool, fields, onChange, blockNames, selectedCount, onSaveBlock, textEdit, unit = "mm" }: PanelProps): React.JSX.Element | null {
   const set = <K extends keyof CurveOptionFields>(key: K, value: CurveOptionFields[K]): void => onChange({ ...fields, [key]: value });
   const numberField = (label: string, key: "cornerRadius" | "rho" | "tension" | "textHeight" | "textRotation" | "textWidth" | "textSpacing" | "blockRotation" | "blockScale", step: number, min?: number, max?: number): React.JSX.Element => (
     <label className="palette-number"><span>{label}</span><input type="number" {...(min === undefined ? {} : { min })} {...(max === undefined ? {} : { max })} step={step} value={fields[key]} aria-label={label} onChange={(event) => set(key, event.target.value)} /></label>
   );
+  /** A length field: kept in millimetres, shown and typed in the document's unit. */
+  const lengthField = (label: string, key: "cornerRadius" | "textHeight", stepMm: number, minMm: number, maxMm?: number): React.JSX.Element => {
+    const factor = unit === "in" ? 25.4 : 1;
+    const named = `${label} (${unit})`;
+    return <label className="palette-number"><span>{named}</span><input type="number" min={Number((minMm / factor).toPrecision(3))} {...(maxMm === undefined ? {} : { max: Number((maxMm / factor).toPrecision(4)) })} step={Number((stepMm / factor).toPrecision(3))} value={lengthTextToDisplay(fields[key], unit)} aria-label={named} onChange={(event) => set(key, lengthTextFromDisplay(event.target.value, unit))} /></label>;
+  };
   switch (tool) {
     case "block": return (
       <>
@@ -117,8 +127,8 @@ export function SketchCurveOptionsPanel({ tool, fields, onChange, blockNames, se
         <button className="palette-action" disabled={selectedCount === 0} title="Save the selected curves as a reusable block" onClick={() => onSaveBlock(fields.blockName)}>Save {selectedCount} selected as block</button>
       </>
     );
-    case "rectangle-rounded": return numberField("Corner radius (mm)", "cornerRadius", 0.5, 0.01);
-    case "circle-tangent-2": return numberField("Circle radius (mm)", "cornerRadius", 0.5, 0.01);
+    case "rectangle-rounded": return lengthField("Corner radius", "cornerRadius", 0.5, 0.01);
+    case "circle-tangent-2": return lengthField("Circle radius", "cornerRadius", 0.5, 0.01);
     case "conic": return numberField("Rho (0.5 = parabola)", "rho", 0.05, CONIC_RHO_MIN, CONIC_RHO_MAX);
     case "blend": return numberField("Blend tension", "tension", 0.1, BLEND_TENSION_MIN, BLEND_TENSION_MAX);
     case "spline-control": return <label className="palette-number"><span>Keep control polygon</span><input type="checkbox" checked={fields.keepPolygon} aria-label="Keep the control polygon as construction lines" onChange={(event) => set("keepPolygon", event.target.checked)} /></label>;
@@ -140,7 +150,7 @@ export function SketchCurveOptionsPanel({ tool, fields, onChange, blockNames, se
     case "text": return (
       <>
         <label className="palette-number"><span>Text</span><input type="text" maxLength={TEXT_MAX_CHARACTERS} value={fields.text} aria-label="Sketch text" onChange={(event) => set("text", event.target.value)} /></label>
-        {numberField("Text height (mm)", "textHeight", 1, 0.5, 1000)}
+        {lengthField("Text height", "textHeight", 1, 0.5, 1000)}
         {numberField("Text width (x normal)", "textWidth", 0.1, 0.2, 5)}
         {numberField("Letter spacing (x normal)", "textSpacing", 0.1, 0, 10)}
         {numberField("Text angle (deg)", "textRotation", 5, -360, 360)}

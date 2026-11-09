@@ -1,6 +1,8 @@
-import { POLAR_INCREMENT_CHOICES, SNAP_STEP_CHOICES, type SnapAssistSettings } from "../../../../../packages/workbench-sketch/src/snap-assist.js";
+import { POLAR_INCREMENT_CHOICES, type SnapAssistSettings } from "../../../../../packages/workbench-sketch/src/snap-assist.js";
 import { keyLabelForCommand } from "../../../../../packages/workbench-sketch/src/hotkeys.js";
 import { useSketchKeymap } from "./useSketchKeymap.js";
+import { labelLength, snapStepChoicesMm } from "../../../../../packages/workbench-sketch/src/unit-defaults.js";
+import type { SketchLengthUnit } from "../../../../../packages/workbench-sketch/src/sketch-units.js";
 
 const suffix = (key: string | undefined): string => key === undefined ? "" : ` (${key})`;
 
@@ -11,11 +13,15 @@ const suffix = (key: string | undefined): string => key === undefined ? "" : ` (
 export function SketchInputPalette(props: {
   readonly settings: SnapAssistSettings;
   readonly gridMm: number;
+  /** The document's unit: the grid and the snap steps are listed in it. */
+  readonly unit?: SketchLengthUnit;
   readonly onChange: (patch: Partial<SnapAssistSettings>) => void;
   readonly onOpenShortcuts: () => void;
 }): React.JSX.Element {
   const keymap = useSketchKeymap();
   const { settings } = props;
+  const unit: SketchLengthUnit = props.unit ?? "mm";
+  const steps = snapStepChoicesMm(unit);
   return <>
     <label className="palette-number">
       <span>Snap step</span>
@@ -24,9 +30,9 @@ export function SketchInputPalette(props: {
         value={settings.snapStepMm === undefined ? "auto" : String(settings.snapStepMm)}
         onChange={(event) => props.onChange({ snapStepMm: event.target.value === "auto" ? undefined : Number(event.target.value) })}
       >
-        <option value="auto">Grid ({Number(props.gridMm.toFixed(3))} mm)</option>
-        {SNAP_STEP_CHOICES.map((step) => <option key={step} value={String(step)}>{step} mm</option>)}
-        {settings.snapStepMm !== undefined && !SNAP_STEP_CHOICES.includes(settings.snapStepMm) && <option value={String(settings.snapStepMm)}>{settings.snapStepMm} mm</option>}
+        <option value="auto">Grid ({labelLength(props.gridMm, unit)})</option>
+        {steps.map((step) => <option key={step} value={String(step)}>{labelLength(step, unit)}</option>)}
+        {settings.snapStepMm !== undefined && !steps.some((step) => Math.abs(step - settings.snapStepMm!) < 1e-9) && <option value={String(settings.snapStepMm)}>{labelLength(settings.snapStepMm, unit)}</option>}
       </select>
     </label>
     <label><span>Polar tracking{suffix(keyLabelForCommand("toggle-polar", keymap))}</span><input type="checkbox" checked={settings.polar} onChange={(event) => props.onChange({ polar: event.target.checked })} /></label>

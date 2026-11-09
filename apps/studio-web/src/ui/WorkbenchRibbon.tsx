@@ -9,6 +9,7 @@ import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, iconTone } from "./CommandIcon.js";
 import type { SketchEditToolId } from "../workspaces/SketchEditPanel.js";
 import type { SurfaceAction } from "../surface-actions.js";
+import { baseGridLabel } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
 
 type SketchRibbonCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check" | "project-body" | "project-edge" | "intersect-body" | "silhouette-body" | "convert-face" | "project-reference";
 type SurfaceParameter = "widthMm" | "depthMm" | "crownMm" | "twistDeg" | "uSegments" | "vSegments";
@@ -199,7 +200,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       <RibbonGroup label="Sketch session">
         <RibbonButton icon="save" label="Finish Sketch" hint="to timeline" onClick={props.onFinishSketch} />
         <RibbonButton icon="cancel" label="Cancel points" hint="clear" onClick={props.onCancelSketchPoints} />
-        <RibbonButton icon="plane" label="Grid" hint={`${props.project.sketch.gridMm} mm`} active info />
+        <RibbonButton icon="plane" label="Grid" hint={baseGridLabel(props.project.sketch.gridMm, props.displayUnit)} active info />
       </RibbonGroup>
       <RibbonGroup label="Dimension & modify">
         <RibbonButton icon="dimension" label="Dimension" hint="points / curve" active={props.sketchDimensionMode} onClick={props.onSketchDimension} />

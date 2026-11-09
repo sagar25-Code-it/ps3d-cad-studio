@@ -1499,6 +1499,8 @@ export interface WorkbenchProject {
   readonly name: string;
   readonly revision: number;
   readonly unit: "mm";
+  /** How lengths are shown and typed ("mm" or "in"); the model stays in millimetres. Absent in files saved before it existed (see display-unit.ts). */
+  readonly displayUnit?: "mm" | "in";
   readonly activeWorkspace: WorkspaceId;
   readonly sketch: WorkbenchSketch;
   readonly part: PartIntent;
