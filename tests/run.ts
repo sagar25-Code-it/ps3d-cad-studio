@@ -16,7 +16,7 @@ import { sketchAutoConstraintTests } from "./sketch-auto-constraints.test.js";
 import { sketchDragTests } from "./sketch-drag.test.js";
 import { sketchDimensionLayoutTests } from "./sketch-dimension-layout.test.js";
 import { sketchShapeTests } from "./sketch-shapes.test.js";
-import { sketchShapeJointTests } from "./sketch-shape-joints.test.js";
+import { sketchArcSlotJointTests, sketchShapeJointTests } from "./sketch-shape-joints.test.js";
 import { sketchRegularPolygonTests } from "./sketch-regular-polygon.test.js";
 import { sketchCornerJoinTests } from "./sketch-corner-joins.test.js";
 import { sketchDrawInferenceTests } from "./sketch-draw-inference.test.js";
@@ -253,6 +253,7 @@ const tests: readonly TestCase[] = [
   ...sketchCanvasUxTests,
   ...sketchCanvasHandleTests,
   ...sketchShapeJointTests,
+  ...sketchArcSlotJointTests,
   ...sketchRegularPolygonTests,
   ...sketchCornerJoinTests,
   ...sketchDrawInferenceTests

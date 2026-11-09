@@ -1,5 +1,7 @@
+import { DEFAULT_CURVE_TOOL_OPTIONS, buildCurveTool } from "../packages/workbench-sketch/src/curve-tools.js";
+import { detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
 import { assert, equal, type TestCase } from "./test-kit.js";
-import { SHAPE_CASES, dimension, dimensionEdits, dragAndCommit, editOutcomeProblem, everyHandle, projectWith, shapeProblem } from "./sketch-shape-kit.js";
+import { SHAPE_CASES, arcRadius, dimension, dimensionEdits, dragAndCommit, editOutcomeProblem, everyHandle, projectWith, shapeIds, shapeProblem, worstJointGap } from "./sketch-shape-kit.js";
 
 /**
  * Wave-2 regression suite for the app's parametric shapes (slot, rounded rectangle, regular polygon, parallelogram):
@@ -76,3 +78,29 @@ export const sketchShapeJointTests: readonly TestCase[] = SHAPE_CASES.flatMap((s
     }
   }
 ]);
+
+/** The curved slots carry the same joints now: they stay one closed profile through a radius edit and a drag of every handle. */
+export const sketchArcSlotJointTests: readonly TestCase[] = ([
+  ["slot-arc-three-point", [[0, 0], [10, 6], [20, 0], [10, 9]]],
+  ["slot-arc-center", [[0, 0], [10, 0], [0, 10], [11, 4]]]
+] as const).map(([tool, points]): TestCase => ({
+  name: `Curve creation T02: a ${tool} arc slot stays one closed profile through radius edits and handle drags`,
+  run: () => {
+    const built = buildCurveTool(tool, points as never, DEFAULT_CURVE_TOOL_OPTIONS, shapeIds());
+    assert(built.ok, "the arc slot builds");
+    const project = projectWith(built.value);
+    equal(built.value.constraints.filter((constraint) => constraint.kind === "coincident").length, 4, "four joints");
+    for (const arc of project.sketch.entities.filter((entity) => entity.kind === "arc")) {
+      const edited = dimension(project, { entityId: arc.id, dimension: "radius", valueMm: arcRadius(arc)! * 0.8 });
+      assert(edited.ok, `radius edit of ${arc.id}: ${edited.ok ? "" : edited.message}`);
+      equal(detectSketchProfiles(edited.project.sketch).length, 1, "one profile after the radius edit");
+      assert(worstJointGap(edited.project.sketch) < 1e-6, "joints closed after the radius edit");
+    }
+    for (const grab of everyHandle(project.sketch)) {
+      const dragged = dragAndCommit(project, grab.entityId, grab.handle, grab.point, [grab.point[0] + 2.5, grab.point[1] + 1.5]);
+      if (!dragged.ok) continue;
+      equal(detectSketchProfiles(dragged.project.sketch).length, 1, `one profile after dragging ${grab.label}`);
+      assert(worstJointGap(dragged.project.sketch) < 1e-6, `joints closed after dragging ${grab.label}`);
+    }
+  }
+}));
