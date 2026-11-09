@@ -37,6 +37,7 @@ import { sketchSolverDofTests } from "./sketch-solver-dof.test.js";
 import { sketchSolverKindsTests } from "./sketch-solver-kinds.test.js";
 import { sketchSolverWave2Tests } from "./sketch-solver-wave2.test.js";
 import { sketchSolverWave2MoreTests } from "./sketch-solver-wave2b.test.js";
+import { sketchSolverWave3Tests } from "./sketch-solver-wave3.test.js";
 import { sketchEditToolTests } from "./sketch-edit-tools.test.js";
 import { sketchEditSuiteTests } from "./sketch-edit-suite.test.js";
 import { meshBooleanTests } from "./mesh-boolean.test.js";
@@ -262,6 +263,7 @@ const tests: readonly TestCase[] = [
   ...regionWave2Tests,
   ...sketchSolverWave2Tests,
   ...sketchSolverWave2MoreTests,
+  ...sketchSolverWave3Tests,
   ...sketchShapeJointTests,
   ...sketchArcSlotJointTests,
   ...sketchRegularPolygonTests,

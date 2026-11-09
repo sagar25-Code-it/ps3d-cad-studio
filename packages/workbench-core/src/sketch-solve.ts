@@ -3,6 +3,7 @@ import type { SketchRelationSet } from "../../parametric-sketch-core/src/types.j
 import { explainOrientationCollapse, ORIENTATION_RECOVERY } from "./sketch-orientation-explain.js";
 import { applyExtraConstraints } from "./sketch-solve-extras.js";
 import { toSolverAnchors, type LiveAnchor } from "./sketch-anchors.js";
+import { turnAcrossLines } from "./sketch-quarter-turn.js";
 import { constraintComponent, fromSolverGeometry, liveConstraintId, solverSelector, translateSketch, type UnsolvedConstraint } from "./sketch-translate.js";
 import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 import type { SketchGeometry } from "../../parametric-sketch-core/src/types.js";
@@ -106,7 +107,9 @@ function runLiveSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[]
 
 function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[] | undefined, drag: LiveDragTarget | undefined, options: LiveSolveOptions): LiveSketchSolveReport {
   const component = constraintComponent(sketch, focusEntityIds);
-  const translation = translateSketch(sketch, { component, ...(options.forceActive === undefined ? {} : { forceActive: options.forceActive }) });
+  // A line lying exactly across the direction a relation asks for is turned to it first, keeping its length (see sketch-quarter-turn.ts).
+  const working = drag === undefined ? turnAcrossLines(sketch, component, options.forceActive).sketch : sketch;
+  const translation = translateSketch(working, { component, ...(options.forceActive === undefined ? {} : { forceActive: options.forceActive }) });
   const { document, arcFrames, unsolved } = translation;
   const unsolvedList: UnsolvedConstraint[] = [...unsolved];
   if (drag === undefined && document.constraints.length === 0 && document.dimensions.length === 0) {
