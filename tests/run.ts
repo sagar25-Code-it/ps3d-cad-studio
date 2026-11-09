@@ -16,7 +16,7 @@ import { sketchAutoConstraintTests } from "./sketch-auto-constraints.test.js";
 import { sketchDragTests } from "./sketch-drag.test.js";
 import { sketchDimensionLayoutTests } from "./sketch-dimension-layout.test.js";
 import { sketchShapeTests } from "./sketch-shapes.test.js";
-import { sketchFit3Tests, sketchHotkeys3Tests, sketchSpline3Tests, sketchBuilderGuards3Tests, sketchShapeSnaps3Tests, sketchTypedEntry3Tests, sketchEllipseCrossing3Tests, sketchSnapRelations3Tests, sketchArcSlots3Tests, sketchShapes3Tests } from "./sketch-shapes3.test.js";
+import { sketchEveryShape3Tests, sketchFit3Tests, sketchHotkeys3Tests, sketchSpline3Tests, sketchBuilderGuards3Tests, sketchShapeSnaps3Tests, sketchTypedEntry3Tests, sketchEllipseCrossing3Tests, sketchSnapRelations3Tests, sketchArcSlots3Tests, sketchShapes3Tests } from "./sketch-shapes3.test.js";
 import { sketchArcSlotJointTests, sketchShapeJointTests } from "./sketch-shape-joints.test.js";
 import { sketchRegularPolygonTests } from "./sketch-regular-polygon.test.js";
 import { sketchCornerJoinTests } from "./sketch-corner-joins.test.js";
@@ -282,6 +282,7 @@ const tests: readonly TestCase[] = [
   ...sketchSpline3Tests,
   ...sketchHotkeys3Tests,
   ...sketchFit3Tests,
+  ...sketchEveryShape3Tests,
 ];
 let failures = 0;
 

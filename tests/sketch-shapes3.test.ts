@@ -18,6 +18,9 @@ import { DEFAULT_SKETCH_KEYMAP, SKETCH_KEYMAP_COMMANDS, resolveSketchHotkey, ske
 import { buildConicByRho, buildControlPointSpline, buildHyperbola, conicArcPoint, controlPointCurve } from "../packages/workbench-sketch/src/conic-curves.js";
 import { splineDeviationMm } from "../packages/workbench-sketch/src/fit-tolerance.js";
 import { CURVE_TOOL_PROMPTS } from "../packages/workbench-sketch/src/curve-tools.js";
+import { detectSketchProfiles, type SketchTool } from "../packages/workbench-sketch/src/index.js";
+import type { PolygonMode } from "../packages/workbench-sketch/src/regular-polygon.js";
+import { worstJointGap } from "./sketch-shape-kit.js";
 import { PROFILE_CHAINS, autoId, drawShape, inferPlaced, typedLineChain, arcSlotProblem, addShape, drawEntity, emptyProject3, tryAdd, profileProject, stressProblem, wholeProblem } from "./sketch-shapes3-kit.js";
 import { arcRadius, dimension, shapeIds } from "./sketch-shape-kit.js";
 
@@ -621,3 +624,28 @@ export const sketchFit3Tests: readonly TestCase[] = [
     }
   }
 ];
+
+const EVERY_SHAPE: readonly { readonly name: string; readonly tool: SketchTool; readonly pointers: readonly Vec2[]; readonly mode?: PolygonMode; readonly pinned: boolean }[] = [
+  { name: "slot", tool: "slot", pointers: [[5.3, 3.1], [35, 3], [20, 8]], pinned: false },
+  { name: "slot on the origin", tool: "slot", pointers: [[0.2, 0.1], [30, 0], [15, 5]], pinned: true },
+  { name: "overall slot", tool: "slot-straight", pointers: [[-3, 2.5], [37, 2.5], [17, 8]], pinned: false },
+  { name: "rounded rectangle", tool: "rectangle-rounded", pointers: [[3.2, 4.1], [63, 44]], pinned: false },
+  { name: "parallelogram", tool: "parallelogram", pointers: [[0, 0], [30, 0], [40, 15]], pinned: false },
+  { name: "parallelogram on the origin", tool: "parallelogram", pointers: [[0.2, 0.1], [30, 0], [40, 15]], pinned: true },
+  { name: "3-point arc slot", tool: "slot-arc-three-point", pointers: [[5, 5], [15, 11], [25, 5], [15, 14]], pinned: false },
+  { name: "centerpoint arc slot", tool: "slot-arc-center", pointers: [[5, 5], [15, 5], [5, 15], [13, 7]], pinned: false },
+  { name: "hexagon on the origin", tool: "polygon", pointers: [[0.1, 0.1], [10, 0]], mode: "inscribed", pinned: true },
+  { name: "pentagon (circumscribed)", tool: "polygon", pointers: [[5, 5], [5, 13]], mode: "circumscribed", pinned: false },
+  { name: "heptagon (edge)", tool: "polygon", pointers: [[0, 0], [12, 0]], mode: "edge", pinned: false }
+];
+
+export const sketchEveryShape3Tests: readonly TestCase[] = EVERY_SHAPE.map((shape): TestCase => ({
+  name: `Curve creation F1/F4/F9: the ${shape.name} (drawn with its snap relations) stays closed with zero joint gaps through every dimension edit and handle drag`,
+  run: () => {
+    const drawn = drawShape(shape.tool, emptyProject3(), shape.pointers, shape.mode === undefined ? {} : { polygonMode: shape.mode });
+    assert(detectSketchProfiles(drawn.project.sketch).length === 1, "one profile as drawn");
+    equal(worstJointGap(drawn.project.sketch) < 1e-9, true, "no joint gap as drawn");
+    // Drags: a cap pinned to the origin can be turned over by the solver (a cusp), so those are held to closed joints only.
+    equal(stressProblem(drawn.project, 1, shape.pinned ? null : 1, !shape.pinned), undefined, `${shape.name}`);
+  }
+}));
