@@ -1,4 +1,4 @@
-import type { SketchConstraintKind, SketchEntity, SketchPointRef, Vec2, WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
+import { SKETCH_AXIS_X_ID, SKETCH_AXIS_Y_ID, SKETCH_ORIGIN_ID, type SketchConstraintKind, type SketchEntity, type SketchPointRef, type Vec2, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
 import { arcShape } from "../../workbench-core/src/sketch-measure.js";
 
 /**
@@ -79,6 +79,10 @@ export function entityOrdinalLabels(entities: readonly SketchEntity[]): Readonly
     counts.set(entity.kind, next);
     labels.set(entity.id, `${KIND_NAME[entity.kind]} ${next}`);
   }
+  // The origin and the two axes are always there; relations to them read "the origin", "the X axis", not "missing curve".
+  labels.set(SKETCH_ORIGIN_ID, "the origin");
+  labels.set(SKETCH_AXIS_X_ID, "the X axis");
+  labels.set(SKETCH_AXIS_Y_ID, "the Y axis");
   return labels;
 }
 

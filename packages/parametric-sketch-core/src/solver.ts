@@ -33,6 +33,8 @@ export { getReferencedPoint };
 
 const DEFAULT_TOLERANCE_MM = 1e-7;
 const COLLAPSE_MM = 0.01;
+/** A conflict message names at most this many relations; the rest are counted. */
+const MAX_NAMED = 6;
 
 export const analyticSketchSolver: ParametricSketchSolver = {
   identity: { name: "ps3d-simultaneous-sketch", version: "0.2.0", deterministic: true },
@@ -58,7 +60,8 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
   const labelOf = makeLabeler(request.document, request.labels);
   const strong = request.mode === "validate" ? new Set<string>() : new Set(request.preserve ?? defaultPreserve(request.document));
   const weak = request.mode === "validate" || request.preserveWeak === undefined ? undefined : new Set(request.preserveWeak);
-  const preserveOption: { readonly preserve?: ReadonlySet<string>; readonly preserveWeak?: ReadonlySet<string> } = { preserve: strong, ...(weak === undefined ? {} : { preserveWeak: weak }) };
+  const keepShape = request.mode !== "validate" && request.keepShape === true;
+  const preserveOption: { readonly preserve?: ReadonlySet<string>; readonly preserveWeak?: ReadonlySet<string>; readonly keepShape?: boolean } = { preserve: strong, ...(weak === undefined ? {} : { preserveWeak: weak }), ...(keepShape ? { keepShape } : {}) };
   // Unless the caller says who stays put, the geometry a relation names first is the reference.
   const anchors = request.mode === "validate" ? [] : request.anchors ?? defaultAnchors(request.document);
   // The relations alone, with nothing preferred or pinned: what the degrees of freedom and the names of conflicts are read from.
@@ -96,7 +99,7 @@ export function solveAnalyticSketch(request: SketchSolveRequest): SketchSolveRes
         // The sizes and places the hints wanted to keep cannot be kept (a Fix elsewhere, or a dimension on them): solve again with less required.
         const attempts: readonly (readonly SolveAnchor[])[] = [anchors, []];
         for (const attemptAnchors of attempts) {
-          const retry = buildSolverModel(request.document, { anchors: attemptAnchors, ...(weak === undefined ? {} : { preserveWeak: weak }) });
+          const retry = buildSolverModel(request.document, { anchors: attemptAnchors, ...(weak === undefined ? {} : { preserveWeak: weak }), ...(keepShape ? { keepShape } : {}) });
           const second = solveModel(retry, { tolerance });
           if (second.ok) {
             model = retry;
@@ -268,19 +271,23 @@ function reportFailure(
   const relevant = conflicts.filter((set) => set.ids.some((id) => failingIds.has(id)));
   const chosen = (relevant.length > 0 ? relevant : conflicts).slice(0, 3);
   if (chosen.length > 0) {
+    const isDimension = (id: string): boolean => model.document.dimensions.some((dimension) => dimension.id === id);
     for (const set of chosen) {
-      const labels = set.ids.map(labelOf);
+      // Name what is violated first, then the dimensions, then the rest; a long loop is cut to a readable list.
+      const ranked = [...set.ids].sort((a, b) => Number(failingIds.has(b)) - Number(failingIds.has(a)) || Number(isDimension(b)) - Number(isDimension(a)));
+      const labels = ranked.slice(0, MAX_NAMED).map(labelOf);
+      const more = ranked.length - labels.length;
       addUniqueDiagnostic(diagnostics, makeDiagnostic(
-        forcedCode ?? (set.ids.every((id) => model.document.dimensions.some((dimension) => dimension.id === id)) ? "DIMENSION_CONFLICT" : "CONSTRAINT_CONFLICT"),
+        forcedCode ?? (set.ids.every(isDimension) ? "DIMENSION_CONFLICT" : "CONSTRAINT_CONFLICT"),
         "error",
-        `These relations contradict each other and cannot all hold: ${joinNames(labels)}.`,
+        `These relations contradict each other and cannot all hold: ${more > 0 ? `${labels.join(", ")}, and ${more} more` : joinNames(labels)}.`,
         set.ids,
         "Remove or relax one of the listed relations, then try again."
       ));
     }
     return;
   }
-  const ids = [...new Set(failing.map((report) => report.equation.id))].slice(0, 6);
+  const ids = [...new Set(failing.map((report) => report.equation.id))].slice(0, MAX_NAMED);
   const labels = ids.map(labelOf);
   addUniqueDiagnostic(diagnostics, makeDiagnostic(
     forcedCode ?? "CONSTRAINT_CONFLICT",
@@ -303,7 +310,7 @@ function findCollapse(model: SolverModel, solved: ParametricSketchDocument, labe
     return makeDiagnostic(
       "CONSTRAINT_CONFLICT",
       "error",
-      `${labelOf(geometry.id)} would ${reason}. The relations acting on it contradict each other: ${joinNames(acting.slice(0, 6).map(labelOf))}${acting.length > 6 ? ` and ${acting.length - 6} more` : ""}.`,
+      `${labelOf(geometry.id)} would ${reason}. The relations acting on it contradict each other: ${acting.length > MAX_NAMED ? `${acting.slice(0, MAX_NAMED).map(labelOf).join(", ")}, and ${acting.length - MAX_NAMED} more` : joinNames(acting.map(labelOf))}.`,
       ids,
       "Remove or relax one of the listed relations."
     );

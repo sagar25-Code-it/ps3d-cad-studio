@@ -86,6 +86,11 @@ export function buildSlot(first: Vec2, second: Vec2, widthPoint: Vec2, ids: Shap
   const bottom: SketchEntity = { id: ids.entity(), kind: "line", start: at(second, 0, -half), end: at(first, 0, -half), construction: false };
   const startCap: SketchEntity = { id: ids.entity(), kind: "arc", start: at(first, 0, -half), mid: at(first, -half, 0), end: at(first, 0, half), construction: false };
   const constraints: WorkbenchSketchConstraint[] = [
+    // The loop stays closed: every side ends where the next cap starts, so a length edit moves the caps with the sides.
+    { id: ids.constraint(), kind: "coincident", entityIds: [top.id, endCap.id], points: ["end", "start"] },
+    { id: ids.constraint(), kind: "coincident", entityIds: [endCap.id, bottom.id], points: ["end", "start"] },
+    { id: ids.constraint(), kind: "coincident", entityIds: [bottom.id, startCap.id], points: ["end", "start"] },
+    { id: ids.constraint(), kind: "coincident", entityIds: [startCap.id, top.id], points: ["end", "start"] },
     // The sides touch the caps without a kink, and both caps have the same radius.
     { id: ids.constraint(), kind: "tangent", entityIds: [top.id, endCap.id] },
     { id: ids.constraint(), kind: "tangent", entityIds: [bottom.id, endCap.id] },

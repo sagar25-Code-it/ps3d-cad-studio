@@ -45,6 +45,12 @@ export interface LiveSolveOptions {
   readonly forceActive?: ReadonlySet<string>;
   /** Entities whose size is kept while their position and direction change (a line turned parallel keeps its length). */
   readonly preserve?: readonly string[];
+  /**
+   * Whether a line joined at both ends is weakly kept at its length, so a chain that is pinned or translated moves rather than stretches.
+   * On by default. A dimension edit turns it off: the dimensioned curve is the one thing that changes and its neighbours follow by moving
+   * as little as they can, which keeps untouched vertices where they are (a joined polygon never flattens).
+   */
+  readonly keepChains?: boolean;
 }
 
 const MOVE_TOLERANCE_MM = 1e-9;
@@ -113,16 +119,17 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
   // A line joined to others at both ends belongs to a chain or a loop: when the chain is moved or pinned the line travels with it instead of stretching.
   // (A dragged corner still stretches its neighbours.)
   const inDocument = (id: string): boolean => document.geometry.some((candidate) => candidate.id === id);
-  const chained = (drag === undefined ? linesJoinedAtBothEnds(sketch) : []).filter(inDocument);
+  const chained = (drag === undefined && options.keepChains !== false ? linesJoinedAtBothEnds(sketch) : []).filter(inDocument);
   const preserve = (options.preserve ?? []).filter(inDocument);
   const result = drag === undefined
-    ? solveAnalyticSketch({ document, mode: "regenerate", anchors, preserve, preserveWeak: chained, labels: translation.labels })
-    : solveAnalyticSketch({ document, mode: "drag", anchors, preserve, labels: translation.labels, dragTarget: { reference: { entityId: drag.entityId, selector: solverSelector(drag.point) }, positionMm: drag.positionMm } });
+    ? solveAnalyticSketch({ document, mode: "regenerate", anchors, preserve, preserveWeak: chained, labels: translation.labels, ...(options.keepChains === false ? { keepShape: true } : {}) })
+    : solveAnalyticSketch({ document, mode: "drag", anchors, preserve, labels: translation.labels, keepShape: true, dragTarget: { reference: { entityId: drag.entityId, selector: solverSelector(drag.point) }, positionMm: drag.positionMm } });
   const errors = result.diagnostics.filter((diagnostic) => diagnostic.severity === "error" && !diagnostic.unsupported);
   if (result.status === "failed" || errors.length > 0) {
     const first = errors[0];
     const related = [...new Set(errors.flatMap((diagnostic) => diagnostic.relatedIds).map(liveConstraintId))].sort();
-    const message = errors.length === 0 ? "The sketch constraints could not be solved." : [...new Set(errors.slice(0, 2).map((diagnostic) => diagnostic.message))].join(" ");
+    // One group of contradicting relations is named; a second sentence would repeat part of the first.
+    const message = errors.length === 0 ? "The sketch constraints could not be solved." : errors[0]!.message;
     return { ok: false, message, relatedIds: related.length === 0 ? [sketch.id] : related, recovery: first?.recovery ?? "Remove or change one of the conflicting constraints." };
   }
   for (const diagnostic of result.diagnostics) {

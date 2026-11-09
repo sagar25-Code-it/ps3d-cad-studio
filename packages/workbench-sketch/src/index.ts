@@ -151,6 +151,8 @@ export interface SketchAnalysis {
   readonly conflicts: readonly string[];
   /** Relations that overlap: each set names the constraints, one of which adds nothing. The sketch is still solvable. */
   readonly redundant: readonly LiveRelationSet[];
+  /** The constraint ids to flag as redundant on the canvas and in the record list: the relation made last in each set of `redundant`. */
+  readonly redundantConstraintIds: readonly string[];
   /** Relations that contradict each other at the stored geometry, with names. */
   readonly conflictSets: readonly LiveRelationSet[];
   /** Rank of the relations' Jacobian. */
@@ -219,6 +221,7 @@ export function analyzeWorkbenchSketch(sketch: WorkbenchSketch): SketchAnalysis 
     appliedConstraints: rank.enforced,
     conflicts,
     redundant: rank.redundant,
+    redundantConstraintIds: rank.redundantConstraintIds,
     conflictSets: rank.conflicting,
     rank: rank.rank,
     boundsMm: sketchBounds(sketch.entities)

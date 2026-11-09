@@ -309,6 +309,12 @@ export interface SketchSolveRequest {
   readonly preserve?: readonly string[];
   /** Entities whose size is kept only as a mild preference (it gives way to `preserve`): the lines of a chain or loop. */
   readonly preserveWeak?: readonly string[];
+  /**
+   * Two-level solve. After every relation holds exactly and the geometry has moved as little as it can, the curves that had to move are
+   * pulled back toward their original shape inside the freedom the relations leave: a line keeps its direction and length, a circle or
+   * arc its radius, as far as the relations allow. Geometry the relations did not force to move stays exactly where it was.
+   */
+  readonly keepShape?: boolean;
   /** Human-readable names for constraints, dimensions and geometry, used in diagnostics. */
   readonly labels?: Readonly<Record<string, string>>;
 }

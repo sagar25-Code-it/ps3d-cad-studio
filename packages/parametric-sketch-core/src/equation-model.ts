@@ -30,6 +30,16 @@ export interface Equation {
   readonly vars: readonly number[];
   readonly entities: readonly string[];
   readonly residual: EvalFn;
+  /** For a shape-keeping term of the two-level solve: 0 direction, 1 length and radius, 2 arc sweep. */
+  readonly level?: number;
+}
+
+/** A line's variables (start x, y, end x, y from `base`) and the vector it ran along when the solve began. */
+export interface LineVector {
+  readonly entityId: string;
+  readonly base: number;
+  readonly vx: number;
+  readonly vy: number;
 }
 
 export interface EntityLayout {
@@ -58,6 +68,10 @@ export interface SolverModel {
   readonly anchored: Uint8Array;
   readonly equations: Equation[];
   readonly soft: Equation[];
+  /** Two-level solve: terms that pull each curve back toward its original shape (see SketchSolveRequest.keepShape). Empty unless asked for. */
+  readonly keep: Equation[];
+  /** The lines of the document with the vector each began with; filled with `keep`. */
+  readonly lineVectors: LineVector[];
   readonly diagnostics: SketchDiagnostic[];
   readonly appliedConstraints: Set<string>;
   readonly appliedDimensions: Set<string>;
@@ -65,6 +79,10 @@ export interface SolverModel {
 }
 
 export const ANCHOR_WEIGHT = { 0: 1, 1: 1e6, 2: 1e12 } as const;
+/** Stiffness of a rectangle's width, height and (scaled by its reach) turn: stiffer than a held centre. */
+const RECTANGLE_SIZE_WEIGHT = 1e9;
+/** Stiffness of a rectangle's turn (times its reach squared): a pinned corner leaves it turned by no more than round-off. */
+const RECTANGLE_TURN_WEIGHT = 1e13;
 const TWO_PI = Math.PI * 2;
 const SMALL = 1e-12;
 
@@ -143,6 +161,8 @@ class ModelBuilder {
   readonly layout = new Map<string, EntityLayout>();
   readonly equations: Equation[] = [];
   readonly soft: Equation[] = [];
+  readonly keep: Equation[] = [];
+  readonly lineVectors: LineVector[] = [];
   readonly diagnostics: SketchDiagnostic[] = [];
   readonly applied = { constraints: new Set<string>(), dimensions: new Set<string>() };
   x0: Float64Array;
@@ -193,10 +213,11 @@ class ModelBuilder {
         this.role[b + 3] = 2;
         this.role[b + 4] = 1;
         const reach = Math.max(1, Math.hypot(values[b + 2]!, values[b + 3]!) / 2);
-        this.weight[b + 2] = SIZE_WEIGHT;
-        this.weight[b + 3] = SIZE_WEIGHT;
-        // A rectangle dragged by a corner travels; it does not turn.
-        this.weight[b + 4] = reach * reach * 100;
+        // A rectangle keeps its size and its turn unless a relation or a dimension changes them: both are far stiffer than any
+        // preference to hold the centre, so a pinned corner moves the centre rather than turning or stretching the rectangle.
+        this.weight[b + 2] = RECTANGLE_SIZE_WEIGHT;
+        this.weight[b + 3] = RECTANGLE_SIZE_WEIGHT;
+        this.weight[b + 4] = reach * reach * RECTANGLE_TURN_WEIGHT;
       } else if (g.kind === "ellipse") {
         this.role[b + 4] = 2;
         this.weight[b + 4] = SIZE_WEIGHT;
@@ -569,12 +590,42 @@ class ModelBuilder {
     return this.invalid(id, "Equal requires two lines, two circles or arcs, two ellipses or two rectangles.");
   }
 
+  /** The end of a line that a Coincident relation puts on a circle or arc (on its end, or anywhere on it), if there is one. */
+  private contactPoint(lineId: string, circleId: string): PointFn | undefined {
+    for (const constraint of this.document.constraints) {
+      if (constraint.suppressed || constraint.kind !== "coincident") continue;
+      const [a, b] = [constraint.first, constraint.second];
+      const lineRef = a.entityId === lineId && b.entityId === circleId ? a : b.entityId === lineId && a.entityId === circleId ? b : undefined;
+      if (lineRef === undefined) continue;
+      const circleRef = lineRef === a ? b : a;
+      if (lineRef.selector !== "start" && lineRef.selector !== "end") continue;
+      if (circleRef.selector !== "start" && circleRef.selector !== "end" && circleRef.selector !== "curve") continue;
+      return this.point(lineRef);
+    }
+    return undefined;
+  }
+
   private buildTangent(constraint: Extract<SketchConstraint, { kind: "tangent" }>): readonly Equation[] | Failure {
     const id = constraint.id;
     const first = this.layout.get(constraint.first.entityId);
     const second = this.layout.get(constraint.second.entityId);
     const radial = (g: SketchGeometry | undefined): boolean => g?.kind === "circle" || g?.kind === "arc";
     const unsupportedPair = this.unsupported(id, "The solver makes a line tangent to a circle or arc, or two circles or arcs tangent.", "Use a line with a circle or arc, or two circles or arcs.");
+    // A sketch axis is an infinite line that never moves: a circle or arc can be tangent to it.
+    const axisSide = [constraint.first, constraint.second].find((reference) => reference.entityId === SKETCH_AXIS_X_ID || reference.entityId === SKETCH_AXIS_Y_ID);
+    if (axisSide !== undefined) {
+      const roundSide = axisSide === constraint.first ? second : first;
+      if (roundSide === undefined || !radial(roundSide.geometry)) return unsupportedPair;
+      const axis = this.line(axisSide)!;
+      const cb = roundSide.base;
+      const side = (x: Float64Array): number => {
+        const ux = axis.q.x(x) - axis.p.x(x);
+        const uy = axis.q.y(x) - axis.p.y(x);
+        return (ux * (x[cb + 1]! - axis.p.y(x)) - uy * (x[cb]! - axis.p.x(x))) / Math.max(Math.hypot(ux, uy), 1e-12);
+      };
+      const sign = side(this.x0) < 0 ? -1 : 1;
+      return [this.make(id, "constraint", 1, [roundSide.id], [[cb, cb + 1, cb + 2]], (x, out, o) => { out[o] = side(x) - sign * x[cb + 2]!; })];
+    }
     if (first === undefined || second === undefined) {
       return this.invalid(id, "Tangent requires two existing curves.");
     }
@@ -584,6 +635,17 @@ class ModelBuilder {
     if (lineSide !== undefined && circleSide !== undefined) {
       const line = this.line({ entityId: lineSide.id, selector: "curve" })!;
       const cb = circleSide.base;
+      // A line that already meets the circle or arc at one of its own ends is tangent exactly when it is square to the radius there. That
+      // is the relation the designer means, and unlike "distance to the line equals the radius" it does not go flat at the joint, so
+      // it removes a degree of freedom beyond the joint and the solver converges on it quickly.
+      const contact = this.contactPoint(lineSide.id, circleSide.id);
+      if (contact !== undefined) {
+        return [this.make(id, "constraint", 1, [lineSide.id, circleSide.id], [line.p.vars, line.q.vars, contact.vars, [cb, cb + 1]], (x, out, o) => {
+          const ux = line.q.x(x) - line.p.x(x);
+          const uy = line.q.y(x) - line.p.y(x);
+          out[o] = ((contact.x(x) - x[cb]!) * ux + (contact.y(x) - x[cb + 1]!) * uy) / Math.max(Math.hypot(ux, uy), 1e-12);
+        })];
+      }
       const side = (x: Float64Array): number => {
         const ux = line.q.x(x) - line.p.x(x);
         const uy = line.q.y(x) - line.p.y(x);
@@ -745,10 +807,14 @@ class ModelBuilder {
         const second = this.line(dimension.second);
         if (first === undefined || second === undefined) return this.invalidDimension(id, "Angular dimensions require two lines.");
         const wanted = wrapPi(target);
+        const turn = (x: Float64Array): number => Math.atan2(second.q.y(x) - second.p.y(x), second.q.x(x) - second.p.x(x)) - Math.atan2(first.q.y(x) - first.p.y(x), first.q.x(x) - first.p.x(x)) - wanted;
+        // The error is measured on the branch that is continuous where the lines start: half way between the starting error and zero, so
+        // a turn of exactly 180 degrees (where wrapping to (-pi, pi] jumps) can be made either way instead of being refused.
+        const start = wrapPi(turn(this.x0));
+        const centre = start / 2;
         return one([dimension.first.entityId, dimension.second.entityId], [first.p.vars, first.q.vars, second.p.vars, second.q.vars], (x) => {
-          const a = Math.atan2(first.q.y(x) - first.p.y(x), first.q.x(x) - first.p.x(x));
-          const b = Math.atan2(second.q.y(x) - second.p.y(x), second.q.x(x) - second.p.x(x));
-          return wrapPi(b - a - wanted);
+          const error = turn(x);
+          return error - TWO_PI * Math.round((error - centre) / TWO_PI);
         });
       }
       case "point-line-distance":
@@ -793,6 +859,65 @@ class ModelBuilder {
   }
 
   // ------------------------------------------------------------------ shape preservation
+
+  /** Terms, in millimetres, that measure how far each curve has drifted from its original shape: a line's vector (direction and length together), a radius, an arc's sweep length. */
+  addShapeKeepers(): void {
+    // A size that a driving dimension sets, or an orientation that Horizontal/Vertical sets, is not the shape terms' to keep.
+    const sized = new Set<string>();
+    const oriented = new Set<string>();
+    for (const dimension of this.document.dimensions) {
+      if (dimension.suppressed || dimension.mode !== "driving") continue;
+      if (dimension.kind === "length" || dimension.kind === "radius" || dimension.kind === "diameter" || dimension.kind === "arc-length") sized.add(dimension.target.entityId);
+    }
+    for (const constraint of this.document.constraints) {
+      if (!constraint.suppressed && (constraint.kind === "horizontal" || constraint.kind === "vertical")) oriented.add(constraint.line.entityId);
+    }
+    for (const entry of this.layout.values()) {
+      if (entry.geometry.suppressed) continue;
+      const b = entry.base;
+      const x0 = this.x0;
+      const add = (level: number, size: number, vars: readonly number[], evaluate: EvalFn): void => {
+        this.keep.push({ id: `keep:${entry.id}`, source: "constraint", size, level, vars, entities: [entry.id], residual: evaluate });
+      };
+      switch (entry.geometry.kind) {
+        case "line": {
+          const vx = x0[b + 2]! - x0[b]!;
+          const vy = x0[b + 3]! - x0[b + 1]!;
+          const length0 = Math.hypot(vx, vy);
+          if (length0 <= 1e-9) break;
+          this.lineVectors.push({ entityId: entry.id, base: b, vx, vy });
+          // Direction: the turn from what it was, times its original length (millimetres). A line pointing the other way is a half turn off, not zero.
+          if (!oriented.has(entry.id)) add(0, 1, [b, b + 1, b + 2, b + 3], (x, out, o) => {
+            const ux = x[b + 2]! - x[b]!;
+            const uy = x[b + 3]! - x[b + 1]!;
+            out[o] = length0 * Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+          });
+          if (!sized.has(entry.id)) add(1, 1, [b, b + 1, b + 2, b + 3], (x, out, o) => { out[o] = Math.hypot(x[b + 2]! - x[b]!, x[b + 3]! - x[b + 1]!) - length0; });
+          break;
+        }
+        case "circle": {
+          const r0 = x0[b + 2]!;
+          if (!sized.has(entry.id)) add(1, 1, [b + 2], (x, out, o) => { out[o] = x[b + 2]! - r0; });
+          break;
+        }
+        case "arc": {
+          const r0 = x0[b + 2]!;
+          const s0 = x0[b + 4]!;
+          if (!sized.has(entry.id)) add(1, 1, [b + 2], (x, out, o) => { out[o] = x[b + 2]! - r0; });
+          if (!sized.has(entry.id)) add(2, 1, [b + 4], (x, out, o) => { out[o] = r0 * (x[b + 4]! - s0); });
+          break;
+        }
+        case "ellipse": {
+          const a0 = Math.hypot(x0[b + 2]!, x0[b + 3]!);
+          const b0 = x0[b + 4]!;
+          add(1, 2, [b + 2, b + 3, b + 4], (x, out, o) => { out[o] = Math.hypot(x[b + 2]!, x[b + 3]!) - a0; out[o + 1] = x[b + 4]! - b0; });
+          break;
+        }
+        default:
+          break;
+      }
+    }
+  }
 
   addShapePreservation(only: ReadonlySet<string>, factor: number): void {
     for (const entry of this.layout.values()) {
@@ -879,6 +1004,8 @@ export interface BuildOptions {
   readonly preserve?: ReadonlySet<string>;
   /** Entities whose size is only mildly preferred; gives way to `preserve`. */
   readonly preserveWeak?: ReadonlySet<string>;
+  /** Build the two-level shape-keeping terms (see SketchSolveRequest.keepShape). */
+  readonly keepShape?: boolean;
 }
 
 /** Builds the equation system for the active (not suppressed) geometry, constraints and driving dimensions of a document. */
@@ -902,6 +1029,7 @@ export function buildSolverModel(document: ParametricSketchDocument, options: Bu
   // a size that is only preferred is a soft term that every real relation outweighs.
   if (options.preserve !== undefined && options.preserve.size > 0) builder.addShapePreservation(options.preserve, 0);
   if (options.preserveWeak !== undefined && options.preserveWeak.size > 0) builder.addShapePreservation(new Set([...options.preserveWeak].filter((id) => options.preserve?.has(id) !== true)), 3e-4);
+  if (options.keepShape === true) builder.addShapeKeepers();
   return {
     document: active,
     layout: builder.layout,
@@ -915,6 +1043,8 @@ export function buildSolverModel(document: ParametricSketchDocument, options: Bu
     anchored: builder.anchored,
     equations: builder.equations,
     soft: builder.soft,
+    keep: builder.keep,
+    lineVectors: builder.lineVectors,
     diagnostics: builder.diagnostics,
     appliedConstraints: builder.applied.constraints,
     appliedDimensions: builder.applied.dimensions,
