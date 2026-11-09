@@ -19,6 +19,15 @@ export const ENVELOPE_LIMITS = {
   maxBodyCoordinateMm: 1_000_000
 } as const;
 
+/**
+ * The most a stored solid mesh may hold. A body keeps three vertices per triangle (flat shading needs each corner of a face to be its own
+ * vertex), so this is also 200,000 triangles. A plate with round holes costs about 1,200 vertices per hole at full roundness, so a plate holds
+ * roughly 450 of them; the extrusion thins the facets of round holes before it reaches this limit (see many-holes.ts in the app).
+ */
+export const MAX_BODY_VERTICES = 600_000;
+/** The same limit as a count of numbers in a flat positions array (three per vertex) or an index array (three per triangle). */
+export const MAX_BODY_MESH_NUMBERS = MAX_BODY_VERTICES * 3;
+
 /** A project file as Save writes it, Open reads it and the validators accept it (decimal megabytes, so the message and the number agree). */
 export const PROJECT_FILE_MAX_BYTES = 50_000_000;
 

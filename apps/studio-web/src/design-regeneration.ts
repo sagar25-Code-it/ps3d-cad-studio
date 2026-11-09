@@ -13,6 +13,7 @@ import { applyBodyEdit } from "./body-edit-replay.js";
 import { revolveAboutChosenAxis } from "./revolve-feature.js";
 import { followSketchFace } from "./sketch-face-follow.js";
 import { buildLoftFeature, buildSweepFeature, needsSweepLoftBuilder, type SketchLookup } from "./sweep-loft-feature.js";
+import { sweepDirectionInDatumFrame } from "./sweep-direction.js";
 
 /**
  * Rebuilds the solids of the parametric timeline. The kernel is asynchronous, so the work happens here and its results
@@ -69,7 +70,7 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   const sketch = sketchFeature.sketch;
   const profiles = detectSketchProfiles(sketch);
   const lost = lostProfileRefs(profiles, feature.profileIds);
-  if (lost.length > 0) return { ok: false, message: `${feature.name}: a profile this feature was built on no longer exists in its sketch (${lost.join("; ")}). Edit the sketch to close it again, or delete the feature.` };
+  if (lost.length > 0) return { ok: false, message: `${feature.name}: a profile this feature was built on no longer exists in its sketch (${lost.join("; ")}). Edit the sketch to close it again, pick the profile again in this feature, or delete the feature.` };
   // The holes of a region are holes in every solid built from it (a thin-wall revolve follows the outline alone, and the other kinds take the outline only).
   const region = resolveProfileRegion(profiles, feature.profileIds, { includeIslands: feature.kind === "extrude" || feature.kind === "sweep" || feature.kind === "loft" || (feature.kind === "revolve" && feature.thinWallMm === undefined) });
   if (!region.ok) return { ok: false, message: `${feature.name}: ${region.diagnostics[0]?.message ?? "The sketch has no closed profile for this feature."}` };
@@ -110,7 +111,8 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   if ((feature.kind === "sweep" || feature.kind === "loft") && needsSweepLoftBuilder(feature, region.value.holes.length)) {
     const special = feature.kind === "sweep" ? await buildSweepFeature(feature, sketchFeature, region.value, color, sketchLookup) : await buildLoftFeature(feature, sketchFeature, region.value, color, sketchLookup);
     if (!special.ok) return special;
-    return { ok: true, body: special.body, ...(special.warning === undefined ? {} : { warning: special.warning }) };
+    // What the region detector said (a crossing circle left out, a hole that touches the outline) holds for a sweep and a loft as well.
+    return { ok: true, body: special.body, ...(special.warning === undefined ? {} : { warning: special.warning }), ...(warnings.length === 0 ? {} : { warnings }) };
   }
   const built = await createGeneralSolidBody({
     profile: region.value.outer,
@@ -123,7 +125,7 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
     name: feature.name,
     color,
     ...(feature.edge === undefined ? {} : { edge: feature.edge }),
-    ...(feature.kind === "sweep" && feature.sweepDirectionMm !== undefined ? { sweepDirectionMm: feature.sweepDirectionMm } : {}),
+    ...(feature.kind === "sweep" && feature.sweepDirectionMm !== undefined ? { sweepDirectionMm: sweepDirectionInDatumFrame(feature.sweepDirectionMm, sketch) } : {}),
     ...(feature.kind === "sweep" && feature.sweepPathEntityId !== undefined ? (() => {
       const pathEntity = sketch.entities.find((entity) => entity.id === feature.sweepPathEntityId);
       if (pathEntity === undefined) return {};
@@ -177,7 +179,8 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   const started = sweep === undefined || sweep.startDeg === 0 ? built.body : { ...built.body, positionsMm: startRevolveAt(built.body.positionsMm, plane, sweep.startDeg) };
   const placed = shifted(started, NORMALS[plane], extrudeStartOffsetMm(feature) + (sketch.planeOffsetMm ?? 0));
   // A sketch on an angle or three-point plane is built on its datum plane and then moved onto that plane, which keeps the face names.
-  return { ok: true, body: isPlaced(sketch) ? { ...placed, positionsMm: placePositions(placed.positionsMm, sketch) } : placed, ...(warnings.length === 0 ? {} : { warnings }) };
+  const allWarnings = built.note === undefined ? warnings : [...warnings, built.note];
+  return { ok: true, body: isPlaced(sketch) ? { ...placed, positionsMm: placePositions(placed.positionsMm, sketch) } : placed, ...(allWarnings.length === 0 ? {} : { warnings: allWarnings }) };
 }
 
 /**

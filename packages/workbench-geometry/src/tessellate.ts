@@ -1,4 +1,5 @@
 import { fullCircleFacets, type Vec3 } from "../../workbench-core/src/index.js";
+import { densifyForTwist as densifyPlanePath, twistSegments } from "./twist-stations.js";
 import { alignLoopStart } from "./loft-align.js";
 
 /**
@@ -182,35 +183,49 @@ export function tessellateSweep(polygonMm: readonly Point2[], directionWorldMm: 
   const shift: readonly [number, number, number] = [unit[0] * offset, unit[1] * offset, unit[2] * offset];
   const capTriangles = triangulatePolygon(polygon);
   const count = polygon.length;
-  // Twist rotates the top ring about the profile's 2D centroid before placement.
+  // Twist rotates each station about the profile's 2D centroid before placement. A twisted sweep needs stations between its ends
+  // (twist-stations.ts); with no twist the two rings are all there is.
   const centroid = polygonCentroid(polygon);
   const twistRad = (Number.isFinite(twistDeg) ? twistDeg : 0) * Math.PI / 180;
-  const sinT = Math.sin(twistRad);
-  const cosT = Math.cos(twistRad);
+  const segments = twistSegments(twistDeg, count);
   const localPositions: number[] = [];
-  for (const [x, y] of polygon) localPositions.push(x, y, 0);
-  for (const [x, y] of polygon) {
-    const dx = x - centroid[0];
-    const dy = y - centroid[1];
-    localPositions.push(centroid[0] + dx * cosT - dy * sinT, centroid[1] + dx * sinT + dy * cosT, 0);
+  for (let station = 0; station <= segments; station += 1) {
+    const angle = twistRad * (station / segments);
+    const sinT = Math.sin(angle);
+    const cosT = Math.cos(angle);
+    for (const [x, y] of polygon) {
+      const dx = x - centroid[0];
+      const dy = y - centroid[1];
+      localPositions.push(centroid[0] + dx * cosT - dy * sinT, centroid[1] + dx * sinT + dy * cosT, 0);
+    }
   }
   const rotated = rotatePositions(localPositions, PLANE_ROTATION_DEG[plane]).slice();
-  // Translate the top half by the world shift.
+  // Each station moves along the world shift by its share.
   const positions = [...rotated];
-  for (let index = count * 3; index < positions.length; index += 3) {
-    positions[index] = positions[index]! + shift[0];
-    positions[index + 1] = positions[index + 1]! + shift[1];
-    positions[index + 2] = positions[index + 2]! + shift[2];
+  for (let station = 0; station <= segments; station += 1) {
+    const fraction = station / segments;
+    for (let index = station * count * 3; index < (station + 1) * count * 3; index += 3) {
+      positions[index] = positions[index]! + shift[0] * fraction;
+      positions[index + 1] = positions[index + 1]! + shift[1] * fraction;
+      positions[index + 2] = positions[index + 2]! + shift[2] * fraction;
+    }
   }
   const indices: number[] = [];
+  const top = segments * count;
   // Bottom cap (reverse CCW so the normal faces the plane's -normal direction).
   for (let i = 0; i < capTriangles.length; i += 3) indices.push(capTriangles[i]!, capTriangles[i + 2]!, capTriangles[i + 1]!);
   // Top cap.
-  for (let i = 0; i < capTriangles.length; i += 3) indices.push(count + capTriangles[i]!, count + capTriangles[i + 1]!, count + capTriangles[i + 2]!);
-  // Side ribbon.
-  for (let i = 0; i < count; i += 1) {
-    const next = (i + 1) % count;
-    indices.push(i, next, count + next, i, count + next, count + i);
+  for (let i = 0; i < capTriangles.length; i += 3) indices.push(top + capTriangles[i]!, top + capTriangles[i + 1]!, top + capTriangles[i + 2]!);
+  // Side ribbons, one band per segment. The quad of a twisted wall is not flat, and splitting every band along the same diagonal loses (or
+  // gains) volume in proportion to the step; alternating the diagonal band by band cancels it to second order.
+  for (let band = 0; band < segments; band += 1) {
+    const base = band * count;
+    const nextBase = (band + 1) * count;
+    for (let i = 0; i < count; i += 1) {
+      const next = (i + 1) % count;
+      if (segments > 1 && band % 2 === 1) indices.push(base + i, base + next, nextBase + i, base + next, nextBase + next, nextBase + i);
+      else indices.push(base + i, base + next, nextBase + next, base + i, nextBase + next, nextBase + i);
+    }
   }
   return { positionsMm: positions, indices };
 }
@@ -248,8 +263,12 @@ export function tessellateLoft(polygonMm: readonly Point2[], topScale: number, t
  * For a line path this reproduces a slanted prism; for an arc or spline path it traces the curvature. The caller
  * samples the path entity into at least two points; three or more give a visible curve.
  */
-export function tessellateSweepPath(polygonMm: readonly Point2[], pathSamples: readonly Point2[], heightMm: number, plane: TessellatePlane, twistDeg = 0, frameTransport = false): TessellatedMesh {
+export function tessellateSweepPath(polygonMm: readonly Point2[], rawPathSamples: readonly Point2[], heightMm: number, plane: TessellatePlane, twistDeg = 0, frameTransport = false): TessellatedMesh {
   const polygon = sanitizePolygon(polygonMm);
+  // A twist needs stations between the ends (a straight path has only two samples): see twist-stations.ts.
+  const pathSamples: readonly Point2[] = twistDeg !== 0 && rawPathSamples.length >= 2
+    ? densifyPlanePath(rawPathSamples.map(([x, y]) => [x, y, 0] as const), false, twistDeg, polygon.length).map((p): Point2 => [p[0], p[1]])
+    : rawPathSamples;
   if (polygon.length < 3 || pathSamples.length < 2) return { positionsMm: [], indices: [] };
   if (!Number.isFinite(heightMm) || heightMm === 0) return { positionsMm: [], indices: [] };
   const height = Math.abs(heightMm);
@@ -309,7 +328,9 @@ export function tessellateSweepPath(polygonMm: readonly Point2[], pathSamples: r
     const nextBase = (r + 1) * count;
     for (let i = 0; i < count; i += 1) {
       const next = (i + 1) % count;
-      indices.push(base + i, base + next, nextBase + next, base + i, nextBase + next, nextBase + i);
+      // A twisted wall is not flat: alternate the diagonal band by band (see tessellateSweep).
+      if (twistDeg !== 0 && r % 2 === 1) indices.push(base + i, base + next, nextBase + i, base + next, nextBase + next, nextBase + i);
+      else indices.push(base + i, base + next, nextBase + next, base + i, nextBase + next, nextBase + i);
     }
   }
   return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };

@@ -1,6 +1,7 @@
 import type { WorkbenchOperation, WorkbenchProject, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
 import { applyWorkbenchOperation, designOf } from "../../../packages/workbench-core/src/index.js";
 import { isRebuildFailure, isRebuildNote, rebuildDependents, type RebuildResult } from "./design-regeneration.js";
+import { upgradeLegacyProfileRefs } from "./legacy-profile-refs.js";
 
 /**
  * The life of a working sketch against the timeline: finishing it, cancelling it, and reopening another sketch while this one has
@@ -73,6 +74,8 @@ export async function commitWorkingSketchAtomically(
   let summary = "";
   let changed = false;
   if (state.kind !== "clean") {
+    // Features that stored a bare profile name still know their region by the sketch the timeline holds; once the edit replaces it they would not.
+    if (state.kind === "edited") current = upgradeLegacyProfileRefs(current, state.sketchFeatureId).project;
     const committed = applyIntent(current, { kind: "commit-design-sketch", featureId: options.featureId, name: options.name });
     if (!committed.ok) return committed;
     current = committed.value.project;

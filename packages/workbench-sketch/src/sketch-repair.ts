@@ -494,7 +494,9 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
     if (freeEnds.length === 0) continue;
     const lone = curveIds.length === 1 && members[0]!.entity.kind === "line";
     if (lone) continue;
-    if (freeEnds.length === 2 && dist(freeEnds[0]!.point, freeEnds[1]!.point) > gapLimit) {
+    // A chain that already bounds a region and has a stub or two left over (a line that crosses a square and sticks out of it) is not a broken loop.
+    const boundsARegion = detectedNow.some((profile) => profile.entityIds.some((id) => curveIds.includes(id)));
+    if (freeEnds.length === 2 && !boundsARegion && dist(freeEnds[0]!.point, freeEnds[1]!.point) > gapLimit) {
       const [a, b] = freeEnds as [EndRef, EndRef];
       const closing: SketchEntity = { id: context.newId("entity"), kind: "line", start: a.point, end: b.point, construction: false };
       const constraints = [jointBetween(context, a.entity, a.which, closing, "first"), jointBetween(context, b.entity, b.which, closing, "last")].filter((c): c is WorkbenchSketchConstraint => c !== undefined);
@@ -536,7 +538,7 @@ export function analyzeSketch(context: SketchEditContext): SketchRepairReport {
     }
     issues.push({
       id: `region:${problem.code}:${[...problem.entityIds].sort().join("|")}:${problem.at === undefined ? "" : `${fmt(problem.at[0])},${fmt(problem.at[1])}`}`,
-      category: "region", severity: problem.severity, title: problem.code === "crossing" ? "Curves cross: the regions are split" : problem.code === "junction" ? "Curves meet at a junction" : problem.code === "overlap" ? "Curves overlap" : problem.code === "self-crossing" ? "A curve crosses itself" : problem.code === "short" ? "A curve stops short of another" : "A curve is ignored",
+      category: "region", severity: problem.severity, title: problem.code === "crossing" ? "Curves cross: the regions are split" : problem.code === "junction" ? "Curves meet at a junction" : problem.code === "overlap" ? "Curves overlap" : problem.code === "near-meet" ? "Curves nearly meet: intersections were merged" : problem.code === "self-crossing" ? "A curve crosses itself" : problem.code === "short" ? "A curve stops short of another" : "A curve is ignored",
       detail: problem.message, entityIds: problem.entityIds, constraintIds: [], fixes: []
     });
   }

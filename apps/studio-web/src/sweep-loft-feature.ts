@@ -5,6 +5,7 @@ import {
   signedArea2, type Loops2, type Loops3, type SolidMesh, type V3
 } from "../../../packages/workbench-geometry/src/index.js";
 import { profilePolygonMm } from "./general-modeling.js";
+import { sweepDirectionInDatumFrame } from "./sweep-direction.js";
 import { datumKey, DATUM_PLANE_NORMAL, sketchToWorld, sketchWorldNormal } from "./sketch-world.js";
 
 type Point2 = readonly [number, number];
@@ -217,7 +218,7 @@ export async function buildSweepFeature(feature: DesignSolidFeature, sketchFeatu
   if (path === undefined) {
     // A straight sweep of a profile with holes: the profile moves along the direction, keeping its orientation.
     if (feature.sweepDirectionMm === undefined) return { ok: false, message: "A sweep needs a direction vector or a path." };
-    const direction = feature.sweepDirectionMm;
+    const direction = sweepDirectionInDatumFrame(feature.sweepDirectionMm, sketchFeature.sketch);
     const size = Math.hypot(direction[0], direction[1], direction[2]);
     if (size < 1e-6) return { ok: false, message: "The sweep direction must not be zero." };
     const normalDatum = DATUM_PLANE_NORMAL[datumKey(sketchFeature.sketch)];

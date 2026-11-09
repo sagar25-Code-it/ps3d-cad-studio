@@ -133,6 +133,7 @@ import { sketchUi2WorkspaceTests } from "./sketch-ui2-workspace.test.js";
 import { sketchUi2CanvasTests } from "./sketch-ui2-canvas.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
+import { regionWave3Tests } from "./region-wave3.test.js";
 import type { TestCase } from "./test-kit.js";
 
 const tests: readonly TestCase[] = [
@@ -263,6 +264,7 @@ const tests: readonly TestCase[] = [
   ...sketchCanvasUxTests,
   ...sketchCanvasHandleTests,
   ...regionWave2Tests,
+  ...regionWave3Tests,
   ...sketchSolverWave2Tests,
   ...sketchSolverWave2MoreTests,
   ...sketchSolverWave3Tests,

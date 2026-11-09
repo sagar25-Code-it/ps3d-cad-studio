@@ -1274,7 +1274,8 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   /**
    * Sweep only: the direction in world space (unit vector; the builder normalizes it). The profile is translated along
    * this vector by `valueMm`. A direction parallel to the sketch plane is refused; a direction equal to the plane normal
-   * is equivalent to an extrude of distance `valueMm`. Mutually exclusive with `sweepPathEntityId`.
+   * is equivalent to an extrude of distance `valueMm`. World space means world space also on a tilted or three-point sketch
+   * plane: there the plane's normal is the tilted one, and (0, 0, 1) is a sheared sweep, not an extrude. Mutually exclusive with `sweepPathEntityId`.
    */
   readonly sweepDirectionMm?: readonly [number, number, number];
   /**

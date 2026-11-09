@@ -111,6 +111,63 @@ function rejoin(
   })();
 }
 
+/**
+ * Joints at the points where the pieces meet. A crossing of two curves is a point both are cut at, but the cuts only joined the pieces of
+ * ONE curve to each other; the pieces of the other curve meeting there had no joint, so resizing one of them left the other behind and the
+ * regions fell apart. Every group of line and arc ends that now lies at one point gets Coincident joints, as many as are needed to tie the
+ * group together (a joint that the sketch or the joints above already imply is not added twice). Only groups with a new piece in them are touched.
+ */
+function jointsAtMeetingPoints(
+  context: SketchEditContext,
+  removed: ReadonlySet<string>,
+  added: readonly SketchEntity[],
+  known: readonly WorkbenchSketchConstraint[]
+): WorkbenchSketchConstraint[] {
+  const fresh = new Set(added.map((entity) => entity.id));
+  const live = [...context.sketch.entities.filter((entity) => !removed.has(entity.id) && !entity.construction && entity.visible !== false), ...added];
+  interface End { readonly id: string; readonly point: SketchPointRef; readonly at: Vec2 }
+  const ends: End[] = [];
+  for (const entity of live) {
+    const both = endsOf(entity);
+    if (both === undefined) continue;
+    ends.push({ id: entity.id, point: "start", at: both.start }, { id: entity.id, point: "end", at: both.end });
+  }
+  const key = (end: { readonly id: string; readonly point: SketchPointRef }): string => `${end.id}|${end.point}`;
+  const parent = new Map<string, string>(ends.map((end) => [key(end), key(end)]));
+  const find = (value: string): string => { let current = value; while (parent.get(current) !== current) { const next = parent.get(current); if (next === undefined) return current; current = next; } return current; };
+  const union = (a: string, b: string): void => { const ra = find(a); const rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+  for (const constraint of [...context.sketch.constraints.filter((candidate) => !constraint_touches(candidate, removed)), ...known]) {
+    if (constraint.kind !== "coincident" || constraint.suppressed === true || constraint.entityIds.length !== 2 || constraint.points === undefined) continue;
+    const a = `${constraint.entityIds[0]!}|${constraint.points[0]!}`;
+    const b = `${constraint.entityIds[1]!}|${constraint.points[1]!}`;
+    if (parent.has(a) && parent.has(b)) union(a, b);
+  }
+  const cell = Math.max(JOINT_TOLERANCE_MM, 1e-6);
+  const grid = new Map<string, End[]>();
+  const cellKey = (x: number, y: number): string => `${x},${y}`;
+  const joints: WorkbenchSketchConstraint[] = [];
+  for (const end of ends) {
+    const cx = Math.floor(end.at[0] / cell);
+    const cy = Math.floor(end.at[1] / cell);
+    for (let dx = -1; dx <= 1; dx += 1) for (let dy = -1; dy <= 1; dy += 1) {
+      for (const other of grid.get(cellKey(cx + dx, cy + dy)) ?? []) {
+        if (other.id === end.id || !near(other.at, end.at)) continue;
+        if (!fresh.has(end.id) && !fresh.has(other.id)) continue;
+        if (find(key(other)) === find(key(end))) continue;
+        union(key(other), key(end));
+        joints.push({ id: context.newId("constraint"), kind: "coincident", entityIds: [other.id, end.id], points: [other.point, end.point] });
+      }
+    }
+    const own = grid.get(cellKey(cx, cy));
+    if (own === undefined) grid.set(cellKey(cx, cy), [end]); else own.push(end);
+  }
+  return joints;
+}
+
+function constraint_touches(constraint: WorkbenchSketchConstraint, removed: ReadonlySet<string>): boolean {
+  return constraint.entityIds.some((id) => removed.has(id));
+}
+
 export function breakAtIntersections(context: SketchEditContext, ids?: readonly string[]): SketchEditResult {
   const sketch = context.sketch;
   const curves = profileCurves(sketch);
@@ -180,6 +237,7 @@ export function breakAtIntersections(context: SketchEditContext, ids?: readonly 
     return failure("INVALID_OPERATION", `No curve crosses, touches or overlaps another, so there is nothing to break${notes.length === 0 ? "" : ` (${notes.join("; ")})`}.`, [...(wanted ?? [])], "Break splits curves where they meet. Draw curves that cross first.");
   }
   addConstraints.push(...rejoin(context, replaced));
+  addConstraints.push(...jointsAtMeetingPoints(context, new Set(removeEntityIds), addEntities, addConstraints));
   const crossings = arrangement.crossings.length;
   return editPlan(`Broke ${curvesBroken} curve${curvesBroken === 1 ? "" : "s"} into ${pieces} pieces at ${crossings} intersection${crossings === 1 ? "" : "s"}${notes.length === 0 ? "" : ` (${notes.join("; ")})`}`, { removeEntityIds, addEntities, addConstraints });
 }

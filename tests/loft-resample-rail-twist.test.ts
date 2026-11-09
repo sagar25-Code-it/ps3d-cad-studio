@@ -97,9 +97,12 @@ export const loftResampleRailTwistTests: readonly TestCase[] = [
       const asymmetric: readonly (readonly [number, number])[] = [[0, 0], [10, 0], [10, 10]];
       const path: readonly (readonly [number, number])[] = [[0, 0], [20, 0]];
       const twisted = tessellateSweepPath(asymmetric, path, 5, "xy", 90);
-      // Base ring first, top ring second. Check the top vertex [0, 0] should move to approximately rotated-by-90° position.
+      // Base ring first, top ring LAST: a twisted sweep has stations between its ends (re-audit R2-05: two rings folded the sweep), so the top ring is no longer
+      // the second one. Check the top vertex [0, 0] should move to approximately rotated-by-90° position.
+      const rings = twisted.positionsMm.length / (3 * 3);
+      assert(rings > 2, "the twisted sweep has stations between its ends");
       // centroid ≈ (6.67, 3.33). Vertex (0, 0) → relative (-6.67, -3.33). Rotate by +90°: (3.33, -6.67). Plus centroid: (10, -3.33). Plus path offset (20, 0): (30, -3.33).
-      const topStart = 3 * 3;
+      const topStart = (rings - 1) * 3 * 3;
       near(twisted.positionsMm[topStart + 0]!, 30, 0.01, "twisted vertex x");
       near(twisted.positionsMm[topStart + 1]!, -3.3333, 0.01, "twisted vertex y");
     }

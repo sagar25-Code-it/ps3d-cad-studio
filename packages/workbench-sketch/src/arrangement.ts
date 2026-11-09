@@ -75,6 +75,13 @@ export interface ArrangementEdge {
   readonly curveKind: "line" | "arc" | "circle" | "ellipse" | "spline";
   readonly owners: readonly ArrangementOwner[];
   readonly whole: boolean;
+  /**
+   * The exact direction (radians) the edge leaves vertex u and vertex v in, for a line and a circular arc. The order of the edges around a
+   * vertex is decided by these when they differ: two curves that cross at a few degrees run alongside each other for a millimetre, and a
+   * direction measured that far along can come out the wrong way round.
+   */
+  readonly departU?: number;
+  readonly departV?: number;
   status: "face" | "dangling" | "bridge";
 }
 
@@ -121,6 +128,11 @@ export interface Arrangement {
   readonly skipped: readonly { readonly entityId: string; readonly reason: string }[];
   /** Entities whose own curve crosses itself. */
   readonly selfCrossings: readonly { readonly entityId: string; readonly at: Vec2 }[];
+  /**
+   * Places where several different intersections lay within the gap tolerance of one another (a line a few microns off the point where
+   * two circles cross) and were merged into one vertex; `spreadMm` is how far apart they really were.
+   */
+  readonly snapped?: readonly { readonly point: Vec2; readonly entityIds: readonly string[]; readonly spreadMm: number }[];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -710,6 +722,19 @@ interface RawEdge {
   whole: boolean;
   pieceIndex: number;
   pieceCount: number;
+  departU: number | undefined;
+  departV: number | undefined;
+}
+
+/** The direction of the curve at parameter `t` as an angle, walking toward larger t (`sign` 1) or back toward smaller t (-1). Lines and circular arcs only. */
+function exactDirection(curve: Curve, t: number, sign: 1 | -1): number | undefined {
+  if (curve.kind === "line") return Math.atan2((curve.b[1] - curve.a[1]) * sign, (curve.b[0] - curve.a[0]) * sign);
+  if (isRound(curve)) {
+    const angle = curve.a0 + curve.sweep * t;
+    const turn = curve.sweep >= 0 ? 1 : -1;
+    return Math.atan2(Math.cos(angle) * turn * sign, -Math.sin(angle) * turn * sign);
+  }
+  return undefined;
 }
 
 /**
@@ -741,43 +766,49 @@ export function buildArrangement(entities: readonly SketchEntity[], options: { r
   const context: Context = {
     tol, chordTol, curves, splits: curves.map(() => []), overlaps: [], selfCrossings: []
   };
-  if (curves.length === 0) return { faces: [], edges: [], vertices: [], toleranceMm: tol, crossings: [], overlaps: [], skipped, selfCrossings: [] };
+  if (curves.length === 0) return { faces: [], edges: [], vertices: [], toleranceMm: tol, crossings: [], overlaps: [], skipped, selfCrossings: [], snapped: [] };
   findIntersections(context);
 
   // Per-curve split lists: end points, then computed intersections, merged where they are closer than the tolerance.
-  const entries: { curve: Curve; list: SplitEntry[] }[] = curves.map((curve) => {
+  const entries: { curve: Curve; list: SplitEntry[]; dropped: SplitEntry[] }[] = curves.map((curve) => {
     const list = context.splits[curve.index]!;
     list.push({ t: 0, p: curvePoint(curve, 0), end: true, other: -1 });
     if (!curve.closed) list.push({ t: 1, p: curvePoint(curve, 1), end: true, other: -1 });
     list.sort((left, right) => left.t - right.t || Number(right.end) - Number(left.end));
-    const merged: SplitEntry[] = [];
+  const merged: SplitEntry[] = [];
+    // A split merged into its neighbour on this curve still marks a place where another curve meets it: it stays in the vertex clustering below
+    // (without cutting the curve), so every curve that meets the cluster ends up on the one vertex. Dropping it let two curves that cross
+    // at a point a few microns from a third curve's crossings miss each other altogether, and whole faces vanished.
+    const dropped: SplitEntry[] = [];
     for (const entry of list) {
       const previous = merged[merged.length - 1];
       if (previous !== undefined && (entry.t - previous.t) * curve.length <= tol) {
-        if (entry.end && !previous.end) merged[merged.length - 1] = entry;
+        if (entry.end && !previous.end) { dropped.push(previous); merged[merged.length - 1] = entry; } else dropped.push(entry);
         continue;
       }
       merged.push(entry);
     }
     if (curve.closed) {
-      while (merged.length > 1 && (1 - merged[merged.length - 1]!.t) * curve.length <= tol) merged.pop();
+      while (merged.length > 1 && (1 - merged[merged.length - 1]!.t) * curve.length <= tol) dropped.push(merged.pop()!);
     } else if (merged.length > 1) {
       // The last entry must be the curve end.
       const last = merged[merged.length - 1]!;
       if (!last.end || last.t < 1) {
         const closing = { t: 1, p: curvePoint(curve, 1), end: true, other: -1 };
-        if ((1 - last.t) * curve.length <= tol) merged[merged.length - 1] = closing; else merged.push(closing);
+        if ((1 - last.t) * curve.length <= tol) { dropped.push(last); merged[merged.length - 1] = closing; } else merged.push(closing);
       }
     }
-    return { curve, list: merged };
+    return { curve, list: merged, dropped };
   });
 
   // Vertices: cluster every split point.
-  const flat: { curveIndex: number; entry: SplitEntry }[] = [];
+  const flat: { curveIndex: number; entry: SplitEntry; dropped?: true }[] = [];
   for (const item of entries) for (const entry of item.list) flat.push({ curveIndex: item.curve.index, entry });
+  for (const item of entries) for (const entry of item.dropped) flat.push({ curveIndex: item.curve.index, entry, dropped: true });
   const clusterOf = clusterPoints(flat.map((item) => item.entry.p), tol);
   const repOfCluster = new Map<number, number>();
   flat.forEach((item, index) => {
+    if (item.dropped === true) return;
     const cluster = clusterOf[index]!;
     const current = repOfCluster.get(cluster);
     if (current === undefined) { repOfCluster.set(cluster, index); return; }
@@ -801,11 +832,32 @@ export function buildArrangement(entities: readonly SketchEntity[], options: { r
     originPoint = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
   }
 
+  // Snapped intersections: a vertex that several different intersections were merged into.
+  const snapped: { point: Vec2; entityIds: string[]; spreadMm: number }[] = [];
+  {
+    const byVertex = new Map<number, { pairs: Set<string>; points: Vec2[] }>();
+    flat.forEach((item, index) => {
+      if (item.entry.other < 0) return;
+      const vertex = vertexOfCluster.get(clusterOf[index]!)!;
+      const pair = item.curveIndex < item.entry.other ? `${item.curveIndex}|${item.entry.other}` : `${item.entry.other}|${item.curveIndex}`;
+      const found = byVertex.get(vertex) ?? { pairs: new Set<string>(), points: [] };
+      found.pairs.add(pair);
+      found.points.push(item.entry.p);
+      byVertex.set(vertex, found);
+    });
+    for (const [vertex, found] of byVertex) {
+      if (found.pairs.size < 2) continue;
+      let spread = 0;
+      for (const a of found.points) for (const b of found.points) spread = Math.max(spread, dist(a, b));
+      if (spread > 1e-7) snapped.push({ point: vertexPoints[vertex]!, entityIds: [...vertexEntities[vertex]!].sort(), spreadMm: spread });
+    }
+  }
+
   // Crossings: vertices where a computed intersection (not an end point) was merged.
   const crossingSeen = new Set<number>();
   const crossings: { point: Vec2; entityIds: string[] }[] = [];
   flat.forEach((item, index) => {
-    if (item.entry.other < 0) return;
+    if (item.entry.other < 0 || item.dropped === true) return;
     const vertex = vertexOfCluster.get(clusterOf[index]!)!;
     if (crossingSeen.has(vertex)) return;
     crossingSeen.add(vertex);
@@ -834,7 +886,7 @@ export function buildArrangement(entities: readonly SketchEntity[], options: { r
       points[points.length - 1] = vertexPoints[v]!;
       let area2 = curveCorrection2(curve, t0, t1, sampled, originPoint);
       for (let index = 0; index + 1 < points.length; index += 1) area2 += crossRel(points[index]!, points[index + 1]!, originPoint);
-      rawEdges.push({ curve, t0, t1, u, v, points, area2, length, whole: pieceTotal === 1 && (!curve.closed || count === 1), pieceIndex: i, pieceCount: pieceTotal });
+      rawEdges.push({ curve, t0, t1, u, v, points, area2, length, whole: pieceTotal === 1 && (!curve.closed || count === 1), pieceIndex: i, pieceCount: pieceTotal, departU: exactDirection(curve, t0, 1), departV: exactDirection(curve, t1, -1) });
     }
   }
 
@@ -877,7 +929,8 @@ export function buildArrangement(entities: readonly SketchEntity[], options: { r
       for (const extra of extraOwners.get(index) ?? []) owners.push(ownerOf(extra));
       edges.push({
         index: edges.length, u: edge.u, v: edge.v, points: edge.points, area2: edge.area2, lengthMm: edge.length, curveKind: edge.curve.kind,
-        owners, whole: edge.whole && owners.every((owner) => owner.whole), status: "face"
+        owners, whole: edge.whole && owners.every((owner) => owner.whole), status: "face",
+        ...(edge.departU === undefined ? {} : { departU: edge.departU }), ...(edge.departV === undefined ? {} : { departV: edge.departV })
       });
     });
   }
@@ -889,7 +942,7 @@ export function buildArrangement(entities: readonly SketchEntity[], options: { r
   const faces = extractFaces(edges, vertexPoints);
   return {
     faces, edges, vertices, toleranceMm: tol,
-    crossings, overlaps: dedupeOverlaps(overlaps), skipped, selfCrossings: context.selfCrossings
+    crossings, overlaps: dedupeOverlaps(overlaps), skipped, selfCrossings: context.selfCrossings, snapped
   };
 }
 
@@ -991,16 +1044,26 @@ function traceCycles(edges: readonly ArrangementEdge[], active: readonly boolean
   // Half-edge h = 2 * edge + (forward ? 0 : 1).
   const outgoing: number[][] = vertexPoints.map(() => []);
   const angle = new Map<number, number>();
+  const exact = new Map<number, number>();
   edges.forEach((edge, index) => {
     if (!active[index]) return;
     outgoing[edge.u]!.push(index * 2);
     outgoing[edge.v]!.push(index * 2 + 1);
     angle.set(index * 2, departureAngle(edge.points, false, edge.lengthMm));
     angle.set(index * 2 + 1, departureAngle(edge.points, true, edge.lengthMm));
+    if (edge.departU !== undefined) exact.set(index * 2, edge.departU);
+    if (edge.departV !== undefined) exact.set(index * 2 + 1, edge.departV);
   });
   const position = new Map<number, number>();
   for (const list of outgoing) {
-    list.sort((left, right) => angle.get(left)! - angle.get(right)! || left - right);
+    // The exact direction orders two edges that leave at different angles; only when they leave together (tangent curves, or a curve with no
+    // closed form) does the direction measured further along the edge decide.
+    list.sort((left, right) => {
+      const keyLeft = exact.get(left) ?? angle.get(left)!;
+      const keyRight = exact.get(right) ?? angle.get(right)!;
+      if (Math.abs(keyLeft - keyRight) > 1e-6) return keyLeft - keyRight;
+      return angle.get(left)! - angle.get(right)! || left - right;
+    });
     list.forEach((half, index) => position.set(half, index));
   }
   const originOf = (half: number): number => (half % 2 === 0 ? edges[half >> 1]!.u : edges[half >> 1]!.v);

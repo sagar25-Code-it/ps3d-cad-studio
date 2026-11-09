@@ -66,7 +66,8 @@ import { setDesignParameters, settleDesignExpressions } from "./design-parameter
 import { failure, MAX_AUDIT_CHANGED_IDS, validateWorkbenchProject, validSketchPlaneFrame, validSketchPlaneTilt, WORKBENCH_LIMITS } from "./validation.js";
 import { sketchConstraintPayloadProblem } from "./constraint-payload.js";
 import { outlineBroken, outlineBrokenMessage } from "./sketch-outline-guard.js";
-import { firstNonFinitePath, MODEL_ENVELOPE, sketchEntityProblem, solidEnvelopeProblem, type EnvelopeProblem } from "./envelope.js";
+import { MAX_BODY_MESH_NUMBERS } from "./envelope-limits.js";
+import { firstNonFinitePath, MODEL_ENVELOPE, rebuildResultProblem, sketchEntityProblem, solidEnvelopeProblem, type EnvelopeProblem } from "./envelope.js";
 import { AUDIT_KEEP_FULL, compactAudit } from "./audit-archive.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
 import { applySketchObjectsEdit, explicitObjectIds, reconcileSketchObjects, validSketchObjectsEdit } from "./sketch-objects.js";
@@ -348,7 +349,7 @@ function validateWorkbenchOperationShape(input: unknown): WorkbenchResult<Workbe
           || (Object.hasOwn(result, "pieces") && (!Object.hasOwn(result, "body") || !boundedList(result.pieces, 16, validGeneralSolidBodyPayload)))
           // A result with neither a body nor a message means the step applied cleanly (a join or cut reports this: the
           // finished shape travels with the step that made the body).
-          || (Object.hasOwn(result, "message") && !shortText(result.message, 1, 400)))) return invalidOperation("The rebuild results are invalid.");
+          || (Object.hasOwn(result, "message") && !shortText(result.message, 1, 400)))) return invalidOperation(Array.isArray(input.results) ? (rebuildResultProblem(input.results) ?? "The rebuild results are invalid.") : "The rebuild results are invalid.");
       break;
     case "set-design-parameters":
       if (!keys(input, [...common, "parameters", ...(Object.hasOwn(input, "renames") ? ["renames"] : [])]) || !boundedList(input.parameters, 200, isRecord)
@@ -1701,11 +1702,11 @@ function validGeneralSolidBodyPayload(value: unknown): value is GeneralSolidBody
     || !stableId(value.id) || !shortText(value.name, 1, 120)
     || typeof value.visible !== "boolean" || typeof value.color !== "string" || !COLOR_PATTERN.test(value.color)) return false;
   const positions = value.positionsMm;
-  if (!Array.isArray(positions) || positions.length < 12 || positions.length % 3 !== 0 || positions.length > 300_000
+  if (!Array.isArray(positions) || positions.length < 12 || positions.length % 3 !== 0 || positions.length > MAX_BODY_MESH_NUMBERS
     || positions.some((entry) => typeof entry !== "number" || !Number.isFinite(entry) || Math.abs(entry) > MODEL_ENVELOPE.maxBodyCoordinateMm)) return false;
   const vertexCount = positions.length / 3;
   const indices = value.indices;
-  if (!Array.isArray(indices) || indices.length < 3 || indices.length % 3 !== 0 || indices.length > 300_000
+  if (!Array.isArray(indices) || indices.length < 3 || indices.length % 3 !== 0 || indices.length > MAX_BODY_MESH_NUMBERS
     || indices.some((entry) => typeof entry !== "number" || !Number.isInteger(entry) || entry < 0 || entry >= vertexCount)) return false;
   if (Object.hasOwn(value, "feature")) {
     const feature = value.feature;
