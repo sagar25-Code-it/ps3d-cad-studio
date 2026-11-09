@@ -7,9 +7,10 @@ import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSket
  * model (rectangles, ellipses, fit-point splines) or need a closed-form step of their own:
  *
  *  - Smooth (G2): a spline end that continues a line, arc or spline with matching position, tangent and curvature.
- *  - Refraction: a line bent at an interface line by Snell's law.
  *
- * Each runs on the geometry the analytic pass produced, so a neighbour that moved in that pass is followed.
+ * (Refraction, a line bent at an interface by Snell's law, used to be applied here after the solve and silently overrode the other
+ * relations; it is now one of the simultaneous solver's relations. See sketch-refraction.ts.) Smooth runs on the geometry the analytic
+ * pass produced, so a neighbour that moved in that pass is followed, and it refuses to disturb any other relation on the spline.
  */
 
 export interface ExtraUnsolved {
@@ -48,13 +49,17 @@ export function applyExtraConstraints(sketch: Pick<WorkbenchSketch, "entities" |
     if (constraint.kind === "smooth") {
       const outcome = applySmooth(constraint, entities, active);
       if (typeof outcome === "string") unsolved.push({ constraintId: constraint.id, reason: outcome });
-      else if (outcome !== undefined) { put(outcome.entity); notes.push(outcome.note); }
+      else if (outcome !== undefined) {
+        // Blending a spline end moves the spline; a spline that another relation holds in place cannot be moved, which is a conflict to name.
+        const holder = active.find((candidate) => candidate.id !== constraint.id && (candidate.kind === "fixed" || (candidate.kind === "radius" || candidate.kind === "distance" || candidate.kind === "perimeter") && candidate.driven !== true) && candidate.entityIds.includes(outcome.entity.id));
+        if (holder !== undefined) {
+          const name = label(outcome.entity.id);
+          return fail(`Smooth would move spline ${name} to blend it into its neighbour, but ${holder.kind === "fixed" ? "it is Fixed" : `a ${holder.kind} relation holds it`}.`, [constraint.id, holder.id, outcome.entity.id], "Relax the Fix or the dimension on the spline, or remove the Smooth.");
+        }
+        put(outcome.entity);
+        notes.push(outcome.note);
+      }
       continue;
-    }
-    if (constraint.kind === "refraction") {
-      const outcome = applyRefraction(constraint, entities);
-      if (outcome.error !== undefined) return fail(outcome.error, [constraint.id, ...constraint.entityIds], "Change the refractive-index ratio or the incident line so the ray is not totally reflected.");
-      if (outcome.entity !== undefined) { put(outcome.entity); notes.push(outcome.note!); }
     }
   }
   return { ok: true, entities: sketch.entities.map((entity) => entities.get(entity.id) ?? entity), movedIds: [...moved], notes, unsolved };

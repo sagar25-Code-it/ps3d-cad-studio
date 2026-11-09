@@ -156,7 +156,13 @@ export type SketchConstraint =
   | (ConstraintBase & { readonly kind: "midpoint"; readonly point: GeometryReference; readonly line: GeometryReference })
   | (ConstraintBase & { readonly kind: "symmetric"; readonly first: GeometryReference; readonly second: GeometryReference; readonly axis: GeometryReference })
   /** A point lies on the (infinite extension of a) line, circle, arc or ellipse, or on the X or Y axis. */
-  | (ConstraintBase & { readonly kind: "on-curve"; readonly point: GeometryReference; readonly curve: GeometryReference });
+  | (ConstraintBase & { readonly kind: "on-curve"; readonly point: GeometryReference; readonly curve: GeometryReference })
+  /**
+   * Snell's law at an interface line: the refracted line leaves the end of the incident line (2 equations) and bends so that the
+   * component of its direction along the interface is the incident one divided by `ratio` = n2 / n1 (1 equation). The side of the
+   * interface each line lies on is kept from the geometry the solve began with.
+   */
+  | (ConstraintBase & { readonly kind: "refraction"; readonly incident: GeometryReference; readonly refracted: GeometryReference; readonly boundary: GeometryReference; readonly ratio: number });
 
 export type DimensionMode = "driving" | "driven";
 

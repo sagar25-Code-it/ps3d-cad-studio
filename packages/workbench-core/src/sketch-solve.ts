@@ -4,6 +4,7 @@ import { explainOrientationCollapse, ORIENTATION_RECOVERY } from "./sketch-orien
 import { applyExtraConstraints } from "./sketch-solve-extras.js";
 import { toSolverAnchors, type LiveAnchor } from "./sketch-anchors.js";
 import { turnAcrossLines } from "./sketch-quarter-turn.js";
+import { refractionRefusal, seedRefractions } from "./sketch-refraction.js";
 import { constraintComponent, fromSolverGeometry, liveConstraintId, solverSelector, translateSketch, type UnsolvedConstraint } from "./sketch-translate.js";
 import type { SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 import type { SketchGeometry } from "../../parametric-sketch-core/src/types.js";
@@ -108,7 +109,11 @@ function runLiveSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[]
 function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[] | undefined, drag: LiveDragTarget | undefined, options: LiveSolveOptions): LiveSketchSolveReport {
   const component = constraintComponent(sketch, focusEntityIds);
   // A line lying exactly across the direction a relation asks for is turned to it first, keeping its length (see sketch-quarter-turn.ts).
-  const working = drag === undefined ? turnAcrossLines(sketch, component, options.forceActive).sketch : sketch;
+  const turned = drag === undefined ? turnAcrossLines(sketch, component, options.forceActive).sketch : sketch;
+  // A refraction starts from the refracted line it implies, on the correct side of the interface; rays that cannot cross are refused by name.
+  const seeded = drag === undefined ? seedRefractions(turned, component, options.forceActive) : { sketch: turned };
+  if ("refusal" in seeded) return { ok: false, message: seeded.refusal.message, relatedIds: seeded.refusal.relatedIds, recovery: seeded.refusal.recovery };
+  const working = seeded.sketch;
   const translation = translateSketch(working, { component, ...(options.forceActive === undefined ? {} : { forceActive: options.forceActive }) });
   const { document, arcFrames, unsolved } = translation;
   const unsolvedList: UnsolvedConstraint[] = [...unsolved];
@@ -160,6 +165,9 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
     notes.push(describeChange(entity, replacement));
     return replacement;
   });
+  // A ray the solve had to move so far that it can no longer cross the interface (a dimension on the incident line, say) is refused by name.
+  const refusal = refractionRefusal(nextEntities, sketch.constraints, component);
+  if (refusal !== undefined) return { ok: false, message: refusal.message, relatedIds: refusal.relatedIds, recovery: refusal.recovery };
   return { ok: true, entities: nextEntities, movedIds, notes, unsolved: unsolvedList, redundant: toLiveSets(result.dof.relationSets ?? [], "redundant") };
 }
 

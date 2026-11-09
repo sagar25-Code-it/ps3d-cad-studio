@@ -63,8 +63,6 @@ export function analyzeLiveSketch(sketch: WorkbenchSketch): LiveSketchAnalysis {
       if (splineId !== undefined) reduce(splineId, 4);
     } else if (constraint.kind === "pierce") {
       reduce(constraint.entityIds[0]!, 2);
-    } else if (constraint.kind === "refraction") {
-      reduce(constraint.entityIds[1]!, 1);
     }
   }
   const redundant = toLiveSets(result.dof.relationSets ?? [], "redundant");

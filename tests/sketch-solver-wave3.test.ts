@@ -1,8 +1,9 @@
 import { dragLiveSketch, solveLiveSketch } from "../packages/workbench-core/src/index.js";
 import { analyzeWorkbenchSketch } from "../packages/workbench-sketch/src/index.js";
+import { refractionAngles } from "../packages/workbench-core/src/sketch-solve-extras.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 import {
-  addConstraint, apply, circle, get, ident, line, lengthOf, projectWith, refuse, rel, run, setDimension,
+  addConstraint, analysis, apply, circle, get, ident, line, lengthOf, projectWith, refuse, rel, run, setDimension,
   type Line
 } from "./sketch-solver-kit.js";
 import type { SketchEntity, WorkbenchProject, WorkbenchSketchConstraint } from "../packages/workbench-core/src/index.js";
@@ -145,6 +146,65 @@ export const sketchSolverWave3Tests: readonly TestCase[] = [
       ];
       const solved = solveLiveSketch(projectWith(lines, constraints).sketch);
       assert(solved.ok, `the chain solves: ${solved.ok ? "" : solved.message}`);
+    }
+  }
+,
+  {
+    name: "Wave3 R2-3: Refraction is one of the simultaneous relations: it removes 3 degrees of freedom (joint and bend), the bent line meets Snell's law, and nothing is left unsolved",
+    run: () => {
+      const base = projectWith([line("inc", [-20, 20], [0, 0]), line("ref", [0, 0], [10, -20]), line("itf", [-30, 0], [30, 0])]);
+      equal(analysis(base).degreesOfFreedom, 12, "three free lines have 12 degrees of freedom");
+      const snell = addConstraint(base, { id: "constraint:rf", kind: "refraction", entityIds: ["entity:inc", "entity:ref", "entity:itf"], ratio: 1.5 });
+      equal(analysis(snell).degreesOfFreedom, 9, "the joint (2) and the bend (1) are counted");
+      const [incidence, refraction] = refractionAngles(lineAt(snell, "inc"), lineAt(snell, "ref"), lineAt(snell, "itf"));
+      near(Math.sin((incidence * Math.PI) / 180), 1.5 * Math.sin((refraction * Math.PI) / 180), 1e-9, "Snell's law holds");
+      near(lineAt(snell, "ref").start[0], lineAt(snell, "inc").end[0], 1e-9, "the bent line leaves the incident line's end");
+      equal(analysis(snell).conflicts.length, 0, "no conflict");
+    }
+  },
+  {
+    name: "Wave3 R2-3: a refraction followed by a joined line leaves no gap, and solving again moves nothing (the old pass left a 0.61 mm gap and moved two entities on the next solve)",
+    run: () => {
+      let project = projectWith([line("inc", [-20, 20], [0, 0]), line("ref", [0, 0], [10, -20]), line("itf", [-30, 0], [30, 0]), line("nx", [10, -20], [10, -40])]);
+      project = addConstraint(project, rel("coincident", ["ref", "nx"], { points: ["end", "start"] }));
+      project = addConstraint(project, rel("vertical", ["nx"]));
+      project = addConstraint(project, { id: "constraint:rf", kind: "refraction", entityIds: ["entity:inc", "entity:ref", "entity:itf"], ratio: 1.5 });
+      const ref = lineAt(project, "ref");
+      const nx = lineAt(project, "nx");
+      near(Math.hypot(ref.end[0] - nx.start[0], ref.end[1] - nx.start[1]), 0, 1e-9, "the joint between the bent line and the next line is closed");
+      near(nx.end[0], nx.start[0], 1e-9, "the next line is still vertical");
+      const again = solveLiveSketch(project.sketch);
+      assert(again.ok, "the sketch solves again");
+      if (again.ok) equal(again.movedIds.length, 0, "and a second solve moves nothing");
+      const [incidence, refraction] = refractionAngles(lineAt(project, "inc"), ref, lineAt(project, "itf"));
+      near(Math.sin((incidence * Math.PI) / 180), 1.5 * Math.sin((refraction * Math.PI) / 180), 1e-9, "Snell's law still holds");
+    }
+  },
+  {
+    name: "Wave3 R2-3: a refracted line that is also Horizontal cannot satisfy Snell's law at index ratio 1.5, and the refusal names Refraction and Horizontal instead of leaving the line unbent",
+    run: () => {
+      const base = addConstraint(projectWith([line("inc", [-20, 20], [0, 0]), line("ref", [0, 0], [10, -20]), line("itf", [-30, 0], [30, 0])]), rel("horizontal", ["ref"]));
+      const message = refuse(base, { kind: "add-sketch-constraint", constraint: { id: "constraint:rf", kind: "refraction", entityIds: ["entity:inc", "entity:ref", "entity:itf"], ratio: 1.5 } });
+      assert(/Refraction/u.test(message) && /Horizontal/u.test(message), `both relations are named: ${message}`);
+    }
+  },
+  {
+    name: "Wave3 R2-3: a length dimension on the refracted line is honoured together with Snell's law",
+    run: () => {
+      const refracted = addConstraint(projectWith([line("inc", [-20, 20], [0, 0]), line("ref", [0, 0], [10, -20]), line("itf", [-30, 0], [30, 0])]), { id: "constraint:rf", kind: "refraction", entityIds: ["entity:inc", "entity:ref", "entity:itf"], ratio: 1.5 });
+      const sized = setDimension(refracted, "ref", "length", 25);
+      near(lengthOf(lineAt(sized, "ref")), 25, 1e-9, "the length is 25 mm");
+      const [incidence, refraction] = refractionAngles(lineAt(sized, "inc"), lineAt(sized, "ref"), lineAt(sized, "itf"));
+      near(Math.sin((incidence * Math.PI) / 180), 1.5 * Math.sin((refraction * Math.PI) / 180), 1e-9, "and the bend still follows Snell's law");
+    }
+  },
+  {
+    name: "Wave3 R2-3: Smooth that would move a Fixed spline is refused with a named reason instead of silently moving it",
+    run: () => {
+      const spline: SketchEntity = { id: "entity:s", kind: "spline", fitPoints: [[10, 2], [14, 6], [20, 7], [26, 5]], construction: false };
+      const fixed = projectWith([line("a", [0, 0], [10, 0]), spline], [{ id: "constraint:fx", kind: "fixed", entityIds: ["entity:s"] }]);
+      const message = refuse(fixed, { kind: "add-sketch-constraint", constraint: { id: "constraint:sm", kind: "smooth", entityIds: ["entity:a", "entity:s"], points: ["end", "start"] } });
+      assert(/Smooth/u.test(message) && /Fixed/u.test(message) && /spline s/u.test(message), `the refusal names Smooth, the spline and the Fix: ${message}`);
     }
   }
 ];

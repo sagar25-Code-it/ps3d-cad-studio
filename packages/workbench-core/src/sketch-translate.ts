@@ -290,8 +290,8 @@ function translateConstraint(constraint: WorkbenchSketchConstraint, entities: Re
   const driven = constraint.driven === true;
   const fit = constraintFit(constraint.kind, kinds, constraint.points, { driven, ...(constraint.dimension === undefined ? {} : { dimension: constraint.dimension }) });
   if (!fit.ok) return none(fit.reason);
-  // A driven (reference) dimension is only measured; smooth, pierce and refraction are solved after the analytic pass.
-  if (driven || constraint.kind === "smooth" || constraint.kind === "pierce" || constraint.kind === "refraction") return NOTHING;
+  // A driven (reference) dimension is only measured; smooth and pierce are solved after the analytic pass (refraction is part of it).
+  if (driven || constraint.kind === "smooth" || constraint.kind === "pierce") return NOTHING;
   const solverHas = (id: string): boolean => isSketchDatumEntityId(id) || present.has(id);
   const dimension = (value: number, rest: { readonly kind: SketchDimension["kind"] } & Record<string, unknown>, unit: "mm" | "rad" = "mm"): Translated =>
     ({ constraints: [], dimensions: [{ id: constraint.id, mode: "driving", suppressed: false, value: { value }, unit, ...rest } as unknown as SketchDimension] });
@@ -366,6 +366,9 @@ function translateConstraint(constraint: WorkbenchSketchConstraint, entities: Re
       return { constraints: [{ ...stable, kind: constraint.kind, first: lineRef(first!), second: lineRef(second!) }], dimensions: [] };
     case "symmetry":
       return translateSymmetry(constraint, entities, present);
+    case "refraction":
+      if (ids.length !== 3 || !ids.every(solverHas) || constraint.ratio === undefined || !(constraint.ratio > 0)) return none("Refraction needs an incident line, a refracted line, an interface line and a positive index ratio.");
+      return { constraints: [{ ...stable, kind: "refraction", incident: lineRef(first!), refracted: lineRef(second!), boundary: lineRef(ids[2]!), ratio: constraint.ratio }], dimensions: [] };
     default:
       return none(`${constraint.kind} needs endpoint selection, which the sketch records but does not solve yet.`);
   }

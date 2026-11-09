@@ -547,7 +547,41 @@ class ModelBuilder {
         })];
       }
       case "on-curve": return this.buildOnCurve(constraint);
+      case "refraction": return this.buildRefraction(constraint);
     }
+  }
+
+  private buildRefraction(constraint: Extract<SketchConstraint, { kind: "refraction" }>): readonly Equation[] | Failure {
+    const id = constraint.id;
+    const incident = this.line(constraint.incident);
+    const refracted = this.line(constraint.refracted);
+    const boundary = this.line(constraint.boundary);
+    if (incident === undefined || refracted === undefined || boundary === undefined) return this.invalid(id, "Refraction requires an incident line, a refracted line and an interface line.");
+    const ratio = constraint.ratio;
+    const directionOf = (line: LineFn, x: Float64Array): readonly [number, number] => {
+      const dx = line.q.x(x) - line.p.x(x);
+      const dy = line.q.y(x) - line.p.y(x);
+      const length = Math.max(Math.hypot(dx, dy), 1e-12);
+      return [dx / length, dy / length];
+    };
+    // Which side of the interface the incident ray travels toward is kept from the geometry the solve began with.
+    const across = (x: Float64Array, line: LineFn): { readonly along: number; readonly cross: number } => {
+      const [tx, ty] = directionOf(boundary, x);
+      const [dx, dy] = directionOf(line, x);
+      return { along: dx * tx + dy * ty, cross: -dx * ty + dy * tx };
+    };
+    const side = across(this.x0, incident).cross < 0 ? -1 : 1;
+    const entities = [constraint.incident.entityId, constraint.refracted.entityId, constraint.boundary.entityId];
+    return [this.make(id, "constraint", 3, entities, [incident.p.vars, incident.q.vars, refracted.p.vars, refracted.q.vars, boundary.p.vars, boundary.q.vars], (x, out, o) => {
+      out[o] = refracted.p.x(x) - incident.q.x(x);
+      out[o + 1] = refracted.p.y(x) - incident.q.y(x);
+      const inbound = across(x, incident);
+      const outbound = across(x, refracted);
+      const wanted = Math.asin(Math.max(-1, Math.min(1, inbound.along / ratio)));
+      const bent = Math.atan2(outbound.along, side * outbound.cross);
+      const gap = bent - wanted;
+      out[o + 2] = Math.atan2(Math.sin(gap), Math.cos(gap));
+    })];
   }
 
   private buildEqual(constraint: Extract<SketchConstraint, { kind: "equal" }>): readonly Equation[] | Failure {
