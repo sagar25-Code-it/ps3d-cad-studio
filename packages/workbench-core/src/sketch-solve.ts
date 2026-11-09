@@ -91,7 +91,7 @@ function runLiveSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[]
   if (!base.ok) return base;
   // Relations on splines (smooth) and refraction are solved on the simultaneous pass's result.
   const component = constraintComponent(sketch, focusEntityIds);
-  const extras = applyExtraConstraints({ entities: base.entities, constraints: sketch.constraints }, (id) => component.has(id));
+  const extras = applyExtraConstraints({ entities: base.entities, constraints: sketch.constraints }, (id) => component.has(id), new Set(focusEntityIds ?? []));
   if (!extras.ok) return { ok: false, message: extras.message, relatedIds: extras.relatedIds, recovery: extras.recovery };
   if (extras.movedIds.length === 0 && extras.unsolved.length === 0) return base;
   return {
@@ -224,6 +224,9 @@ export function toLiveSets(sets: readonly SketchRelationSet[], kind: "redundant"
   for (const set of sets) {
     if (set.kind !== kind) continue;
     const ids = [...new Set(set.ids.map(liveConstraintId))].sort();
+    // The parts of one relation that overlap each other (a mirrored arc is pinned by both ends and its middle, which is one equation more than it has freedom)
+    // are not a redundancy between relations: there is nothing for the user to remove.
+    if (kind === "redundant" && set.implied !== undefined && set.implied.includes("#") && set.ids.filter((id) => liveConstraintId(id) === liveConstraintId(set.implied!)).length >= 2) continue;
     const key = ids.join("|");
     if (seen.has(key)) continue;
     seen.add(key);

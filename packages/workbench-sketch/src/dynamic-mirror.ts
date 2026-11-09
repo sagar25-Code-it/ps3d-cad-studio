@@ -2,10 +2,11 @@ import { type SketchEntity, type Vec2, type WorkbenchSketch, type WorkbenchSketc
 import { entityPoints } from "./index.js";
 import { mapEntity, reflectAcross, type SketchEditContext, type SketchEditPlan } from "./edit-tools.js";
 import { planHolds } from "./sketch-clone.js";
+import { pruneRedundantAdditions } from "./edit-prune.js";
 
 /**
  * Dynamic Mirror: with an axis line chosen in advance, everything drawn afterwards is created together with its mirror image,
- * as one undoable edit. Lines and circles also get a symmetry relation with their image, so editing one side moves the other.
+ * as one undoable edit. Every image gets a symmetry relation with its source, so editing one side moves the other.
  */
 
 type Line = Extract<SketchEntity, { kind: "line" }>;
@@ -45,7 +46,7 @@ export interface DynamicMirrorOutcome {
 }
 
 /**
- * Adds the mirror images of the plan's new entities (and symmetry relations for lines and circles) to a drawing plan.
+ * Adds the mirror images of the plan's new entities (and their symmetry relations) to a drawing plan.
  * If `axisId` is not a usable line in the sketch the plan is returned as it was.
  */
 export function withDynamicMirror(context: SketchEditContext, axisId: string | null, drawn: SketchEditPlan): DynamicMirrorOutcome {
@@ -64,9 +65,9 @@ export function withDynamicMirror(context: SketchEditContext, axisId: string | n
     const image = mapEntity(entity, context.newId("entity"), reflect, (degrees) => 2 * axisAngleDeg - degrees);
     if (sameShape(entity, image, tolerance)) { skipped += 1; continue; }
     images.push(image);
-    if ((entity.kind === "line" && image.kind === "line") || (entity.kind === "circle" && image.kind === "circle")) {
-      relations.push({ id: context.newId("constraint"), kind: "symmetry", entityIds: [entity.id, image.id, axis.id] });
-    }
+    // Every kind is tied to its image by a symmetry the solver holds (an arc by its ends and middle, a rectangle by centre, size and corner, an
+    // ellipse by centre, size and turn, a spline point by point), so editing one side moves the other and the joints of a drawn chain stay joined.
+    relations.push({ id: context.newId("constraint"), kind: "symmetry", entityIds: [entity.id, image.id, axis.id] });
   }
   if (images.length === 0) return { plan: drawn, mirrored: 0, skipped, withoutRelations: false };
   const build = (withRelations: boolean): SketchEditPlan => ({
@@ -76,7 +77,11 @@ export function withDynamicMirror(context: SketchEditContext, axisId: string | n
     addConstraints: withRelations ? [...drawn.addConstraints, ...relations] : drawn.addConstraints
   });
   const full = build(true);
-  if (planHolds(context.sketch, full).ok) return { plan: full, mirrored: images.length, skipped, withoutRelations: false };
+  if (planHolds(context.sketch, full).ok) {
+    // Relations the symmetry already implies are not added twice (the sketch would read as over-defined).
+    const pruned = pruneRedundantAdditions(context.sketch, full);
+    return { plan: planHolds(context.sketch, pruned).ok ? pruned : full, mirrored: images.length, skipped, withoutRelations: false };
+  }
   // The solver could not take the symmetry relations (for example alongside the drawing's own relations): keep the exact mirror geometry.
   return { plan: build(false), mirrored: images.length, skipped, withoutRelations: relations.length > 0 };
 }

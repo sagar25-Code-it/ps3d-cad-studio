@@ -19,7 +19,7 @@ const MAX_ANALYSED_RELATIONS = 1_500;
 const MAX_ROUNDS = 6;
 
 /** Entity kinds whose copy is completely determined by a symmetry relation to its source (see constraintFit "symmetry"). */
-export const SYMMETRY_DETERMINED_KINDS: ReadonlySet<SketchEntity["kind"]> = new Set(["line", "circle", "point"]);
+export const SYMMETRY_DETERMINED_KINDS: ReadonlySet<SketchEntity["kind"]> = new Set(["line", "circle", "point", "arc", "rectangle", "ellipse", "spline"]);
 
 /** A one-entity size dimension (a line's length, a circle's or arc's radius or diameter, a rectangle's width or height). */
 export function isSizeDimension(constraint: WorkbenchSketchConstraint): boolean {
