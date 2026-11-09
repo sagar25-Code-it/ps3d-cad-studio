@@ -678,7 +678,7 @@ export function offsetEntities(context: SketchEditContext, ids: readonly string[
           if (tooClose) return reject("The offset overlaps itself: some feature of the shape is narrower than twice the distance.", ids, "Use a smaller distance, or offset to the other side.");
         }
         added.push(...result.entities);
-        if (withRelations) constraints.push(...offsetRelations(context, chain, result));
+        if (withRelations) constraints.push(...offsetRelations(context, chain, result, Math.abs(signed)));
       }
     }
   }
@@ -687,11 +687,15 @@ export function offsetEntities(context: SketchEditContext, ids: readonly string[
   return finishPlan(context, { label: `Offset ${total} curve${total === 1 ? "" : "s"} by ${fmt(distanceMm)} mm${sides}`, removeEntityIds: [], updateEntities: [], addEntities: added, addConstraints: constraints }, { prune: true });
 }
 
-function offsetRelations(context: SketchEditContext, chain: Chain, built: Built): readonly WorkbenchSketchConstraint[] {
+function offsetRelations(context: SketchEditContext, chain: Chain, built: Built, distanceMm: number): readonly WorkbenchSketchConstraint[] {
   const relations: WorkbenchSketchConstraint[] = [];
+  // A chain of straight lines keeps its offset distance: each copy stays that far from its source line, so a source dimension edit carries the offset along.
+  const allLines = built.fillers.length === 0 && built.parts.every((part) => part.source.kind === "line");
   for (const part of built.parts) {
-    if (part.source.kind === "line") relations.push(pairRelation(context, "parallel", part.source.id, part.made.id));
-    else relations.push(pairRelation(context, "concentric", part.source.id, part.made.id));
+    if (part.source.kind === "line") {
+      relations.push(pairRelation(context, "parallel", part.source.id, part.made.id));
+      if (allLines) relations.push({ id: context.newId("constraint"), kind: "distance", entityIds: [part.source.id, part.made.id], valueMm: distanceMm, dimension: "line-line" });
+    } else relations.push(pairRelation(context, "concentric", part.source.id, part.made.id));
   }
   const count = built.parts.length;
   const joints = chain.closed ? count : count - 1;
