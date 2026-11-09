@@ -77,7 +77,7 @@ interface SketchPlaneDialogProps {
   readonly currentPlaneChip?: string;
   /** Present when the dialog was offered on entering Sketch: adds a "Continue with the current sketch" button that does not change anything. */
   readonly onContinue?: () => void;
-  readonly onConfirm: (plane: SketchPlane, offsetMm: number, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef) => void;
+  readonly onConfirm: (plane: SketchPlane, offsetMm: number, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef, convention?: "z-up" | "legacy") => void;
   readonly onClose: () => void;
 }
 
@@ -213,7 +213,7 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
             key={option.featureId}
             type="button"
             className="sketch-plane-face"
-            onClick={() => props.onConfirm(option.sketchPlane, option.offsetMm, option.tilt, option.frame)}
+            onClick={() => props.onConfirm(option.sketchPlane, option.offsetMm, option.tilt, option.frame, undefined, option.convention)}
           ><CommandIcon name="sketch" /><span><strong>{option.name}</strong><small>{option.description}</small></span></button>)}
         </div>}
         {(props.anglePlanes?.length ?? 0) > 0 && <div className="sketch-plane-faces">

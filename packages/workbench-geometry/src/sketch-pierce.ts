@@ -9,6 +9,7 @@ import type {
   WorkbenchProject,
   WorkbenchSketch
 } from "../../workbench-core/src/index.js";
+import { datumCoordinatesOf, usesZUpPlane } from "../../workbench-core/src/index.js";
 import { evaluateConstructionAxis } from "./construction-geometry.js";
 import { pickableEdges } from "./mesh-modify.js";
 import { placeDirection, placePoint, type SketchPlacement } from "./sketch-placement.js";
@@ -27,21 +28,20 @@ type PlaneName = "datum:xy" | "datum:xz" | "datum:yz";
 
 const NORMALS: Readonly<Record<PlaneName, Vec3>> = { "datum:xy": [0, 0, 1], "datum:xz": [0, -1, 0], "datum:yz": [1, 0, 0] };
 
-/** The sketch coordinates (u, v) of a point in the datum plane's own frame. */
-function datumToSketch(plane: PlaneName, point: Vec3): Vec2 {
-  if (plane === "datum:xz") return [point[0], point[2]];
-  if (plane === "datum:yz") return [-point[2], point[1]];
-  return [point[0], point[1]];
+/** The sketch coordinates (u, v) of a point in the datum plane's own frame (the Right plane follows the sketch's convention). */
+function datumToSketch(sketch: PlacedSketch, point: Vec3): Vec2 {
+  return datumCoordinatesOf(sketch, point);
 }
 
 /** The point in the datum plane's own frame at sketch coordinates (u, v), on the plane moved `offsetMm` along its normal. */
-function sketchToDatum(plane: PlaneName, uv: Vec2, offsetMm: number): Vec3 {
+function sketchToDatum(sketch: PlacedSketch, uv: Vec2, offsetMm: number): Vec3 {
+  const plane = sketch.plane;
   if (plane === "datum:xz") return [uv[0], -offsetMm, uv[1]];
-  if (plane === "datum:yz") return [offsetMm, uv[1], -uv[0]];
+  if (plane === "datum:yz") return usesZUpPlane(sketch) ? [offsetMm, uv[0], uv[1]] : [offsetMm, uv[1], -uv[0]];
   return [uv[0], uv[1], offsetMm];
 }
 
-type PlacedSketch = Pick<WorkbenchSketch, "plane" | "planeOffsetMm" | "planeTilt" | "planeFrame">;
+type PlacedSketch = Pick<WorkbenchSketch, "plane" | "planeOffsetMm" | "planeTilt" | "planeFrame"> & { readonly planeConvention?: WorkbenchSketch["planeConvention"] | undefined };
 
 function placementOf(sketch: PlacedSketch): SketchPlacement {
   return { planeTilt: sketch.planeTilt, planeFrame: sketch.planeFrame };
@@ -49,14 +49,14 @@ function placementOf(sketch: PlacedSketch): SketchPlacement {
 
 /** World position of a point on the sketch plane. */
 export function sketchPointToWorld(sketch: PlacedSketch, uv: Vec2): Vec3 {
-  return placePoint(sketchToDatum(sketch.plane, uv, sketch.planeOffsetMm ?? 0), placementOf(sketch));
+  return placePoint(sketchToDatum(sketch, uv, sketch.planeOffsetMm ?? 0), placementOf(sketch));
 }
 
 /** Sketch coordinates of a world point projected along the plane's normal, and how far the point stands from the plane (signed, along the normal). */
 export function worldToSketchPoint(sketch: PlacedSketch, world: Vec3): { readonly uv: Vec2; readonly heightMm: number } {
   const datum = placePoint(world, placementOf(sketch), true);
   const normal = NORMALS[sketch.plane];
-  return { uv: datumToSketch(sketch.plane, datum), heightMm: normal[0] * datum[0] + normal[1] * datum[1] + normal[2] * datum[2] - (sketch.planeOffsetMm ?? 0) };
+  return { uv: datumToSketch(sketch, datum), heightMm: normal[0] * datum[0] + normal[1] * datum[1] + normal[2] * datum[2] - (sketch.planeOffsetMm ?? 0) };
 }
 
 export interface PierceHit {
@@ -87,7 +87,7 @@ export function linePlaneCrossing(sketch: PlacedSketch, origin: Vec3, direction:
   }
   const t = -height / across;
   const point: Vec3 = [o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t];
-  return { ok: true, value: { pointMm: datumToSketch(sketch.plane, point), worldMm: placePoint(point, placement), t } };
+  return { ok: true, value: { pointMm: datumToSketch(sketch, point), worldMm: placePoint(point, placement), t } };
 }
 
 /** Where a construction axis crosses the sketch plane. */
@@ -118,7 +118,7 @@ export function bodyEdgePierces(sketch: PlacedSketch, body: GeneralSolidBody): P
     if (ha * hb > 0) continue;
     const t = ha / (ha - hb);
     const point: Vec3 = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-    const pointMm = datumToSketch(sketch.plane, point);
+    const pointMm = datumToSketch(sketch, point);
     // An edge that ends exactly on the plane is met by the neighbouring edge too; report the crossing once.
     const key = `${edge.chain}:${Math.round(pointMm[0] * 1e6)}:${Math.round(pointMm[1] * 1e6)}`;
     if (seen.has(key)) continue;

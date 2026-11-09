@@ -172,7 +172,7 @@ import { AboutDialog } from "./ui/AboutDialog.js";
 import { useBuildUpdate } from "./ui/useBuildUpdate.js";
 import { formatBuildLabel } from "./build-info.js";
 import { dimensionModeStatus } from "./sketch-help-text.js";
-import { INITIAL_PLANE_OFFER, decidePlaneOffer, describeSketchPlane, existingSketchPlanes, planeOfferAfterFinish } from "./sketch-plane-ui.js";
+import { INITIAL_PLANE_OFFER, decidePlaneOffer, conventionOf, describeSketchPlane, existingSketchPlanes, planeOfferAfterFinish } from "./sketch-plane-ui.js";
 import { SKETCH_HOTKEY_HELP } from "../../../packages/workbench-sketch/src/hotkeys.js";
 import { friendlySketchText } from "../../../packages/workbench-core/src/sketch-names.js";
 import { WorkbenchContextMenu } from "./ui/WorkbenchContextMenu.js";
@@ -928,12 +928,12 @@ export function App(): React.JSX.Element {
     setSketchPlaneDialogOpen(true);
   };
 
-  const confirmSketchPlane = (plane: SketchPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef): void => {
+  const confirmSketchPlane = (plane: SketchPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef, convention?: "z-up" | "legacy"): void => {
     setSketchPlaneDialogOpen(false);
     const datum = `datum:${plane}` as const;
     const where = frame !== undefined ? "plane through three points"
       : `${plane.toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
-    const placement = { ...(offsetMm === 0 ? {} : { offsetMm }), ...(tilt === undefined ? {} : { tilt }), ...(frame === undefined ? {} : { frame }), ...(face === undefined ? {} : { face }) };
+    const placement = { ...(offsetMm === 0 ? {} : { offsetMm }), ...(tilt === undefined ? {} : { tilt }), ...(frame === undefined ? {} : { frame }), ...(face === undefined ? {} : { face }), ...(convention === undefined ? {} : { convention }) };
     if (sketchPlaneDialogMode === "new") {
       void (async () => {
         await commitWorkingSketch();
@@ -945,7 +945,8 @@ export function App(): React.JSX.Element {
     const sameTilt = (sketch.planeTilt?.axis ?? null) === (tilt?.axis ?? null) && (sketch.planeTilt?.angleDeg ?? 0) === (tilt?.angleDeg ?? 0);
     const sameFrame = JSON.stringify(sketch.planeFrame ?? null) === JSON.stringify(frame ?? null);
     const sameFace = (sketch.planeFace?.faceKey ?? null) === (face?.faceKey ?? null) && (sketch.planeFace?.bodyId ?? null) === (face?.bodyId ?? null);
-    if ((sketch.plane !== datum || (sketch.planeOffsetMm ?? 0) !== offsetMm || !sameTilt || !sameFrame || !sameFace)
+    const sameConvention = convention === undefined || sketch.plane !== "datum:yz" || convention === conventionOf(sketch);
+    if ((sketch.plane !== datum || !sameConvention || (sketch.planeOffsetMm ?? 0) !== offsetMm || !sameTilt || !sameFrame || !sameFace)
       && !applyProjectOperation({ kind: "set-sketch-plane", plane: datum, ...placement })) return;
     if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
     setStatusText(`${describeSketchPlane(projectRef.current.sketch).status} Shown face-on. Draw a closed profile, then Create solid extrudes or revolves it from this plane.`);

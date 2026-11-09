@@ -11,7 +11,8 @@ import { alignLoopStart } from "./loft-align.js";
  * kernel). It is cross-checked by volume against combineSolids in the test suite.
  */
 
-export type TessellatePlane = "xy" | "xz" | "yz";
+/** "yz-zup" is the Right plane of the Z-up convention (sketch X along world +Y, sketch Y along +Z); "yz" keeps the legacy mapping of older sketches. */
+export type TessellatePlane = "xy" | "xz" | "yz" | "yz-zup";
 
 export interface TessellatedMesh {
   readonly positionsMm: readonly number[];
@@ -24,7 +25,8 @@ type Point2 = readonly [number, number];
 export const PLANE_ROTATION_DEG: Record<TessellatePlane, Vec3> = {
   xy: [0, 0, 0],
   xz: [90, 0, 0],
-  yz: [0, 90, 0]
+  yz: [0, 90, 0],
+  "yz-zup": [0, 90, 90]
 };
 
 const REVOLVE_SEGMENTS = 64;

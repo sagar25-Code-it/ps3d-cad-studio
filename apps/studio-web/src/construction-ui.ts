@@ -1,3 +1,4 @@
+import { datumPointOf } from "../../../packages/workbench-core/src/index.js";
 import type { ConstructionAxis, ConstructionBinder, ConstructionPlaneDefinition, ConstructionBinderTarget, ConstructionEdgeRef, ConstructionPathRef, DesignHistory, GeneralSolidBody, SketchEntity, Vec3, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
 import { faceTargetOf, nearestBodyFace, nearestPickableEdge, pickableEdges, placePoint } from "../../../packages/workbench-geometry/src/index.js";
 import { sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
@@ -21,7 +22,7 @@ const CIRCLE_SAMPLES = 96;
 export function sketchPointToWorld(sketch: WorkbenchSketch, point: readonly [number, number]): Vec3 {
   const plane = planeKeyOf(sketch.plane);
   // The datum planes place sketch (x, y) the way the solid builders do: XY as is, XZ with y up Z, YZ with y along Y and x down Z.
-  const onDatum: Vec3 = plane === "xy" ? [point[0], point[1], 0] : plane === "xz" ? [point[0], 0, point[1]] : [0, point[1], -point[0]];
+  const onDatum: Vec3 = datumPointOf(sketch, point[0], point[1]);
   const normal = NORMALS[plane];
   const offset = sketch.planeOffsetMm ?? 0;
   const lifted: Vec3 = [onDatum[0] + normal[0] * offset, onDatum[1] + normal[1] * offset, onDatum[2] + normal[2] * offset];

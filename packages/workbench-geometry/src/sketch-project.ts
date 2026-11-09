@@ -6,7 +6,7 @@
  * recognised again as lines, circular arcs, whole circles, ellipses and, for a smooth run that is none of those, splines
  * (see curve-fit.ts). The sketch entities that come out are SNAPSHOTS: they do not follow later edits of the source body.
  */
-import type { SketchDatumPlane, SketchEntity } from "../../workbench-core/src/index.js";
+import { datumAxesOf, type SketchDatumPlane, type SketchEntity, type SketchPlaneConvention } from "../../workbench-core/src/index.js";
 import { fitPolyline, type FitPrimitive, type Pt } from "./curve-fit.js";
 import { placeDirection, placePoint, type SketchPlacement } from "./sketch-placement.js";
 
@@ -29,18 +29,13 @@ export interface SketchFrame {
 export interface SketchFrameSource extends SketchPlacement {
   readonly plane: SketchDatumPlane;
   readonly planeOffsetMm?: number | undefined;
+  /** The Right plane's mapping: absent is the legacy one, "z-up" the newer (plane-convention.ts). */
+  readonly planeConvention?: SketchPlaneConvention | undefined;
 }
-
-/** The datum planes' own axes, matching how the solid builder places a profile (xz sketches face -Y, yz sketches run along -Z). */
-const DATUM_AXES: Readonly<Record<SketchDatumPlane, { readonly u: Vec3; readonly v: Vec3; readonly n: Vec3 }>> = {
-  "datum:xy": { u: [1, 0, 0], v: [0, 1, 0], n: [0, 0, 1] },
-  "datum:xz": { u: [1, 0, 0], v: [0, 0, 1], n: [0, -1, 0] },
-  "datum:yz": { u: [0, 0, -1], v: [0, 1, 0], n: [1, 0, 0] }
-};
 
 /** The world frame of a sketch: its datum plane, moved along the normal by the offset, then tilted or placed on its three-point frame. */
 export function sketchFrameOf(sketch: SketchFrameSource): SketchFrame {
-  const axes = DATUM_AXES[sketch.plane];
+  const axes = datumAxesOf(sketch);
   const offset = sketch.planeOffsetMm ?? 0;
   const placement: SketchPlacement = { planeTilt: sketch.planeTilt, planeFrame: sketch.planeFrame };
   return {

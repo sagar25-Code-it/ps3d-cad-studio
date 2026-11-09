@@ -80,7 +80,7 @@ export const sketchPierceWpTests: readonly TestCase[] = [
       near(alongY.pointMm[1], 7, 1e-9, "XZ: v is the world z");
       near(alongY.worldMm[1], -6, 1e-9, "the XZ plane at offset 6 sits at y = -6");
       // YZ, offset 5: plane x = 5; an axis along X through y = 4, z = 9 gives u = -z = -9, v = y = 4.
-      const yz = onSketch("datum:yz", { offsetMm: 5 });
+      const yz = onSketch("datum:yz", { offsetMm: 5, convention: "legacy" });
       const alongX = hitOf(yz, axisThrough("x", [-10, 4, 9], [10, 4, 9]));
       near(alongX.pointMm[0], -9, 1e-9, "YZ: u is minus the world z");
       near(alongX.pointMm[1], 4, 1e-9, "YZ: v is the world y");

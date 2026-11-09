@@ -1,3 +1,4 @@
+import { datumPointOf } from "../../../packages/workbench-core/src/index.js";
 import type { SketchEntity, SketchDatumPlane, Vec2, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
 import { placeDirection, placePoint } from "../../../packages/workbench-geometry/src/index.js";
 import { detectSketchProfiles, sampleArcToBound, sampleSplineToBound } from "../../../packages/workbench-sketch/src/index.js";
@@ -17,7 +18,7 @@ export function sketchPlaneNormal(sketch: WorkbenchSketch): V3 {
 /** A sketch point in world millimetres: onto its datum plane, along the normal by the plane offset, then onto a tilted or three-point plane. */
 export function sketchPointToWorld(sketch: WorkbenchSketch, point: Vec2): V3 {
   const key = planeKey(sketch.plane);
-  const flat: V3 = key === "xy" ? [point[0], point[1], 0] : key === "xz" ? [point[0], 0, point[1]] : [0, point[1], -point[0]];
+  const flat: V3 = datumPointOf(sketch, point[0], point[1]);
   const normal = DATUM_NORMAL[key];
   const offset = sketch.planeOffsetMm ?? 0;
   return placePoint([flat[0] + normal[0] * offset, flat[1] + normal[1] * offset, flat[2] + normal[2] * offset], sketch);

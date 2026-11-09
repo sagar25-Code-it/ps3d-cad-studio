@@ -69,6 +69,8 @@ import { AUDIT_KEEP_FULL, compactAudit } from "./audit-archive.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
 import { applySketchObjectsEdit, explicitObjectIds, reconcileSketchObjects, validSketchObjectsEdit } from "./sketch-objects.js";
 import { unpackMeshes } from "./mesh-pack.js";
+import { conventionFields } from "./plane-convention.js";
+import { quarterTurnEditProblem, seedQuarterTurns } from "./sketch-quarter-turn.js";
 import { missingSketchEntityFailure } from "./finished-sketch-hint.js";
 import { constraintPayloadProblem, describeGivenValue, parameterTableProblem, sketchObjectsProblem } from "./operation-payload-problems.js";
 
@@ -753,10 +755,10 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       );
     }
     case "set-sketch-plane": {
-      const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, ...rest } = project.sketch;
+      const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, planeConvention: _previousConvention, ...rest } = project.sketch;
       const offset = operation.offsetMm ?? 0;
       return changed(
-        { ...project, sketch: { ...rest, plane: operation.plane, ...(offset === 0 ? {} : { planeOffsetMm: offset }), ...(operation.tilt === undefined ? {} : { planeTilt: operation.tilt }), ...(operation.frame === undefined ? {} : { planeFrame: operation.frame }), ...(operation.face === undefined ? {} : { planeFace: operation.face }) } },
+        { ...project, sketch: { ...rest, plane: operation.plane, ...conventionFields(operation.plane, operation.convention, operation.frame !== undefined, project.sketch), ...(offset === 0 ? {} : { planeOffsetMm: offset }), ...(operation.tilt === undefined ? {} : { planeTilt: operation.tilt }), ...(operation.frame === undefined ? {} : { planeFrame: operation.frame }), ...(operation.face === undefined ? {} : { planeFace: operation.face }) } },
         [project.sketch.id],
         operation.frame === undefined
           ? `Placed the sketch on the ${operation.plane.replace("datum:", "").toUpperCase()} plane${offset === 0 ? "" : ` offset ${offset} mm`}${operation.tilt === undefined ? "" : ` tilted ${operation.tilt.angleDeg}° about ${operation.tilt.axis.toUpperCase()}`}.`
@@ -765,7 +767,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "commit-design-sketch": return commitDesignSketch(project, operation.featureId, operation.name);
     case "edit-design-sketch": return editDesignSketch(project, operation.featureId);
-    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt, operation.frame, operation.face);
+    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt, operation.frame, operation.face, operation.convention);
     case "add-design-solid": return addDesignSolid(project, operation.feature, operation.body);
     case "update-design-solid": return updateDesignSolid(project, operation.feature, operation.body);
     case "regenerate-design": return regenerateDesign(project, operation.results);
@@ -1449,6 +1451,9 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   const solved = solveLiveSketch(next, focus);
   if (!solved.ok) return solveFailure(solved);
   if (solved.movedIds.length > 0) {
+    // Horizontal on a vertical line (or Vertical on a horizontal one) is a quarter turn: add-sketch-constraint does it, an exact edit cannot.
+    const turn = quarterTurnEditProblem(next, seedQuarterTurns(next, new Set(focus)).turnedIds);
+    if (turn !== undefined) return failure("CONSTRAINT_CONFLICT", turn.message, solved.movedIds, turn.recovery);
     return failure(
       "CONSTRAINT_CONFLICT",
       `This edit conflicts with a sketch relation on ${solved.movedIds.map((id) => sketchEntityName(next, id)).join(", ")}. ${solved.notes.join("; ")}.`,
@@ -1586,7 +1591,9 @@ function stableId(value: unknown): value is string {
 /** The shared payload of the two operations that place a sketch: a datum plane with an optional offset, tilt or (instead of both) frame. */
 function validSketchPlacementInput(input: Record<string, unknown>, common: readonly string[]): boolean {
   const optional = ["offsetMm", "tilt", "frame", "face"].filter((key) => Object.hasOwn(input, key));
-  if (!keys(input, [...common, "plane", ...optional]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)) return false;
+  const hasConvention = Object.hasOwn(input, "convention");
+  if (!keys(input, [...common, "plane", ...optional, ...(hasConvention ? ["convention"] : [])]) || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(input.plane)) return false;
+  if (hasConvention && input.convention !== "z-up" && input.convention !== "legacy") return false;
   if (Object.hasOwn(input, "offsetMm") && !(typeof input.offsetMm === "number" && Number.isFinite(input.offsetMm) && Math.abs(input.offsetMm) <= MODEL_ENVELOPE.maxPlaneOffsetMm)) return false;
   if (Object.hasOwn(input, "tilt") && !validSketchPlaneTilt(input.tilt)) return false;
   if (Object.hasOwn(input, "frame") && (!validSketchPlaneFrame(input.frame) || input.plane !== "datum:xy" || optional.length > 1)) return false;

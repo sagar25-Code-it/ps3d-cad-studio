@@ -39,7 +39,7 @@ import { keyLabelForCommand, sketchHotkeyHelp, type SketchCommandId, type Sketch
 import { DRAW_CONSTRUCTION_OFF_MESSAGE, DRAW_CONSTRUCTION_ON_MESSAGE, entityForDrawMode, planForDrawMode } from "../../../../packages/workbench-sketch/src/draw-construction.js";
 import { findTextObject, planSketchText, planSketchTextEdit, textSpecFromFields } from "../../../../packages/workbench-sketch/src/sketch-text.js";
 import type { DesignSketchFeature, SketchTextObject, WorkbenchResult } from "../../../../packages/workbench-core/src/index.js";
-import { isSketchDatumEntityId } from "../../../../packages/workbench-core/src/index.js";
+import { isSketchDatumEntityId, usesZUpPlane } from "../../../../packages/workbench-core/src/index.js";
 import { SketchExportPanel, SketchImportPanel, SketchUnderlayPanel, type UnderlayPickState } from "./sketch/SketchExchangePanel.js";
 import { SketchPatternPanel } from "./sketch/SketchPatternPanel.js";
 import { useDimensionOffsets } from "./sketch/useDimensionOffsets.js";
@@ -96,7 +96,7 @@ import { sketchEntityNames } from "../../../../packages/workbench-core/src/sketc
 import { useSketchPref } from "./sketch/useSketchPref.js";
 import type { DisplayUnit } from "../../../../packages/model-schema/src/index.js";
 import { formatLength, formatLengthWithUnit, parseAngleText, setDimensionLabelUnit, unitWord, type SketchLengthUnit } from "../../../../packages/workbench-sketch/src/sketch-units.js";
-import { describeSketchPlane, sketchAxesInWorld } from "../sketch-plane-ui.js";
+import { conventionOf, describeSketchPlane, sketchAxesInWorld } from "../sketch-plane-ui.js";
 import { DEFAULT_PALETTE_LAYOUT } from "./sketch/sketch-prefs.js";
 import {
   type NavigationMode,
@@ -158,11 +158,14 @@ interface DimensionEditState {
 }
 
 /** How each datum plane maps the sketch's horizontal and vertical directions onto the world axes (see general-modeling.ts placeOnPlane). */
-const PLANE_INFO: Readonly<Record<PlaneKey, { readonly name: string; readonly horizontal: "x" | "z"; readonly vertical: "y" | "z"; readonly horizontalLabel: string; readonly verticalLabel: string }>> = {
+const PLANE_INFO: Readonly<Record<PlaneKey, { readonly name: string; readonly horizontal: "x" | "y" | "z"; readonly vertical: "y" | "z"; readonly horizontalLabel: string; readonly verticalLabel: string }>> = {
   xy: { name: "Top (XY)", horizontal: "x", vertical: "y", horizontalLabel: "X", verticalLabel: "Y" },
   xz: { name: "Front (XZ)", horizontal: "x", vertical: "z", horizontalLabel: "X", verticalLabel: "Z" },
   yz: { name: "Right (YZ)", horizontal: "z", vertical: "y", horizontalLabel: "−Z", verticalLabel: "Y" }
 };
+
+/** The Right (YZ) plane of a Z-up sketch: horizontal along world +Y, vertical along +Z (plane-convention.ts). Older sketches keep PLANE_INFO.yz. */
+const PLANE_INFO_YZ_ZUP: (typeof PLANE_INFO)["yz"] = { name: "Right (YZ)", horizontal: "y", vertical: "z", horizontalLabel: "Y", verticalLabel: "Z" };
 
 function planeKeyOf(plane: SketchDatumPlane): PlaneKey {
   return plane === "datum:xz" ? "xz" : plane === "datum:yz" ? "yz" : "xy";
@@ -550,7 +553,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [props.optionsRevealRequest]);
 
   const plane = planeKeyOf(props.sketch.plane);
-  const planeInfo = PLANE_INFO[plane];
+  const planeInfo = plane === "yz" && usesZUpPlane(props.sketch) ? PLANE_INFO_YZ_ZUP : PLANE_INFO[plane];
   const planeWhere = planeWorldCoordinate(props.sketch.plane, props.sketch.planeOffsetMm ?? 0);
   const planePlacement = props.sketch.planeFrame !== undefined ? "plane through three points"
     : planeWhere.valueMm === 0 ? `${planeInfo.name} plane` : `${planeInfo.name} plane at ${planeWhere.axisName} = ${Number(planeWhere.valueMm.toFixed(3))} mm`;
@@ -2252,8 +2255,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           {solidOp === "revolve" && <div className="make-solid-row" aria-label="Revolve axis">
             <small>Axis</small>
             <select aria-label="Revolve axis" value={props.sketch.entities.some((entity) => entity.id === revolveAxisChoice) || revolveAxisChoice === "x" ? revolveAxisChoice : ""} onChange={(event) => setRevolveAxisChoice(event.target.value)}>
-              <option value="">Sketch Y axis ({sketchAxesInWorld(props.sketch.plane).y})</option>
-              <option value="x">Sketch X axis ({sketchAxesInWorld(props.sketch.plane).x})</option>
+              <option value="">Sketch Y axis ({sketchAxesInWorld(props.sketch.plane, conventionOf(props.sketch)).y})</option>
+              <option value="x">Sketch X axis ({sketchAxesInWorld(props.sketch.plane, conventionOf(props.sketch)).x})</option>
               {props.sketch.entities.filter((entity) => entity.kind === "line").map((entity, index) => <option key={entity.id} value={entity.id}>{entity.construction ? "Construction line" : "Line"} {index + 1} ({shortId(entity.id)})</option>)}
             </select>
             <small>{describeSketchAxes(props.sketch)}</small>

@@ -2,7 +2,7 @@ import type { DesignSketchFeature, DesignSolidFeature, GeneralSolidBody } from "
 import type { ProfileRegion } from "../../../packages/workbench-sketch/src/index.js";
 import { profileOutlineMm } from "../../../packages/workbench-sketch/src/index.js";
 import { revolveAxisRelation } from "../../../packages/workbench-geometry/src/index.js";
-import type { SketchPlane } from "./general-modeling.js";
+import type { BuildPlane } from "./general-modeling.js";
 import { buildAxisRevolve, prepareRevolve, resolveRevolveAxis } from "./revolve-axis.js";
 
 export type AxisRevolveOutcome =
@@ -17,7 +17,7 @@ export async function revolveAboutChosenAxis(
   feature: DesignSolidFeature,
   sketchFeature: DesignSketchFeature,
   region: ProfileRegion,
-  plane: SketchPlane,
+  plane: BuildPlane,
   span: { readonly totalDeg: number; readonly startDeg: number },
   color: string,
   bodies?: readonly GeneralSolidBody[]

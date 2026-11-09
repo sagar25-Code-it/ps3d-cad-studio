@@ -261,7 +261,9 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   const optionalFrame = isRecord(value) && Object.hasOwn(value, "planeFrame") ? ["planeFrame"] : [];
   const optionalFace = isRecord(value) && Object.hasOwn(value, "planeFace") ? ["planeFace"] : [];
   const optionalObjects = isRecord(value) ? ["texts", "patterns", "underlay"].filter((key) => Object.hasOwn(value, key)) : [];
-  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame, ...optionalFace, ...optionalObjects])
+  const optionalConvention = isRecord(value) && Object.hasOwn(value, "planeConvention") ? ["planeConvention"] : [];
+  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame, ...optionalFace, ...optionalObjects, ...optionalConvention])
+    || (optionalConvention.length > 0 && (value.planeConvention !== "z-up" || value.plane !== "datum:yz"))
     || (optionalFace.length > 0 && (!validSketchPlaneFace(value.planeFace) || optionalTilt.length > 0 || optionalFrame.length > 0))
     || (optionalTilt.length > 0 && !validSketchPlaneTilt(value.planeTilt))
     || (optionalFrame.length > 0 && (!validSketchPlaneFrame(value.planeFrame) || value.plane !== "datum:xy" || optionalOffset.length > 0 || optionalTilt.length > 0))

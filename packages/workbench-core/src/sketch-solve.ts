@@ -1,6 +1,7 @@
 import { solveAnalyticSketch } from "../../parametric-sketch-core/src/solver.js";
 import type { SketchRelationSet } from "../../parametric-sketch-core/src/types.js";
 import { explainOrientationCollapse, ORIENTATION_RECOVERY } from "./sketch-orientation-explain.js";
+import { seedQuarterTurns } from "./sketch-quarter-turn.js";
 import { applyExtraConstraints } from "./sketch-solve-extras.js";
 import { toSolverAnchors, type LiveAnchor } from "./sketch-anchors.js";
 import { constraintComponent, fromSolverGeometry, liveConstraintId, solverSelector, translateSketch, type UnsolvedConstraint } from "./sketch-translate.js";
@@ -106,7 +107,10 @@ function runLiveSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[]
 
 function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly string[] | undefined, drag: LiveDragTarget | undefined, options: LiveSolveOptions): LiveSketchSolveReport {
   const component = constraintComponent(sketch, focusEntityIds);
-  const translation = translateSketch(sketch, { component, ...(options.forceActive === undefined ? {} : { forceActive: options.forceActive }) });
+  // Horizontal on an exactly vertical line (or Vertical on a horizontal one) is a quarter turn: the line is turned first, keeping its length
+  // (N-08). The solved result still replaces the original entities below, so the turn shows as a move of that line.
+  const seeded = drag === undefined ? seedQuarterTurns(sketch, component) : { sketch, turnedIds: [] as readonly string[] };
+  const translation = translateSketch(seeded.sketch, { component, ...(options.forceActive === undefined ? {} : { forceActive: options.forceActive }) });
   const { document, arcFrames, unsolved } = translation;
   const unsolvedList: UnsolvedConstraint[] = [...unsolved];
   if (drag === undefined && document.constraints.length === 0 && document.dimensions.length === 0) {

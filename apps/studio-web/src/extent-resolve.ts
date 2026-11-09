@@ -1,3 +1,4 @@
+import { datumPointOf } from "../../../packages/workbench-core/src/index.js";
 import type { DesignExtentTarget, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody } from "../../../packages/workbench-core/src/index.js";
 import { distanceToBody, distanceToFace, distanceToPoint, facePlaneOf, footprintSamples, halfSpaceBox, nearestMeshVertex, pickableVertices, placeDirection, placePoint, revolveAngleToFace, type ExtentDistance, type ExtentMesh } from "../../../packages/workbench-geometry/src/index.js";
 import { detectSketchProfiles, profileOutlineMm, resolveProfileRegion } from "../../../packages/workbench-sketch/src/index.js";
@@ -20,7 +21,7 @@ function planeKey(feature: DesignSketchFeature): "xy" | "xz" | "yz" {
 /** A point of the sketch (u, v in millimetres) in world space, with the sketch's plane offset and tilt applied. */
 export function sketchPointToWorld(sketchFeature: DesignSketchFeature, u: number, v: number): V3 {
   const key = planeKey(sketchFeature);
-  const base: V3 = key === "xz" ? [u, 0, v] : key === "yz" ? [0, v, -u] : [u, v, 0];
+  const base: V3 = datumPointOf(sketchFeature.sketch, u, v);
   const normal = PLANE_NORMAL[key];
   const offset = sketchFeature.sketch.planeOffsetMm ?? 0;
   return placePoint([base[0] + normal[0] * offset, base[1] + normal[1] * offset, base[2] + normal[2] * offset], sketchFeature.sketch);

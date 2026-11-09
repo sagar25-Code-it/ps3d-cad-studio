@@ -2,18 +2,18 @@ import type { GeneralSolidBody } from "../../../packages/workbench-core/src/inde
 import { offsetPolygon, rotateAboutAxis } from "../../../packages/workbench-geometry/src/index.js";
 import type { SketchProfile } from "../../../packages/workbench-sketch/src/index.js";
 import { stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
-import { combineGeneralBodies, createGeneralSolidBody, type CreateGeneralSolidResult, type SketchPlane } from "./general-modeling.js";
+import { combineGeneralBodies, createGeneralSolidBody, storedPlaneOf, type BuildPlane, type CreateGeneralSolidResult } from "./general-modeling.js";
 
 type Point2 = readonly [number, number];
 
 /** The world axis a revolve turns about in the datum frame (the sketch Y axis, carried onto its plane). Native sweep is right-handed about its opposite. */
-export const REVOLVE_AXIS: Readonly<Record<SketchPlane, readonly [number, number, number]>> = { xy: [0, 1, 0], xz: [0, 0, 1], yz: [0, 1, 0] };
+export const REVOLVE_AXIS: Readonly<Record<BuildPlane, readonly [number, number, number]>> = { xy: [0, 1, 0], xz: [0, 0, 1], yz: [0, 1, 0], "yz-zup": [0, 0, 1] };
 
 /**
  * Moves a revolved body so that it starts `startDeg` degrees along its sweep instead of at 0 (negative starts before the sketch plane).
  * The builders always sweep from 0 to the angle; this is how symmetric, flipped and two-sided revolves are placed.
  */
-export function startRevolveAt(positionsMm: readonly number[], plane: SketchPlane, startDeg: number): number[] {
+export function startRevolveAt(positionsMm: readonly number[], plane: BuildPlane, startDeg: number): number[] {
   if (startDeg === 0) return [...positionsMm];
   // The sweep is right-handed about the opposite of the axis, so starting earlier by s turns the body right-handed by +s.
   return rotateAboutAxis(positionsMm, [0, 0, 0], REVOLVE_AXIS[plane], (-startDeg * Math.PI) / 180);
@@ -35,7 +35,7 @@ function profileOf(id: string, points: readonly Point2[]): SketchProfile {
 export interface ThinRevolveRequest {
   /** The closed outline the wall follows, in sketch millimetres. */
   readonly outlineMm: readonly Point2[];
-  readonly plane: SketchPlane;
+  readonly plane: BuildPlane;
   /** The angle swept, 1 to 360 degrees, starting at the sketch plane. */
   readonly angleDeg: number;
   readonly wallMm: number;
@@ -95,10 +95,10 @@ export async function createThinRevolveBody(request: ThinRevolveRequest): Promis
   if (!innerSolid.ok) return innerSolid;
   if (full) {
     const shell = await hollowShell(outerSolid.body, innerSolid.body, request.bodyId, request.name);
-    return { ok: true, body: { ...shell, color: request.color, feature: { operation: "revolve", plane: request.plane, valueMm: request.angleDeg } } };
+    return { ok: true, body: { ...shell, color: request.color, feature: { operation: "revolve", plane: storedPlaneOf(request.plane), valueMm: request.angleDeg } } };
   }
   const innerPlaced: GeneralSolidBody = { ...innerSolid.body, positionsMm: startRevolveAt(innerSolid.body.positionsMm, request.plane, -overshoot) };
   const walled = await combineGeneralBodies({ target: outerSolid.body, tool: innerPlaced, mode: "cut", bodyId: request.bodyId, name: request.name });
   if (!walled.ok) return { ok: false, message: `Thin revolve could not hollow the solid: ${walled.message}` };
-  return { ok: true, body: { ...walled.body, color: request.color, feature: { operation: "revolve", plane: request.plane, valueMm: request.angleDeg } } };
+  return { ok: true, body: { ...walled.body, color: request.color, feature: { operation: "revolve", plane: storedPlaneOf(request.plane), valueMm: request.angleDeg } } };
 }

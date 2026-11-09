@@ -19,6 +19,7 @@ import { validParameterTable } from "./parameter-graph.js";
 import { EDGE_BLEND_KEYS, validEdgeBlendFields } from "./edge-blend.js";
 import { BODY_EDIT_KINDS, BODY_EDIT_ONLY_KINDS, validBodyEdit } from "./body-edit.js";
 import { FEATURE_REF_KEYS, validFeatureRefs } from "./feature-refs.js";
+import { conventionFields, type SketchPlaneConventionRequest } from "./plane-convention.js";
 
 /**
  * The parametric history ("timeline"): an ordered list of sketch and solid features with a rollback marker. A sketch
@@ -236,11 +237,12 @@ export function editDesignSketch(project: WorkbenchProject, featureId: string): 
   return changed({ ...project, sketch: feature.sketch, activeWorkspace: "sketch", design: next }, [featureId], `Reopened ${feature.name} for editing.`);
 }
 
-export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef): DesignChange {
+export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef, convention?: SketchPlaneConventionRequest): DesignChange {
   const history = designOf(project);
-  const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, ...rest } = project.sketch;
+  const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, planeConvention: _previousConvention, ...rest } = project.sketch;
   const { texts: _texts, patterns: _patterns, underlay: _underlay, ...fresh } = rest;
-  const sketch = { ...fresh, name: "Sketch", plane, ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), ...(frame === undefined ? {} : { planeFrame: frame }), ...(face === undefined ? {} : { planeFace: face }), entities: [], constraints: [] };
+  // A new sketch on the Right plane gets the Z-up mapping unless the caller restores an older sketch with "legacy".
+  const sketch = { ...fresh, name: "Sketch", plane, ...conventionFields(plane, convention ?? "z-up", frame !== undefined, undefined), ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), ...(frame === undefined ? {} : { planeFrame: frame }), ...(face === undefined ? {} : { planeFace: face }), entities: [], constraints: [] };
   const where = frame !== undefined ? "a plane through three points"
     : `the ${plane.replace("datum:", "").toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
   return changed({ ...project, sketch, activeWorkspace: "sketch", design: { ...history, editingSketchId: null } }, [project.sketch.id], `Started a new sketch on ${where}.`);

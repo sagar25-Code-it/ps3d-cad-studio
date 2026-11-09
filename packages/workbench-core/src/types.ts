@@ -2,6 +2,7 @@ import type { PatternDefinition } from "./pattern.js";
 import type { BodyEditSpec } from "./body-edit.js";
 import type { SheetBendTable } from "./sheet-features.js";
 import type { SketchObjectsEdit, SketchPatternObject, SketchTextObject, SketchUnderlay } from "./sketch-objects.js";
+import type { SketchPlaneConvention, SketchPlaneConventionRequest } from "./plane-convention.js";
 
 export const WORKBENCH_FORMAT = "ps3d-workbench-project" as const;
 export const WORKBENCH_SCHEMA_VERSION = 1 as const;
@@ -305,6 +306,8 @@ export interface WorkbenchSketch {
   readonly planeTilt?: SketchPlaneTilt;
   /** Absent for a datum plane. Present only with `plane: "datum:xy"` and neither an offset nor a tilt. */
   readonly planeFrame?: SketchPlaneFrame;
+  /** Absent: the legacy Right (YZ) mapping (sketch X along world -Z, Y along +Y). "z-up": X along world +Y, Y along +Z (see plane-convention.ts). */
+  readonly planeConvention?: SketchPlaneConvention;
   readonly gridMm: number;
   readonly snapToleranceMm: number;
   readonly entities: readonly SketchEntity[];
@@ -1555,13 +1558,13 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly label: string;
     }
   | { readonly kind: "set-sketch-constraints-suppressed"; readonly constraintIds: readonly string[]; readonly suppressed: boolean }
-  | { readonly kind: "set-sketch-plane"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame; readonly face?: SketchPlaneFaceRef }
+  | { readonly kind: "set-sketch-plane"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame; readonly face?: SketchPlaneFaceRef; readonly convention?: SketchPlaneConventionRequest }
   /** Finishes the working sketch into the timeline: a new sketch feature, or an update of the one being edited. */
   | { readonly kind: "commit-design-sketch"; readonly featureId: string; readonly name: string }
   /** Reopens a sketch feature as the working sketch. */
   | { readonly kind: "edit-design-sketch"; readonly featureId: string }
   /** Starts a new, empty working sketch on a plane (the previous one should be finished first), optionally offset along its normal. */
-  | { readonly kind: "new-design-sketch"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame; readonly face?: SketchPlaneFaceRef }
+  | { readonly kind: "new-design-sketch"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame; readonly face?: SketchPlaneFaceRef; readonly convention?: SketchPlaneConventionRequest }
   /** Adds an extrude or revolve feature together with the solid the kernel built for it. */
   | { readonly kind: "add-design-solid"; readonly feature: DesignSolidFeature; readonly body: GeneralSolidBody }
   /** Changes a solid feature's parameters and replaces its solid. */

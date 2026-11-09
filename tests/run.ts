@@ -134,6 +134,7 @@ import { pipeline3MeshTests } from "./pipeline3-mesh.test.js";
 import { pipeline3TimelineTests } from "./pipeline3-timeline.test.js";
 import { pipeline3UnitTests } from "./pipeline3-units.test.js";
 import { pipeline3SweepPathTests } from "./pipeline3-sweep-path.test.js";
+import { pipeline3PlaneTests } from "./pipeline3-plane.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import type { TestCase } from "./test-kit.js";
@@ -283,6 +284,7 @@ const tests: readonly TestCase[] = [
   ...pipeline3TimelineTests,
   ...pipeline3UnitTests,
   ...pipeline3SweepPathTests,
+  ...pipeline3PlaneTests,
 ];
 let failures = 0;
 
