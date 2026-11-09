@@ -9,6 +9,7 @@ import {
 import { entityPoints, sampleSpline } from "./index.js";
 import { pinnedAmong } from "./sketch-clone.js";
 import { finishPlan } from "./edit-relations.js";
+import { carryRectangleRelations } from "./corner-keep.js";
 import {
   arcEntity,
   arcFrame,
@@ -314,7 +315,9 @@ function splitRectangle(context: SketchEditContext, rectangle: Rectangle, pick: 
   if (t * length < MIN_PIECE_MM || (1 - t) * length < MIN_PIECE_MM) return reject("Pick a point between the corners of the rectangle side.", [rectangle.id]);
   const at: Vec2 = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
   const chain: Vec2[] = [];
+  const cornerAt: number[] = [];
   for (let index = 0; index < 4; index += 1) {
+    cornerAt[index] = chain.length;
     chain.push(corners[index]!);
     if (index === side) chain.push(at);
   }
@@ -336,11 +339,29 @@ function splitRectangle(context: SketchEditContext, rectangle: Rectangle, pick: 
     });
   }
   const carried = relationsOn(context.sketch, rectangle.id).filter((constraint) => constraint.kind === "fixed").flatMap((constraint) => lines.map((line) => repoint(context, constraint, rectangle.id, line.id)));
-  const lost = relationsOn(context.sketch, rectangle.id).filter((constraint) => constraint.kind !== "fixed").length;
+  // Width and height stay driven: the side that was split is measured between its two corners, the others by their line.
+  const cornerLine = cornerAt.map((index) => lines[index]!.id);
+  const sizes: WorkbenchSketchConstraint[] = [];
+  if (!pinnedRectangle) {
+    for (const constraint of relationsOn(context.sketch, rectangle.id)) {
+      if (constraint.kind !== "distance" || constraint.driven === true || constraint.suppressed === true || constraint.valueMm === undefined || constraint.entityIds[0] !== rectangle.id) continue;
+      if (constraint.dimension !== "width" && constraint.dimension !== "height") continue;
+      const sideIndex = constraint.dimension === "height" ? 1 : 0;
+      const keepExpression = constraint.expression === undefined ? {} : { expression: constraint.expression };
+      if (sideIndex === side) {
+        sizes.push({ id: context.newId("constraint"), kind: "distance", dimension: "aligned", entityIds: [cornerLine[sideIndex]!, cornerLine[(sideIndex + 1) % 4]!], points: ["start", "start"], valueMm: constraint.valueMm, ...keepExpression });
+      } else {
+        sizes.push({ id: context.newId("constraint"), kind: "distance", dimension: "length", entityIds: [cornerLine[sideIndex]!], valueMm: constraint.valueMm, ...keepExpression });
+      }
+    }
+  }
+  // A corner pinned to the origin, a line joined to a corner or a hole measured from the centre moves onto the sides.
+  const points = pinnedRectangle ? { addEntities: [] as SketchEntity[], addConstraints: [] as WorkbenchSketchConstraint[], lost: [] as WorkbenchSketchConstraint[] } : carryRectangleRelations(context, context.sketch, rectangle, { cornerLine, lines });
+  const lost = points.lost.length;
   return editPlan(`Split rectangle side at (${fmt(at[0])}, ${fmt(at[1])}); the rectangle is now ${lines.length} lines${lost === 0 ? "" : ` (${lost} rectangle relation${lost === 1 ? "" : "s"} removed)`}`, {
     removeEntityIds: [rectangle.id],
-    addEntities: lines,
-    addConstraints: [...constraints, ...carried]
+    addEntities: [...lines, ...points.addEntities],
+    addConstraints: [...constraints, ...carried, ...sizes, ...points.addConstraints]
   });
 }
 
