@@ -153,10 +153,10 @@ export const sketchEditOffsetTests: readonly TestCase[] = [
   {
     name: "Sketch edit E11 an offset beyond the model limit says so; construction flags are inherited",
     run: () => {
-      const huge = projectWith([line("a", [-9000, -9000], [9000, -9000]), line("b", [9000, -9000], [9000, 9000]), line("c", [9000, 9000], [-9000, 9000]), line("d", [-9000, 9000], [-9000, -9000])]);
+      const huge = projectWith([line("a", [-99000, -99000], [99000, -99000]), line("b", [99000, -99000], [99000, 99000]), line("c", [99000, 99000], [-99000, 99000]), line("d", [-99000, 99000], [-99000, -99000])]);
       const result = offsetEntities(ctx(huge), ids("a", "b", "c", "d"), 2000);
-      assert(!result.ok, "an 18000 mm square offset by 2000 would leave the 10000 mm limit");
-      if (!result.ok) assert(/10000/u.test(result.diagnostics[0]!.message), "and the message names the limit");
+      assert(!result.ok, "a 198000 mm square offset by 2000 would leave the 100000 mm limit");
+      if (!result.ok) assert(/100000/u.test(result.diagnostics[0]!.message), "and the message names the limit");
       const construction = projectWith([line("a", [0, 0], [10, 0], { construction: true })]);
       equal(ofKind(applyOk(construction, offsetEntities(ctx(construction), ids("a"), 2)), "line")[1]!.construction, true, "the copy of a construction line is construction");
     }

@@ -1,5 +1,6 @@
 import { solveAnalyticSketch } from "../../parametric-sketch-core/src/solver.js";
 import type { SketchRelationSet } from "../../parametric-sketch-core/src/types.js";
+import { explainOrientationCollapse, ORIENTATION_RECOVERY } from "./sketch-orientation-explain.js";
 import { applyExtraConstraints } from "./sketch-solve-extras.js";
 import { toSolverAnchors, type LiveAnchor } from "./sketch-anchors.js";
 import { constraintComponent, fromSolverGeometry, liveConstraintId, solverSelector, translateSketch, type UnsolvedConstraint } from "./sketch-translate.js";
@@ -130,6 +131,8 @@ function runSimultaneousSolve(sketch: WorkbenchSketch, focusEntityIds: readonly 
     const related = [...new Set(errors.flatMap((diagnostic) => diagnostic.relatedIds).map(liveConstraintId))].sort();
     // One group of contradicting relations is named; a second sentence would repeat part of the first.
     const message = errors.length === 0 ? "The sketch constraints could not be solved." : errors[0]!.message;
+    const orientation = errors.some((diagnostic) => /collapse|shrink/u.test(diagnostic.message)) ? explainOrientationCollapse(sketch, related) : undefined;
+    if (orientation !== undefined) return { ok: false, message: orientation, relatedIds: related, recovery: ORIENTATION_RECOVERY };
     return { ok: false, message, relatedIds: related.length === 0 ? [sketch.id] : related, recovery: first?.recovery ?? "Remove or change one of the conflicting constraints." };
   }
   for (const diagnostic of result.diagnostics) {

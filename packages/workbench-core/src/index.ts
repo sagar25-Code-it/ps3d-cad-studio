@@ -38,6 +38,8 @@ export { describeConstraint, entityKindOf, entityNames, liveConstraintId } from 
 export { redriveDimension, dimensionNameOf, locateDimensionConstraint } from "./sketch-dimension-edit.js";
 export type { LiveRelationSet, LiveSolveOptions } from "./sketch-solve.js";
 export * from "./envelope.js";
+export * from "./envelope-limits.js";
+export * from "./tessellation.js";
 export * from "./audit-archive.js";
 export * from "./project-text.js";
 export * from "./feature-refs.js";

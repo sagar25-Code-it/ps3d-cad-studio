@@ -1,5 +1,6 @@
 import {
   failure,
+  MODEL_ENVELOPE,
   WORKBENCH_LIMITS,
   type SketchEntity,
   type SketchPointRef,
@@ -199,8 +200,8 @@ function solverAccepts(sketch: WorkbenchSketch, constraint: WorkbenchSketchConst
 /** The per-edit list sizes the apply-sketch-edit operation accepts. */
 export const EDIT_ENTITY_LIMIT = 500;
 export const EDIT_CONSTRAINT_LIMIT = 1_000;
-const LIMIT_MM = WORKBENCH_LIMITS.maxCoordinateMm;
-const MIN_MM = WORKBENCH_LIMITS.minGeometryMm;
+const LIMIT_MM = MODEL_ENVELOPE.maxSketchCoordinateMm;
+const MIN_MM = MODEL_ENVELOPE.minGeometryMm;
 
 function pointProblem(point: readonly number[], label: string): string | undefined {
   if (!finiteVec(point)) return `${label} would have a coordinate that is not a number.`;
@@ -221,11 +222,11 @@ export function entityProblem(entity: SketchEntity): string | undefined {
     case "line":
       return pointProblem(entity.start, label) ?? pointProblem(entity.end, label) ?? sized(dist(entity.start, entity.end), "length", 2 * LIMIT_MM * Math.SQRT2);
     case "circle":
-      return pointProblem(entity.center, label) ?? sized(entity.radiusMm, "radius", 10_000);
+      return pointProblem(entity.center, label) ?? sized(entity.radiusMm, "radius", MODEL_ENVELOPE.maxSketchRadiusMm);
     case "rectangle":
-      return pointProblem(entity.center, label) ?? sized(entity.widthMm, "width", 20_000) ?? sized(entity.heightMm, "height", 20_000);
+      return pointProblem(entity.center, label) ?? sized(entity.widthMm, "width", MODEL_ENVELOPE.maxSketchSizeMm) ?? sized(entity.heightMm, "height", MODEL_ENVELOPE.maxSketchSizeMm);
     case "ellipse":
-      return pointProblem(entity.center, label) ?? sized(entity.majorRadiusMm, "major radius", 10_000) ?? sized(entity.minorRadiusMm, "minor radius", 10_000)
+      return pointProblem(entity.center, label) ?? sized(entity.majorRadiusMm, "major radius", MODEL_ENVELOPE.maxSketchRadiusMm) ?? sized(entity.minorRadiusMm, "minor radius", MODEL_ENVELOPE.maxSketchRadiusMm)
         ?? (entity.minorRadiusMm > entity.majorRadiusMm + 1e-9 ? `${label} would have a minor radius larger than its major radius.` : undefined);
     case "arc": {
       const problem = pointProblem(entity.start, label) ?? pointProblem(entity.mid, label) ?? pointProblem(entity.end, label);

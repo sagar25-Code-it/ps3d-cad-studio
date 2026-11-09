@@ -262,7 +262,7 @@ const tests: readonly TestCase[] = [
   ...sketchArcSlotJointTests,
   ...sketchRegularPolygonTests,
   ...sketchCornerJoinTests,
-  ...sketchDrawInferenceTests
+  ...sketchDrawInferenceTests,
 ];
 let failures = 0;
 

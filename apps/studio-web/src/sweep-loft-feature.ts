@@ -1,5 +1,5 @@
 import type { DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchEntity, SweepPathRef } from "../../../packages/workbench-core/src/index.js";
-import { detectSketchProfiles, resolveProfileRegion, sampleArc, sampleSpline, type ProfileRegion } from "../../../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, resolveProfileRegion, sampleArcToBound, sampleSplineToBound, type ProfileRegion } from "../../../packages/workbench-sketch/src/index.js";
 import {
   loftProfiles, loopCentroid, pathStartFrame, placeDirection, resamplePath, solidMeshVolume, sweepAlongPath, sweepRigid, flipped,
   signedArea2, type Loops2, type Loops3, type SolidMesh, type V3
@@ -28,24 +28,72 @@ export type SweepLoftOutcome =
 interface Piece {
   readonly id: string;
   readonly points: readonly Point2[];
+  /** The true unit direction of a curved piece at its first and last point (a straight piece has none): the end caps of a sweep stand square to it. */
+  readonly startTangent?: Point2;
+  readonly endTangent?: Point2;
 }
 
-function samplesOf(entity: SketchEntity): readonly Point2[] | undefined {
+function samplesOf(entity: SketchEntity, fine = false): readonly Point2[] | undefined {
   if (entity.kind === "line") return [entity.start, entity.end];
-  if (entity.kind === "arc") return sampleArc(entity.start, entity.mid, entity.end);
-  if (entity.kind === "spline") return sampleSpline(entity.fitPoints);
+  if (entity.kind === "arc") return sampleArcToBound(entity.start, entity.mid, entity.end, { fine });
+  if (entity.kind === "spline") return sampleSplineToBound(entity.fitPoints, { fine });
   return undefined;
 }
 
 const gap = (a: Point2, b: Point2): number => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
+/** Keeps at most `limit` evenly spaced points of a sampled piece, always the first and the last (a straight piece has only those two). */
+function thinned(points: readonly Point2[], limit: number): readonly Point2[] {
+  if (points.length <= limit || limit < 2) return points;
+  const kept: Point2[] = [];
+  for (let index = 0; index < limit; index += 1) kept.push(points[Math.round((index * (points.length - 1)) / (limit - 1))]!);
+  return kept;
+}
+
+/**
+ * The direction a curve leaves its first point in, from its first three samples: the tangent of the circle through them. The first chord
+ * leans toward the inside of a bend by half the angle that chord spans, so the chord is turned back by that much (the share of the
+ * total turn that its own length makes up). Undefined for a straight start (the chord is the tangent) or a start that cannot be read.
+ */
+function startTangentOf(points: readonly Point2[]): Point2 | undefined {
+  if (points.length < 3) return undefined;
+  const [p0, p1, p2] = [points[0]!, points[1]!, points[2]!];
+  const a: Point2 = [p1[0] - p0[0], p1[1] - p0[1]];
+  const b: Point2 = [p2[0] - p1[0], p2[1] - p1[1]];
+  const la = Math.hypot(a[0], a[1]);
+  const lb = Math.hypot(b[0], b[1]);
+  if (la < 1e-12 || lb < 1e-12) return undefined;
+  const turn = Math.atan2(a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1]);
+  if (Math.abs(turn) < 1e-9) return undefined;
+  const back = -turn * (la / (la + lb));
+  const cos = Math.cos(back);
+  const sin = Math.sin(back);
+  return [(a[0] * cos - a[1] * sin) / la, (a[0] * sin + a[1] * cos) / la];
+}
+
+function reversedPiece(piece: Piece): Piece {
+  const negate = (t: Point2): Point2 => [-t[0], -t[1]];
+  return {
+    id: piece.id, points: [...piece.points].reverse(),
+    ...(piece.endTangent === undefined ? {} : { startTangent: negate(piece.endTangent) }),
+    ...(piece.startTangent === undefined ? {} : { endTangent: negate(piece.startTangent) })
+  };
+}
+
+export interface SketchChain {
+  readonly ok: true;
+  readonly points: readonly Point2[];
+  /** Unit directions of the true curve at the first and last point, when those pieces are curved. */
+  readonly startTangent?: Point2;
+  readonly endTangent?: Point2;
+}
+
 /** Chains pieces end to end starting from the first one, in the order given; returns the polyline or the first gap it could not close. */
-function chainInOrder(pieces: readonly Piece[], toleranceMm: number): { readonly ok: true; readonly points: readonly Point2[] } | { readonly ok: false; readonly message: string } {
-  const first = pieces[0]!;
-  let points: Point2[] = [...first.points];
+function chainInOrder(pieces: readonly Piece[], toleranceMm: number): SketchChain | { readonly ok: false; readonly message: string } {
+  let head = pieces[0]!;
   if (pieces.length > 1) {
     const second = pieces[1]!;
-    const ends = [first.points[0]!, first.points[first.points.length - 1]!];
+    const ends = [head.points[0]!, head.points[head.points.length - 1]!];
     const nextEnds = [second.points[0]!, second.points[second.points.length - 1]!];
     // Orient the first piece so that its end is the one nearest the second piece.
     let best = Infinity;
@@ -54,31 +102,42 @@ function chainInOrder(pieces: readonly Piece[], toleranceMm: number): { readonly
       const distance = gap(end, next);
       if (distance < best) { best = distance; reverse = firstIndex === 0; }
     }
-    if (reverse) points.reverse();
+    if (reverse) head = reversedPiece(head);
   }
+  let points: Point2[] = [...head.points];
+  let last = head;
   for (let index = 1; index < pieces.length; index += 1) {
     const piece = pieces[index]!;
     const tail = points[points.length - 1]!;
-    const head = piece.points[0]!;
+    const first = piece.points[0]!;
     const foot = piece.points[piece.points.length - 1]!;
-    const forward = gap(tail, head) <= gap(tail, foot);
-    const distance = forward ? gap(tail, head) : gap(tail, foot);
+    const forward = gap(tail, first) <= gap(tail, foot);
+    const distance = forward ? gap(tail, first) : gap(tail, foot);
     if (distance > toleranceMm) return { ok: false, message: `The sweep path is not connected: ${pieces[index - 1]!.id.replace(/^entity:/u, "")} and ${piece.id.replace(/^entity:/u, "")} are ${distance.toFixed(2)} mm apart. Join their ends (Coincident) or pick curves that touch.` };
-    const oriented = forward ? piece.points : [...piece.points].reverse();
-    points = [...points, ...oriented.slice(1)];
+    last = forward ? piece : reversedPiece(piece);
+    points = [...points, ...last.points.slice(1)];
   }
-  return { ok: true, points };
+  return { ok: true, points, ...(head.startTangent === undefined ? {} : { startTangent: head.startTangent }), ...(last.endTangent === undefined ? {} : { endTangent: last.endTangent }) };
 }
 
-/** The curves of a sketch chained end to end (in the order given, or reordered to connect), as one polyline in sketch millimetres. */
-export function chainSketchCurves(sketchFeature: DesignSketchFeature, entityIds: readonly string[]): { readonly ok: true; readonly points: readonly Point2[] } | { readonly ok: false; readonly message: string } {
+/**
+ * The curves of a sketch chained end to end (in the order given, or reordered to connect), as one polyline in sketch millimetres.
+ * `fine` samples arcs and splines to the finer chord-error rule (a sweep's volume follows the length of its path).
+ */
+export function chainSketchCurves(sketchFeature: DesignSketchFeature, entityIds: readonly string[], maxPointsPerPiece?: number, fine = false): SketchChain | { readonly ok: false; readonly message: string } {
   const pieces: Piece[] = [];
   for (const id of entityIds) {
     const entity = sketchFeature.sketch.entities.find((candidate) => candidate.id === id);
     if (entity === undefined) return { ok: false, message: `The sweep path curve ${id.replace(/^entity:/u, "")} is no longer in ${sketchFeature.name}. Pick the path again.` };
-    const samples = samplesOf(entity);
+    const samples = samplesOf(entity, fine);
     if (samples === undefined || samples.length < 2) return { ok: false, message: `A sweep path is made of lines, arcs and splines; ${id.replace(/^entity:/u, "")} is a ${entity.kind}.` };
-    pieces.push({ id, points: samples });
+    const startTangent = startTangentOf(samples);
+    const endTangent = startTangentOf([...samples].reverse());
+    pieces.push({
+      id, points: maxPointsPerPiece === undefined ? samples : thinned(samples, maxPointsPerPiece),
+      ...(startTangent === undefined ? {} : { startTangent }),
+      ...(endTangent === undefined ? {} : { endTangent: [-endTangent[0], -endTangent[1]] as Point2 })
+    });
   }
   if (pieces.length === 0) return { ok: false, message: "The sweep path has no curves." };
   const tolerance = Math.max(0.05, sketchFeature.sketch.snapToleranceMm);
@@ -87,17 +146,17 @@ export function chainSketchCurves(sketchFeature: DesignSketchFeature, entityIds:
   // The picks were not in order: try every piece as the start, always continuing with an unused piece that touches the end.
   for (const start of pieces) {
     for (const reversed of [false, true]) {
-      const sequence: Piece[] = [{ id: start.id, points: reversed ? [...start.points].reverse() : start.points }];
+      const sequence: Piece[] = [reversed ? reversedPiece(start) : start];
       const used = new Set([start.id]);
       let tail = sequence[0]!.points[sequence[0]!.points.length - 1]!;
       for (;;) {
         const next = pieces.find((piece) => !used.has(piece.id) && (gap(tail, piece.points[0]!) <= tolerance || gap(tail, piece.points[piece.points.length - 1]!) <= tolerance));
         if (next === undefined) break;
         const forward = gap(tail, next.points[0]!) <= gap(tail, next.points[next.points.length - 1]!);
-        const oriented = forward ? next.points : [...next.points].reverse();
-        sequence.push({ id: next.id, points: oriented });
+        const oriented = forward ? next : reversedPiece(next);
+        sequence.push(oriented);
         used.add(next.id);
-        tail = oriented[oriented.length - 1]!;
+        tail = oriented.points[oriented.points.length - 1]!;
       }
       if (used.size === pieces.length) {
         const joined = chainInOrder(sequence, tolerance);
@@ -112,9 +171,9 @@ export function chainSketchCurves(sketchFeature: DesignSketchFeature, entityIds:
 // Profiles in the world
 // ---------------------------------------------------------------------------------------------
 
-function worldLoops(region: ProfileRegion, sketchFeature: DesignSketchFeature, lift = 0): Loops3 {
+function worldLoops(region: ProfileRegion, sketchFeature: DesignSketchFeature, lift = 0, fine = false): Loops3 {
   const toWorld = (polygon: readonly Point2[]): V3[] => polygon.map(([x, y]) => sketchToWorld(sketchFeature.sketch, x, y, lift));
-  return { outer: toWorld(profilePolygonMm(region.outer.boundary)), holes: region.holes.map((hole) => toWorld(profilePolygonMm(hole.boundary))) };
+  return { outer: toWorld(profilePolygonMm(region.outer.boundary, undefined, fine)), holes: region.holes.map((hole) => toWorld(profilePolygonMm(hole.boundary, undefined, fine))) };
 }
 
 function bodyOf(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature, mesh: SolidMesh, color: string): GeneralSolidBody {
@@ -127,6 +186,8 @@ function bodyOf(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature,
 }
 
 const MAX_TRIANGLES = 99_000;
+/** Triangles a sweep along a curved path may use before the path is sampled more coarsely (the mesh is stored as plain JSON). */
+const SWEEP_TRIANGLE_BUDGET = 16_000;
 
 function checked(mesh: SolidMesh, what: string): { readonly ok: true } | { readonly ok: false; readonly message: string } {
   if (mesh.positionsMm.length / 3 > 99_000 || mesh.indices.length / 3 > MAX_TRIANGLES * 2) return { ok: false, message: `The ${what} has too many triangles to store. Use a shorter or simpler path or profile.` };
@@ -173,18 +234,41 @@ export async function buildSweepFeature(feature: DesignSolidFeature, sketchFeatu
 
   const pathSketch = path.sketchFeatureId === sketchFeature.id ? sketchFeature : lookup?.(path.sketchFeatureId);
   if (pathSketch === undefined) return { ok: false, message: lookup === undefined ? "The sketch holding this sweep's path could not be reached from here." : "The sketch holding this sweep's path is no longer in the timeline. Pick the path again, or delete the sweep." };
-  const chain = chainSketchCurves(pathSketch, path.entityIds);
+  // A sweep's volume follows the length of its sampled path and the area of its sampled section, so both use the finer chord-error rule
+  // when the result fits the triangle budget of a stored mesh (every station repeats the whole section); otherwise the ordinary rule, and
+  // then each curve of the path is thinned evenly, never below 12 points, until the sweep fits.
+  const sectionCount = (fine: boolean): number => profilePolygonMm(region.outer.boundary, undefined, fine).length + region.holes.reduce((total, hole) => total + profilePolygonMm(hole.boundary, undefined, fine).length, 0);
+  let fine = true;
+  let chain = chainSketchCurves(pathSketch, path.entityIds, undefined, true);
   if (!chain.ok) return chain;
+  if ((chain.points.length - 1) * sectionCount(true) * 2 > SWEEP_TRIANGLE_BUDGET) {
+    fine = false;
+    const ordinary = chainSketchCurves(pathSketch, path.entityIds);
+    if (!ordinary.ok) return ordinary;
+    chain = ordinary;
+  }
+  const sectionPoints = sectionCount(fine);
+  for (let limit = 256; limit >= 12 && (chain.points.length - 1) * sectionPoints * 2 > SWEEP_TRIANGLE_BUDGET; limit = Math.floor(limit / 2)) {
+    const coarser = chainSketchCurves(pathSketch, path.entityIds, limit, fine);
+    if (!coarser.ok) break;
+    chain = coarser;
+  }
+  const worldDirection = (at: Point2, direction: Point2): V3 => sub3(sketchToWorld(pathSketch.sketch, at[0] + direction[0], at[1] + direction[1]), sketchToWorld(pathSketch.sketch, at[0], at[1]));
+  let startTangent: V3 | undefined = chain.startTangent === undefined ? undefined : worldDirection(chain.points[0]!, chain.startTangent);
+  let endTangent: V3 | undefined = chain.endTangent === undefined ? undefined : worldDirection(chain.points[chain.points.length - 1]!, chain.endTangent);
   let worldPath = chain.points.map(([x, y]) => sketchToWorld(pathSketch.sketch, x, y));
   const sameSketch = pathSketch.id === sketchFeature.id;
   // The sweep starts at the end of the path that is nearer the profile.
   const profileCentre = centroid3(worldLoops(region, sketchFeature).outer);
-  if (dist3(worldPath[0]!, profileCentre) > dist3(worldPath[worldPath.length - 1]!, profileCentre) + 1e-9) worldPath = [...worldPath].reverse();
+  if (dist3(worldPath[0]!, profileCentre) > dist3(worldPath[worldPath.length - 1]!, profileCentre) + 1e-9) {
+    worldPath = [...worldPath].reverse();
+    [startTangent, endTangent] = [endTangent === undefined ? undefined : scale3(endTangent, -1), startTangent === undefined ? undefined : scale3(startTangent, -1)];
+  }
   const t0 = pathStartFrame(worldPath, [1, 0, 0]);
   if (t0 === undefined) return { ok: false, message: "The sweep path has no length." };
   let startU: V3;
   let loops: Loops2;
-  const outline2 = profilePolygonMm(region.outer.boundary);
+  const outline2 = profilePolygonMm(region.outer.boundary, undefined, fine);
   if (sameSketch) {
     // The profile and its path are drawn on one plane: the profile is taken as the cross-section at the path's start, turned to face along
     // the path (its x across the path in the sketch plane, its y out of the plane) and centred on its own centroid.
@@ -192,7 +276,7 @@ export async function buildSweepFeature(feature: DesignSolidFeature, sketchFeatu
     startU = cross3(normal, t0.tangent);
     const centre = loopCentroid(outline2);
     const shift = (polygon: readonly Point2[]): Point2[] => polygon.map(([x, y]) => [x - centre[0], y - centre[1]]);
-    loops = { outer: shift(outline2), holes: region.holes.map((hole) => shift(profilePolygonMm(hole.boundary))) };
+    loops = { outer: shift(outline2), holes: region.holes.map((hole) => shift(profilePolygonMm(hole.boundary, undefined, fine))) };
     // The cross-section sits on the path's start point.
     notes.push("The profile and the path are in one sketch, so the profile is swept as the cross-section at the start of the path (centred on its centroid).");
     const frame = pathStartFrame(worldPath, startU);
@@ -204,7 +288,7 @@ export async function buildSweepFeature(feature: DesignSolidFeature, sketchFeatu
     const normal = unitNormal(sketchFeature);
     if (Math.abs(dot3(normal, frame.tangent)) < 0.95) notes.push("The profile's plane is not perpendicular to the start of the path; the sweep section is taken perpendicular to the path.");
     const local = (point: V3): Point2 => [dot3(sub3(point, origin), frame.u), dot3(sub3(point, origin), frame.v)];
-    const world = worldLoops(region, sketchFeature);
+    const world = worldLoops(region, sketchFeature, 0, fine);
     loops = { outer: world.outer.map(local), holes: world.holes.map((hole) => hole.map(local)) };
     startU = frame.u;
     const trueArea = Math.hypot(...newell(world.outer)) / 2;
@@ -212,7 +296,11 @@ export async function buildSweepFeature(feature: DesignSolidFeature, sketchFeatu
       return { ok: false, message: "The profile's plane is almost parallel to the start of the path, so the sweep section would be flattened. Draw the profile on a plane that crosses the path, ideally at right angles to it." };
     }
   }
-  const built = sweepAlongPath({ loops, path: worldPath, startU, ...(feature.sweepTwistDeg === undefined ? {} : { twistDeg: feature.sweepTwistDeg }) });
+  const built = sweepAlongPath({
+    loops, path: worldPath, startU,
+    ...(feature.sweepTwistDeg === undefined ? {} : { twistDeg: feature.sweepTwistDeg }),
+    ...(startTangent === undefined ? {} : { startTangent }), ...(endTangent === undefined ? {} : { endTangent })
+  });
   if (!built.ok) return built;
   const fit = checked(built.mesh, "sweep");
   if (!fit.ok) return fit;
@@ -292,5 +380,6 @@ function newell(points: readonly V3[]): V3 {
   return [nx, ny, nz];
 }
 const sub3 = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const scale3 = (a: V3, factor: number): V3 => [a[0] * factor, a[1] * factor, a[2] * factor];
 const dot3 = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross3 = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];

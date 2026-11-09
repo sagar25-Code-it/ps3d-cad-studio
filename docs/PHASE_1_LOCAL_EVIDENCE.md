@@ -210,7 +210,7 @@ are reviewed product evidence, not copied Autodesk or Siemens assets.
 | [`78-ai-collaboration-agent.jpg`](screenshots/78-ai-collaboration-agent.jpg) | PhD-level stateless coordination handshake resolving a sketch-dimension goal without CAD execution |
 
 The current local functional suite passed **111/111** cases and the direct MCP
-stdio exchange across all twelve tools plus evaluator identity. The current
+stdio exchange across all thirteen tools (twelve when this record was written; ps3d_prepare_design_solid was added later) plus evaluator identity. The current
 `pnpm build` run produced 59 assets, enforced the strict CSP, and verified that
 Node-only MCP SDK, WASM/Manifold, and dynamic-evaluation paths are absent from
 the browser production boundary. The source-set gate is resealed only after

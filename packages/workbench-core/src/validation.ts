@@ -51,14 +51,16 @@ import { createVehicleTemplate, solveVehicleGeometry, VEHICLE_PARAMETER_RANGES }
 import { MASTER_CART_TEMPLATE_IDS } from "./master-cart.js";
 import { validatePartFeatureStack } from "./part-features.js";
 import { MODEL_ENVELOPE, sketchEntityProblem } from "./envelope.js";
+import { describeByteLimit, MCP_CALL_MAX_BYTES, PROJECT_FILE_MAX_BYTES } from "./envelope-limits.js";
+import { sketchShapeProblem } from "./sketch-problem-messages.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
 import { AUDIT_CHECKPOINT_KIND, AUDIT_MAX_ENTRIES } from "./audit-archive.js";
 
 export const WORKBENCH_LIMITS = {
-  /** A project file as Open and the validators accept it. Matches the 50 MB the file workspace allows Save to write. */
-  maxJsonBytes: 50_000_000,
-  /** What one MCP tool call may carry (the remote transport caps its body at 1 MB). */
-  maxMcpInputBytes: 1_000_000,
+  /** A project file as Open and the validators accept it: the same constant Save checks (see envelope-limits.ts). */
+  maxJsonBytes: PROJECT_FILE_MAX_BYTES,
+  /** What one MCP tool call may carry, on the local server and on the deployed transport (see envelope-limits.ts). */
+  maxMcpInputBytes: MCP_CALL_MAX_BYTES,
   maxEntities: 500,
   maxConstraints: 1_000,
   maxComponents: 100,
@@ -69,7 +71,7 @@ export const WORKBENCH_LIMITS = {
   /** Component, assembly and electrical coordinates. Sketch geometry has its own, larger limit: see MODEL_ENVELOPE. */
   maxCoordinateMm: 10_000,
   maxSketchCoordinateMm: MODEL_ENVELOPE.maxSketchCoordinateMm,
-  minGeometryMm: 0.01,
+  minGeometryMm: MODEL_ENVELOPE.minGeometryMm,
   maxSurfaceSegments: 48
 } as const;
 
@@ -204,7 +206,7 @@ function validateVehicle(value: unknown): WorkbenchResult<VehicleIntent> {
 
 export function parseWorkbenchProjectText(text: string): WorkbenchResult<WorkbenchProject> {
   if (new TextEncoder().encode(text).byteLength > WORKBENCH_LIMITS.maxJsonBytes) {
-    return failure("RESOURCE_LIMIT", `The project file is larger than the ${WORKBENCH_LIMITS.maxJsonBytes / 1_000_000} MB limit.`, [], "Open a smaller PS3D workbench project, or delete bodies you no longer need and save it again.");
+    return failure("RESOURCE_LIMIT", `The project file is larger than the ${describeByteLimit(WORKBENCH_LIMITS.maxJsonBytes)} limit.`, [], "Open a smaller PS3D workbench project, or delete bodies you no longer need and save it again.");
   }
   try {
     return validateWorkbenchProject(JSON.parse(text) as unknown);
@@ -262,7 +264,7 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
     || !finiteRange(value.gridMm, 0.1, 100) || !finiteRange(value.snapToleranceMm, 0.01, 10)
     || !Array.isArray(value.entities) || value.entities.length > WORKBENCH_LIMITS.maxEntities
     || !Array.isArray(value.constraints) || value.constraints.length > WORKBENCH_LIMITS.maxConstraints) {
-    return invalid("The primary sketch is invalid or exceeds its limits.");
+    return invalid(sketchShapeProblem(value, WORKBENCH_LIMITS));
   }
   const entityIds = new Set<string>();
   for (const entity of value.entities) {
@@ -493,7 +495,7 @@ function validateConstructionPlane(value: unknown): value is import("./types.js"
   const def = value.definition;
   if (def.kind === "offset") {
     return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && typeof def.offsetMm === "number"
-      && Number.isFinite(def.offsetMm) && Math.abs(def.offsetMm) <= 10_000
+      && Number.isFinite(def.offsetMm) && Math.abs(def.offsetMm) <= MODEL_ENVELOPE.maxPlaneOffsetMm
       && Object.keys(def).every((key) => ["kind", "basePlane", "offsetMm"].includes(key));
   }
   if (def.kind === "angle") {
@@ -507,8 +509,8 @@ function validateConstructionPlane(value: unknown): value is import("./types.js"
       && Object.keys(def).every((key) => ["kind", "points"].includes(key));
   }
   if (def.kind === "midplane") {
-    return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && typeof def.fromMm === "number" && Number.isFinite(def.fromMm) && Math.abs(def.fromMm) <= 10_000
-      && typeof def.toMm === "number" && Number.isFinite(def.toMm) && Math.abs(def.toMm) <= 10_000 && def.fromMm !== def.toMm
+    return SKETCH_DATUM_PLANES.includes(def.basePlane as never) && typeof def.fromMm === "number" && Number.isFinite(def.fromMm) && Math.abs(def.fromMm) <= MODEL_ENVELOPE.maxPlaneOffsetMm
+      && typeof def.toMm === "number" && Number.isFinite(def.toMm) && Math.abs(def.toMm) <= MODEL_ENVELOPE.maxPlaneOffsetMm && def.fromMm !== def.toMm
       && Object.keys(def).every((key) => ["kind", "basePlane", "fromMm", "toMm"].includes(key));
   }
   if (def.kind === "tangent-to-cylinder") {

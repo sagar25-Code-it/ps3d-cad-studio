@@ -3,7 +3,7 @@ import type { SketchPlaneFaceRef, SketchPlaneFrame, SketchPlaneTilt } from "../.
 import { frameThroughPoints } from "../../../../packages/workbench-geometry/src/index.js";
 import type { SketchPlane } from "../general-modeling.js";
 import { CommandIcon } from "./CommandIcon.js";
-import type { ExistingSketchPlane } from "../sketch-plane-ui.js";
+import { datumPlaneHint, type ExistingSketchPlane } from "../sketch-plane-ui.js";
 import { useDialogFocus } from "./useDialogFocus.js";
 
 interface SketchPlaneOption {
@@ -16,9 +16,9 @@ interface SketchPlaneOption {
 
 /** The three primary datum planes, matching the Fusion-style "choose a plane to sketch on" step. */
 const SKETCH_PLANES: readonly SketchPlaneOption[] = [
-  { plane: "xy", label: "Top (XY)", view: "Top view", icon: "axes", hint: "Floor plane · Z up" },
-  { plane: "xz", label: "Front (XZ)", view: "Front view", icon: "axes", hint: "Looking along −Y" },
-  { plane: "yz", label: "Right (YZ)", view: "Right view", icon: "axes", hint: "Looking along +X · sketch X runs along world -Z, Y is up" }
+  { plane: "xy", label: "Top (XY)", view: "Top view", icon: "axes", hint: datumPlaneHint("datum:xy") },
+  { plane: "xz", label: "Front (XZ)", view: "Front view", icon: "axes", hint: datumPlaneHint("datum:xz") },
+  { plane: "yz", label: "Right (YZ)", view: "Right view", icon: "axes", hint: datumPlaneHint("datum:yz") }
 ];
 
 /** A planar face of a solid the sketch can sit on, already reduced to its plane and offset. */

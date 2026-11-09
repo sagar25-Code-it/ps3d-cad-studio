@@ -72,7 +72,7 @@ spline solving, and topology-dependent edge operations.
 
 ## MCP tool execution
 
-All twelve tools were invoked against the local fixture project through the
+All thirteen tools were invoked against the local fixture project through the
 real Node stdio lifecycle. The observed schemas and safety behavior were:
 
 | Tool | Observed result |
@@ -87,6 +87,7 @@ real Node stdio lifecycle. The observed schemas and safety behavior were:
 | `ps3d_analyze_vehicle` | `ps3d-vehicle-mcp-analysis/2` |
 | `ps3d_electromechanical_catalog` | `ps3d-electromechanical-catalog/1` |
 | `ps3d_preview_electromechanical` | `ps3d-electromechanical-preview/1` plus receipt |
+| `ps3d_prepare_design_solid` | `ps3d-design-solid-preview/1`: the add-design-solid operation, receipt and candidate project for an extrude, revolve, sweep or loft |
 | `ps3d_preview_operation` | `ps3d-operation-preview/1` plus receipt |
 | `ps3d_apply_preview` | `ps3d-applied-operation/1` only after matching receipt and explicit confirmation |
 

@@ -40,6 +40,11 @@ export function splineSpanCount(fit: readonly SplinePoint[]): number {
  * with the points and evenly spaced splines keep the exact uniform curve (and the curvature formulas that go with it).
  */
 function knotExponent(ring: readonly SplinePoint[], closed: boolean): number {
+  return 0.75 * Math.min(1, Math.max(0, (chordRatio(ring, closed) - 4) / 4));
+}
+
+/** The largest ratio between neighbouring chords of the fit points (1 for evenly spaced points). */
+function chordRatio(ring: readonly SplinePoint[], closed: boolean): number {
   let ratio = 1;
   const count = ring.length;
   const chord = (index: number): number => {
@@ -58,7 +63,45 @@ function knotExponent(ring: readonly SplinePoint[], closed: boolean): number {
     const right = chord(0);
     if (left > 1e-12 && right > 1e-12) ratio = Math.max(ratio, left / right, right / left);
   }
-  return 0.75 * Math.min(1, Math.max(0, (ratio - 4) / 4));
+  return ratio;
+}
+
+/** From this ratio of neighbouring chords the tangents are kept from swinging the curve far outside its fit points. */
+const OVERSHOOT_LIMIT_RATIO = 3;
+/** The share of a cubic's end tangent (perpendicular to the chord) that shows as its largest sideways excursion: 4/27 from each end, and the two ends of a span add up, so 8/27. */
+const EXCURSION_PER_TANGENT = 8 / 27;
+/** A tangent is never shortened below this share, so the curve keeps leaving the point in the direction it is heading. */
+const MIN_TANGENT_KEEP = 0.05;
+
+/**
+ * Keeps the curve near its fit points when they are unevenly spaced. A Catmull-Rom tangent at a point between a short and a very long
+ * chord leans along the short one, and over the long chord that sends the curve far outside the points (a spline through points that
+ * all lie in y 0..1 dipped to y -2.6). Here the tangent keeps its direction (so the curve still leaves the point the way the clicks
+ * suggest and the short spans do not fold back) but is shortened until the sideways excursion over each adjacent span stays within a share of
+ * how far that span's neighbours lie off its chord (or half a percent of its length). Evenly spaced points never reach this, so they
+ * keep the exact uniform curve.
+ */
+function limitedTangent(at: (index: number) => SplinePoint, index: number, hasPrevious: boolean, hasNext: boolean, gap: (a: SplinePoint, b: SplinePoint) => number, tangent: SplinePoint): SplinePoint {
+  const size = Math.hypot(tangent[0], tangent[1]);
+  if (size < 1e-12) return tangent;
+  const current = at(index);
+  let keep = 1;
+  const constrain = (to: SplinePoint, outerBefore: SplinePoint, outerAfter: SplinePoint, scale: number): void => {
+    const dx = to[0] - current[0];
+    const dy = to[1] - current[1];
+    const length = Math.hypot(dx, dy);
+    if (length < 1e-12) return;
+    const off = (point: SplinePoint): number => Math.abs((point[0] - current[0]) * dy - (point[1] - current[1]) * dx) / length;
+    const slack = Math.max(0.2 * Math.max(off(outerBefore), off(outerAfter)), 0.002 * length);
+    // The part of the tangent across the chord is what swings the curve sideways.
+    const across = Math.abs(tangent[0] * dy - tangent[1] * dx) / length;
+    const reach = EXCURSION_PER_TANGENT * scale * across;
+    if (reach > slack) keep = Math.min(keep, slack / reach);
+  };
+  if (hasPrevious) constrain(at(index - 1), at(index + 1), at(index - 2), gap(at(index - 1), current));
+  if (hasNext) constrain(at(index + 1), at(index - 1), at(index + 2), gap(current, at(index + 1)));
+  keep = Math.max(keep, MIN_TANGENT_KEEP);
+  return keep >= 1 ? tangent : [tangent[0] * keep, tangent[1] * keep];
 }
 
 /**
@@ -81,11 +124,18 @@ export function splineSpanHermite(fit: readonly SplinePoint[], span: number): { 
   const d01 = !closed && span === 0 ? d12 : gap(q0, q1);
   const d23 = !closed && span === count - 2 ? d12 : gap(q2, q3);
   const tangent = (axis: 0 | 1, a: SplinePoint, b: SplinePoint, c: SplinePoint, dLeft: number, dRight: number): number =>
-    d12 * ((b[axis] - a[axis]) / dLeft - (c[axis] - a[axis]) / (dLeft + dRight) + (c[axis] - b[axis]) / dRight);
-  const m1: SplinePoint = [tangent(0, q0, q1, q2, d01, d12), tangent(1, q0, q1, q2, d01, d12)];
+    ((b[axis] - a[axis]) / dLeft - (c[axis] - a[axis]) / (dLeft + dRight) + (c[axis] - b[axis]) / dRight);
+  let t1: SplinePoint = [tangent(0, q0, q1, q2, d01, d12), tangent(1, q0, q1, q2, d01, d12)];
   // The far tangent uses the same pattern shifted by one: (q2 - q1) / d12 - (q3 - q1) / (d12 + d23) + (q3 - q2) / d23.
-  const far = (axis: 0 | 1): number => d12 * ((q2[axis] - q1[axis]) / d12 - (q3[axis] - q1[axis]) / (d12 + d23) + (q3[axis] - q2[axis]) / d23);
-  const m2: SplinePoint = [far(0), far(1)];
+  let t2: SplinePoint = [tangent(0, q1, q2, q3, d12, d23), tangent(1, q1, q2, q3, d12, d23)];
+  if (chordRatio(ring, closed) > OVERSHOOT_LIMIT_RATIO) {
+    const hasBefore = (index: number): boolean => closed || index > 0;
+    const hasAfter = (index: number): boolean => closed || index < count - 1;
+    t1 = limitedTangent(at, span, hasBefore(span), hasAfter(span), gap, t1);
+    t2 = limitedTangent(at, span + 1, hasBefore(span + 1), hasAfter(span + 1), gap, t2);
+  }
+  const m1: SplinePoint = [d12 * t1[0], d12 * t1[1]];
+  const m2: SplinePoint = [d12 * t2[0], d12 * t2[1]];
   return { p1: q1, p2: q2, m1, m2 };
 }
 

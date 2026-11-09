@@ -1,4 +1,4 @@
-import { createWorkbenchProject, WORKBENCH_OPERATION_KINDS, type WorkbenchOperation, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { createWorkbenchProject, WORKBENCH_LIMITS, WORKBENCH_OPERATION_KINDS, type WorkbenchOperation, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { PS3D_AI_COMMAND_RECIPES, PS3D_OPERATION_KINDS, handleWorkbenchMcpTool, WORKBENCH_MCP_TOOLS } from "../packages/workbench-mcp/src/index.js";
 import { assert, equal, type TestCase } from "./test-kit.js";
 
@@ -237,7 +237,7 @@ export const workbenchMcpTests: readonly TestCase[] = [
       assert(unknown.isError === true, "unknown methods should fail closed");
       equal(unknown.structuredContent["code"], "METHOD_NOT_FOUND", "unknown method should be typed");
 
-      const oversized = await handleWorkbenchMcpTool("ps3d_inspect_project", { project: { data: "x".repeat(1_100_000) } });
+      const oversized = await handleWorkbenchMcpTool("ps3d_inspect_project", { project: { data: "x".repeat(WORKBENCH_LIMITS.maxMcpInputBytes + 100_000) } });
       assert(oversized.isError === true, "oversized tool payload should be rejected");
       equal(oversized.structuredContent["code"], "RESOURCE_LIMIT", "resource failure should be typed");
 

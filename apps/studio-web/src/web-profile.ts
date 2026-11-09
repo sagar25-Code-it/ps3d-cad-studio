@@ -1,6 +1,6 @@
 import type { SketchEntity, SketchDatumPlane, Vec2, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
 import { placeDirection, placePoint } from "../../../packages/workbench-geometry/src/index.js";
-import { detectSketchProfiles, sampleArc, sampleSpline } from "../../../packages/workbench-sketch/src/index.js";
+import { detectSketchProfiles, sampleArcToBound, sampleSplineToBound } from "../../../packages/workbench-sketch/src/index.js";
 
 type V3 = readonly [number, number, number];
 
@@ -29,8 +29,8 @@ const isCurve = (entity: SketchEntity): entity is Curve => entity.kind === "line
 
 function samplesOf(entity: Curve): readonly Vec2[] {
   if (entity.kind === "line") return [entity.start, entity.end];
-  if (entity.kind === "arc") return sampleArc(entity.start, entity.mid, entity.end);
-  return sampleSpline(entity.fitPoints);
+  if (entity.kind === "arc") return sampleArcToBound(entity.start, entity.mid, entity.end);
+  return sampleSplineToBound(entity.fitPoints);
 }
 
 /** The ids of the visible curves of a sketch that are not part of a closed profile: the open profiles a rib can follow. */

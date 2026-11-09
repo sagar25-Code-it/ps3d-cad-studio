@@ -1,4 +1,4 @@
-import { failure, type SketchEntity, type Vec2, type WorkbenchResult, type WorkbenchSketch } from "../../workbench-core/src/index.js";
+import { failure, SPLINE_MAX_FIT_POINTS, type SketchEntity, type Vec2, type WorkbenchResult, type WorkbenchSketch } from "../../workbench-core/src/index.js";
 import {
   arcFromAngles,
   arcGeometry,
@@ -10,6 +10,8 @@ import {
   type ParsedDrawing,
   type RawCurve
 } from "./sketch-exchange.js";
+import { splineSpanHermite } from "../../workbench-core/src/spline-curvature.js";
+import { flattenSpline } from "./curve-sampling.js";
 
 /**
  * DXF for sketches.
@@ -87,19 +89,20 @@ function mapPoint(point: Vec2, factor: number): Vec2 {
   return [point[0] * factor, point[1] * factor];
 }
 
-/** The cubic Bezier chain of a Catmull-Rom spline through fit points, as B-spline control points and a clamped knot vector. */
+/**
+ * The cubic Bezier chain of the sketch spline through fit points, as B-spline control points and a clamped knot vector. Each span is
+ * the sketch's own Hermite span (the one the sketch draws and builds solids from, with its uneven-spacing handling), so the exported
+ * curve is the same curve, not a uniform Catmull-Rom look-alike.
+ */
 export function splineAsBezierChain(fit: readonly Vec2[]): { readonly controls: readonly Vec2[]; readonly knots: readonly number[] } {
   const controls: Vec2[] = [fit[0]!];
-  for (let span = 0; span < fit.length - 1; span += 1) {
-    const p0 = fit[Math.max(0, span - 1)]!;
-    const p1 = fit[span]!;
-    const p2 = fit[span + 1]!;
-    const p3 = fit[Math.min(fit.length - 1, span + 2)]!;
-    controls.push([p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6]);
-    controls.push([p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6]);
-    controls.push(p2);
-  }
   const spans = fit.length - 1;
+  for (let span = 0; span < spans; span += 1) {
+    const { p1, p2, m1, m2 } = splineSpanHermite(fit, span);
+    controls.push([p1[0] + m1[0] / 3, p1[1] + m1[1] / 3]);
+    controls.push([p2[0] - m2[0] / 3, p2[1] - m2[1] / 3]);
+    controls.push([p2[0], p2[1]]);
+  }
   const knots: number[] = [0, 0, 0, 0];
   for (let span = 1; span < spans; span += 1) knots.push(span, span, span);
   knots.push(spans, spans, spans, spans);
@@ -207,16 +210,19 @@ export function writeSketchDxf(sketch: WorkbenchSketch, options: DxfWriteOptions
       }
       case "spline": {
         common("SPLINE", "AcDbSpline", entity);
-        const chain = splineAsBezierChain(entity.fitPoints.map((point) => mapPoint(point, factor)));
+        const fit = entity.fitPoints.map((point) => mapPoint(point, factor));
+        const chain = splineAsBezierChain(fit);
         body.pair(210, 0); body.pair(220, 0); body.pair(230, 1);
         body.intPair(70, 8);
         body.intPair(71, 3);
         body.intPair(72, chain.knots.length);
         body.intPair(73, chain.controls.length);
-        body.intPair(74, 0);
+        body.intPair(74, fit.length);
         body.pair(42, 1e-7); body.pair(43, 1e-7);
         for (const knot of chain.knots) body.pair(40, knot);
         for (const control of chain.controls) { body.pair(10, control[0]); body.pair(20, control[1]); body.pair(30, 0); }
+        // The fit points ride along, so PS3D reads back the same spline (same points, same count) and not a refit of the curve.
+        for (const point of fit) { body.pair(11, point[0]); body.pair(21, point[1]); body.pair(31, 0); }
         break;
       }
     }
@@ -283,7 +289,8 @@ export function writeSketchDxf(sketch: WorkbenchSketch, options: DxfWriteOptions
 // Reader
 // ---------------------------------------------------------------------------------------------------------------------
 
-type Pair = readonly [number, string];
+/** A group code, its value, and the 1-based line the value is on (so a damaged number can be named). */
+type Pair = readonly [number, string, number?];
 
 interface DxfRecord {
   /** The entity type (group 0 value). */
@@ -313,6 +320,9 @@ function tokenize(text: string): readonly Pair[] | string {
   if (text.startsWith("AutoCAD Binary DXF")) return "This is a binary DXF. Save the drawing as an ASCII DXF (in most CAD programs: Save As, DXF, ASCII or text).";
   if (/^AC10\d\d/u.test(text) && text.includes("\u0000")) return "This is a DWG file, which PS3D cannot read. Save or export the drawing as DXF from your CAD program and open that.";
   const lines = text.replace(/^﻿/u, "").split(/\r\n|\r|\n/u);
+  // A file cut off in the middle of a group ends on a code with no value: say so instead of quietly dropping the last group.
+  while (lines.length > 0 && lines[lines.length - 1]!.trim() === "") lines.pop();
+  if (lines.length % 2 === 1 && lines.length > 1) return `The DXF ends in the middle of a group at line ${lines.length} (the group code "${lines[lines.length - 1]!.trim().slice(0, 20)}" has no value): the file looks cut off. Export the drawing again.`;
   const pairs: Pair[] = [];
   for (let index = 0; index + 1 < lines.length; index += 2) {
     const codeText = lines[index]!.trim();
@@ -320,9 +330,26 @@ function tokenize(text: string): readonly Pair[] | string {
       if (index === 0 || pairs.length === 0) return "This does not look like a DXF file: the first line is not a group code number.";
       return `The DXF is damaged near line ${index + 1}: expected a group code number but found "${codeText.slice(0, 20)}".`;
     }
-    pairs.push([Number(codeText), lines[index + 1]!.trim()]);
+    pairs.push([Number(codeText), lines[index + 1]!.trim(), index + 2]);
   }
   return pairs;
+}
+
+/** Group codes whose value is a number (coordinates, radii, angles, flags, counts). */
+function isNumericGroup(code: number): boolean {
+  return (code >= 10 && code <= 99) || (code >= 110 && code <= 149) || (code >= 160 && code <= 179) || (code >= 210 && code <= 239) || (code >= 270 && code <= 289) || (code >= 370 && code <= 389) || (code >= 400 && code <= 409) || (code >= 420 && code <= 429) || (code >= 440 && code <= 469);
+}
+
+const DXF_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/u;
+
+/** The first number in the pairs that cannot be read (not a number, or too large to be one), with the line it is on; undefined when all are fine. */
+function unreadableNumber(pairs: readonly Pair[]): string | undefined {
+  for (const [code, value, line] of pairs) {
+    if (!isNumericGroup(code)) continue;
+    if (DXF_NUMBER.test(value) && Number.isFinite(Number(value))) continue;
+    return `The DXF has an unreadable number "${value.slice(0, 24)}" for group ${code} at line ${line ?? "?"}. The file may be damaged or cut off, and importing it would put wrong geometry in the sketch. Export the drawing again.`;
+  }
+  return undefined;
 }
 
 function sectionsOf(pairs: readonly Pair[]): ReadonlyMap<string, readonly Pair[]> {
@@ -433,6 +460,34 @@ function evaluateNurbs(degree: number, knots: readonly number[], controls: reado
   return result[2] === 0 ? [result[0], result[1]] : [result[0] / result[2], result[1] / result[2]];
 }
 
+/** The curve of a B-spline as a dense list of points, or an empty list when its knots do not span a curve. */
+function nurbsPolyline(degree: number, knots: readonly number[], controls: readonly Vec2[], weights: readonly number[]): Vec2[] {
+  const start = knots[degree]!;
+  const end = knots[controls.length]!;
+  if (!(end - start > 1e-12)) return [];
+  const points: Vec2[] = [];
+  const total = Math.min(2000, Math.max(120, controls.length * 8));
+  for (let step = 0; step <= total; step += 1) {
+    const u = step === total ? end - 1e-12 : start + ((end - start) * step) / total;
+    points.push(evaluateNurbs(degree, knots, controls, weights.length === 0 ? undefined : weights, u));
+  }
+  return points;
+}
+
+function distanceToPolyline(point: Vec2, line: readonly Vec2[]): number {
+  let best = Infinity;
+  for (let index = 0; index + 1 < line.length; index += 1) {
+    const a = line[index]!;
+    const b = line[index + 1]!;
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const lengthSquared = dx * dx + dy * dy;
+    const t = lengthSquared < 1e-30 ? 0 : Math.max(0, Math.min(1, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / lengthSquared));
+    best = Math.min(best, Math.hypot(point[0] - (a[0] + t * dx), point[1] - (a[1] + t * dy)));
+  }
+  return best;
+}
+
 function splineCurves(record: DxfRecord, layer: string, toleranceUnits: number, warnings: string[]): readonly RawCurve[] {
   const degree = Math.max(1, Math.trunc(firstNumber(record, 71, 3)));
   const knots = record.pairs.filter((pair) => pair[0] === 40).map((pair) => numberOf(pair[1]));
@@ -449,6 +504,13 @@ function splineCurves(record: DxfRecord, layer: string, toleranceUnits: number, 
   }
   const usable = controls.length >= degree + 1 && knots.length === controls.length + degree + 1 && (weights.length === 0 || weights.length === controls.length);
   let dense: Vec2[] = [];
+  const fitCount = Math.trunc(firstNumber(record, 74, 0));
+  if (usable && fitCount === fits.length && fits.length >= 3 && fits.length <= SPLINE_MAX_FIT_POINTS) {
+    // A spline that carries its fit points and whose curve is the sketch spline through them (PS3D wrote it) comes back as that spline.
+    const sampled = nurbsPolyline(degree, knots, controls, weights);
+    const reference = flattenSpline(fits, toleranceUnits / 10).points;
+    if (sampled.length >= 2 && sampled.every((point) => distanceToPolyline(point, reference) <= toleranceUnits / 4)) return [{ kind: "spline", fit: fits, layer }];
+  }
   if (usable) {
     const start = knots[degree]!;
     const end = knots[controls.length]!;
@@ -461,7 +523,7 @@ function splineCurves(record: DxfRecord, layer: string, toleranceUnits: number, 
       }
       dense[dense.length - 1] = evaluateNurbs(degree, knots, controls, weights.length === 0 ? undefined : weights, end - 1e-12);
     }
-  } else if (fits.length >= 3 && fits.length <= 24) {
+  } else if (fits.length >= 3 && fits.length <= SPLINE_MAX_FIT_POINTS) {
     // A spline given only by fit points is the same kind of curve as a sketch spline: keep the points.
     if (controls.length > 0) warnings.push("A spline had inconsistent control points and knots; its fit points were used instead.");
     return [{ kind: "spline", fit: fits, layer }];
@@ -513,6 +575,8 @@ export function parseDxf(text: string, options: DxfReadOptions = {}): ParseResul
   const sections = sectionsOf(pairs);
   const entitiesSection = sections.get("ENTITIES");
   if (entitiesSection === undefined) return bad("The DXF has no ENTITIES section, so there is nothing to import.", "Choose a DXF that contains drawn geometry (not just blocks or tables).");
+  const unreadable = unreadableNumber(entitiesSection) ?? unreadableNumber(sections.get("HEADER") ?? []);
+  if (unreadable !== undefined) return bad(unreadable, "Export the drawing from your CAD program again as an ASCII DXF.");
   const units = detectUnits(sections.get("HEADER"));
   const toleranceUnits = Math.max(0.0005, Math.min(1, options.curveToleranceMm ?? 0.02)) / units.mmPerUnit;
   const records = recordsOf(entitiesSection);
@@ -591,6 +655,8 @@ export function parseDxf(text: string, options: DxfReadOptions = {}): ParseResul
       default: skip(record.type);
     }
   }
+  // The layer PS3D writes construction curves on is construction again when a PS3D drawing is read back, whatever the import dialog offers.
+  for (let index = 0; index < curves.length; index += 1) if (/^construction$/iu.test(curves[index]!.layer)) curves[index] = { ...curves[index]!, construction: true };
   const counts = new Map<string, number>();
   for (const curve of curves) counts.set(curve.layer, (counts.get(curve.layer) ?? 0) + 1);
   const layers = [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));

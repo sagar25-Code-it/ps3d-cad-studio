@@ -13,7 +13,7 @@ import {
   requiredSketchPoints,
   selectConnectedSketchEntities,
   selectTangentSketchEntities,
-  sampleSpline,
+  sampleSplineToBound,
   sketchBounds,
   sketchChainBranchCount,
   sketchToolLabel,
@@ -88,7 +88,7 @@ import { sketchEntityNames } from "../../../../packages/workbench-core/src/sketc
 import { useSketchPref } from "./sketch/useSketchPref.js";
 import type { DisplayUnit } from "../../../../packages/model-schema/src/index.js";
 import { formatLength, formatLengthWithUnit, parseAngleText, setDimensionLabelUnit, unitWord, type SketchLengthUnit } from "../../../../packages/workbench-sketch/src/sketch-units.js";
-import { describeSketchPlane } from "../sketch-plane-ui.js";
+import { describeSketchPlane, sketchAxesInWorld } from "../sketch-plane-ui.js";
 import { DEFAULT_PALETTE_LAYOUT } from "./sketch/sketch-prefs.js";
 import {
   type NavigationMode,
@@ -2096,8 +2096,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           {solidOp === "revolve" && <div className="make-solid-row" aria-label="Revolve axis">
             <small>Axis</small>
             <select aria-label="Revolve axis" value={props.sketch.entities.some((entity) => entity.id === revolveAxisChoice) || revolveAxisChoice === "x" ? revolveAxisChoice : ""} onChange={(event) => setRevolveAxisChoice(event.target.value)}>
-              <option value="">Sketch Y axis</option>
-              <option value="x">Sketch X axis</option>
+              <option value="">Sketch Y axis ({sketchAxesInWorld(props.sketch.plane).y})</option>
+              <option value="x">Sketch X axis ({sketchAxesInWorld(props.sketch.plane).x})</option>
               {props.sketch.entities.filter((entity) => entity.kind === "line").map((entity, index) => <option key={entity.id} value={entity.id}>{entity.construction ? "Construction line" : "Line"} {index + 1} ({shortId(entity.id)})</option>)}
             </select>
             <small>{describeSketchAxes(props.sketch)}</small>
@@ -2405,7 +2405,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       <section className="inspector-section constraint-records"><header><strong>Constraint records</strong><span>{props.sketch.constraints.length}{redundantIds.size > 0 ? ` · ${redundantIds.size} redundant` : ""}</span></header>
         <ConstraintRecordList rows={recordRows} selectedIds={selectedConstraintIds} redundantIds={redundantIds} onHover={setHoverConstraintId} onSelect={selectConstraint} onDelete={deleteSelectedConstraints} onToggleRelaxed={(id, relaxed) => { props.onSetSuppressed([id], relaxed); }} />
       </section>
-      <div className="scope-note"><strong>Preview solver boundary</strong><p>A small analytic solver enforces horizontal, vertical, parallel, perpendicular, collinear, tangent, concentric, equal, symmetric and fixed relations plus radius and length dimensions on lines, circles and arcs; a conflict is refused with the reason. Rectangles are rigid, point-on-curve and endpoint relations are recorded but not solved, and there is no general nonlinear solver. Degrees of freedom are an estimate.</p></div>
+      <div className="scope-note"><strong>Preview solver boundary</strong><p>All relations and dimensions are solved together (least movement) over lines, circles, arcs, ellipses, rectangles and points, including point-on-curve, endpoint and origin/axis relations; a conflict is refused and the relations that contradict are named. Splines carry no relations. Degrees of freedom are the exact rank of the relations.</p></div>
     </aside>
   </SketchUnitContext.Provider>;
 }
@@ -2607,7 +2607,7 @@ function SketchEntityShape({ entity, name, px, selected, hovered, related = fals
     if (entity.kind === "circle") return <circle className={cls} cx={entity.center[0]} cy={-entity.center[1]} r={entity.radiusMm} />;
     if (entity.kind === "ellipse") return <ellipse className={cls} cx={entity.center[0]} cy={-entity.center[1]} rx={entity.majorRadiusMm} ry={entity.minorRadiusMm} transform={`rotate(${-entity.rotationDeg} ${entity.center[0]} ${-entity.center[1]})`} />;
     if (entity.kind === "point") return <circle className={`${cls} sketch-point`} cx={entity.point[0]} cy={-entity.point[1]} r={(hit ? 9 : 3.5) * px} />;
-    if (entity.kind === "spline") return <path className={cls} d={sampleSpline(entity.fitPoints).map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${-point[1]}`).join(" ")} />;
+    if (entity.kind === "spline") return <path className={cls} d={sampleSplineToBound(entity.fitPoints).map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${-point[1]}`).join(" ")} />;
     return <path className={cls} d={arcPathData(entity.start, entity.mid, entity.end)} />;
   };
   if (preview || onSelect === undefined) return <g data-selection-id={entity.id}>{geometry(className, false)}</g>;

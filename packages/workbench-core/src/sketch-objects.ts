@@ -1,3 +1,4 @@
+import { ENVELOPE_LIMITS } from "./envelope-limits.js";
 import type { SketchEntity, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
 
 /**
@@ -124,7 +125,7 @@ const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const stableId = (value: unknown): value is string => typeof value === "string" && value.length <= 128 && ID_PATTERN.test(value);
 const finite = (value: unknown, minimum: number, maximum: number): value is number => typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum;
-const vec2 = (value: unknown): value is Vec2 => Array.isArray(value) && value.length === 2 && value.every((coordinate) => finite(coordinate, -10_000, 10_000));
+const vec2 = (value: unknown): value is Vec2 => Array.isArray(value) && value.length === 2 && value.every((coordinate) => finite(coordinate, -ENVELOPE_LIMITS.maxSketchCoordinateMm, ENVELOPE_LIMITS.maxSketchCoordinateMm));
 const keysAre = (value: Record<string, unknown>, expected: readonly string[]): boolean => {
   const actual = Object.keys(value).sort();
   const wanted = [...expected].sort();

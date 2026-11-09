@@ -1,3 +1,4 @@
+import { ENVELOPE_LIMITS } from "./envelope-limits.js";
 import type { Vec2 } from "./types.js";
 
 /**
@@ -6,11 +7,11 @@ import type { Vec2 } from "./types.js";
  * while refusing a tiny arc that is perfectly well formed. A three-point arc is judged by its circumradius instead.
  */
 
-/** The largest circle or arc radius a sketch may hold. It equals the sketch's circle radius limit (MODEL_ENVELOPE.maxSketchRadiusMm in envelope.ts, which imports this file, so the number is written here). */
-export const MAX_ARC_RADIUS_MM = 100_000;
+/** The largest circle or arc radius a sketch may hold: the envelope's circle radius limit, shared through envelope-limits.ts (which imports nothing, so there is no cycle with envelope.ts). */
+export const MAX_ARC_RADIUS_MM: number = ENVELOPE_LIMITS.maxSketchRadiusMm;
 
 /** The smallest circle or arc radius a sketch may hold. */
-export const MIN_ARC_RADIUS_MM = 0.01;
+export const MIN_ARC_RADIUS_MM: number = ENVELOPE_LIMITS.minGeometryMm;
 
 export interface ThreePointCircle {
   readonly center: Vec2;

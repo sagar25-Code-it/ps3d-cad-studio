@@ -373,8 +373,10 @@ export const designParameterTests: readonly TestCase[] = [
       equal(designOf(deleted).parameters?.length, 1, "deleting a feature keeps the table");
 
       // The hole refers to Extrude1; delete the sketch both are built on and the hole goes with it. Deleting only the extrude is
-      // not possible without its dependents, so check the reference error with a feature that is renamed to clash instead.
-      const clash = run(project, { kind: "rename-design-feature", featureId: "feature:hole-1", name: "Extrude 1" });
+      // not possible without its dependents, so check the reference error with a feature that is renamed to clash instead. A rename to a
+      // taken name is refused now (re-audit P19), so the clash is a file from an older version that already holds two steps with one name.
+      const clashHistory = designOf(project);
+      const clash: typeof project = { ...project, design: { ...clashHistory, features: clashHistory.features.map((feature) => feature.id === "feature:hole-1" ? { ...feature, name: "Extrude 1" } : feature) } };
       const issues = designExpressionIssues(clash, resizeSketchEntity);
       assert(issues.some((issue) => issue.ownerId === "feature:hole-1" && issue.message?.includes("More than one feature")), `two steps with the same name make the reference ambiguous: ${issues[0]?.message}`);
       equal(featureById(clash, "feature:hole-1").holeDepthMm, 5, "the hole keeps its last good depth");

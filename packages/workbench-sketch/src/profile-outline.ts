@@ -1,14 +1,18 @@
-import type { Vec2 } from "../../workbench-core/src/index.js";
-import { arcStepCount, CHORD_TOLERANCE_MM } from "./curve-sampling.js";
+import { chordErrorBoundMm, CHORD_ERROR_CAP_MM, CHORD_ERROR_RELATIVE, FINE_CHORD_ERROR, fullCircleFacets, MAX_FULL_CIRCLE_FACETS, type Vec2 } from "../../workbench-core/src/index.js";
 import type { SketchProfileBoundary } from "./index.js";
 
 /**
- * Closed polygon (millimetres) that outlines a profile boundary, counter-clockwise for every kind. Curves are sampled by a
- * chord-error bound (see CHORD_TOLERANCE_MM), so a large circle gets more points than a small one.
+ * Closed polygon (millimetres) that outlines a profile boundary, counter-clockwise for every kind. Curves are sampled by the one
+ * chord-error rule (workbench-core/tessellation.ts: within 1/2,000 of the radius and at most 0.01 mm), so every round part
+ * is within about 0.07 percent of its true volume. A full circle gets a multiple of four edges, so its quadrant points are vertices.
  */
-export function profileOutlineMm(boundary: SketchProfileBoundary): readonly Vec2[] {
+export function profileOutlineMm(boundary: SketchProfileBoundary, options: { readonly maxFacets?: number; readonly fine?: boolean } = {}): readonly Vec2[] {
+  const cap = options.fine === true ? FINE_CHORD_ERROR.capMm : CHORD_ERROR_CAP_MM;
+  const relative = options.fine === true ? FINE_CHORD_ERROR.relative : CHORD_ERROR_RELATIVE;
+  // A caller that multiplies the outline by another count (a revolve turns it through many positions) can cap the facets of a round outline.
+  const capped = (steps: number): number => (options.maxFacets === undefined ? steps : Math.min(steps, Math.max(16, Math.floor(options.maxFacets / 4) * 4)));
   if (boundary.kind === "circle") {
-    const steps = arcStepCount(boundary.radiusMm, Math.PI * 2);
+    const steps = capped(fullCircleFacets(boundary.radiusMm, cap, MAX_FULL_CIRCLE_FACETS, relative));
     return Array.from({ length: steps }, (_, index): Vec2 => {
       const angle = (2 * Math.PI * index) / steps;
       return [boundary.center[0] + boundary.radiusMm * Math.cos(angle), boundary.center[1] + boundary.radiusMm * Math.sin(angle)];
@@ -20,7 +24,9 @@ export function profileOutlineMm(boundary: SketchProfileBoundary): readonly Vec2
     const sin = Math.sin(radians);
     const major = Math.max(boundary.majorRadiusMm, boundary.minorRadiusMm);
     const minor = Math.min(boundary.majorRadiusMm, boundary.minorRadiusMm);
-    const steps = Math.min(1440, Math.max(72, Math.ceil((Math.PI * 2) / Math.sqrt((8 * CHORD_TOLERANCE_MM * minor * minor) / major ** 3))));
+    // The bound follows the mean radius; the step count below is set by the sharpest bend, at the end of the major axis.
+    const tolerance = chordErrorBoundMm(Math.sqrt(major * minor), cap, relative);
+    const steps = capped(Math.min(4096, Math.max(72, Math.ceil(Math.ceil((Math.PI * 2) / Math.sqrt((8 * tolerance * minor * minor) / major ** 3)) / 4) * 4)));
     return Array.from({ length: steps }, (_, index): Vec2 => {
       const theta = (2 * Math.PI * index) / steps;
       const localX = boundary.majorRadiusMm * Math.cos(theta);

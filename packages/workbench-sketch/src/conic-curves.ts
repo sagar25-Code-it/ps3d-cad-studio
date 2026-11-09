@@ -1,4 +1,4 @@
-import { type SketchEntity, type Vec2, type WorkbenchResult } from "../../workbench-core/src/index.js";
+import { MODEL_ENVELOPE, type SketchEntity, type Vec2, type WorkbenchResult } from "../../workbench-core/src/index.js";
 import { add, badShape, dist, dot, lerp, normalize, resampleByLength, sampleCurveToFitPoints, scale, splineFromPoints, sub, turn, type ShapeIds, type SketchShape } from "./curve-math.js";
 
 /**
@@ -258,7 +258,7 @@ export function fitConicThroughFivePoints(points: readonly Vec2[], id: string): 
     let rotation = ((aIsMajor ? theta : theta + Math.PI / 2) * 180) / Math.PI;
     rotation = ((rotation + 180) % 180 + 180) % 180;
     if (rotation > 90) rotation -= 180;
-    if (minor < 0.01 || major > 10_000) return badShape("The ellipse through these points is too small or too large for a sketch.");
+    if (minor < MODEL_ENVELOPE.minGeometryMm || major > MODEL_ENVELOPE.maxSketchRadiusMm) return badShape(`The ellipse through these points is too small or too large for a sketch (radii between ${MODEL_ENVELOPE.minGeometryMm} mm and ${MODEL_ENVELOPE.maxSketchRadiusMm} mm).`);
     return { ok: true, value: { kind: "ellipse", entity: { id, kind: "ellipse", center, majorRadiusMm: major, minorRadiusMm: minor, rotationDeg: rotation, construction: false } } };
   }
   if (disc > 1e-9 * quad) {

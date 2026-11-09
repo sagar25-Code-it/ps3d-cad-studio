@@ -1,4 +1,4 @@
-import type { Vec3 } from "../../workbench-core/src/index.js";
+import { fullCircleFacets, type Vec3 } from "../../workbench-core/src/index.js";
 import { alignLoopStart } from "./loft-align.js";
 
 /**
@@ -74,11 +74,22 @@ export function tessellateExtrude(polygonMm: readonly Point2[], heightMm: number
   return { positionsMm: rotatePositions(positions, PLANE_ROTATION_DEG[plane]), indices };
 }
 
-/** The facets a full turn of a revolve of this radius gets: enough that the chord sag stays within the tolerance, never fewer than 64. */
+/** The most triangles a revolve spends on getting rounder than the classic rule: a stored mesh is plain JSON, so a torus must stay a few megabytes. */
+export const REVOLVE_TRIANGLE_BUDGET = 14_000;
+
+/**
+ * The facets a full turn of a revolve of this radius gets. The classic rule (adaptiveFacetCount: sag up to 0.1 percent of the radius, at
+ * least 64) is the floor; where the profile is simple enough that the triangle budget allows, the turn follows the sketch-wide chord
+ * error rule (1/2,000 of the radius, at most 0.01 mm: workbench-core/tessellation.ts), so a rectangle revolved at r=5 is as round as one
+ * at r=500. A profile with many points keeps the classic count rather than an unstorable solid.
+ */
 export function revolveSegmentsForRadius(radiusMm: number, profilePoints = 0): number {
-  const wanted = adaptiveFacetCount(radiusMm, REVOLVE_SEGMENTS, 512);
+  const classic = adaptiveFacetCount(radiusMm, REVOLVE_SEGMENTS, 512);
+  const wanted = Number.isFinite(radiusMm) && radiusMm > 0 ? fullCircleFacets(radiusMm, undefined, 512) : classic;
+  const affordable = profilePoints > 0 ? Math.floor(REVOLVE_TRIANGLE_BUDGET / (2 * profilePoints)) : wanted;
+  const chosen = Math.max(classic, Math.min(wanted, affordable));
   // A body stores at most 100,000 vertices: a finely faceted profile gets fewer turns rather than an unstorable solid.
-  return profilePoints > 0 ? Math.max(16, Math.min(wanted, Math.floor(80_000 / profilePoints))) : wanted;
+  return profilePoints > 0 ? Math.max(16, Math.min(chosen, Math.floor(80_000 / profilePoints))) : chosen;
 }
 
 /**
