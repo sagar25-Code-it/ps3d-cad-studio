@@ -123,7 +123,18 @@ export function ExtraDimensionMarks(props: {
         ? <line x1={layout.dimensionLine.from[0]} y1={-layout.dimensionLine.from[1]} x2={layout.dimensionLine.to[0]} y2={-layout.dimensionLine.to[1]} />
         : <path d={path} fill="none" />}
       {layout.arrows.map((arrow, index) => <polygon key={index} className="arrow" points={arrowHead(arrow, px).map(flip).join(" ")} />)}
-      {(selecting || !driven) && <rect className="driving-dimension-hit" x={layout.textAt[0] - textWidth / 2} y={-layout.textAt[1] - 11 * px} width={textWidth} height={20 * px} onPointerDown={(event) => {
+      {(selecting || !driven) && <rect className="driving-dimension-hit" x={layout.textAt[0] - textWidth / 2} y={-layout.textAt[1] - 11 * px} width={textWidth} height={20 * px}
+        {...(props.onEdit !== undefined || selecting ? {
+          role: "button",
+          tabIndex: 0,
+          "aria-pressed": props.selectedIds?.includes(constraint.id) === true,
+          "aria-label": `${layout.label}, ${constraint.dimension ?? constraint.kind} dimension${driven ? " (reference)" : ""}. Press Enter to edit${selecting ? ", Space to select" : ""}`,
+          onKeyDown: (event: React.KeyboardEvent) => {
+            if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); props.onEdit?.(constraint, layout.textAt); }
+            else if (event.key === " " && props.onSelect !== undefined) { event.preventDefault(); event.stopPropagation(); props.onSelect(constraint.id, false); }
+          }
+        } : {})}
+        onPointerDown={(event) => {
         if (event.button !== 0) return;
         event.stopPropagation();
         const additive = event.shiftKey || event.ctrlKey || event.metaKey;

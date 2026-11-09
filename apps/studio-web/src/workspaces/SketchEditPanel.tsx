@@ -29,6 +29,7 @@ import { breakAtIntersections } from "../../../../packages/workbench-sketch/src/
 import { describePath, healPathGaps, makePath, pathToSpline } from "../../../../packages/workbench-sketch/src/make-path.js";
 import { offsetMoveEntities } from "../../../../packages/workbench-sketch/src/offset-move.js";
 import { CommandIcon } from "../ui/CommandIcon.js";
+import { CentrePickButton, useCentrePickFields, type CentrePickBridge } from "./sketch/CentrePick.js";
 
 export type SketchEditToolId = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "stretch" | "corner" | "fillet" | "chamfer" | "trim" | "extend"
   | "split" | "break" | "jog" | "delete-curve" | "offset-move" | "make-path" | "dynamic-mirror"
@@ -140,6 +141,8 @@ interface SketchEditPanelProps {
   readonly onPreview?: (entities: readonly SketchEntity[]) => void;
   /** The unit lengths are shown and typed in; a bare number in a length field is in it. The sketch itself is always millimetres. Default millimetres. */
   readonly unit?: SketchLengthUnit;
+  /** Rotate and Scale: picking the centre on the canvas (see sketch/CentrePick.tsx). */
+  readonly centrePick?: CentrePickBridge;
 }
 
 type NewId = (prefix: "entity" | "constraint") => string;
@@ -195,6 +198,8 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   const jog = props.jog ?? DEFAULT_JOG_PARAMS;
   const pathResult = useMemo(() => (props.tool === "make-path" && props.selectionIds.length > 0 ? makePath(props.sketch, props.selectionIds) : undefined), [props.tool, props.sketch, props.selectionIds]);
   const { stretchWindow, onStretchWindow, onCorner } = props;
+  // Rotate and Scale: a point clicked on the canvas fills the centre, and the typed centre is drawn there.
+  useCentrePickFields(props.centrePick, props.tool === "rotate" || props.tool === "scale", { x: centerX, y: centerY }, (x, y) => { setCenterX(x); setCenterY(y); }, len, seed);
 
   // A window drawn on the canvas fills the fields; a typed window is drawn on the canvas.
   useEffect(() => {
@@ -285,6 +290,7 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
         setCenterX(seed((bounds.x1 + bounds.x2) / 2)); setCenterY(seed((bounds.y1 + bounds.y2) / 2));
       }}><CommandIcon name="fit" />Centre of selection</button>
       <button className="palette-action" title="Put the centre at the sketch origin" onClick={() => { setCenterX("0"); setCenterY("0"); }}><CommandIcon name="coincident" />Origin</button>
+      <CentrePickButton bridge={props.centrePick} />
     </div>
   );
   const sideSelect = (): React.JSX.Element => (

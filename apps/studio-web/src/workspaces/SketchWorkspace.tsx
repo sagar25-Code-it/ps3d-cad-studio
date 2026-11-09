@@ -113,6 +113,7 @@ import { CommandIcon } from "../ui/CommandIcon.js";
 import { ViewportChrome } from "../ui/ViewportChrome.js";
 import { PointDistanceField } from "./sketch/SolverRelations.js";
 import { DimensionField, EntityDimensions } from "./sketch/EntityDimensionFields.js";
+import { CentreMarker, snapPickedCentre, useCentrePickState } from "./sketch/CentrePick.js";
 import { ORIGIN_DIMENSION_POINT as ORIGIN_POINT, allDimensionPoints, dimensionHandles, defaultDimensionPoints, resolveDirectSketchDimension, type DirectSketchDimension, type SketchDimensionPoint } from "./sketch/dimension-points.js";
 import { applyOf, circleDiameterApply, type DimensionApply } from "./sketch/dimension-requests.js";
 import { dimensionAllowsZero, readDimensionText } from "../../../../packages/workbench-sketch/src/dimension-text.js";
@@ -303,6 +304,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [pendingInference, setPendingInference] = useState<readonly PlacedPointInference[]>([]);
   // Picking the points of a Coincident or Midpoint relation on the canvas.
   const [pickRelation, setPickRelation] = useState<"coincident" | "midpoint" | null>(null);
+  // Rotate, Scale and a circular Pattern: the centre can be clicked on the canvas (the panels hold the fields, this holds the pick).
+  const centrePick = useCentrePickState(String(props.editTool));
   const [pickedPoint, setPickedPoint] = useState<RelationPoint | undefined>(undefined);
   // The in-place value editor for a driving dimension (opened from Sketch Dimension, or by clicking a dimension's text).
   const [dimensionEdit, setDimensionEdit] = useState<DimensionEditState | undefined>(undefined);
@@ -1041,7 +1044,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       return;
     }
     setPending([]);
-    say(`Added ${sketchToolLabel(props.tool)}${relationNote} with stable ID ${built.value.id}.`);
+    say(`Added ${sketchToolLabel(props.tool).toLowerCase()}${relationNote}.`);
   };
 
   const dynamicFields = useMemo(() => dynamicFieldsFor(props.tool, pending.length), [props.tool, pending.length]);
@@ -1087,7 +1090,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (!built.ok) { props.onMessage(built.diagnostics[0]?.message ?? "The spline was rejected."); setPending([]); return; }
     addDrawn(built.value);
     setPending([]);
-    props.onMessage(`Added fit-point spline with ${points.length} points and stable ID ${built.value.id}.`);
+    props.onMessage(`Added a fit-point spline through ${points.length} points.`);
   };
 
   const finishControlSpline = (controls: readonly Vec2[], closed: boolean): void => {
@@ -1323,7 +1326,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (props.viewportState.selectionFilter === "profile") {
       const profile = profiles.find((candidate) => candidate.entityIds.includes(id));
       if (profile !== undefined) selectProfile(profile, additive);
-      else props.onMessage("This curve does not bound a detected closed profile.");
+      else props.onMessage("This curve does not bound a closed profile yet. Close the outline (Sketch Checking lists every open end), or pick another curve.");
       return;
     }
     const intentIds = props.viewportState.selectionFilter === "connected"
@@ -1473,7 +1476,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   /** Select Other: picks the next curve among the ones under the pointer, and shows the list so any of them can be picked directly. */
   const cycleSelectOther = (candidates: readonly SelectOtherCandidate[], fromKeyboard: boolean, canvasAt?: readonly [number, number]): void => {
-    if (candidates.length === 0) { props.onMessage("No curve under the pointer."); return; }
+    if (candidates.length === 0) { props.onMessage("No curve under the pointer. Move onto a curve and try again; Alt-click cycles curves that overlap."); return; }
     const current = selectionIds.length === 1 ? selectionIds[0] : undefined;
     const next = nextInCycle(candidates, current);
     if (next === undefined) return;
@@ -1554,7 +1557,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     // Escape (and V) end Zoom window or Measure first, whatever else Escape would back out of next.
     if ((zoomWindowMode || measureMode) && (action.kind === "cancel-points" || action.kind === "exit-pick" || action.kind === "exit-dimension" || action.kind === "select-tool" || action.kind === "clear-selection")) {
       endModalModes();
-      props.onMessage("Finished.");
+      props.onMessage("Zoom window or Measure finished. Pick a tool, or click a curve to select it.");
       return;
     }
     switch (action.kind) {
@@ -1576,11 +1579,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         setInference(undefined);
         props.onMessage("Move cancelled; the curve is back where it was.");
         return;
-      case "exit-pick": setPickRelation(null); setPickedPoint(undefined); props.onMessage("Relation picking cancelled."); return;
+      case "exit-pick":
+        if (centrePick.picking) { centrePick.cancel(); props.onMessage("Centre picking cancelled. Type the centre, or press Pick on canvas to try again."); return; }
+        setPickRelation(null); setPickedPoint(undefined); props.onMessage("Relation picking cancelled."); return;
       case "exit-dimension": props.onExitDimension(); return;
       case "exit-edit-tool":
         // Esc also ends the zoom window and the Measure tool, which behave like edit tools.
-        if (endModalModes()) { props.onMessage("Finished."); return; }
+        if (endModalModes()) { props.onMessage("Zoom window or Measure finished. Pick a tool, or click a curve to select it."); return; }
         props.onCloseEditTool();
         return;
       case "clear-selection":
@@ -1644,7 +1649,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
   useSketchHotkeys({
     enabled: true,
-    context: { tool: props.tool, pendingPoints: pending.length, selectionCount: selectionIds.length + selectedProfileIds.length + selectedConstraintIds.length, curveSelectionCount: selectionIds.length, constraintSelectionCount: selectedConstraintIds.length, dimensionMode: props.dimensionMode, editToolActive: props.editTool !== null || zoomWindowMode || measureMode, pickingRelation: pickRelation !== null, dragging: dragLive !== undefined || (dragGesture.current?.moved ?? false), dynamicFieldCount: dynamicFields.length, dynamicTyped: Object.keys(fieldText).length > 0, overlapUnderCursor: hoverStack.length },
+    context: { tool: props.tool, pendingPoints: pending.length, selectionCount: selectionIds.length + selectedProfileIds.length + selectedConstraintIds.length, curveSelectionCount: selectionIds.length, constraintSelectionCount: selectedConstraintIds.length, dimensionMode: props.dimensionMode, editToolActive: props.editTool !== null || zoomWindowMode || measureMode, pickingRelation: pickRelation !== null || centrePick.picking, dragging: dragLive !== undefined || (dragGesture.current?.moved ?? false), dynamicFieldCount: dynamicFields.length, dynamicTyped: Object.keys(fieldText).length > 0, overlapUnderCursor: hoverStack.length },
     onAction: handleHotkey
   });
 
@@ -1738,9 +1743,21 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     });
   };
 
+  /** A canvas point for a picked centre: snapped to the nearest endpoint, centre, midpoint, intersection or the origin (Ctrl turns snapping off). */
+  const snapCentrePoint = (point: Vec2, ctrl: boolean): Vec2 => snapPickedCentre({ sketch: props.sketch, point, toleranceMm: SNAP_PIXELS * px, gridMm: grid.minorMm, settings: assist, ctrl });
+
   const handleCanvasPointerDownCapture = (event: React.PointerEvent<SVGSVGElement>): void => {
     // Panning wins over everything underneath the pointer, including curves, so a middle or Space drag never selects.
     const wantsPan = event.button === 1 || (event.button === 0 && (camera.spaceHeld || navigationPan));
+    // Picking a centre: the click is the centre, wherever it lands (it snaps to endpoints, centres and the origin), not a selection.
+    if (!wantsPan && event.button === 0 && centrePick.picking) {
+      event.stopPropagation();
+      event.preventDefault();
+      const point = snapCentrePoint(camera.toSketch(event.clientX, event.clientY), event.ctrlKey || event.metaKey);
+      centrePick.deliver(point);
+      props.onMessage(`Centre set to ${fmtNum(point[0])}, ${fmtNum(point[1])} ${unit}. Apply to use it, or click Pick on canvas to choose again.`);
+      return;
+    }
     // Alt-click on curves that overlap cycles through them (Select Other) instead of taking the top one.
     if (!wantsPan && event.button === 0 && event.altKey && props.tool === "select" && !props.dimensionMode && pickRelation === null && !isClickEditTool(props.editTool)) {
       event.stopPropagation();
@@ -1789,6 +1806,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
 
   const handleCanvasPointerMove = (event: React.PointerEvent<SVGSVGElement>): void => {
     if (camera.movePan(event)) return;
+    if (centrePick.picking) { centrePick.setHover(snapCentrePoint(camera.toSketch(event.clientX, event.clientY), event.ctrlKey || event.metaKey)); return; }
     const labelDrag = dimensionDrag.current;
     if (labelDrag !== undefined && labelDrag.pointerId === event.pointerId) {
       // Dragging a dimension label moves its dimension line; the pointer is only captured once the press has become a drag, so a plain click or double-click still reaches the label.
@@ -2021,9 +2039,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {previewShape?.entities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
         {mirrorGhosts.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} preview />)}
         {props.editTool !== null && editPreview.map((entity) => <SketchEntityShape key={`edit-preview-${entity.id}`} entity={entity} px={px} selected={false} hovered={false} preview />)}
-        {showDimensions && dimensionViews.map((entry) => <DimensionMarks key={entry.id} constraintId={entry.id} entityId={entry.view.entity.id} layout={entry.layout} px={px} relaxed={entry.view.constraint.suppressed === true} selected={selectedConstraintIds.includes(entry.id)} interactive={interactive} repositionable={isRepositionable(entry.layout)} title={constraintTitles.get(entry.id) ?? "Dimension"} onPress={(event, additive) => pressDimension(entry, event, additive)} onEdit={() => openDimensionEditor(entry.view.entity, entry.view.dimension)} />)}
+        {showDimensions && dimensionViews.map((entry) => <DimensionMarks key={entry.id} constraintId={entry.id} entityId={entry.view.entity.id} layout={entry.layout} px={px} relaxed={entry.view.constraint.suppressed === true} selected={selectedConstraintIds.includes(entry.id)} interactive={interactive} repositionable={isRepositionable(entry.layout)} title={constraintTitles.get(entry.id) ?? "Dimension"} onPress={(event, additive) => pressDimension(entry, event, additive)} onEdit={() => openDimensionEditor(entry.view.entity, entry.view.dimension)} onSelect={() => selectConstraint(entry.id, false)} />)}
         {showDimensions && <ExtraDimensionMarks sketch={visibleSketch} px={px} selectedIds={selectedConstraintIds} offsets={dimensionDragOffset === undefined ? dimensionOffsets : { ...dimensionOffsets, [dimensionDragOffset.constraintId]: dimensionDragOffset.offsetPx }} format={(value) => formatLengthLabel(value, dimensionDisplay)} {...(interactive ? { onEdit: openExtraDimensionEditor, onSelect: selectConstraint, onLabelPress: pressExtraDimension } : {})} />}
         {pending.map((point, index) => <circle key={index} cx={point[0]} cy={-point[1]} r={4 * px} className="pending-point" />)}
+        <CentreMarker centre={centrePick.centre} hover={centrePick.picking ? centrePick.hover : undefined} px={px} />
         {underlayPick.points.length > 0 && props.editTool === "underlay" && <g className="underlay-pick" pointerEvents="none" stroke="#d9480f" strokeWidth={1.5 * px} fill="none">
           {underlayPick.points.length === 2 && <line x1={underlayPick.points[0]![0]} y1={-underlayPick.points[0]![1]} x2={underlayPick.points[1]![0]} y2={-underlayPick.points[1]![1]} strokeDasharray={`${6 * px} ${4 * px}`} />}
           {underlayPick.points.map((point, index) => <g key={index}><circle cx={point[0]} cy={-point[1]} r={5 * px} /><line x1={point[0] - 9 * px} y1={-point[1]} x2={point[0] + 9 * px} y2={-point[1]} /><line x1={point[0]} y1={-point[1] - 9 * px} x2={point[0]} y2={-point[1] + 9 * px} /></g>)}
@@ -2042,8 +2061,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           width={2 * hitSizes.relationPointPx * px}
           height={2 * hitSizes.relationPointPx * px}
           role="button"
+          tabIndex={0}
+          aria-pressed={pickedPoint?.id === handle.id}
           aria-label={`${handle.label} (relation point)`}
           onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); pickRelationPoint(handle); }}
+          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); pickRelationPoint(handle); } }}
         />)}
         {props.dimensionMode && <>
           {[...dimensionHandleEntities.flatMap(dimensionHandles), ORIGIN_POINT].map((point) => <circle key={point.id} className={`dimension-point ${dimensionPoints.some((candidate) => candidate.id === point.id) ? "selected" : ""}`} data-dimension-point={point.id} cx={point.point[0]} cy={-point.point[1]} r={hitSizes.dimensionPointPx * px} role="button" tabIndex={0} aria-pressed={dimensionPoints.some((candidate) => candidate.id === point.id)} aria-label={`${point.label} dimension point`} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); selectDimensionPoint(point); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); selectDimensionPoint(point); } }} />)}
@@ -2208,7 +2230,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             <select aria-label="Revolve axis" value={props.sketch.entities.some((entity) => entity.id === revolveAxisChoice) || revolveAxisChoice === "x" ? revolveAxisChoice : ""} onChange={(event) => setRevolveAxisChoice(event.target.value)}>
               <option value="">Sketch Y axis ({sketchAxesInWorld(props.sketch.plane).y})</option>
               <option value="x">Sketch X axis ({sketchAxesInWorld(props.sketch.plane).x})</option>
-              {props.sketch.entities.filter((entity) => entity.kind === "line").map((entity, index) => <option key={entity.id} value={entity.id}>{entity.construction ? "Construction line" : "Line"} {index + 1} ({shortId(entity.id)})</option>)}
+              {props.sketch.entities.filter((entity) => entity.kind === "line").map((entity, index) => <option key={entity.id} value={entity.id}>{entityNames.get(entity.id) ?? `Line ${index + 1}`}{entity.construction ? " (construction)" : ""}</option>)}
             </select>
             <small>{describeSketchAxes(props.sketch)}</small>
           </div>}
@@ -2425,7 +2447,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         </div>
         <details className="palette-shortcuts">
           <summary>Shortcuts</summary>
-          <dl>{sketchHotkeyHelp(sketchKeymap).map((entry) => <div key={entry.keys}><dt>{entry.keys}</dt><dd>{entry.action}</dd></div>)}</dl>
+          <dl>{sketchHotkeyHelp(sketchKeymap).map((entry, index) => <div key={`${index}:${entry.keys}`}><dt>{entry.keys}</dt><dd>{entry.action}</dd></div>)}</dl>
         </details>
         </>}
       </div>
@@ -2450,11 +2472,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       {dynamicMirrorEntity !== undefined && props.editTool !== "dynamic-mirror" && <div className="inline-warning movable-note" role="status" aria-label="Dynamic mirror active">
         Dynamic mirror is on: what you draw is mirrored about {entityNames.get(dynamicMirrorEntity.id) ?? "the axis"}. <button className="palette-action" onClick={() => { setDynamicMirrorAxis(null); props.onMessage("Dynamic mirror stopped."); }}><CommandIcon name="cancel" />Stop</button>
       </div>}
-      {props.editTool === "pattern" && <SketchPatternPanel key={`pattern-${unit}`} unit={unit} sketch={props.sketch} selectionIds={selectionIds} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} onPreview={setEditPreview} />}
+      {props.editTool === "pattern" && <SketchPatternPanel key={`pattern-${unit}`} unit={unit} centrePick={centrePick.bridge} sketch={props.sketch} selectionIds={selectionIds} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} onPreview={setEditPreview} />}
       {props.editTool === "import-drawing" && <SketchImportPanel sketch={props.sketch} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
       {props.editTool === "export-drawing" && <SketchExportPanel sketch={props.sketch} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
       {props.editTool === "underlay" && <SketchUnderlayPanel sketch={props.sketch} pick={underlayPick} onPickStart={() => { setUnderlayPick({ active: true, points: [] }); props.onMessage("Picture: click the first point on the picture."); }} onPickCancel={() => setUnderlayPick({ active: false, points: [] })} onApply={props.onApplyEdit} onMessage={props.onMessage} onClose={props.onCloseEditTool} />}
-      {props.editTool !== null && props.editTool !== "pattern" && props.editTool !== "import-drawing" && props.editTool !== "export-drawing" && props.editTool !== "underlay" && <SketchEditPanel key={`${props.editTool}-${unit}`} unit={unit} tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} jog={jogParams} onJog={setJogParams} corner={cornerParams} onCorner={setCornerParams} onPreview={setEditPreview} dynamicMirrorAxis={dynamicMirrorAxis} onDynamicMirror={(axisId) => { setDynamicMirrorAxis(axisId); props.onMessage(axisId === null ? "Dynamic mirror stopped." : `Dynamic mirror on: pick a drawing tool; everything you draw is mirrored about ${axisId.replace(/^entity:/u, "")}.`); }} />}
+      {props.editTool !== null && props.editTool !== "pattern" && props.editTool !== "import-drawing" && props.editTool !== "export-drawing" && props.editTool !== "underlay" && <SketchEditPanel key={`${props.editTool}-${unit}`} unit={unit} centrePick={centrePick.bridge} tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} jog={jogParams} onJog={setJogParams} corner={cornerParams} onCorner={setCornerParams} onPreview={setEditPreview} dynamicMirrorAxis={dynamicMirrorAxis} onDynamicMirror={(axisId) => { setDynamicMirrorAxis(axisId); props.onMessage(axisId === null ? "Dynamic mirror stopped." : `Dynamic mirror on: pick a drawing tool; everything you draw is mirrored about ${axisId.replace(/^entity:/u, "")}.`); }} />}
       {props.checkOpen && <SketchRepairPanel sketch={props.sketch} onApplyEdit={props.onApplyEdit} onSetSuppressed={props.onSetSuppressed} onSelect={(ids) => { setSelectionIds(ids); props.onSelect(ids.at(-1) ?? null); }} onMessage={props.onMessage} onClose={props.onCloseCheck} />}
       {props.showMovable && <div className="inline-warning movable-note">{movableIds.size === 0 ? "Show Movable: every entity is fully constrained." : `Show Movable: ${movableIds.size} entit${movableIds.size === 1 ? "y has" : "ies have"} estimated degrees of freedom (amber).`}</div>}
       <section className="inspector-section point-relations"><header><strong>Point relations</strong><span>{pickRelation === null ? "pick points" : pickRelation}</span></header>

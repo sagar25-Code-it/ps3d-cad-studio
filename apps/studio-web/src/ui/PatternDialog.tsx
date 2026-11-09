@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { describeFailure } from "../failure-text.js";
 import type { PatternShape } from "../../../../packages/workbench-core/src/index.js";
 import type { PatternPreview, PatternRequest } from "../pattern-commit.js";
 import { formOfRequest, PATTERN_DIRECTIONS, requestOfForm, type PatternForm } from "../pattern-form.js";
@@ -56,9 +57,14 @@ export function PatternDialog(props: PatternDialogProps): React.JSX.Element {
     if (!("request" in built)) { setError(built.message); return; }
     setWorking(true);
     setError(undefined);
-    const message = await props.onApply(built.request);
-    setWorking(false);
-    if (message !== undefined) setError(message);
+    try {
+      const message = await props.onApply(built.request);
+      if (message !== undefined) setError(message);
+    } catch (failure) {
+      setError(describeFailure(failure, "The pattern"));
+    } finally {
+      setWorking(false);
+    }
   };
 
   const directionSelect = (value: string, onChange: (next: string) => void, label: string, initialFocus = false): React.JSX.Element =>

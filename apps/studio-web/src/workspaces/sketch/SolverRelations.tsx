@@ -60,15 +60,29 @@ function PointSelect(props: { readonly label: string; readonly entity: SketchEnt
   </label>;
 }
 
+/**
+ * The direction (aligned, horizontal or vertical) of the distance the selection already has: from the origin for one curve, between the
+ * two for a pair. The Distance field opens on it, so a hole already placed 20 mm along X shows that dimension (and its parameter) to
+ * edit, instead of offering a second, aligned one next to it.
+ */
+function existingDirection(sketch: WorkbenchSketch, selected: readonly SketchEntity[]): "aligned" | "horizontal" | "vertical" {
+  const ids = selected.length === 1 ? [SKETCH_ORIGIN_ID, selected[0]!.id] : selected.length === 2 ? [selected[0]!.id, selected[1]!.id] : undefined;
+  if (ids === undefined) return "aligned";
+  const found = sketch.constraints.find((constraint) => constraint.kind === "distance" && constraint.driven !== true && constraint.suppressed !== true
+    && (constraint.dimension === "horizontal" || constraint.dimension === "vertical" || constraint.dimension === "aligned")
+    && constraint.entityIds.length === 2 && constraint.entityIds[0] === ids[0] && constraint.entityIds[1] === ids[1]);
+  return found?.dimension === "horizontal" || found?.dimension === "vertical" ? found.dimension : "aligned";
+}
+
 export function SolverRelations(props: SolverRelationsProps): React.JSX.Element {
   const names = useMemo(() => entityNames(props.sketch), [props.sketch.entities]); // eslint-disable-line react-hooks/exhaustive-deps
   const [first, second] = [props.selected.at(-2) ?? props.selected.at(-1), props.selected.length >= 2 ? props.selected.at(-1) : undefined];
   const one = props.selected.length === 1 ? props.selected[0] : undefined;
   const [firstRef, setFirstRef] = useState<SketchPointRef | undefined>(undefined);
   const [secondRef, setSecondRef] = useState<SketchPointRef | undefined>(undefined);
-  const [orientation, setOrientation] = useState<"aligned" | "horizontal" | "vertical">("aligned");
+  const [orientation, setOrientation] = useState<"aligned" | "horizontal" | "vertical">(() => existingDirection(props.sketch, props.selected));
   const selectionKey = props.selected.map((entity) => entity.id).join("|");
-  useEffect(() => { setFirstRef(undefined); setSecondRef(undefined); }, [selectionKey]);
+  useEffect(() => { setFirstRef(undefined); setSecondRef(undefined); setOrientation(existingDirection(props.sketch, props.selected)); }, [selectionKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // What a distance would be between the current selection.
   const plan = useMemo(() => {

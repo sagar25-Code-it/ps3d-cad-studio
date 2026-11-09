@@ -1,0 +1,19 @@
+/* Sketch wave 3: bound dimension fields, the picked centre marker and keyboard focus on the canvas' small controls.
+   Loaded after sketch-canvas-ux.css. */
+
+/* ---- a dimension bound to a parameter ---- */
+.studio-app .dimension-field small.dimension-bound { display: block; margin-top: 0.2rem; border-left: 0; color: #5c4400; font: 0.55rem var(--mono); text-align: left; overflow-wrap: anywhere; }
+.studio-app .dimension-field-group { display: grid; gap: 0.2rem; }
+
+/* ---- the centre of Rotate, Scale and a circular Pattern ---- */
+.centre-marker-current circle, .centre-marker-current line { fill: none; stroke: #ffd36a; stroke-width: 1.8px; vector-effect: non-scaling-stroke; }
+.centre-marker-hover circle, .centre-marker-hover line { fill: none; stroke: #7bd88f; stroke-width: 1.6px; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }
+.sketch-palette .palette-action.active, .sketch-edit-panel .palette-action.active { border-color: #1f6fb6; color: #124a7c; background: #eaf5fb; font-weight: 700; }
+
+/* ---- keyboard focus on the canvas' small controls (they are reachable with Tab and operated with Enter or Space) ---- */
+.dimension-point:focus-visible, .relation-point:focus-visible { outline: none; stroke: #4aa8f0; stroke-width: 3px; }
+.driving-dimension-hit:focus-visible { outline: none; stroke: #4aa8f0; stroke-width: 2px; fill: #4aa8f033; }
+.sketch-stage .select-other button[role="option"]:focus-visible { outline: 2px solid #4aa8f0; outline-offset: 1px; }
+.sketch-stage .dimension-editor input:focus-visible { outline: 2px solid #f4bd42; outline-offset: 0; }
+.studio-app .sketch-stage .select-other [role="listbox"] { display: grid; gap: 2px; }
+.studio-app .sketch-stage .select-other [role="listbox"] { display: grid; gap: 2px; }

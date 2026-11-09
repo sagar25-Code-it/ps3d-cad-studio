@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { describeFailure } from "../failure-text.js";
 import type { DesignParameter, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import { analyseParameterRows, boundValuesOf, nextParameterName, parameterOperationOf, parameterRowsOf, type ParameterRow } from "../parameter-rows.js";
 import { CommandIcon } from "./CommandIcon.js";
@@ -46,8 +47,12 @@ export function ChangeParametersDialog(props: ChangeParametersDialogProps): Reac
   const apply = async (): Promise<void> => {
     if (!report.ready) return;
     const operation = parameterOperationOf(rows);
-    const message = await props.onApply(operation.parameters, operation.renames);
-    if (message !== undefined) setRefusal(message);
+    try {
+      const message = await props.onApply(operation.parameters, operation.renames);
+      if (message !== undefined) setRefusal(message);
+    } catch (failure) {
+      setRefusal(describeFailure(failure, "Saving the parameters"));
+    }
   };
 
   return <div className="dialog-backdrop save-project-backdrop" role="presentation" onMouseDown={props.onClose}>

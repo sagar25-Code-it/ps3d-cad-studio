@@ -40,7 +40,9 @@ export function BendTableDialog(props: BendTableDialogProps): React.JSX.Element 
   };
   const importCsv = async (file: File | undefined): Promise<void> => {
     if (file === undefined) return;
-    const parsed = parseBendTableCsv(await file.text());
+    let text: string;
+    try { text = await file.text(); } catch { setProblem("The file could not be read. Choose it again, or paste the rows by hand."); return; }
+    const parsed = parseBendTableCsv(text);
     if (!parsed.ok) { setProblem(parsed.message); return; }
     setRows(parsed.rows.map(draftOf));
     setProblem("");

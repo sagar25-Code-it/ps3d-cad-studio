@@ -10,6 +10,7 @@ import {
 import { analyzeWorkbenchSketch, detectSketchProfiles, entityPoints, sampleSpline } from "./index.js";
 import { arrangeSketch } from "./profile-detect.js";
 import { solveLiveSketch } from "../../workbench-core/src/sketch-solve.js";
+import { sketchEntityNames } from "../../workbench-core/src/sketch-names.js";
 import { isDimensionConstraint } from "../../workbench-core/src/sketch-measure.js";
 
 /** One atomic sketch edit, applied by the `apply-sketch-edit` operation. */
@@ -409,6 +410,9 @@ export interface SketchCheckReport {
 /** Read-only diagnostics: gaps, tiny or duplicate curves, conflicting or unsolved relations and the degree-of-freedom state. */
 export function checkSketch(sketch: WorkbenchSketch): SketchCheckReport {
   const items: SketchCheckItem[] = [];
+  // Curves are named the way the sketch lists them ("Line 3"), never by their generated id.
+  const names = sketchEntityNames(sketch.entities);
+  const label = (id: string): string => names.get(id) ?? "A curve";
   const tolerance = Math.max(sketch.snapToleranceMm, 1e-6);
   const curves = sketch.entities.filter((entity) => !entity.construction && (entity.kind === "line" || entity.kind === "arc" || entity.kind === "spline"));
   const endOf = (entity: SketchEntity): readonly Vec2[] => (entity.kind === "line" || entity.kind === "arc" ? [entity.start, entity.end] : entity.kind === "spline" ? [entity.fitPoints[0]!, entity.fitPoints[entity.fitPoints.length - 1]!] : []);
@@ -419,19 +423,19 @@ export function checkSketch(sketch: WorkbenchSketch): SketchCheckReport {
   for (const end of ends) {
     const partners = ends.filter((other) => other !== end && distance(other.point, end.point) <= tolerance).length;
     if (partners === 0 && !freeEnds.some((free) => distance(free, end.point) <= 0.02)) continue;
-    if (partners === 0) items.push({ severity: "warning", message: `Open end at (${format(end.point[0])}, ${format(end.point[1])}) mm on ${shortId(end.entity.id)}; the curve does not close a profile there.`, entityIds: [end.entity.id] });
+    if (partners === 0) items.push({ severity: "warning", message: `Open end at (${format(end.point[0])}, ${format(end.point[1])}) mm on ${label(end.entity.id)}; the curve does not close a profile there.`, entityIds: [end.entity.id] });
     else if (partners > 1) {
       const key = `${format(end.point[0])},${format(end.point[1])}`;
       if (!junctions.has(key)) { junctions.add(key); items.push({ severity: "info", message: `${partners + 1} curve ends meet at (${format(end.point[0])}, ${format(end.point[1])}) mm; the regions on each side of every curve are separate.`, entityIds: [end.entity.id] }); }
     }
   }
   for (const entity of sketch.entities) {
-    if (entity.kind === "line" && distance(entity.start, entity.end) < 0.1) items.push({ severity: "warning", message: `${shortId(entity.id)} is shorter than 0.1 mm.`, entityIds: [entity.id] });
-    if (entity.kind === "circle" && entity.radiusMm < 0.1) items.push({ severity: "warning", message: `${shortId(entity.id)} has a radius under 0.1 mm.`, entityIds: [entity.id] });
+    if (entity.kind === "line" && distance(entity.start, entity.end) < 0.1) items.push({ severity: "warning", message: `${label(entity.id)} is shorter than 0.1 mm.`, entityIds: [entity.id] });
+    if (entity.kind === "circle" && entity.radiusMm < 0.1) items.push({ severity: "warning", message: `${label(entity.id)} has a radius under 0.1 mm.`, entityIds: [entity.id] });
   }
   sketch.entities.forEach((entity, index) => {
     for (const other of sketch.entities.slice(index + 1)) {
-      if (sameGeometry(entity, other, tolerance)) items.push({ severity: "warning", message: `${shortId(entity.id)} and ${shortId(other.id)} are the same curve drawn twice.`, entityIds: [entity.id, other.id] });
+      if (sameGeometry(entity, other, tolerance)) items.push({ severity: "warning", message: `${label(entity.id)} and ${label(other.id)} are the same curve drawn twice.`, entityIds: [entity.id, other.id] });
     }
   });
   const profiles = detectSketchProfiles(sketch);
@@ -459,10 +463,6 @@ function sameGeometry(a: SketchEntity, b: SketchEntity, tolerance: number): bool
   return false;
 }
 
-function shortId(id: string): string {
-  const bare = id.replace(/^entity:/u, "");
-  return bare.length > 18 ? `${bare.slice(0, 12)}…` : bare;
-}
 
 // ---------------------------------------------------------------------------------------------
 // Geometry helpers

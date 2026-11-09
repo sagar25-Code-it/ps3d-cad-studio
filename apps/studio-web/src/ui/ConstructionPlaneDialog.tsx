@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { describeFailure } from "../failure-text.js";
 import type { ConstructionAxis, ConstructionBinder, ConstructionEdgeRef, ConstructionPathRef, ConstructionPlaneDefinition, GeneralSolidBody } from "../../../../packages/workbench-core/src/index.js";
 import { evaluateConstructionPlaneDefinition } from "../../../../packages/workbench-geometry/src/index.js";
 import { emptyEdgeForm, planeDefinitionOfForm, type EdgeForm, type EdgeSource, type PickResult, type SketchPathOption } from "../construction-ui.js";
@@ -66,7 +67,8 @@ export function ConstructionPlaneDialog(props: ConstructionPlaneDialogProps): Re
   if (!props.open) return null;
 
   const pickInto = async (set: (updater: (form: EdgeForm) => EdgeForm) => void): Promise<void> => {
-    const result = await props.onPickEdge();
+    let result: Awaited<ReturnType<typeof props.onPickEdge>>;
+    try { result = await props.onPickEdge(); } catch (failure) { set((form) => ({ ...form, picked: undefined, pickedText: describeFailure(failure, "Picking the edge") })); return; }
     if (result.ok) set((form) => ({ ...form, picked: result.value, pickedText: result.message }));
     else set((form) => ({ ...form, picked: undefined, pickedText: result.message }));
   };
