@@ -82,6 +82,8 @@ export const sketchArcSlots3Tests: readonly TestCase[] = ARC_SLOTS.flatMap((slot
       assert(built.ok, "builds");
       equal(built.value.constraints.filter((constraint) => constraint.kind === "tangent").length, 4, "a Tangent at each of the four joints");
       equal(built.value.constraints.filter((constraint) => constraint.kind === "coincident").length, 4, "and the four joints");
+      equal(built.value.constraints.filter((constraint) => constraint.kind === "equal").length, 0, "no Equal between the caps: tangent caps on concentric arcs are equal already, so it would be a redundant relation");
+      equal(built.value.constraints.filter((constraint) => constraint.kind === "concentric").length, 1, "the long arcs share their centre");
       const project = addShape(emptyProject3(), built.value);
       equal(wholeProblem(project), undefined, "as drawn");
       equal(arcSlotProblem(project.sketch), undefined, "the slot as drawn");

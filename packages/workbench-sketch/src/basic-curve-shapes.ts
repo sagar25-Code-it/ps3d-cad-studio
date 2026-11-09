@@ -139,13 +139,13 @@ export function buildArcSlot(arc: CenterlineArc, halfWidthMm: number, ids: Shape
   const endCap = mk(outerEnd, add(endCentre, scale(along(a1), h)), innerEnd);
   const inner = mk(innerEnd, polar(center, R - h, aMid), innerStart);
   const startCap = mk(innerStart, add(startCentre, scale(along(a0), -h)), outerStart);
-  // Every joint is a Coincident pair of real ends held Tangent (outer arc, cap, inner arc, cap), the two caps are equal and the two long
-  // arcs share their centre, so a width or radius edit keeps the slot a slot instead of kinking at the caps.
+  // Every joint is a Coincident pair of real ends held Tangent (outer arc, cap, inner arc, cap) and the two long arcs share their centre, so
+  // a width or radius edit keeps the slot a slot instead of kinking at the caps. No Equal between the caps: two caps tangent to two
+  // concentric arcs are both half-circles of radius (outer - inner) / 2, so an Equal would be an implied (redundant) relation.
   const ring: readonly SketchEntity[] = [outer, endCap, inner, startCap];
   const constraints: WorkbenchSketchConstraint[] = [
     ...joinRing(ring, ids),
     ...ring.map((entity, index): WorkbenchSketchConstraint => ({ id: ids.constraint(), kind: "tangent", entityIds: [entity.id, ring[(index + 1) % ring.length]!.id] })),
-    { id: ids.constraint(), kind: "equal", entityIds: [endCap.id, startCap.id] },
     { id: ids.constraint(), kind: "concentric", entityIds: [outer.id, inner.id] }
   ];
   return { ok: true, value: { entities: [outer, endCap, inner, startCap], constraints } };
