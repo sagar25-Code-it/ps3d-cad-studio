@@ -49,3 +49,4 @@ export * from "./arc-geometry.js";
 export * from "./spline-limits.js";
 export * from "./sketch-objects.js";
 export * from "./mesh-pack.js";
+export * from "./finished-sketch-hint.js";

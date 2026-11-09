@@ -7,6 +7,7 @@ import type { SketchDimensionName, SketchEntity, SketchPointRef, WorkbenchOperat
 import { isSketchDatumEntityId, SKETCH_RELATIVE_DISTANCE_NAMES } from "./types.js";
 import { failure, WORKBENCH_LIMITS } from "./validation.js";
 import { MODEL_ENVELOPE } from "./envelope.js";
+import { missingSketchEntityFailure } from "./finished-sketch-hint.js";
 
 type SetDimension = Extract<WorkbenchOperation, { readonly kind: "set-sketch-dimension" }>;
 type Applied = WorkbenchResult<{ readonly project: WorkbenchProject; readonly changedIds: readonly string[]; readonly summary: string }>;
@@ -171,7 +172,7 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
   const name = operation.dimension;
   const lookup = (id: string): SketchEntity | "datum" | undefined => (isSketchDatumEntityId(id) ? "datum" : sketch.entities.find((entity) => entity.id === id));
   const target = lookup(operation.entityId);
-  if (target === undefined) return failure("BROKEN_REFERENCE", "The sketch entity does not exist.", [operation.entityId], "Refresh the project and select an existing stable ID.");
+  if (target === undefined) return missingSketchEntityFailure(project, operation.entityId, "The sketch entity does not exist.");
   const invalid = (message: string): Applied => failure("INVALID_OPERATION", message, [], "Use an exact bounded operation schema from the capability list.");
   const driven = operation.driven === true;
   const relative = (SKETCH_RELATIVE_DISTANCE_NAMES as readonly string[]).includes(name);

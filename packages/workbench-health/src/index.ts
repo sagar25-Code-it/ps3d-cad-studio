@@ -14,6 +14,7 @@ import { createAutomaticDrawingPlan } from "../../workbench-drawing/src/index.js
 import { createElectricalSchematic } from "../../workbench-electrical/src/index.js";
 import { buildVehiclePreview } from "../../workbench-vehicle/src/index.js";
 import { partGeometryFindings } from "./part-geometry.js";
+import { timelineFindings, timelineMetrics } from "./timeline.js";
 
 export type DesignHealthStatus = "healthy" | "review" | "blocked";
 export type DesignHealthSeverity = "info" | "warning" | "error";
@@ -100,6 +101,8 @@ export function buildDesignHealthReport(project: WorkbenchProject): DesignHealth
   add(finding("health:part-kernel-boundary", "part", "info", "Qualified and analytic solid lanes are bounded", "The centered-bore plate is worker-validated. Additional revolve, pattern, mirror, aligned Boolean, trim, detail, shell, draft, and planar-face operations regenerate deterministic closed analytic meshes but remain preview-scoped rather than general B-rep.", "Review each operation's preconditions and export a neutral tessellated reference until a general exact kernel is separately qualified.", [project.part.id, ...(project.part.previewBodies ?? []).map((body) => body.id)], `${project.part.widthMm} × ${project.part.heightMm} × ${project.part.thicknessMm} mm · ${project.part.previewBodies?.length ?? 0} analytic bodies`));
 
   for (const solidFinding of partGeometryFindings(project.part)) add(solidFinding);
+  // The design timeline: failed or orphaned steps, a rolled-back marker, suppressed steps.
+  for (const timelineFinding of timelineFindings(project)) add(timelineFinding);
 
   const interferences = findAssemblyInterference(project.assembly);
   const conflictingMates = project.assembly.mates.filter((mate) => mate.status === "conflict");
@@ -227,8 +230,8 @@ function metricsFor(
   }
 ): Readonly<Record<string, string | number | boolean>> {
   switch (workspace) {
-    case "sketch": return { entities: project.sketch.entities.length, constraints: project.sketch.constraints.length, degreesOfFreedom: derived.sketch.degreesOfFreedom, classification: derived.sketch.classification };
-    case "part": return { widthMm: project.part.widthMm, heightMm: project.part.heightMm, thicknessMm: project.part.thicknessMm, holeDiameterMm: project.part.holeDiameterMm };
+    case "sketch": return { entities: project.sketch.entities.length, constraints: project.sketch.constraints.length, degreesOfFreedom: derived.sketch.degreesOfFreedom, classification: derived.sketch.classification, timelineSketches: timelineMetrics(project).timelineSketches };
+    case "part": return { widthMm: project.part.widthMm, heightMm: project.part.heightMm, thicknessMm: project.part.thicknessMm, holeDiameterMm: project.part.holeDiameterMm, ...timelineMetrics(project) };
     case "assembly": return { components: project.assembly.components.length, mates: project.assembly.mates.length, interferences: derived.interferences.length, ecadTrace: project.assembly.electromechanicalSource?.status ?? "none" };
     case "surface": return { mode: project.surface.mode, triangles: derived.surface.metrics.triangles, areaSquareMm: round(derived.surface.metrics.approximateAreaSquareMm), boundaryEdges: derived.surface.metrics.boundaryEdges };
     case "drawing": return { views: derived.drawing.views.length, dimensions: derived.drawing.dimensions.length, gdtFrames: derived.drawing.gdtFrames.length, draftingStandard: derived.drawing.draftingStandard };

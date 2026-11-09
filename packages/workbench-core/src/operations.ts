@@ -69,6 +69,7 @@ import { AUDIT_KEEP_FULL, compactAudit } from "./audit-archive.js";
 import { validSketchPlaneFace } from "./feature-refs.js";
 import { applySketchObjectsEdit, explicitObjectIds, reconcileSketchObjects, validSketchObjectsEdit } from "./sketch-objects.js";
 import { unpackMeshes } from "./mesh-pack.js";
+import { missingSketchEntityFailure } from "./finished-sketch-hint.js";
 import { constraintPayloadProblem, describeGivenValue, parameterTableProblem, sketchObjectsProblem } from "./operation-payload-problems.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
@@ -693,7 +694,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       return changed({ ...project, sketch: { ...project.sketch, entities: [...project.sketch.entities, operation.entity] } }, [operation.entity.id], `Added ${sketchEntityName({ entities: [...project.sketch.entities, operation.entity] }, operation.entity.id)}.`);
     }
     case "delete-sketch-entity": {
-      if (!project.sketch.entities.some((entity) => entity.id === operation.entityId)) return broken(operation.entityId, "The sketch entity does not exist.");
+      if (!project.sketch.entities.some((entity) => entity.id === operation.entityId)) return missingSketchEntityFailure(project, operation.entityId, "The sketch entity does not exist.");
       const removedConstraints = project.sketch.constraints.filter((constraint) => constraint.entityIds.includes(operation.entityId));
       return changed({
         ...project,
@@ -775,7 +776,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     case "rename-design-feature": return renameDesignFeature(project, operation.featureId, operation.name);
     case "toggle-sketch-construction": {
       const target = project.sketch.entities.find((entity) => entity.id === operation.entityId);
-      if (target === undefined) return broken(operation.entityId, "The sketch entity does not exist.");
+      if (target === undefined) return missingSketchEntityFailure(project, operation.entityId, "The sketch entity does not exist.");
       return changed({
         ...project,
         sketch: { ...project.sketch, entities: project.sketch.entities.map((entity) => entity.id === target.id ? { ...entity, construction: !entity.construction } : entity) }
@@ -783,7 +784,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "toggle-sketch-entity-visibility": {
       const target = project.sketch.entities.find((entity) => entity.id === operation.entityId);
-      if (target === undefined) return broken(operation.entityId, "The sketch entity does not exist.");
+      if (target === undefined) return missingSketchEntityFailure(project, operation.entityId, "The sketch entity does not exist.");
       const visible = target.visible !== false;
       return changed({
         ...project,
@@ -1414,7 +1415,7 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   const sketch = project.sketch;
   const existing = new Set(sketch.entities.map((entity) => entity.id));
   const removed = new Set(operation.removeEntityIds);
-  for (const id of removed) if (!existing.has(id)) return broken(id, "A sketch entity to remove does not exist.");
+  for (const id of removed) if (!existing.has(id)) return missingSketchEntityFailure(project, id, "A sketch entity to remove does not exist.");
   const updates = new Map(operation.updateEntities.map((entity) => [entity.id, entity] as const));
   if (updates.size !== operation.updateEntities.length) {
     const seenIds = new Set<string>();
@@ -1422,7 +1423,7 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
     return invalidOperation(`The sketch edit updates ${twice ?? "the same entity"} twice; list each curve once in updateEntities.`);
   }
   for (const id of updates.keys()) {
-    if (!existing.has(id)) return broken(id, "A sketch entity to update does not exist.");
+    if (!existing.has(id)) return missingSketchEntityFailure(project, id, "A sketch entity to update does not exist.");
     if (removed.has(id)) return invalidOperation(`The sketch edit both removes and updates ${id}; it can do only one of the two.`);
   }
   const addedIds = operation.addEntities.map((entity) => entity.id);
