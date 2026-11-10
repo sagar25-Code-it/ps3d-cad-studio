@@ -52,7 +52,7 @@ previews, and a read-only vehicle MCP analysis. The implementation used only:
   architecture, ADRs, governance files, and recorded primary-source facts;
 - the user-supplied `PS3D_Master_Brand_Marketing_Profile_Updated.pdf` as an
   authorized visual-identity reference (SHA-256
-  `dc90154d7795d5784e05d4d0928923346711d6d60498259842224918284633ef`);
+  `b1a30062f45ec0cbe58c6d95c6cd7d8169fff838cb5a4b18fee780774a2c0804`);
   it supplies the PS3D Master identity, official name/service line/tagline,
   owner biography and public links, navy/indigo, engineering-blue,
   signal-cyan, steel, blueprint-grid, technical typography direction, and the
