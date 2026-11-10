@@ -1529,3 +1529,25 @@ Of the 141 original issues: 109 fixed, 23 partly fixed, 6 still failing, 3 not c
 - No UI behaviour from the fix waves was exercised in a browser by the engineers. I exercised these live on the merged build: sketch plane dialog and chip, build version footer and the "newer version available" banner, closing-loop auto-constraint, DOF of a drawn rectangle (4), corner drag, inline dimension editor, friendly entity names, region count with a diagonal (2), fillet of a drawn rectangle corner with relations, DXF import, slot creation with joints. A slot side-length edit and a regular polygon edit were not driven through the UI.
 - Not fixed: legacy bare profile ids after a fillet or chamfer (the id carries no information to tell regions apart); the stored outline start vertex stays arbitrary (kernel face names depend on it); the YZ plane keeps its Y-up convention in a Z-up world (documented in the plane dialog, the status line and the revolve axis chip); meshes are still stored as plain JSON (only the size limits were aligned); a UI path picker for cross-sketch sweep paths; imported layer names other than construction cannot be kept (sketch entities carry no layer field); revolve of a circle profile keeps a fixed facet count because the mesh is stored as JSON; STEP/IGES export and DWG import are out of scope.
 - Known interactions to watch: the arc radius limit is duplicated in `arc-geometry.ts` and `envelope.ts` (change both); Fix on a rectangle now really holds it, so dimensioning a rectangle that still carries a Fix needs the "Relax the Fix" step.
+
+
+## E. Second re-audit and wave 3 (2026-11-10)
+
+The released build (main 167da52) was re-audited a second time by six agents (see `docs/SKETCH_REAUDIT2_2026-11.md`): of the original 141 issues 124 were fixed, 15 partly fixed, 1 failing by design and 1 UI-only; of the 62 issues from the first re-audit 56 were fixed and 6 partly; the agents found 61 new issues (2 blocker, 23 major, 31 minor, 5 cosmetic).
+
+Wave 3 fixed them in six packages (solver, regions, edit tools, creation tools, pipeline, UI), merged with 1564 passing tests. Verified by me against the merged build:
+
+- Plates with a row of 4 equal holes and a 12-hole bolt circle now extrude to closed meshes (0 open edges in every layout I tried; rows of 1 to 6, a 2 x 3 grid, staggered and mixed radii).
+- Filleting a corner of a fully dimensioned plate keeps it fully constrained: the two length dimensions become aligned distances of 80 and 50 (verified by script and live in the app: DOF stays 2, the same as before the fillet).
+- The Profile tool now emits a coincident joint at every junction and a tangent at every smooth one; 18 handle drags leave a worst joint gap of 0 (was 36 mm) and DOF 12 (was 23).
+- The new YZ convention: a new Right-plane sketch maps sketch X to world Y and sketch Y to world Z (extrude and revolve verified at the kernel: revolve turns about world Z), while saved sketches keep the legacy mapping (revolve about world Y) unchanged.
+
+### Still open after wave 3
+
+- A 312-line closed H/V grid still takes about 1.5 s per dimension edit (it was 12 s for the worst coupled chains before; those now take under a second).
+- Offset of a circle, arc, rectangle, ellipse or spline has no distance relation, so the offset does not follow when the source is resized (the solver has no offset relation kind).
+- Legacy bare profile ids from files saved by an older build cannot be re-attached after a fillet when two or more regions remain (the id holds no area or centroid).
+- A 3-point arc whose through-point snaps to a curve or crossing records no relation (no relation kind says "the arc passes through some point").
+- A two-point spline's end direction is built in as one extra fit point, not a stored condition.
+- Shape snaps: rounded-rectangle virtual corners and the splines made by parabola, hyperbola, conic, blend, text and blocks cannot be joined at a point by the current relation kinds.
+- Nothing from wave 3 was exercised in a browser by the engineers; I exercised the plane dialog, build indicator, drawn rectangle with dimensions, DOF and fillet live on the merged build.
