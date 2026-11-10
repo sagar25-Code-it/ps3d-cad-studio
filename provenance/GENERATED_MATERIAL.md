@@ -52,7 +52,7 @@ previews, and a read-only vehicle MCP analysis. The implementation used only:
   architecture, ADRs, governance files, and recorded primary-source facts;
 - the user-supplied `PS3D_Master_Brand_Marketing_Profile_Updated.pdf` as an
   authorized visual-identity reference (SHA-256
-  `b1a30062f45ec0cbe58c6d95c6cd7d8169fff838cb5a4b18fee780774a2c0804`);
+  `dc90154d7795d5784e05d4d0928923346711d6d60498259842224918284633ef`);
   it supplies the PS3D Master identity, official name/service line/tagline,
   owner biography and public links, navy/indigo, engineering-blue,
   signal-cyan, steel, blueprint-grid, technical typography direction, and the
@@ -261,8 +261,8 @@ deployment, release, or legal clearance.
   self-referential record.
   Symbolic links are rejected.
 - Canonical source-set hash:
-``
-- Canonical source-set file count: 
+`b1a30062f45ec0cbe58c6d95c6cd7d8169fff838cb5a4b18fee780774a2c0804`
+- Canonical source-set file count: 1037
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
   `provenance/BUILD_IDENTITY.json`, SHA-256
