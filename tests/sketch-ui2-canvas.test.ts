@@ -268,7 +268,7 @@ export const sketchUi2CanvasTests: readonly TestCase[] = [
       equal(radialRequest.dimension, "radius", "typing 14 writes a radius");
       near(radialRequest.valueMm, 7, 1e-9, "of 7");
       const source = readFileSync(new URL("../../apps/studio-web/src/workspaces/SketchWorkspace.tsx", import.meta.url), "utf8");
-      assert(source.includes("circleDimensionRequest(typed, edit.diameterConstraint === true)"), "the editor uses the request");
+      assert(source.includes("circleDiameterApply(read, edit.diameterConstraint === true)"), "the editor uses the request (circleDiameterApply wraps circleDimensionRequest)");
     }
   },
   {

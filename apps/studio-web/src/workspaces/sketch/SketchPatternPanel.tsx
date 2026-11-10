@@ -14,9 +14,10 @@ import {
   type PatternFields
 } from "../../../../../packages/workbench-sketch/src/pattern-path.js";
 import { patternPanelKey, patternSelection, planPatternPanel } from "../../../../../packages/workbench-sketch/src/pattern-panel-model.js";
-import { formatLengthField } from "../../../../../packages/workbench-sketch/src/edit-fields.js";
+import { formatLengthField, parseLengthField } from "../../../../../packages/workbench-sketch/src/edit-fields.js";
 import type { SketchLengthUnit } from "../../../../../packages/workbench-sketch/src/sketch-units.js";
 import { CommandIcon } from "../../ui/CommandIcon.js";
+import { CentrePickButton, useCentrePickFields, type CentrePickBridge } from "./CentrePick.js";
 
 interface Props {
   readonly sketch: WorkbenchSketch;
@@ -28,6 +29,8 @@ interface Props {
   readonly onPreview?: (entities: readonly SketchEntity[]) => void;
   /** The unit lengths are typed and shown in. The sketch itself is millimetres. Default millimetres. */
   readonly unit?: SketchLengthUnit;
+  /** Circular layout: picking the centre on the canvas (see CentrePick.tsx). */
+  readonly centrePick?: CentrePickBridge;
 }
 
 const previewId = (): ((prefix: "entity" | "constraint") => string) => {
@@ -62,6 +65,8 @@ export function SketchPatternPanel(props: Props): React.JSX.Element {
   }, [existing, loadedFor, unit]);
 
   const set = <K extends keyof PatternFields>(key: K, value: PatternFields[K]): void => setFields((current) => ({ ...current, [key]: value }));
+  // A circular pattern's centre can be clicked on the canvas, and the typed centre is drawn there.
+  useCentrePickFields(props.centrePick, fields.kind === "circular", { x: fields.centerX, y: fields.centerY }, (x, y) => setFields((current) => ({ ...current, centerX: x, centerY: y })), (text) => parseLengthField(text, unit), (valueMm) => formatLengthField(valueMm, unit));
   const { pathId } = patternSelection({ selectionIds: props.selectionIds, fields, existing });
   const pathMode = fields.kind === "path";
   const pathLength = pathMode && pathId !== "" ? patternPathLengthMm(props.sketch, pathId) : undefined;
@@ -123,6 +128,7 @@ export function SketchPatternPanel(props: Props): React.JSX.Element {
       {field("Count", "count")}{field("Total angle", "totalAngle", "angle")}{field("Centre X", "centerX", "length")}{field("Centre Y", "centerY", "length")}
       <div className="palette-row">
         <button className="palette-action" title="Put the centre at the sketch origin" onClick={() => { set("centerX", formatLengthField(0, unit)); set("centerY", formatLengthField(0, unit)); }}><CommandIcon name="coincident" />Origin</button>
+        <CentrePickButton bridge={props.centrePick} />
       </div>
       {(associative || existing !== undefined) && check("Copies turn with the pattern", "rotate")}
     </>}

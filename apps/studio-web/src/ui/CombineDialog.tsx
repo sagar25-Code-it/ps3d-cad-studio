@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { describeFailure } from "../failure-text.js";
 import type { BooleanMode } from "../../../../packages/workbench-geometry/src/index.js";
 
 export interface CombineBodyOption {
@@ -55,9 +56,15 @@ export function CombineDialog(props: CombineDialogProps): React.JSX.Element {
     if (targetId === "" || toolId === "" || targetId === toolId) { setError("Choose two different bodies."); return; }
     setWorking(true);
     setError(undefined);
-    const message = await props.onApply({ targetId, toolId, mode, keepTool });
-    setWorking(false);
-    if (message !== undefined) setError(message);
+    // A step that throws must not leave the dialog stuck on "working": say what stopped and let the person try again.
+    try {
+      const message = await props.onApply({ targetId, toolId, mode, keepTool });
+      if (message !== undefined) setError(message);
+    } catch (failure) {
+      setError(describeFailure(failure, "Combine"));
+    } finally {
+      setWorking(false);
+    }
   };
 
   const options = (exclude?: string): React.JSX.Element[] => props.bodies.filter((body) => body.id !== exclude).map((body) => <option key={body.id} value={body.id}>{body.name}{body.visible ? "" : " (hidden)"}</option>);

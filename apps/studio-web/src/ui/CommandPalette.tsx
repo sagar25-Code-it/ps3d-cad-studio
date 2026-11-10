@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CadCommandRecord, WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
 import { searchableCommands } from "./sketch-tool-commands.js";
+import { matchesCommandQuery } from "./command-match.js";
 import { useSketchKeymap } from "../workspaces/sketch/useSketchKeymap.js";
 import { CommandIcon, inferCommandIcon } from "./CommandIcon.js";
 import { useDialogFocus } from "./useDialogFocus.js";
@@ -43,17 +44,7 @@ export function CommandPalette({ open, workspace, onClose, onCommand }: CommandP
   }, [open, workspace]);
 
   const matching = useMemo(() => {
-    const queryTokens = query.trim().toLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
-    return commands.filter((command) => {
-      if (scope !== "all" && command.workspace !== scope) return false;
-      const haystack = [
-        command.name, command.description, command.workspace, command.category, command.group, command.level,
-        command.shortcut ?? "",
-        ...command.keywords, command.guide.selection, ...command.guide.steps, command.guide.result, command.guide.boundary
-      ].join(" ").toLowerCase();
-      const searchTokens = haystack.split(/[^a-z0-9]+/u).filter(Boolean);
-      return queryTokens.every((token) => searchTokens.some((candidate) => candidate.startsWith(token)));
-    });
+    return commands.filter((command) => (scope === "all" || command.workspace === scope) && matchesCommandQuery(command, query));
   }, [query, scope, commands]);
   // Runnable commands first-class: gated ones are hidden until asked for, so the list is what the app can actually do.
   const filtered = useMemo(() => showUnavailable ? matching : matching.filter((command) => command.level !== "unavailable"), [matching, showUnavailable]);

@@ -27,4 +27,8 @@ export function entityForDrawMode(entity: SketchEntity, drawAsConstruction: bool
 }
 
 export const DRAW_CONSTRUCTION_ON_MESSAGE = "Draw as construction is ON: everything you draw is construction geometry (guides that do not form profiles). Press Q to turn it off.";
+/** The message for turning Draw as construction on, naming the key the command has right now (undefined when it has none). */
+export function drawConstructionOnMessage(key: string | undefined): string {
+  return `Draw as construction is ON: everything you draw is construction geometry (guides that do not form profiles). ${key === undefined ? "Untick Draw as construction to turn it off." : `Press ${key} to turn it off.`}`;
+}
 export const DRAW_CONSTRUCTION_OFF_MESSAGE = "Draw as construction is off: new curves are profile geometry.";

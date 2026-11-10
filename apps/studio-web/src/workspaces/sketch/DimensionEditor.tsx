@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 
 /**
  * The inline value editor for a driving dimension: it opens at the dimension (Fusion's D tool: click a curve, type, Enter), starts
@@ -23,8 +23,22 @@ export interface DimensionEditorProps {
 
 export function DimensionEditor(props: DimensionEditorProps): React.JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
+  const groupRef = useRef<HTMLDivElement>(null);
+  const hintId = useId();
+  useEffect(() => {
+    // The editor takes the keyboard while it is open and gives it back to whatever had it (the canvas) when it closes, so a keyboard
+    // user is not left on the page body with every sketch key dead.
+    const before = globalThis.document.activeElement;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+    return () => {
+      const now = globalThis.document.activeElement;
+      const stranded = now === null || now === globalThis.document.body || groupRef.current?.contains(now) === true;
+      if (stranded && before instanceof HTMLElement && before.isConnected) before.focus();
+    };
+  }, []);
   return <div
+    ref={groupRef}
     className="dimension-editor"
     style={{ left: props.position[0], top: props.position[1] }}
     role="group"
@@ -35,7 +49,10 @@ export function DimensionEditor(props: DimensionEditorProps): React.JSX.Element 
     <label><span>{props.label}</span>
       <input
         ref={inputRef}
-        inputMode="decimal"
+        inputMode="text"
+        autoComplete="off"
+        spellCheck={false}
+        aria-describedby={hintId}
         aria-label={`${props.label} in ${props.unitName ?? props.unitLabel}`}
         value={props.text}
         onChange={(event) => props.onChange(event.target.value)}
@@ -50,6 +67,6 @@ export function DimensionEditor(props: DimensionEditorProps): React.JSX.Element 
       <input type="checkbox" checked={props.reference} onChange={(event) => props.onReferenceChange?.(event.target.checked)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel(); } }} />
       <span>Reference (measured, does not drive)</span>
     </label>}
-    <em>{props.hint ?? "Enter applies a driving value · Esc closes"}</em>
+    <em id={hintId}>{props.hint ?? "A number, or a parameter such as plate_w / 4 · Enter applies · Esc closes"}</em>
   </div>;
 }

@@ -34,7 +34,7 @@ import {
   sketchPlaneName,
   preferredElectromechanicalLayout,
   resolveWorkbenchContextCommands,
-  previewDimensionExpression,
+  previewSketchDimensionExpression,
   usesExpressions,
   validateWorkbenchProject,
   type AssemblyTemplateId,
@@ -173,7 +173,10 @@ import { useBuildUpdate } from "./ui/useBuildUpdate.js";
 import { formatBuildLabel } from "./build-info.js";
 import { dimensionModeStatus } from "./sketch-help-text.js";
 import { INITIAL_PLANE_OFFER, decidePlaneOffer, conventionOf, describeSketchPlane, existingSketchPlanes, planeOfferAfterFinish } from "./sketch-plane-ui.js";
-import { SKETCH_HOTKEY_HELP } from "../../../packages/workbench-sketch/src/hotkeys.js";
+import { ShortcutsOverlay } from "./ui/ShortcutsOverlay.js";
+import { describeFailure } from "./failure-text.js";
+import { shortcutGroupsFor } from "./ui/sketch-shortcut-items.js";
+import { useSketchKeymap } from "./workspaces/sketch/useSketchKeymap.js";
 import { friendlySketchText } from "../../../packages/workbench-core/src/sketch-names.js";
 import { WorkbenchContextMenu } from "./ui/WorkbenchContextMenu.js";
 import { MarkingMenu } from "./ui/MarkingMenu.js";
@@ -282,7 +285,8 @@ const SHORTCUT_GROUPS: readonly { readonly title: string; readonly items: readon
   },
   {
     title: "Sketch canvas",
-    items: SKETCH_HOTKEY_HELP.map((entry) => ({ keys: [entry.keys], label: entry.action }))
+    // Filled from the live keymap when the list opens (shortcutGroupsFor), so a rebound key shows under its new key.
+    items: []
   },
   {
     title: "Panels",
@@ -337,6 +341,11 @@ export function App(): React.JSX.Element {
   const [exchangeOpen, setExchangeOpen] = useState(false);
   const [designHealthOpen, setDesignHealthOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const sketchKeymap = useSketchKeymap();
+  /** Runs a background step of the sketch and, if it throws instead of refusing, says which step stopped (and clears "working") rather than leaving an unhandled rejection. */
+  const guard = (step: Promise<unknown>, what: string): void => {
+    step.catch((error: unknown) => { setStatus("error"); setStatusText(describeFailure(error, what)); });
+  };
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [sketchPlaneDialogOpen, setSketchPlaneDialogOpen] = useState(false);
   /** The plane-through-two-edges / plane-along-path dialog, and whether it has stepped aside for a viewport click. */
@@ -2798,7 +2807,7 @@ export function App(): React.JSX.Element {
   const setSketchDimension = (entityId: string, dimension: SketchDimensionName, valueMm: number, extra?: { readonly secondEntityId?: string; readonly driven?: boolean; readonly expression?: string }): void => {
     const { expression, ...rest } = extra ?? {};
     if (expression === undefined) { applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm, ...rest }); return; }
-    const preview = previewDimensionExpression(projectRef.current, expression);
+    const preview = previewSketchDimensionExpression(projectRef.current, dimension, expression);
     if (!preview.ok) { setStatus("error"); setStatusText(`That dimension expression does not work: ${preview.message}${preview.position === undefined ? "" : ` (character ${preview.position + 1})`}`); return; }
     applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm: preview.value, expression, ...rest });
   };
@@ -3399,7 +3408,7 @@ export function App(): React.JSX.Element {
       setStatusText(sketchProjectReference ? "Projected curves will be real curves that can bound profiles." : "Projected curves will be construction (reference) geometry: they never bound a profile.");
       return;
     }
-    if (isSketchProjectCommand(command)) { void handleSketchProject(command, source); return; }
+    if (isSketchProjectCommand(command)) { guard(handleSketchProject(command, source), "Projecting into the sketch"); return; }
     if (command === "show-movable") {
       setSketchShowMovable((current) => !current);
       setStatusText(sketchShowMovable ? "Movable geometry highlight off." : `Movable geometry highlighted ${source}: entities with estimated degrees of freedom are shown in amber.`);
@@ -3506,7 +3515,7 @@ export function App(): React.JSX.Element {
       if (selectionId !== null && !selectionId.startsWith("datum:")) setSelectedId(selectionId);
       return;
     }
-    if (commandId === "sketch.finish") { void finishSketch(); return; }
+    if (commandId === "sketch.finish") { guard(finishSketch(), "Finishing the sketch"); return; }
     if (commandId === "sketch.select-profile" || commandId === "sketch.select-curve" || commandId === "sketch.select-connected" || commandId === "sketch.select-tangent") {
       if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
       setViewportSelectionFilter(commandId === "sketch.select-profile" ? "profile" : commandId === "sketch.select-curve" ? "sketch-curve" : commandId === "sketch.select-connected" ? "connected" : "tangent");
@@ -3903,7 +3912,7 @@ export function App(): React.JSX.Element {
       onSketchCommand={(command) => runSketchCommand(command, "in the top ribbon")}
       onOpenSketchOptions={openSketchCreateSolid}
       onToggleSketchEntityVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })}
-      onFinishSketch={() => void finishSketch()}
+      onFinishSketch={() => guard(finishSketch(), "Finishing the sketch")}
       onNewSketch={() => openSketchPlaneDialog("new")}
       onChangeSketchPlane={() => openSketchPlaneDialog("set")}
       onChangeParameters={() => setParametersOpen(true)}
@@ -3940,7 +3949,7 @@ export function App(): React.JSX.Element {
       onNativeOpen={() => nativeInputRef.current?.click()}
       onExportStl={() => void exportStl()}
       onExchange={() => setExchangeOpen(true)}
-      onDisplayUnit={(unit) => void changeUnit(unit)}
+      onDisplayUnit={(unit) => guard(changeUnit(unit), "Changing the unit")}
       onAssemblyExplode={(valueMm) => { previewAssemblyExplode(valueMm); commitAssemblyExplode(valueMm); }}
       onAssemblyTemplate={requestAssemblyTemplate}
       onInsertPartIntoAssembly={insertCurrentPartIntoAssembly}
@@ -3989,7 +3998,7 @@ export function App(): React.JSX.Element {
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
       {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
-      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace displayUnit={unitToShow(project, document.displayUnit)} finishedSketches={finishedSketches} workingTimelineId={designOf(project).editingSketchId} projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={(text) => setStatusText(friendlySketchText(text, [projectRef.current.sketch]))} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => void createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams)} onChangePlane={() => openSketchPlaneDialog("set")} onDisplayUnit={(unit) => void changeUnit(unit)} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => void finishSketch()} onCancelSketch={cancelSketch} onSelectionCount={setSketchSelectionCount} evaluateText={(text) => evaluateTextInDesign(designOf(project), text)} />}
+      {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace displayUnit={unitToShow(project, document.displayUnit)} finishedSketches={finishedSketches} workingTimelineId={designOf(project).editingSketchId} projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={(text) => setStatusText(friendlySketchText(text, [projectRef.current.sketch]))} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => guard(createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams), "Creating the solid")} onChangePlane={() => openSketchPlaneDialog("set")} onDisplayUnit={(unit) => guard(changeUnit(unit), "Changing the unit")} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => guard(finishSketch(), "Finishing the sketch")} onCancelSketch={cancelSketch} onSelectionCount={setSketchSelectionCount} evaluateText={(text) => evaluateTextInDesign(designOf(project), text)} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
         <CameraGestureControl
@@ -4063,7 +4072,7 @@ export function App(): React.JSX.Element {
       onDelete={(feature) => timelineOperation({ kind: "delete-design-feature", featureId: feature.id }, () => setSelectedId(null))}
       onRename={(feature, name) => { applyProjectOperation({ kind: "rename-design-feature", featureId: feature.id, name }); }}
     />}
-    <footer className="app-status"><div className={`status-copy ${status}`} role="status" aria-live="polite"><span />{statusText}</div><div className="status-facts"><a className="app-brand-credit" href="/about" title={`${PS3D_BRAND.name} - ${PS3D_BRAND.serviceLine}`}>{PS3D_BRAND.name}</a><button className={`status-health ${designHealth.overallStatus}`} onClick={openDesignHealth}>health {designHealth.score}</button><button className="status-shortcuts" onClick={() => setShortcutsOpen(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">? keys</button><button className="status-build" onClick={() => setAboutOpen(true)} title="Which build is running. Click for details and to copy it." aria-label={formatBuildLabel(buildUpdate.running)}>{formatBuildLabel(buildUpdate.running)}</button><span>{document.displayUnit}</span><span>{project.activeWorkspace === "sketch" ? selectionCountLabel(sketchSelectionCount) : selectedId === null ? "0 selected" : "1 selected"}</span><span>{renderStudioOpen ? `${renderSettings.resolution} ${renderSettings.format}` : masterCartOpen ? "parametric preview" : isThreeDimensional ? viewportState.selectionFilter : project.activeWorkspace === "electrical" ? `ERC ${electrical.erc.status}` : "local"}</span><span>{renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace}</span></div>{diagnostic !== undefined && <div className="diagnostic-toast" role="alert"><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span><small>{diagnostic.recovery}</small><button onClick={() => setDiagnostic(undefined)} aria-label="Dismiss diagnostic">×</button></div>}</footer>
+    <footer className="app-status"><div className={`status-copy ${status}`} role="status" aria-live={status === "error" ? "assertive" : "polite"}><span />{statusText}</div><div className="status-facts"><a className="app-brand-credit" href="/about" title={`${PS3D_BRAND.name} - ${PS3D_BRAND.serviceLine}`}>{PS3D_BRAND.name}</a><button className={`status-health ${designHealth.overallStatus}`} onClick={openDesignHealth}>health {designHealth.score}</button><button className="status-shortcuts" onClick={() => setShortcutsOpen(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">? keys</button><button className="status-build" onClick={() => setAboutOpen(true)} title="Which build is running. Click for details and to copy it." aria-label={formatBuildLabel(buildUpdate.running)}>{formatBuildLabel(buildUpdate.running)}</button><span>{document.displayUnit}</span><span>{project.activeWorkspace === "sketch" ? selectionCountLabel(sketchSelectionCount) : selectedId === null ? "0 selected" : "1 selected"}</span><span>{renderStudioOpen ? `${renderSettings.resolution} ${renderSettings.format}` : masterCartOpen ? "parametric preview" : isThreeDimensional ? viewportState.selectionFilter : project.activeWorkspace === "electrical" ? `ERC ${electrical.erc.status}` : "local"}</span><span>{renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace}</span></div>{diagnostic !== undefined && <div className="diagnostic-toast" role="alert"><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span><small>{diagnostic.recovery}</small><button onClick={() => setDiagnostic(undefined)} aria-label="Dismiss diagnostic">×</button></div>}</footer>
     <SmartFaultBrain workspace={project.activeWorkspace} report={designHealth} {...(diagnostic === undefined ? {} : { diagnostic })} onDesignHealth={openDesignHealth} onWorkspace={switchWorkspace} />
     {electromechanicalReviewOpen && <div className="engineering-confirmation-backdrop"><section ref={engineeringDialogRef} tabIndex={-1} className="engineering-confirmation-dialog exact-candidate" role="dialog" aria-modal="true" aria-labelledby="electromechanical-review-title" aria-describedby="electromechanical-review-description">
         <header><div><span>EXACT CANDIDATE REPLACEMENT REVIEW</span><h2 id="electromechanical-review-title">Circuit → wired mounting plate</h2></div><button data-dialog-initial-focus onClick={() => { setElectromechanicalReviewOpen(false); setElectromechanicalAcknowledged(false); }} aria-label="Close circuit to mounting plate review">×</button></header>
@@ -4097,15 +4106,7 @@ export function App(): React.JSX.Element {
       onApply={applyPatternRequest}
       onCancel={() => setPatternDialog(null)} />}
     <CommandPalette open={paletteOpen} workspace={project.activeWorkspace} onClose={() => setPaletteOpen(false)} onCommand={executeCadCommand} />
-    {shortcutsOpen && <div className="shortcuts-overlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={() => setShortcutsOpen(false)}>
-      <div className="shortcuts-panel" onClick={(event) => event.stopPropagation()}>
-        <header><strong>Keyboard shortcuts</strong><button onClick={() => setShortcutsOpen(false)} aria-label="Close keyboard shortcuts">×</button></header>
-        <div className="shortcuts-grid">
-          {SHORTCUT_GROUPS.map((group) => <section key={group.title}><h4>{group.title}</h4><dl>{group.items.map((item) => <div key={item.label}><dt>{item.keys.map((k) => <kbd key={k}>{k}</kbd>)}</dt><dd>{item.label}</dd></div>)}</dl></section>)}
-        </div>
-        <footer>Press <kbd>?</kbd> anytime to open this list · <kbd>Esc</kbd> to close</footer>
-      </div>
-    </div>}
+    <ShortcutsOverlay open={shortcutsOpen} groups={shortcutGroupsFor(SHORTCUT_GROUPS, sketchKeymap)} onClose={() => setShortcutsOpen(false)} />
     <ExchangeCenter open={exchangeOpen} busy={exchangeBusy} hasScene={!masterCartOpen && isThreeDimensional} exportContents={exchangeExportContents} activeImport={activeImport} feedback={exchangeFeedback} onClose={() => setExchangeOpen(false)} onImport={(files, unit) => void importExchangeFiles(files, unit)} onExport={(format, unit) => void exportExchangeFormat(format, unit)} onPdfPackage={() => void exportPdfPackage()} onInteractivePdf={(file) => void exportInteractivePdf(file)} onClearImport={clearActiveImport} />
     {designHealthOpen && <DesignHealthCenter report={designHealth} onClose={() => setDesignHealthOpen(false)} onWorkspace={switchWorkspace} />}
     <SaveProjectDialog open={saveDialogMode !== undefined} mode={saveDialogMode ?? "save-as"} projectName={project.name} workspaceStatus={fileWorkspaceStatus} onConfirm={(fileName) => void confirmSaveDialog(fileName)} onClose={() => setSaveDialogMode(undefined)} />

@@ -20,6 +20,8 @@ export interface DimensionMarksProps {
   readonly title: string;
   readonly onPress: (event: React.PointerEvent, additive: boolean) => void;
   readonly onEdit: () => void;
+  /** Selecting from the keyboard (Space); the pointer path is onPress. Without it only Enter (edit) is offered. */
+  readonly onSelect?: () => void;
 }
 
 export function DimensionMarks(props: DimensionMarksProps): React.JSX.Element {
@@ -42,7 +44,13 @@ export function DimensionMarks(props: DimensionMarksProps): React.JSX.Element {
       width={box.width * px}
       height={box.height * px}
       role={props.interactive ? "button" : undefined}
-      aria-label={props.interactive ? `${props.title}. Click to select, double-click to edit${props.repositionable ? ", drag to move" : ""}` : undefined}
+      tabIndex={props.interactive ? 0 : undefined}
+      aria-pressed={props.interactive ? props.selected : undefined}
+      aria-label={props.interactive ? `${props.title}. Click to select, double-click to edit${props.repositionable ? ", drag to move" : ""}. From the keyboard: Press Enter to edit, Space to select.` : undefined}
+      onKeyDown={props.interactive ? (event) => {
+        if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); props.onEdit(); }
+        else if (event.key === " ") { event.preventDefault(); event.stopPropagation(); props.onSelect?.(); }
+      } : undefined}
       onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); props.onPress(event, event.shiftKey || event.ctrlKey || event.metaKey); }}
       onDoubleClick={(event) => { event.stopPropagation(); props.onEdit(); }}
     />

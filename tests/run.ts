@@ -145,6 +145,9 @@ import { sketchEdit3MirrorTests } from "./sketch-edit3-mirror.test.js";
 import { sketchEdit3ClipboardTests } from "./sketch-edit3-clipboard.test.js";
 import { sketchEdit3RedundancyTests } from "./sketch-edit3-redundancy.test.js";
 import { sketchEdit3OffsetTests } from "./sketch-edit3-offset.test.js";
+import { sketchUi3DimensionTests } from "./sketch-ui3-dimensions.test.js";
+import { sketchUi3ChromeTests } from "./sketch-ui3-chrome.test.js";
+import { sketchUi3ErrorTests } from "./sketch-ui3-errors.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import { regionWave3Tests } from "./region-wave3.test.js";
@@ -320,6 +323,9 @@ const tests: readonly TestCase[] = [
   ...sketchHotkeys3Tests,
   ...sketchFit3Tests,
   ...sketchEveryShape3Tests,
+  ...sketchUi3DimensionTests,
+  ...sketchUi3ChromeTests,
+  ...sketchUi3ErrorTests,
 ];
 let failures = 0;
 

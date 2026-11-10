@@ -73,6 +73,27 @@ const LONG_DIMENSIONS: readonly SketchDimensionName[] = ["arc-length", "perimete
 /** A distance between points or lines may be zero. */
 const ZERO_ALLOWED: readonly SketchDimensionName[] = ["aligned", "horizontal", "vertical", "point-line", "line-line"];
 
+/**
+ * Whether an evaluated expression is acceptable as the value of the named sketch dimension, and the value it gives (millimetres, or
+ * degrees for an angle). Shared by the bound dimensions of a project and by the live preview of what a person is typing.
+ */
+export function checkSketchDimensionQuantity(name: SketchDimensionName, quantity: Quantity): NodeResult {
+  const scalar = quantity.length === 0 && quantity.angle === 0;
+  if (name === "angle") {
+    // An angle dimension takes degrees: a plain number means degrees, "30 deg" and "0.5 rad" convert.
+    if (!scalar && !(quantity.length === 0 && quantity.angle === 1)) return { ok: false, message: `An angle dimension needs an angle, but this expression gives ${describeDimension(quantity)}.` };
+    if (!(quantity.value >= 0 && quantity.value < 360)) return { ok: false, message: `An angle dimension must be at least 0° and under 360°, but this expression gives ${Number(quantity.value.toFixed(6))}°.` };
+    return { ok: true, quantity: { value: quantity.value, ...dimensionOfKind("angle") } };
+  }
+  if (!scalar && !(quantity.length === 1 && quantity.angle === 0)) return { ok: false, message: `A dimension needs a length, but this expression gives ${describeDimension(quantity)}.` };
+  const minimum = ZERO_ALLOWED.includes(name) ? 0 : SKETCH_DIMENSION_RANGE_MM.min;
+  const maximum = name === "radius" ? ENVELOPE_LIMITS.maxSketchRadiusMm : LONG_DIMENSIONS.includes(name) ? SKETCH_DIMENSION_RANGE_MM.max * 2 : SKETCH_DIMENSION_RANGE_MM.max;
+  if (!(quantity.value >= minimum && quantity.value <= maximum)) {
+    return { ok: false, message: `A dimension must be between ${minimum} and ${maximum} mm, but this expression gives ${Number(quantity.value.toFixed(6))} mm.` };
+  }
+  return { ok: true, quantity: { value: quantity.value, ...dimensionOfKind("length") } };
+}
+
 function sketchDimensionOf(constraint: WorkbenchSketchConstraint): SketchDimensionName {
   return dimensionNameOf(constraint);
 }
@@ -254,22 +275,7 @@ class Evaluation {
   sketchNode(constraint: WorkbenchSketchConstraint): NodeResult {
     const evaluated = this.evaluateText(constraint.expression!);
     if (!evaluated.ok) return evaluated;
-    const quantity = evaluated.quantity;
-    const scalar = quantity.length === 0 && quantity.angle === 0;
-    if (constraint.kind === "angle") {
-      // An angle dimension takes degrees: a plain number means degrees, "30 deg" and "0.5 rad" convert.
-      if (!scalar && !(quantity.length === 0 && quantity.angle === 1)) return { ok: false, message: `An angle dimension needs an angle, but this expression gives ${describeDimension(quantity)}.` };
-      if (!(quantity.value >= 0 && quantity.value < 360)) return { ok: false, message: `An angle dimension must be at least 0° and under 360°, but this expression gives ${Number(quantity.value.toFixed(6))}°.` };
-      return { ok: true, quantity: { value: quantity.value, ...dimensionOfKind("angle") } };
-    }
-    if (!scalar && !(quantity.length === 1 && quantity.angle === 0)) return { ok: false, message: `A dimension needs a length, but this expression gives ${describeDimension(quantity)}.` };
-    const name = sketchDimensionOf(constraint);
-    const minimum = ZERO_ALLOWED.includes(name) ? 0 : SKETCH_DIMENSION_RANGE_MM.min;
-    const maximum = name === "radius" ? ENVELOPE_LIMITS.maxSketchRadiusMm : LONG_DIMENSIONS.includes(name) ? SKETCH_DIMENSION_RANGE_MM.max * 2 : SKETCH_DIMENSION_RANGE_MM.max;
-    if (!(quantity.value >= minimum && quantity.value <= maximum)) {
-      return { ok: false, message: `A dimension must be between ${minimum} and ${maximum} mm, but this expression gives ${Number(quantity.value.toFixed(6))} mm.` };
-    }
-    return { ok: true, quantity: { value: quantity.value, ...dimensionOfKind("length") } };
+    return checkSketchDimensionQuantity(constraint.kind === "angle" ? "angle" : sketchDimensionOf(constraint), evaluated.quantity);
   }
 }
 

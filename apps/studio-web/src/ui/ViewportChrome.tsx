@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { keyLabelForCommand } from "../../../../packages/workbench-sketch/src/hotkeys.js";
+import { useSketchKeymap } from "../workspaces/sketch/useSketchKeymap.js";
 import {
   orbitViewAngles,
   projectWorldAxes,
@@ -64,6 +66,8 @@ const CUBE_EDGES = CUBE_VERTICES.flatMap((vertex, index) => CUBE_VERTICES.slice(
 
 export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
   const [displayOpen, setDisplayOpen] = useState(false);
+  // The pan key in the tooltip is the one the sketch keymap has now, not the default.
+  const panKey = keyLabelForCommand("pan-mode", useSketchKeymap());
   const delta = props.measurePoints.length === 2
     ? subtract(props.measurePoints[1]!.pointMm, props.measurePoints[0]!.pointMm)
     : undefined;
@@ -81,7 +85,7 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
           className={props.state.navigationMode === mode ? "active" : ""}
           aria-pressed={props.state.navigationMode === mode}
           onClick={() => props.onNavigationMode(mode)}
-          title={navigationTitle(mode, sketch)}
+          title={navigationTitle(mode, sketch, panKey)}
           aria-label={mode === "select" ? "Select" : mode === "measure" ? "Measure" : capitalize(mode)}
         ><CommandIcon name={mode} /><span className="control-label">{mode === "select" ? "Select" : mode === "measure" ? "Measure" : capitalize(mode)}</span></button>)}
       </div>
@@ -254,9 +258,9 @@ function pointText(point: readonly [number, number]): string { return `${point[0
 function differenceCount(left: Vec3, right: Vec3): number { return left.filter((value, index) => value !== right[index]).length; }
 function add3(left: Vec3, right: Vec3): Vec3 { return [left[0] + right[0], left[1] + right[1], left[2] + right[2]]; }
 
-function navigationTitle(mode: NavigationMode, sketch: boolean): string {
+function navigationTitle(mode: NavigationMode, sketch: boolean, panKey?: string): string {
   if (mode === "orbit") return sketch ? "Drag to orbit the camera around the active sketch plane; geometry remains on XY." : "Left drag or Shift+middle drag to orbit.";
-  if (mode === "pan") return sketch ? "Left drag pans the sketch (P). Middle drag or Space+drag pans from any tool." : "Left drag to pan; middle drag pans from any mode.";
+  if (mode === "pan") return sketch ? `Left drag pans the sketch${panKey === undefined ? "" : ` (${panKey})`}. Middle drag or Space+drag pans from any tool.` : "Left drag to pan; middle drag pans from any mode.";
   if (mode === "measure") return "Pick two model points for XYZ delta and distance.";
   return sketch ? "Click a curve to select it, or drag a box: left to right takes what it fully encloses, right to left takes anything it touches. Right-click opens commands." : "Click visible geometry to select it; right-click opens contextual commands.";
 }

@@ -4,10 +4,12 @@ export type CadCommandCategory = "create" | "modify" | "construct" | "assemble" 
 export type CadSketchTool = "select" | "line" | "rectangle" | "rectangle-center" | "rectangle-three-point" | "circle" | "circle-two-point" | "circle-three-point" | "arc" | "point" | "spline" | "polygon" | "slot"
   /** The tools below are listed in the command search by apps/studio-web/src/ui/sketch-tool-commands.ts, not by CAD_COMMANDS. */
   | "ellipse" | "arc-center" | "arc-tangent" | "slot-straight"
-  | "line-midpoint" | "centerline" | "parallelogram" | "rectangle-rounded" | "slot-arc-three-point" | "slot-arc-center" | "parabola" | "hyperbola" | "conic" | "conic-five" | "blend" | "text" | "block" | "spline-control" | "profile";
+  | "line-midpoint" | "centerline" | "parallelogram" | "rectangle-rounded" | "slot-arc-three-point" | "slot-arc-center" | "parabola" | "hyperbola" | "conic" | "conic-five" | "blend" | "text" | "block" | "spline-control" | "profile"
+  | "ellipse-arc" | "circle-tangent-3" | "circle-tangent-2";
 /** Selection-driven or click-driven sketch edit tools (each applies one atomic `apply-sketch-edit`). */
 export type CadSketchEditTool = "offset" | "mirror" | "pattern" | "move" | "rotate" | "scale" | "stretch" | "corner" | "fillet" | "chamfer" | "trim" | "extend"
-  | "split" | "jog" | "delete-curve" | "offset-move" | "make-path" | "dynamic-mirror";
+  | "split" | "jog" | "delete-curve" | "offset-move" | "make-path" | "dynamic-mirror"
+  | "break" | "import-drawing" | "export-drawing" | "underlay";
 /** One-shot sketch commands that act on the current selection or toggle a display mode. */
 export type CadSketchCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check" | "project-body" | "project-edge" | "intersect-body" | "silhouette-body" | "convert-face" | "project-reference";
 

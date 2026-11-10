@@ -22,6 +22,7 @@ export * from "./expressions.js";
 export * from "./feature-bindings.js";
 export * from "./parameter-graph.js";
 export * from "./design-parameters.js";
+export * from "./sketch-dimension-binding.js";
 export * from "./edge-blend.js";
 export * from "./body-edit.js";
 export * from "./solid-metrics.js";
