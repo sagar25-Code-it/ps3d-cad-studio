@@ -14,6 +14,7 @@ import {
   type SketchViewBox
 } from "../../../../../packages/workbench-sketch/src/camera.js";
 import { cameraForExtents } from "../../../../../packages/workbench-sketch/src/camera-zoom.js";
+import { insetsForOverlays, type OverlayBox } from "./canvas-insets.js";
 
 export interface SketchCameraController {
   /** Attach to the sketch `<svg>`: it measures the canvas and owns wheel zoom. */
@@ -39,26 +40,15 @@ export interface SketchCameraController {
 /** Pixels at each side of the canvas that floating panels (palette, navigation bars, status strip) currently cover. */
 function measureInsets(node: SVGSVGElement): ScreenInsets {
   const rect = node.getBoundingClientRect();
-  let left = 0;
-  let top = 0;
-  let right = 0;
-  let bottom = 0;
+  const boxes: OverlayBox[] = [];
   const overlays = node.parentElement?.querySelectorAll<HTMLElement>(".sketch-palette, .viewport-controller, .navigation-bar, .canvas-hud") ?? [];
   for (const element of overlays) {
     const box = element.getBoundingClientRect();
     if (box.width === 0 || box.height === 0) continue;
-    const boxLeft = box.left - rect.left;
-    const boxRight = box.right - rect.left;
-    const boxTop = box.top - rect.top;
-    const boxBottom = box.bottom - rect.top;
-    if (box.width > rect.width * 0.5) {
-      // A wide bar belongs to the top or bottom edge, whichever half it sits in.
-      if ((boxTop + boxBottom) / 2 < rect.height / 2) top = Math.max(top, boxBottom);
-      else bottom = Math.max(bottom, rect.height - boxTop);
-    } else if ((boxLeft + boxRight) / 2 > rect.width / 2) right = Math.max(right, rect.width - boxLeft);
-    else left = Math.max(left, boxRight);
+    boxes.push({ left: box.left - rect.left, top: box.top - rect.top, right: box.right - rect.left, bottom: box.bottom - rect.top });
   }
-  return { left, top, right, bottom };
+  // Which edge each panel belongs to is decided in insetsForOverlays, by what it costs, not by the window width.
+  return insetsForOverlays({ width: rect.width, height: rect.height }, boxes);
 }
 
 function isInteractive(target: EventTarget | null): boolean {
