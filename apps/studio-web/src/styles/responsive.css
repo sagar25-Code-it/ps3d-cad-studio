@@ -237,6 +237,32 @@
   max-height: calc(100dvh - 16px);
 }
 
+/*
+ * The command palette starts below the top of the window (the backdrop's top padding), so its height limit has to subtract that offset.
+ * Its header, filter row and footer keep their height; the command list and guide give way and scroll. At 1280 x 650 the 440 px
+ * minimum of the list pushed the footer 23 px past the bottom of the window.
+ */
+.palette-backdrop > .command-palette {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - min(11vh, 92px) - 12px);
+}
+.palette-backdrop > .command-palette > * { flex: 0 0 auto; }
+.palette-backdrop > .command-palette > .command-browser-main { flex: 1 1 auto; min-height: 0; }
+
+/*
+ * Menu-bar menus open about 90 to 100 px below the top of the window and had no height limit: the Modify menu is 977 px tall, so on a
+ * 1366 x 768 laptop its lower third was off screen with no way to reach it (the page does not scroll there). The menu now ends above
+ * the bottom of the window and scrolls; arrow-key focus scrolls the item into view.
+ */
+.studio-app .cad-menu-popover {
+  max-height: calc(100dvh - 112px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  grid-auto-rows: max-content;
+  scrollbar-width: thin;
+}
+
 @media (max-width: 1220px) {
   .studio-app .app-header {
     grid-template-columns: minmax(178px, 205px) minmax(220px, 1fr) minmax(0, 1.2fr);
@@ -722,6 +748,16 @@
   .studio-app .ribbon-group { grid-template-rows: 58px 14px; }
   .studio-app .ribbon-button { height: 58px; grid-template-rows: 22px 23px 10px; }
   .studio-app .ribbon-button > span { height: 22px; }
+}
+
+/*
+ * Short window, three-column layout (a laptop at 1280 x 650, or a browser with toolbars and a 125 % display scale).
+ * The page scrolls here, so the workbench row has no height of its own; with `height: auto` it grew to the full content height of the
+ * browser tree and the inspector (2,326 px on a real project), the canvas grew with it, and Fit centred the sketch far below the fold.
+ * A definite height keeps the canvas on screen: the side panels scroll inside themselves, as they do on a tall window.
+ */
+@media (max-height: 700px) and (min-width: 981px) {
+  .studio-app .workbench-grid { height: 520px; }
 }
 
 @media (pointer: coarse) {

@@ -108,7 +108,11 @@
 /* Base modal overlay shared by the New, Save and Sketch-plane dialogs (it was missing, so they rendered inline at the bottom of the page). */
 .dialog-backdrop { position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; padding: 1.25rem; background: rgba(2, 7, 13, 0.72); backdrop-filter: blur(6px); }
 .save-project-backdrop { z-index: 160; }
-.save-project-dialog { width: min(520px, calc(100vw - 2rem)); overflow: hidden; border: 1px solid #8c9aa5; border-radius: 8px; color: #35424a; background: #f7f8f9; box-shadow: 0 28px 90px #000a; }
+/* A dialog is never taller than the window: its header and footer (Cancel / the primary button) stay put and the content scrolls. Before this the New Sketch dialog ran off both ends of a 650 px window and "Start sketch" could not be reached. */
+.save-project-dialog { display: flex; flex-direction: column; width: min(520px, calc(100vw - 2rem)); max-height: calc(100dvh - 2.5rem); overflow: hidden; border: 1px solid #8c9aa5; border-radius: 8px; color: #35424a; background: #f7f8f9; box-shadow: 0 28px 90px #000a; }
+.save-project-dialog > header, .save-project-dialog > footer { flex: 0 0 auto; }
+/* Rows keep their full content height (max-content): with plain auto rows a clipped child such as the plane diagram collapsed to a few pixels and the next row drew over it. */
+.save-project-dialog > .save-project-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; grid-auto-rows: max-content; align-content: start; }
 .save-project-dialog > header { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 0.65rem; padding: 0.75rem; border-bottom: 1px solid #9ab1c0; color: #eef8fb; background: linear-gradient(110deg, #103b60, #17699e); }
 .save-project-dialog > header > span { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid #93def0; border-radius: 5px; color: #6ed6ee; }
 .save-project-dialog header small { color: #83d9ef; font: 800 0.45rem var(--mono); letter-spacing: 0.1em; }

@@ -23,6 +23,26 @@ Preview or Unavailable in the user interface and release notes.
       recovery, and empty states were reviewed.
 - [ ] Qualified, Preview, and Unavailable labels match implemented evidence.
 
+## Window sizes and saved state
+
+The same build behaves differently in different windows when layout or view logic
+depends on the window size, the display scale, or what the browser has stored. Two
+defects of this kind reached production: Fit pushed the sketch to the left edge on
+wide windows only, and on a 1280 x 650 window the canvas grew to 2,326 px with the
+sketch below the fold. Passing tests and one browser pane do not show either.
+
+- [ ] Every change to a canvas, panel, dialog, style sheet, or view command (Fit,
+      zoom, pan, frame) was run in a real browser with `scripts/layout-probe.js`
+      at all of: 1024 x 640, 1280 x 650, 1366 x 768, 1536 x 730, 1920 x 1080 and
+      2560 x 1300, and `problems` was empty at each one.
+- [ ] The check was made in each workspace the change touches, with the longest
+      dialog of that workspace open.
+- [ ] The check was repeated on a project with a long browser tree and inspector
+      (not only the default project): long side panels are what stretched the page.
+- [ ] After the push, the same probe ran on the production address at a short
+      window (1280 x 650) and a wide one (1920 x 1080), on build hash shown in
+      the footer.
+
 ## Identity and MCP
 
 - [ ] Email verification, login, logout, refresh, recovery, and password update
