@@ -244,6 +244,12 @@ export interface WorkbenchSketchConstraint {
   /** A relaxed constraint stays recorded but is ignored by the solver and the degree-of-freedom estimate. */
   readonly suppressed?: boolean;
   /**
+   * A driving dimension's short name (d1, d2 ...), unique across the sketches of the design and given by the project the first time
+   * the sketch is edited. An expression in another dimension can use it (`d1 / 2`). Absent on relations, reference dimensions and
+   * dimensions saved before names existed.
+   */
+  readonly name?: string;
+  /**
    * A point-to-line or line-to-line distance only: `valueMm` is a diameter across the line, twice the distance the solver holds. This is
    * how the half profile of a turned part is dimensioned across its centreline. Absent (or false) means a plain distance.
    */

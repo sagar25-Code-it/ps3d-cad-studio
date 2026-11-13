@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from "react";
+import { insertAtSelection } from "../../../../../packages/workbench-sketch/src/dimension-text.js";
 
 /**
  * The inline value editor for a driving dimension: it opens at the dimension (Fusion's D tool: click a curve, type, Enter), starts
@@ -20,6 +21,11 @@ export interface DimensionEditorProps {
   readonly onCommit: () => void;
   /** Closes the editor. `escape` when the person pressed Esc, `blur` when the focus left it (a click elsewhere). */
   readonly onCancel: (reason: "escape" | "blur") => void;
+  /**
+   * Text to write into the value where the selection or caret is (the name of a dimension that was clicked). A new `serial` inserts
+   * again; the editor takes the keyboard back afterwards.
+   */
+  readonly insert?: { readonly text: string; readonly serial: number } | undefined;
 }
 
 export function DimensionEditor(props: DimensionEditorProps): React.JSX.Element {
@@ -38,6 +44,16 @@ export function DimensionEditor(props: DimensionEditorProps): React.JSX.Element 
       if (stranded && before instanceof HTMLElement && before.isConnected) before.focus();
     };
   }, []);
+  const insertSerial = props.insert?.serial;
+  useEffect(() => {
+    const input = inputRef.current;
+    if (props.insert === undefined || input === null) return;
+    // The click that asked for this took the focus away; the selection the input had is still its own.
+    const next = insertAtSelection(input.value, input.selectionStart, input.selectionEnd, props.insert.text);
+    props.onChange(next.text);
+    input.focus();
+    globalThis.requestAnimationFrame?.(() => { input.focus(); input.setSelectionRange(next.caret, next.caret); });
+  }, [insertSerial]);
   return <div
     ref={groupRef}
     className="dimension-editor"
@@ -68,6 +84,6 @@ export function DimensionEditor(props: DimensionEditorProps): React.JSX.Element 
       <input type="checkbox" checked={props.reference} onChange={(event) => props.onReferenceChange?.(event.target.checked)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel("escape"); } }} />
       <span>Reference (measured, does not drive)</span>
     </label>}
-    <em id={hintId}>{props.hint ?? "A number, or a parameter such as plate_w / 4 · Enter applies · Esc closes"}</em>
+    <em id={hintId}>{props.hint ?? "A number, a parameter such as plate_w / 4, or another dimension's name such as d1 (click that dimension to insert it) · Enter applies · Esc closes"}</em>
   </div>;
 }

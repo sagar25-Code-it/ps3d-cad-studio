@@ -14,6 +14,7 @@ import {
   type ReferenceResolution
 } from "./expressions.js";
 import type { DesignHistory, DesignParameter, DesignSolidFeature, SketchDimensionName, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
+import { DIMENSION_NAME_PATTERN, dimensionNamed } from "./dimension-names.js";
 
 /**
  * The expression engine's view of a project: user parameters, bound feature numbers and bound sketch dimensions form a graph in
@@ -116,7 +117,7 @@ class Evaluation {
   private readonly memo = new Map<string, NodeResult>();
   private readonly visiting: string[] = [];
 
-  constructor(private readonly history: DesignHistory) {
+  constructor(private readonly history: DesignHistory, private readonly working?: WorkbenchSketch) {
     for (const parameter of history.parameters ?? []) this.parameters.set(parameter.name, parameter);
     for (const feature of history.features) {
       if (feature.kind === "sketch") continue;
@@ -136,7 +137,7 @@ class Evaluation {
   }
 
   labelOfKey(key: string): string {
-    if (key.startsWith("p:")) return key.slice(2);
+    if (key.startsWith("p:") || key.startsWith("d:")) return key.slice(2);
     const [, featureId, fieldId] = /^f:([^:]+:[^:]+):(.+)$/u.exec(key) ?? [];
     const feature = this.history.features.find((candidate) => candidate.id === featureId);
     return feature === undefined || feature.kind === "sketch" ? key : `${featureAlias(feature)}.${fieldId}`;
@@ -254,6 +255,13 @@ class Evaluation {
   resolve(reference: ExpressionReference): ReferenceResolution {
     if (reference.owner === undefined) {
       if (!this.parameters.has(reference.name)) {
+        // The name of a sketch dimension (d1, d2 ...): its value now, or what its own expression gives.
+        const named = DIMENSION_NAME_PATTERN.test(reference.name) ? dimensionNamed(this.history, this.working, reference.name) : undefined;
+        if (named !== undefined) {
+          const node = this.dimensionNode(reference.name, named);
+          return node.ok ? node : { ok: false, message: `Dimension ${reference.name} has a problem: ${node.message}` };
+        }
+        if (DIMENSION_NAME_PATTERN.test(reference.name)) return { ok: false, message: `No dimension is called "${reference.name}". Dimension names are shown on each dimension; a deleted or reference dimension has none.` };
         return { ok: false, message: `Unknown name "${reference.name}". Add it in Change Parameters, or write Feature.value to use a feature's number.` };
       }
       const node = this.parameterNode(reference.name);
@@ -272,6 +280,16 @@ class Evaluation {
     return node.ok ? node : { ok: false, message: `${feature.name}.${field.id} has a problem: ${node.message}` };
   }
 
+  /** A named sketch dimension as a value: an angle in degrees or a length in millimetres. A bound one gives what its expression gives. */
+  dimensionNode(name: string, constraint: WorkbenchSketchConstraint): NodeResult {
+    return this.nodeFor(`d:${name}`, () => {
+      if (constraint.expression !== undefined) return this.sketchNode(constraint);
+      const value = constraint.kind === "angle" ? constraint.valueDeg : constraint.valueMm;
+      if (value === undefined) return { ok: false, message: "it has no value." };
+      return { ok: true, quantity: { value, ...dimensionOfKind(constraint.kind === "angle" ? "angle" : "length") } };
+    });
+  }
+
   sketchNode(constraint: WorkbenchSketchConstraint): NodeResult {
     const evaluated = this.evaluateText(constraint.expression!);
     if (!evaluated.ok) return evaluated;
@@ -288,13 +306,13 @@ export function findParameterCycle(history: DesignHistory): readonly string[] | 
 }
 
 /** Evaluates a piece of text against the parameters and steps of a history, without binding it anywhere. */
-export function evaluateTextInDesign(history: DesignHistory, text: string): { readonly ok: true; readonly quantity: Quantity } | { readonly ok: false; readonly message: string; readonly position?: number } {
-  return new Evaluation(history).evaluateText(text);
+export function evaluateTextInDesign(history: DesignHistory, text: string, working?: WorkbenchSketch): { readonly ok: true; readonly quantity: Quantity } | { readonly ok: false; readonly message: string; readonly position?: number } {
+  return new Evaluation(history, working).evaluateText(text);
 }
 
 /** Evaluates every expression in the history, and in the working sketch if one is given. */
 export function evaluateDesignExpressions(history: DesignHistory, working?: WorkbenchSketch): ExpressionReport {
-  const evaluation = new Evaluation(history);
+  const evaluation = new Evaluation(history, working);
   const bindings: BindingResult[] = [];
   for (const parameter of history.parameters ?? []) {
     const node = evaluation.parameterNode(parameter.name);

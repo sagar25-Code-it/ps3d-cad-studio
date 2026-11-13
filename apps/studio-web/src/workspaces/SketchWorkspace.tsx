@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SOLVABLE_POINT_REFS, SPLINE_MAX_FIT_POINTS, constraintFit, planeWorldCoordinate, type DesignExtentTarget, type GeneralSolidBody, type ConstraintFit, type SketchDatumPlane, type SketchDimensionName, type SketchEntity, type SketchConstraintKind, type SketchPointRef, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
+import { SOLVABLE_POINT_REFS, SPLINE_MAX_FIT_POINTS, constraintFit, locateDimensionConstraint, planeWorldCoordinate, type DesignExtentTarget, type GeneralSolidBody, type ConstraintFit, type SketchDatumPlane, type SketchDimensionName, type SketchEntity, type SketchConstraintKind, type SketchPointRef, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
 import {
   analyzeWorkbenchSketch,
   buildLineRectangle,
@@ -446,6 +446,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
   // Sketch Dimension with two picks: the first thing picked, and two picked points waiting for the click that places their dimension.
   const [dimensionFirst, setDimensionFirst] = useState<DimensionPick | undefined>(undefined);
+  // The name of a clicked dimension on its way into the open value editor, and the flag that keeps the editor open through that click.
+  const [nameInsert, setNameInsert] = useState<{ readonly text: string; readonly serial: number } | undefined>(undefined);
+  const keepEditorOnBlur = useRef(false);
   const [dimensionPlacement, setDimensionPlacement] = useState<PointPairPlacement | AcrossLinePlacement | undefined>(undefined);
   // Snapping aids (snap on/off, snap step, polar tracking, ortho) live in the browser; Ctrl and Shift held on the keyboard override them while down.
   const [assist, setAssist] = useState<SnapAssistSettings>(() => { try { return loadStoredSnapAssist(); } catch { return DEFAULT_SNAP_ASSIST; } });
@@ -750,7 +753,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const newConstraintId = (): string => `constraint:user-${crypto.randomUUID()}`;
   const entityLabels = useMemo(() => entityOrdinalLabels(props.sketch.entities), [props.sketch.entities]);
   const redundantIds = useMemo(() => redundantConstraintIds(workingSketch.constraints, analysis), [workingSketch.constraints, analysis]);
-  const constraintTitles = useMemo(() => new Map(props.sketch.constraints.map((constraint) => [constraint.id, describeConstraint(constraint, entityLabels)] as const)), [props.sketch.constraints, entityLabels]);
+  // A driving dimension is shown with its name (d1, d2 ...), which an expression in another dimension can use.
+  const constraintTitles = useMemo(() => new Map(props.sketch.constraints.map((constraint) => [constraint.id, `${describeConstraint(constraint, entityLabels)}${constraint.name === undefined ? "" : ` (${constraint.name})`}`] as const)), [props.sketch.constraints, entityLabels]);
   const glyphs = useMemo(() => layoutConstraintGlyphs(
     constraintsToDraw(visibleSketch.constraints, showConstraints ? constraintDisplay : { ...constraintDisplay, level: "none" }, { selectedEntityIds: selectionIds, hoveredEntityId: hoverId, selectedConstraintIds, hoveredConstraintId: hoverConstraintId, alwaysShowIds: redundantIds }),
     visibleEntities,
@@ -1410,6 +1414,14 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const preview = placementPreview(props.sketch, waiting, cursor);
     return preview === undefined ? undefined : pointDistanceLayout(props.sketch, preview.constraint, preview.measured, px, { format: (value) => formatLengthLabel(value, dimensionDisplay) });
   }, [props.dimensionMode, dimensionPlacement, lineExtent, cursor, props.sketch, px, dimensionDisplay]);
+
+  // The stored dimension the open editor is changing, if it exists already: its name is shown beside the label.
+  const editedDimension = useMemo(() => {
+    if (dimensionEdit === undefined) return undefined;
+    const dimension: SketchDimensionName = dimensionEdit.named?.dimension ?? (dimensionEdit.diameterConstraint === true ? "diameter" : dimensionEdit.dimension);
+    return locateDimensionConstraint(props.sketch, { entityId: dimensionEdit.entityId, dimension, ...(dimensionEdit.secondEntityId === undefined ? {} : { secondEntityId: dimensionEdit.secondEntityId }), ...(dimensionEdit.named?.points === undefined ? {} : { points: dimensionEdit.named.points }) });
+  }, [dimensionEdit, props.sketch]);
+  useEffect(() => { if (dimensionEdit === undefined) { setNameInsert(undefined); keepEditorOnBlur.current = false; } }, [dimensionEdit]);
 
   /** Opens the value editor for a dimension between two picks (a distance or an angle), at the place given. */
   const openPairDimension = (found: PairDimension, anchor: Vec2): void => {
@@ -2260,13 +2272,30 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     zoomWindowMode ? "zoom-window" : "",
     measureMode ? "measuring" : ""
   ].filter(Boolean).join(" ");
+  /**
+   * A dimension clicked while another dimension's value is being edited: its name is written into the value, as a designer expects
+   * (`d1 / 2`). True when the click was used for that, so it neither selects nor drags.
+   */
+  const insertDimensionName = (constraintId: string, event: React.PointerEvent): boolean => {
+    if (dimensionEdit === undefined || event.button !== 0) return false;
+    const clicked = props.sketch.constraints.find((candidate) => candidate.id === constraintId);
+    if (clicked === undefined) return false;
+    keepEditorOnBlur.current = true;
+    if (clicked.id === editedDimension?.id) props.onMessage("That is the dimension being edited. Click another dimension to use its name here.");
+    else if (clicked.name === undefined) props.onMessage("That dimension has no name to use: a reference dimension has none, and an older dimension gets one the next time this sketch is edited.");
+    else { props.onMessage(`Inserted ${clicked.name}, the name of ${constraintTitles.get(clicked.id) ?? "that dimension"}. Enter applies.`); }
+    setNameInsert((current) => ({ text: clicked.id === editedDimension?.id || clicked.name === undefined ? "" : clicked.name, serial: (current?.serial ?? 0) + 1 }));
+    return true;
+  };
   const pressDimension = (entry: (typeof dimensionViews)[number], event: React.PointerEvent, additive: boolean): void => {
+    if (insertDimensionName(entry.id, event)) return;
     selectConstraint(entry.id, additive);
     if (!interactive || additive || event.button !== 0 || !isRepositionable(entry.layout)) return;
     dimensionDrag.current = { pointerId: event.pointerId, constraintId: entry.id, startMm: camera.toSketch(event.clientX, event.clientY), startClient: [event.clientX, event.clientY], startOffsetPx: entry.offsetPx, layoutAt: entry.layoutAt, moved: false };
   };
   /** A press on the text of a distance between things (or another extra dimension): selects it and, once the pointer moves, drags its dimension line. */
   const pressExtraDimension = (constraintId: string, event: React.PointerEvent, layoutAt: (offsetPx: number) => DimensionLayout | undefined, offsetPx: number, additive: boolean): void => {
+    if (insertDimensionName(constraintId, event)) return;
     selectConstraint(constraintId, additive);
     if (!interactive || additive || event.button !== 0) return;
     dimensionDrag.current = { pointerId: event.pointerId, constraintId, startMm: camera.toSketch(event.clientX, event.clientY), startClient: [event.clientX, event.clientY], startOffsetPx: offsetPx, layoutAt, moved: false };
@@ -2384,7 +2413,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       </svg>
 
       {dimensionEdit !== undefined && <DimensionEditor
-        label={dimensionEdit.label}
+        label={editedDimension?.name === undefined ? dimensionEdit.label : `${dimensionEdit.label} \u00b7 ${editedDimension.name}`}
+        insert={nameInsert}
         unitLabel={dimensionEdit.dimension === "angle" ? "°" : dimensionDisplay.unit}
         reference={dimensionReference}
         onReferenceChange={setDimensionReference}
@@ -2396,7 +2426,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         })()}
         onChange={setDimensionText}
         onCommit={commitDimensionEdit}
-        onCancel={(reason) => { setDimensionEdit(undefined); if (reason === "escape") setDimensionFirst(undefined); }}
+        onCancel={(reason) => {
+          // A click on another dimension to insert its name takes the focus for a moment; the editor stays open for it.
+          if (reason === "blur" && keepEditorOnBlur.current) { keepEditorOnBlur.current = false; return; }
+          setDimensionEdit(undefined);
+          if (reason === "escape") setDimensionFirst(undefined);
+        }}
       />}
       {dynamicFields.length > 0 && (pointerInside || dynamicFocused || Object.keys(fieldText).length > 0) && !camera.panning && <DynamicInputBox
         unit={unit}

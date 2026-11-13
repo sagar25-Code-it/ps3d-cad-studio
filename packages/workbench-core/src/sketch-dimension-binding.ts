@@ -12,7 +12,7 @@ import type { SketchDimensionName, WorkbenchProject } from "./types.js";
  * when the dimension is bound and re-evaluated), and the person gets the reason in words they can act on.
  */
 export function previewSketchDimensionExpression(project: WorkbenchProject, dimension: SketchDimensionName, text: string): FieldPreview {
-  const evaluated = evaluateTextInDesign(designOf(project), text);
+  const evaluated = evaluateTextInDesign(designOf(project), text, project.sketch);
   if (!evaluated.ok) return { ok: false, message: explainBindingProblem(evaluated.message), ...(evaluated.position === undefined ? {} : { position: evaluated.position }) };
   const checked = checkSketchDimensionQuantity(dimension, evaluated.quantity);
   if (!checked.ok) return { ok: false, message: checked.message };

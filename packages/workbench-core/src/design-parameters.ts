@@ -457,7 +457,7 @@ export function previewFieldExpression(project: WorkbenchProject, feature: Desig
 
 /** Evaluates `text` as a sketch dimension (a length in mm) against the project, for live feedback while typing. */
 export function previewDimensionExpression(project: WorkbenchProject, text: string): FieldPreview {
-  const evaluated = evaluateTextInDesign(designOf(project), text);
+  const evaluated = evaluateTextInDesign(designOf(project), text, project.sketch);
   if (!evaluated.ok) return evaluated;
   const quantity: Quantity = evaluated.quantity;
   if (!(quantity.angle === 0 && (quantity.length === 0 || quantity.length === 1))) return { ok: false, message: "A dimension needs a length." };

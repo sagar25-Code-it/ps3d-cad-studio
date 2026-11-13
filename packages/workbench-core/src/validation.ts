@@ -1,4 +1,5 @@
 import { circleThroughThreePoints } from "./arc-geometry.js";
+import { DIMENSION_NAME_PATTERN } from "./dimension-names.js";
 import { SPLINE_MAX_FIT_POINTS, SPLINE_MIN_FIT_POINTS } from "./spline-limits.js";
 import { NEW_PRIMITIVE_SHAPES, validPrimitiveBody } from "./primitive-bodies.js";
 import { validConstructionBinder, validNewPlaneDefinition } from "./construction-refs.js";
@@ -316,10 +317,13 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   const hasPierce = Object.hasOwn(value, "pierce");
   const hasRatio = Object.hasOwn(value, "ratio");
   const hasDoubled = Object.hasOwn(value, "doubled");
+  const hasName = Object.hasOwn(value, "name");
+  // A dimension name is d followed by a number (dimension-names.ts).
+  if (hasName && !(typeof value.name === "string" && DIMENSION_NAME_PATTERN.test(value.name))) return false;
   // A diameter across a line is a point-to-line or line-to-line distance.
   if (hasDoubled && (typeof value.doubled !== "boolean" || value.kind !== "distance" || (value.dimension !== "point-line" && value.dimension !== "line-line"))) return false;
   const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : []), ...(hasPoints ? ["points"] : []),
-    ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : []), ...(hasExpression ? ["expression"] : []), ...(hasDoubled ? ["doubled"] : [])];
+    ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : []), ...(hasExpression ? ["expression"] : []), ...(hasDoubled ? ["doubled"] : []), ...(hasName ? ["name"] : [])];
   if (!exactKeys(value, expectedKeys) || (hasSuppressed && typeof value.suppressed !== "boolean")) return false;
   // An expression only drives a dimension, and must be short, parseable text.
   if (hasExpression && (!(hasValue || hasValueDeg) || typeof value.expression !== "string" || value.expression.length < 1 || value.expression.length > MAX_EXPRESSION_LENGTH || !parseExpression(value.expression).ok)) return false;

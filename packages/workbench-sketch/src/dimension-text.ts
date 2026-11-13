@@ -61,3 +61,14 @@ export function readDimensionText(text: string, options: DimensionTextOptions): 
 export function dimensionAllowsZero(dimension: string): boolean {
   return dimension === "aligned" || dimension === "horizontal" || dimension === "vertical" || dimension === "point-line" || dimension === "line-line";
 }
+
+/**
+ * Puts `insert` into the text of a value editor where the selection is: it replaces what is selected (the whole value, when the
+ * editor has just opened) or goes in at the caret. Used when a dimension is clicked while another is being edited, to write its
+ * name. Returns the new text and where the caret goes.
+ */
+export function insertAtSelection(text: string, selectionStart: number | null, selectionEnd: number | null, insert: string): { readonly text: string; readonly caret: number } {
+  const start = Math.max(0, Math.min(selectionStart ?? text.length, text.length));
+  const end = Math.max(start, Math.min(selectionEnd ?? start, text.length));
+  return { text: `${text.slice(0, start)}${insert}${text.slice(end)}`, caret: start + insert.length };
+}

@@ -1,4 +1,5 @@
 import { isNewPrimitiveShape, NEW_PRIMITIVE_SHAPES, normalizePrimitiveSize, validPrimitiveBody } from "./primitive-bodies.js";
+import { nameSketchDimensions, unbindLostDimensionNames } from "./dimension-names.js";
 import { planeDependencies, validConstructionBinder, validNewPlaneDefinition } from "./construction-refs.js";
 import type {
   AppliedWorkbenchOperation,
@@ -160,7 +161,8 @@ function applyWorkbenchOperationChecked(
   // A full audit never freezes the project: the oldest entries fold into one checkpoint and the last AUDIT_KEEP_FULL stay in full.
   const priorAudit = current.value.audit.length >= WORKBENCH_LIMITS.maxAuditEntries ? compactAudit(current.value.audit, AUDIT_KEEP_FULL) : current.value.audit;
 
-  const settled = settleDesignExpressions(current.value, operation, applyIntent(current.value, operation), resizeSketchEntity);
+  // Every driving dimension of the working sketch has a name an expression can use; an edit of the sketch names the new ones.
+  const settled = settleDesignExpressions(current.value, operation, withDimensionNames(current.value, operation, applyIntent(current.value, operation)), resizeSketchEntity);
   // Messages name sketch geometry as "Line 3", never by its generated id (see sketch-names.ts).
   const reconciled = settled.ok ? reconcileOperationSketch(current.value, settled.value, operation) : settled;
   if (!reconciled.ok) return { ok: false, diagnostics: reconciled.diagnostics.map((entry) => ({ ...entry, message: friendlySketchText(entry.message, [current.value.sketch]), recovery: friendlySketchText(entry.recovery, [current.value.sketch]) })) };
@@ -183,6 +185,20 @@ function applyWorkbenchOperationChecked(
   if (!validated.ok) return validated;
   VALIDATED_PROJECTS.add(validated.value);
   return { ok: true, value: { project: validated.value, changedIds: changed.value.changedIds, summary: changed.value.summary, exactRetry: false } };
+}
+
+const DIMENSION_NAMING_KINDS: ReadonlySet<WorkbenchOperation["kind"]> = new Set(["set-sketch-dimension", "apply-sketch-edit", "add-sketch-constraint"]);
+/** Edits that can take a named dimension away (delete it, delete its curve, make it a reference). */
+const DIMENSION_REMOVING_KINDS: ReadonlySet<WorkbenchOperation["kind"]> = new Set(["set-sketch-dimension", "apply-sketch-edit", "delete-sketch-constraint", "delete-sketch-entity"]);
+
+function withDimensionNames<T extends { readonly project: WorkbenchProject; readonly summary: string }>(before: WorkbenchProject, operation: WorkbenchOperation, result: WorkbenchResult<T>): WorkbenchResult<T> {
+  if (!result.ok || !(DIMENSION_NAMING_KINDS.has(operation.kind) || DIMENSION_REMOVING_KINDS.has(operation.kind))) return result;
+  const named = DIMENSION_NAMING_KINDS.has(operation.kind) ? nameSketchDimensions(before.sketch, result.value.project.sketch, result.value.project.design) : result.value.project.sketch;
+  // A dimension whose expression used the name of one that is gone keeps its value and becomes a plain number.
+  const freed = DIMENSION_REMOVING_KINDS.has(operation.kind) ? unbindLostDimensionNames(result.value.project.design, named) : { sketch: named, unbound: [] };
+  if (freed.sketch === result.value.project.sketch) return result;
+  const note = freed.unbound.length === 0 ? "" : ` ${freed.unbound.join(", ")} used the name of a dimension that is gone, so ${freed.unbound.length === 1 ? "it keeps its value as a plain number" : "they keep their values as plain numbers"}.`;
+  return { ok: true, value: { ...result.value, project: { ...result.value.project, sketch: freed.sketch }, summary: `${result.value.summary}${note}` } };
 }
 
 /** The audit keeps a summary of at most 240 characters; a long one (a big edit that moved many curves) is shortened rather than refused. */

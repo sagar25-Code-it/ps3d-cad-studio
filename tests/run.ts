@@ -170,6 +170,7 @@ import { sketchLineArcDragTests } from "./sketch-line-arc-drag.test.js";
 import { sketchDiameterAcrossTests } from "./sketch-diameter-across.test.js";
 import { sketchDimensionPlacementTests } from "./sketch-dimension-placement.test.js";
 import { sketchFacePickTests } from "./sketch-face-pick.test.js";
+import { sketchDimensionNameTests } from "./sketch-dimension-names.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -362,6 +363,7 @@ const tests: readonly TestCase[] = [
   ...sketchDiameterAcrossTests,
   ...sketchDimensionPlacementTests,
   ...sketchFacePickTests,
+  ...sketchDimensionNameTests,
 ];
 let failures = 0;
 

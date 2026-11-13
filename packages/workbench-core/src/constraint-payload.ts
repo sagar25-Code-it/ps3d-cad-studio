@@ -12,7 +12,7 @@ import { MAX_EXPRESSION_LENGTH } from "./expressions.js";
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
 const KINDS = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed", "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"] as const;
 const DIMENSION_NAMES = ["length", "width", "height", "radius", "diameter", "aligned", "horizontal", "vertical", "point-line", "line-line", "major-radius", "minor-radius"] as const;
-const ALLOWED_KEYS = ["id", "kind", "entityIds", "valueMm", "dimension", "suppressed", "points", "valueDeg", "driven", "pierce", "ratio", "expression", "doubled"] as const;
+const ALLOWED_KEYS = ["id", "kind", "entityIds", "valueMm", "dimension", "suppressed", "points", "valueDeg", "driven", "pierce", "ratio", "expression", "doubled", "name"] as const;
 const DRIVABLE = ["radius", "distance", "angle", "arc-length", "perimeter"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -70,6 +70,7 @@ export function sketchConstraintPayloadProblem(value: unknown): EnvelopeProblem 
   const has = (key: string): boolean => Object.hasOwn(value, key);
   if (has("suppressed") && typeof value.suppressed !== "boolean") return bad(`needs suppressed to be true or false, but it is ${shown(value.suppressed)}.`);
   if (has("driven") && typeof value.driven !== "boolean") return bad(`needs driven to be true or false, but it is ${shown(value.driven)}.`);
+  if (has("name") && !(typeof value.name === "string" && /^d[1-9][0-9]{0,5}$/u.test(value.name))) return bad(`has the name ${shown(value.name)}; a dimension name is d followed by a number, such as d12 (the project gives the names itself).`);
   if (has("doubled")) {
     if (typeof value.doubled !== "boolean") return bad(`needs doubled to be true or false, but it is ${shown(value.doubled)}.`);
     if (kind !== "distance" || (value.dimension !== "point-line" && value.dimension !== "line-line")) return bad("is marked doubled (a diameter across a line), which only a point-line or line-line distance can be.");
