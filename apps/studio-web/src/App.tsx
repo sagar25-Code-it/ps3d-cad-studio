@@ -102,6 +102,7 @@ import { detectSketchProfiles, explainNoProfiles, resolveProfileRegion, sketchTo
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 import type { ConstraintToolKind } from "../../../packages/workbench-sketch/src/constraint-tool.js";
 import { EMPTY_REFERENCE_LAYER, sketchReferenceLayer } from "./sketch-reference.js";
+import { placementOfPickedPlane, sketchPlaneOfFace, type FacePick } from "./sketch-face-pick.js";
 import { edgesToPick, isSketchProjectCommand, needsPick, pickedEdgeRun, planSketchProject, sourceBodyOf, type SketchProjectCommand, type SketchProjectPick } from "./sketch-project-command.js";
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
@@ -2846,18 +2847,51 @@ export function App(): React.JSX.Element {
    * Create Sketch on an origin plane from a right-click: the working sketch's unrecorded work goes into the timeline first, then a new
    * empty sketch starts on the plane. Both are one project, so one Undo takes back the whole step and no finished sketch is moved.
    */
-  const startSketchOnPlane = (plane: "datum:xy" | "datum:xz" | "datum:yz"): void => {
+  const startSketchOnPlane = (plane: "datum:xy" | "datum:xz" | "datum:yz", placement: { readonly offsetMm?: number; readonly face?: SketchPlaneFaceRef; readonly frame?: SketchPlaneFrame } = {}, note = ""): void => {
     void (async () => {
       lastSketchCommitRef.current = undefined;
-      await commitWorkingSketch([{ kind: "new-design-sketch", plane }]);
+      await commitWorkingSketch([{ kind: "new-design-sketch", plane, ...placement }]);
       const outcome = lastSketchCommit();
       if (outcome === undefined) return;
       setSelectedId(null);
       planeOfferRef.current = { offered: true, finishedSinceOffer: false };
       if (outcome.failed.length > 0) return;
       setStatus("ready");
-      setStatusText(`New sketch started. ${describeSketchPlane(projectRef.current.sketch).status}${outcome.sketchFeatureId === undefined ? "" : " The previous sketch is in the timeline."}`);
+      setStatusText(`New sketch started${note}. ${describeSketchPlane(projectRef.current.sketch).status}${outcome.sketchFeatureId === undefined ? "" : " The previous sketch is in the timeline."}`);
     })();
+  };
+
+  /** Create Sketch on a face of a solid that was clicked or selected: a new sketch on that face, or the reason the face cannot take one. */
+  const startSketchOnFace = (body: GeneralSolidBody, pick: FacePick): boolean => {
+    const picked = sketchPlaneOfFace(body, pick);
+    if (!picked.ok) { setStatus("ready"); setStatusText(`Create Sketch: ${picked.message}`); return false; }
+    startSketchOnPlane(picked.plane, placementOfPickedPlane(picked), ` on ${picked.label}${picked.follows ? " (it follows the face)" : " (it stays here if the solid changes)"}`);
+    return true;
+  };
+
+  /** New Sketch: on the face or origin plane that is already selected in the Part view; otherwise the plane dialog asks. */
+  const beginNewSketch = (): void => {
+    const current = projectRef.current;
+    if (current.activeWorkspace === "part") {
+      const body = selectedFace === null ? undefined : (current.part.generalBodies ?? []).find((candidate) => candidate.id === selectedFace.bodyId);
+      if (body !== undefined && selectedFace !== null) { startSketchOnFace(body, { faceIndex: selectedFace.faceIndex }); return; }
+      if (selectedId === "datum:xy" || selectedId === "datum:xz" || selectedId === "datum:yz") { startSketchOnPlane(selectedId); return; }
+    }
+    openSketchPlaneDialog("new");
+  };
+
+  /** The plane dialog's "click a face on the model": the dialog closes, the next click on a solid in the 3D view chooses the face. */
+  const pickFaceForSketch = async (): Promise<void> => {
+    setSketchPlaneDialogOpen(false);
+    if (projectRef.current.activeWorkspace !== "part") switchWorkspace("part");
+    let viewport = viewportRef.current;
+    for (let attempt = 0; viewport === undefined && attempt < 60; attempt += 1) { await new Promise<void>((resolve) => window.setTimeout(resolve, 50)); viewport = viewportRef.current; }
+    if (viewport === undefined) { setStatus("error"); setStatusText("Create Sketch: the 3D view did not open, so no face could be clicked. Choose a plane from the list instead."); return; }
+    const picked = await requestViewportPick("Create Sketch: click a flat face of a solid");
+    if (picked === null) { setStatus("ready"); setStatusText("Create Sketch cancelled."); return; }
+    const body = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === picked.semanticId);
+    if (body === undefined) { setStatus("ready"); setStatusText("Create Sketch: that is not a solid body. Click a flat face of a solid, or choose a plane from the list."); return; }
+    startSketchOnFace(body, { faceIndex: picked.faceIndex ?? null, pointMm: picked.pointMm });
   };
 
   // The unit is a property of the project (saved with it, restored on open) and is remembered for the next session; the CAD document follows.
@@ -3540,9 +3574,15 @@ export function App(): React.JSX.Element {
       const timelineFeature = commandId === "sketch.create" ? undefined : designOf(projectRef.current).features.find((feature) => feature.id === selectionId);
       if (timelineFeature !== undefined) { editTimelineFeature(timelineFeature); return; }
       if (commandId === "feature.edit") { switchWorkspace("part"); if (selectionId !== null) setSelectedId(selectionId); return; }
-      const action = contextSketchAction(commandId, selectionId);
+      const action = contextSketchAction(commandId, selectionId, [], selectedFace?.bodyId ?? null);
       // Create Sketch always starts a new sketch; it never moves the one that is already drawn (see contextSketchAction).
       if (action.kind === "new-on-plane") { startSketchOnPlane(action.plane); return; }
+      if (action.kind === "new-on-face") {
+        const body = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === action.bodyId);
+        if (body !== undefined && selectedFace !== null) { startSketchOnFace(body, { faceIndex: selectedFace.faceIndex }); return; }
+        openSketchPlaneDialog("new");
+        return;
+      }
       if (action.kind === "ask-plane") { openSketchPlaneDialog("new"); return; }
       switchWorkspace("sketch");
       if (selectionId !== null && !selectionId.startsWith("datum:")) setSelectedId(selectionId);
@@ -3844,7 +3884,7 @@ export function App(): React.JSX.Element {
     onUndo: () => historyActionRef.current.undo(),
     onRedo: () => historyActionRef.current.redo(),
     onCommandPalette: () => setPaletteOpen(true),
-    onNewSketch: () => openSketchPlaneDialog("new"),
+    onNewSketch: beginNewSketch,
     onAbout: () => setAboutOpen(true),
     onCreateSolidFromSketch: openSketchCreateSolid,
     onCreatePrimitive: createPartPreviewBody,
@@ -3959,7 +3999,7 @@ export function App(): React.JSX.Element {
       onOpenSketchOptions={openSketchCreateSolid}
       onToggleSketchEntityVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })}
       onFinishSketch={() => guard(finishSketch(), "Finishing the sketch")}
-      onNewSketch={() => openSketchPlaneDialog("new")}
+      onNewSketch={beginNewSketch}
       onChangeSketchPlane={() => openSketchPlaneDialog("set")}
       onChangeParameters={() => setParametersOpen(true)}
       onRemoteMcp={revealRemoteMcp}
@@ -4171,7 +4211,7 @@ export function App(): React.JSX.Element {
       onClose={() => setNewDialogOpen(false)}
     />
     <ConstructionPlaneDialog open={constructionDialog !== null} mode={constructionDialog ?? "through-two-edges"} axes={project.part.constructionAxes ?? []} bodies={project.part.generalBodies ?? []} binders={project.part.constructionBinders ?? []} paths={constructionDialog === null ? [] : sketchPathOptions(project.sketch, designOf(project))} picking={constructionPicking} onPickEdge={pickEdgeForConstructionPlane} onConfirm={confirmConstructionPlane} onClose={() => setConstructionDialog(null)} />
-    <SketchPlaneDialog unit={unitToShow(project, document.displayUnit)} open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} initialTilt={sketchPlaneDialogMode === "new" ? undefined : project.sketch.planeTilt} anglePlanes={anglePlaneOptions} framePlanes={framePlaneOptions} faces={sketchFaceOptions} existingPlanes={existingSketchPlanes(designOf(project).features, project.sketch)} mode={sketchPlaneDialogMode} currentPlaneChip={describeSketchPlane(project.sketch).chip} {...(sketchPlaneOffered ? { onContinue: () => { setSketchPlaneDialogOpen(false); switchWorkspace("sketch"); } } : {})} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
+    <SketchPlaneDialog unit={unitToShow(project, document.displayUnit)} open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} initialTilt={sketchPlaneDialogMode === "new" ? undefined : project.sketch.planeTilt} anglePlanes={anglePlaneOptions} framePlanes={framePlaneOptions} faces={sketchFaceOptions} existingPlanes={existingSketchPlanes(designOf(project).features, project.sketch)} mode={sketchPlaneDialogMode} {...(sketchPlaneDialogMode === "new" && (project.part.generalBodies ?? []).some((body) => body.visible) ? { onPickFace: () => guard(pickFaceForSketch(), "Picking a face for the sketch") } : {})} currentPlaneChip={describeSketchPlane(project.sketch).chip} {...(sketchPlaneOffered ? { onContinue: () => { setSketchPlaneDialogOpen(false); switchWorkspace("sketch"); } } : {})} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
     <AboutDialog open={aboutOpen} update={buildUpdate} onClose={() => setAboutOpen(false)} />
     <ChangeParametersDialog open={parametersOpen} project={project} busy={status === "working"} onApply={changeParameters} onClose={() => setParametersOpen(false)} />
     <FeatureEditDialog feature={featureEdit} project={project} busy={status === "working"} onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />

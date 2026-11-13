@@ -171,6 +171,8 @@ export function planeOfferAfterFinish(state: PlaneOfferState): PlaneOfferState {
 export type ContextSketchAction =
   /** Finish the working sketch into the timeline (if it has unrecorded work) and start a new, empty sketch on this origin plane. */
   | { readonly kind: "new-on-plane"; readonly plane: SketchDatumPlane }
+  /** Finish the working sketch into the timeline and start a new, empty sketch on the face that is selected on this solid. */
+  | { readonly kind: "new-on-face"; readonly bodyId: string }
   /** Ask which plane or face the new sketch goes on (the plane dialog in its "new sketch" mode). */
   | { readonly kind: "ask-plane" }
   /** Reopen a finished sketch of the timeline for editing. */
@@ -184,11 +186,13 @@ export type ContextSketchAction =
  * drawn (it used to re-plane the working sketch, which after Finish is still the last finished sketch). Edit Sketch is the only
  * command that reopens existing geometry: the timeline sketch that was right-clicked, or the working sketch.
  */
-export function contextSketchAction(commandId: "sketch.create" | "sketch.edit", selectionId: string | null, sketchFeatureIds: readonly string[] = []): ContextSketchAction {
+export function contextSketchAction(commandId: "sketch.create" | "sketch.edit", selectionId: string | null, sketchFeatureIds: readonly string[] = [], selectedFaceBodyId: string | null = null): ContextSketchAction {
   if (commandId === "sketch.edit") {
     return selectionId !== null && sketchFeatureIds.includes(selectionId) ? { kind: "edit-feature", featureId: selectionId } : { kind: "open-working" };
   }
   if (selectionId === "datum:xy" || selectionId === "datum:xz" || selectionId === "datum:yz") return { kind: "new-on-plane", plane: selectionId };
+  // A face of the selected solid is picked: the sketch goes on that face, with no list to choose from.
+  if (selectionId !== null && selectedFaceBodyId === selectionId) return { kind: "new-on-face", bodyId: selectionId };
   return { kind: "ask-plane" };
 }
 

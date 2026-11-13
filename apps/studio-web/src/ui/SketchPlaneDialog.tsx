@@ -78,6 +78,8 @@ interface SketchPlaneDialogProps {
   /** Present when the dialog was offered on entering Sketch: adds a "Continue with the current sketch" button that does not change anything. */
   readonly onContinue?: () => void;
   readonly onConfirm: (plane: SketchPlane, offsetMm: number, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef, convention?: "z-up" | "legacy") => void;
+  /** Present when there is a solid to click: closes the dialog and lets the next click on the model choose the face (any flat face, not only the listed ones). */
+  readonly onPickFace?: () => void;
   readonly onClose: () => void;
 }
 
@@ -251,6 +253,9 @@ export function SketchPlaneDialog(props: SketchPlaneDialogProps): React.JSX.Elem
           </label>)}
           <button type="button" className="sketch-plane-face" onClick={confirmPoints}><CommandIcon name="projection" /><span><strong>Start sketch through these points</strong><small>The first point is the sketch origin, the second sets its X direction</small></span></button>
         </details>
+        {props.onPickFace !== undefined && <div className="sketch-plane-faces">
+          <button type="button" className="sketch-plane-face" onClick={props.onPickFace}><CommandIcon name="face" /><span><strong>Click a face on the model</strong><small>Closes this window; the next click on a flat face of a solid starts the sketch there. Esc cancels.</small></span></button>
+        </div>}
         {props.faces.length > 0 && <div className="sketch-plane-faces">
           <small className="sketch-plane-faces-title">Or sketch on a face of a solid</small>
           {props.faces.map((face, index) => <button
