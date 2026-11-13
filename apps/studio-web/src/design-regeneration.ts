@@ -1,4 +1,4 @@
-import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, WorkbenchProject, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
+import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, SketchEntity, WorkbenchProject, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
 import { usesZUpPlane } from "../../../packages/workbench-core/src/index.js";
 import { dependentsOf, designOf, HEALTH_NOTE_PREFIX, isHealthNote, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, lostProfileRefs, profileOutlineMm, resolveProfileRegion, sampleArc, sampleArcToBound, sampleSpline, sampleSplineToBound } from "../../../packages/workbench-sketch/src/index.js";
@@ -13,6 +13,7 @@ import { blendBodyEdges } from "./edge-blend-step.js";
 import { applyBodyEdit } from "./body-edit-replay.js";
 import { revolveAboutChosenAxis } from "./revolve-feature.js";
 import { followSketchFace } from "./sketch-face-follow.js";
+import { followSketchProjections, projectionBodyIds } from "./sketch-projection-follow.js";
 import { buildLoftFeature, buildSweepFeature, needsSweepLoftBuilder, type SketchLookup } from "./sweep-loft-feature.js";
 import { sweepDirectionInDatumFrame } from "./sweep-direction.js";
 
@@ -32,6 +33,8 @@ export interface RebuildResult {
   readonly message?: string;
   /** Set when the sketch this feature is built on lies on a face that moved: the offset the sketch now has, to be stored with it. */
   readonly sketchPlaneOffsetMm?: number;
+  /** Set when curves the sketch projected from a solid moved with that solid: the linked curves as they are now, to be stored with the sketch. */
+  readonly sketchEntities?: readonly SketchEntity[];
 }
 
 export const NORMALS: Readonly<Record<BuildPlane, readonly [number, number, number]>> = { xy: [0, 0, 1], xz: [0, -1, 0], yz: [1, 0, 0], "yz-zup": [1, 0, 0] };
@@ -435,7 +438,9 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
     if (storedSketch === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The sketch this feature was built on is no longer in the timeline." }); continue; }
     // A sketch drawn on a face follows that face as the solid is now (the body being replayed, one rebuilt earlier in this pass, or the stored one).
     const followed = followSketchFace(storedSketch, (id) => id === bodyId ? current : fresh?.get(id) ?? project.part.generalBodies?.find((candidate) => candidate.id === id));
-    const sketchFeature = followed.sketchFeature;
+    // Curves the sketch projected from a solid follow that solid as it is at this point of the replay (this body before this step, or another body as rebuilt in this pass).
+    const linked = followSketchProjections(followed.sketchFeature, (id) => id === bodyId ? current : fresh?.get(id) ?? project.part.generalBodies?.find((candidate) => candidate.id === id));
+    const sketchFeature = linked.sketchFeature;
     const modifies = modifiesBody(step);
     let sized = modifies && step.extent === "through-all" && current !== undefined ? throughAllOverride(step, sketchFeature, current) : step;
     // A "to" extent is measured from the target's shape as it is at this point of the replay.
@@ -450,11 +455,11 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
     }
     let built = await rebuildSolidFeature(modifies ? { ...sized, bodyId: `${step.id}:tool` } : sized, sketchFeature, existing?.color, sketchLookupOf(history));
     if (!built.ok) { outcomes.set(step.id, { featureId: step.id, message: built.message }); continue; }
-    const notes = [followed.warning, warning, built.warning].filter((note): note is string => note !== undefined);
+    const notes = [followed.warning, linked.warning, warning, built.warning].filter((note): note is string => note !== undefined);
     // What the region detector said (a hole left out, a curve that crosses the outline) changes the solid, so it is kept on the feature too.
     const regionNotes = built.warnings ?? [];
     const noteText = regionNotes.length === 0 ? notes.join(" ") : `${REBUILD_NOTE_PREFIX}${[...notes, ...regionNotes].join(" ")}`;
-    const applied: RebuildResult = { featureId: step.id, ...(noteText === "" ? {} : { message: clipMessage(noteText) }), ...(followed.movedToOffsetMm === undefined ? {} : { sketchPlaneOffsetMm: followed.movedToOffsetMm }) };
+    const applied: RebuildResult = { featureId: step.id, ...(noteText === "" ? {} : { message: clipMessage(noteText) }), ...(followed.movedToOffsetMm === undefined ? {} : { sketchPlaneOffsetMm: followed.movedToOffsetMm }), ...(linked.entities.length === 0 ? {} : { sketchEntities: linked.entities }) };
     if (trim !== undefined) {
       const trimmedTool = await trimToFace(built.body, trim);
       if (!trimmedTool.ok) { outcomes.set(step.id, { featureId: step.id, message: trimmedTool.message }); continue; }
@@ -497,7 +502,9 @@ function targetsFirst(history: ReturnType<typeof designOf>, bodyIds: readonly st
     // A body reaches the body its extent ends at, and the body whose face its sketch lies on.
     const sketchFace = history.features.find((candidate) => candidate.id === feature.sketchFeatureId && candidate.kind === "sketch");
     const faceBody = sketchFace !== undefined && sketchFace.kind === "sketch" ? sketchFace.sketch.planeFace?.bodyId : undefined;
-    for (const reached of [feature.extentTarget?.bodyId, faceBody]) {
+    // ... and the bodies its sketch projected curves from.
+    const projected = sketchFace !== undefined && sketchFace.kind === "sketch" ? projectionBodyIds(sketchFace.sketch) : [];
+    for (const reached of [feature.extentTarget?.bodyId, faceBody, ...projected]) {
       if (reached === undefined || reached === feature.bodyId) continue;
       const set = reaches.get(feature.bodyId) ?? new Set<string>();
       set.add(reached);
@@ -543,8 +550,9 @@ export async function rebuildDependents(project: WorkbenchProject, sketchFeature
       if (feature.kind === "sketch" || affected.has(feature.bodyId)) continue;
       const sketchFace = history.features.find((candidate) => candidate.id === feature.sketchFeatureId && candidate.kind === "sketch");
       const faceBody = sketchFace !== undefined && sketchFace.kind === "sketch" ? sketchFace.sketch.planeFace?.bodyId : undefined;
-      // A body that reaches one of these (up to its face, or sketched on its face) changes with it.
-      if (!((feature.extentTarget !== undefined && affected.has(feature.extentTarget.bodyId)) || (faceBody !== undefined && affected.has(faceBody)))) continue;
+      // A body that reaches one of these (up to its face, sketched on its face, or built on curves projected from it) changes with it.
+      const projected = sketchFace !== undefined && sketchFace.kind === "sketch" ? projectionBodyIds(sketchFace.sketch) : [];
+      if (!((feature.extentTarget !== undefined && affected.has(feature.extentTarget.bodyId)) || (faceBody !== undefined && affected.has(faceBody)) || projected.some((id) => affected.has(id)))) continue;
       affected.add(feature.bodyId);
       grew = true;
     }

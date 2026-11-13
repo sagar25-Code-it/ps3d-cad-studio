@@ -532,6 +532,15 @@ export function translateSketch(sketch: WorkbenchSketch, options: TranslateOptio
       labels[item.id] = label;
     }
   }
+  // A curve projected from a solid is held where the solid puts it: the solver treats it as fixed, so no drag and no relation moves it.
+  for (const projection of sketch.projections ?? []) {
+    for (const id of projection.entityIds) {
+      if (id === null || !present.has(id)) continue;
+      const linkId = `${projection.id}#${id}`;
+      constraints.push({ id: linkId, suppressed: false, kind: "fix", target: reference(id, "self") });
+      labels[linkId] = `${names.get(id) ?? "A curve"} is projected from a solid and follows it`;
+    }
+  }
   const reversedArcs = new Set([...arcFrames].filter(([, frame]) => frame.reversed).map(([id]) => id));
   const document: ParametricSketchDocument = {
     schemaVersion: "1.0",

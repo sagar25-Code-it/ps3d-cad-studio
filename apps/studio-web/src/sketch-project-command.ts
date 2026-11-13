@@ -1,5 +1,5 @@
-import type { GeneralSolidBody, WorkbenchOperation, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
-import { WORKBENCH_LIMITS } from "../../../packages/workbench-core/src/index.js";
+import type { GeneralSolidBody, SketchProjectionMode, SketchProjectionObject, WorkbenchOperation, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
+import { SKETCH_PROJECTION_MAX_CURVES, WORKBENCH_LIMITS } from "../../../packages/workbench-core/src/index.js";
 import { nearestPickableEdge, pickableEdges, planProjection, type ProjectionMode, type Segment3 } from "../../../packages/workbench-geometry/src/index.js";
 
 /**
@@ -19,6 +19,15 @@ const MODE_OF: Readonly<Record<SketchProjectCommand, ProjectionMode>> = {
   "silhouette-body": "silhouette",
   "convert-face": "convert"
 };
+
+/**
+ * The commands whose curves stay linked to the solid: the whole-body ones, which can be worked out again from the body alone. A
+ * single picked edge or face has no name that survives a rebuild on this kernel, so Project edge and Convert face stay snapshots.
+ */
+export const LINKED_PROJECT_MODES: Readonly<Partial<Record<SketchProjectCommand, SketchProjectionMode>>> = { "project-body": "project", "intersect-body": "intersect", "silhouette-body": "silhouette" };
+
+const SNAPSHOT_SENTENCE = "These are a snapshot of the body as it is now; they do not follow later edits of it.";
+const LINKED_SENTENCE = "They stay linked to the body: they follow it when it changes and cannot be dragged. Select them and choose Break link to make them ordinary curves.";
 
 /** The commands that need a click on the model: a picked edge, or a picked face. */
 export const needsPick = (command: SketchProjectCommand): boolean => command === "project-edge" || command === "convert-face";
@@ -76,9 +85,19 @@ export function planSketchProject(project: WorkbenchProject, body: GeneralSolidB
     ...(command === "convert-face" && pick !== undefined ? { pointMm: pick.pointMm, faceIndex: pick.faceIndex ?? null } : {})
   });
   if (!planned.ok) return { ok: false, message: planned.message };
+  const linkedMode = LINKED_PROJECT_MODES[command];
+  if (linkedMode === undefined || planned.plan.entities.length > SKETCH_PROJECTION_MAX_CURVES) {
+    return {
+      ok: true,
+      operation: { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: planned.plan.entities, addConstraints: [], label: planned.plan.label },
+      summary: planned.plan.summary
+    };
+  }
+  // The projection is recorded with the sketch, so its curves follow the body from now on.
+  const projection: SketchProjectionObject = { id: `projection:${options.newId().replace(/^[^:]*:/u, "")}`, mode: linkedMode, bodyId: body.id, entityIds: planned.plan.entities.map((entity) => entity.id) };
   return {
     ok: true,
-    operation: { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: planned.plan.entities, addConstraints: [], label: planned.plan.label },
-    summary: planned.plan.summary
+    operation: { kind: "apply-sketch-edit", removeEntityIds: [], updateEntities: [], addEntities: planned.plan.entities, addConstraints: [], objects: { projections: [projection] }, label: planned.plan.label },
+    summary: planned.plan.summary.includes(SNAPSHOT_SENTENCE) ? planned.plan.summary.replace(SNAPSHOT_SENTENCE, LINKED_SENTENCE) : `${planned.plan.summary} ${LINKED_SENTENCE}`
   };
 }

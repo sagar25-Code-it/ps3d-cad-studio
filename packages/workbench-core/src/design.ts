@@ -6,6 +6,7 @@ import type {
   DesignSolidFeature,
   GeneralSolidBody,
   SketchDatumPlane,
+  SketchEntity,
   SketchPlaneFaceRef,
   SketchPlaneFrame,
   SketchPlaneTilt,
@@ -20,6 +21,7 @@ import { EDGE_BLEND_KEYS, validEdgeBlendFields } from "./edge-blend.js";
 import { BODY_EDIT_KINDS, BODY_EDIT_ONLY_KINDS, validBodyEdit } from "./body-edit.js";
 import { FEATURE_REF_KEYS, validFeatureRefs } from "./feature-refs.js";
 import { conventionFields, type SketchPlaneConventionRequest } from "./plane-convention.js";
+import { applyProjectedCurves } from "./projection-follow.js";
 
 /**
  * The parametric history ("timeline"): an ordered list of sketch and solid features with a rollback marker. A sketch
@@ -305,7 +307,7 @@ export function updateDesignSolid(project: WorkbenchProject, feature: DesignSoli
   return changed(withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, next), [feature.id, body.id], `Updated ${feature.name}.`);
 }
 
-export function regenerateDesign(project: WorkbenchProject, results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number }[]): DesignChange {
+export function regenerateDesign(project: WorkbenchProject, results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number; readonly sketchEntities?: readonly SketchEntity[] }[]): DesignChange {
   const history = designOf(project);
   const byId = new Map(results.map((result) => [result.featureId, result] as const));
   if (byId.size !== results.length) return fail("INVALID_OPERATION", "A feature appears twice in the rebuild results.", [], "Send one result per feature.");
@@ -338,9 +340,24 @@ export function regenerateDesign(project: WorkbenchProject, results: readonly { 
     const { planeOffsetMm: _old, ...rest } = sketch;
     return offsetMm === 0 ? rest : { ...rest, planeOffsetMm: offsetMm };
   };
+  // Curves projected from a solid follow it: the rebuild worked them out again, and the sketch they belong to takes the new shapes.
+  // Only a curve that the sketch holds as linked, and that is still the same kind of curve, is replaced; everything else is ignored.
+  const followedCurves = new Map<string, Map<string, SketchEntity>>();
+  for (const result of results) {
+    const feature = history.features.find((candidate) => candidate.id === result.featureId);
+    if (result.sketchEntities === undefined || feature === undefined || feature.kind === "sketch") continue;
+    const curves = followedCurves.get(feature.sketchFeatureId) ?? new Map<string, SketchEntity>();
+    for (const entity of result.sketchEntities) curves.set(entity.id, entity);
+    followedCurves.set(feature.sketchFeatureId, curves);
+  }
+  const relinked = applyProjectedCurves;
   const features = history.features.map((feature): DesignFeature => {
     const followed = followedOffsets.get(feature.id);
-    if (feature.kind === "sketch" && followed !== undefined && feature.sketch.planeFace !== undefined) return { ...feature, sketch: retargeted(feature.sketch, followed) };
+    const curves = followedCurves.get(feature.id);
+    if (feature.kind === "sketch" && (curves !== undefined || (followed !== undefined && feature.sketch.planeFace !== undefined))) {
+      const moved = followed !== undefined && feature.sketch.planeFace !== undefined ? retargeted(feature.sketch, followed) : feature.sketch;
+      return { ...feature, sketch: curves === undefined ? moved : relinked(moved, curves) };
+    }
     const result = byId.get(feature.id);
     if (result === undefined) return feature;
     const { health: _previous, ...rest } = feature;

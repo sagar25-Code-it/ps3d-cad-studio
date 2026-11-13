@@ -6,7 +6,7 @@ import type { WorkbenchSketch } from "../../workbench-core/src/index.js";
  */
 export interface SketchStateColour {
   /** The CSS class the canvas puts on the curve (beside `sketch-entity`). */
-  readonly key: "free" | "constrained" | "fixed" | "construction" | "selected" | "reference";
+  readonly key: "free" | "constrained" | "fixed" | "linked" | "construction" | "selected" | "reference";
   readonly label: string;
   /** What the state means, for the tooltip of the key. */
   readonly meaning: string;
@@ -16,6 +16,7 @@ export const SKETCH_STATE_COLOURS: readonly SketchStateColour[] = [
   { key: "free", label: "Can still move", meaning: "The curve has freedom left: a relation or dimension is still missing. Drag it to see what moves." },
   { key: "constrained", label: "Fully defined", meaning: "Relations and dimensions decide the curve completely; it cannot move." },
   { key: "fixed", label: "Fixed", meaning: "The curve is held where it is by a Fix relation. Remove or relax the Fix to move it." },
+  { key: "linked", label: "Projected from a solid", meaning: "The curve was brought in with Project, Intersect or Silhouette and follows its solid. It cannot be dragged; Break link makes it an ordinary curve." },
   { key: "construction", label: "Construction", meaning: "Reference geometry: it guides other curves and never bounds a profile." },
   { key: "selected", label: "Selected", meaning: "The curves the next command acts on." },
   { key: "reference", label: "Model behind sketch", meaning: "Edges of solids and curves of other sketches. The pointer snaps to them; they are not part of this sketch." }

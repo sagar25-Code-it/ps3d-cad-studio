@@ -1,7 +1,7 @@
 import type { PatternDefinition } from "./pattern.js";
 import type { BodyEditSpec } from "./body-edit.js";
 import type { SheetBendTable } from "./sheet-features.js";
-import type { SketchObjectsEdit, SketchPatternObject, SketchTextObject, SketchUnderlay } from "./sketch-objects.js";
+import type { SketchObjectsEdit, SketchPatternObject, SketchProjectionObject, SketchTextObject, SketchUnderlay } from "./sketch-objects.js";
 import type { SketchPlaneConvention, SketchPlaneConventionRequest } from "./plane-convention.js";
 
 export const WORKBENCH_FORMAT = "ps3d-workbench-project" as const;
@@ -346,6 +346,8 @@ export interface WorkbenchSketch {
   readonly patterns?: readonly SketchPatternObject[];
   /** A locked background picture for tracing. Absent means none. */
   readonly underlay?: SketchUnderlay;
+  /** Curves brought in from a solid by Project, Intersect or Silhouette and kept linked to it. Absent means none (every sketch saved before links existed). */
+  readonly projections?: readonly SketchProjectionObject[];
 }
 
 export interface PartIntent {
@@ -1612,7 +1614,7 @@ export type WorkbenchOperation = OperationEnvelope & (
    */
   | { readonly kind: "set-design-parameters"; readonly parameters: readonly DesignParameter[]; readonly renames?: readonly { readonly from: string; readonly to: string }[] }
   /** Applies the result of rebuilding features after a sketch changed: new solids, or the reason a feature failed. */
-  | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number }[] }
+  | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number; /** The linked (projected) curves of the sketch this feature is built on, where their solid puts them now; each keeps its id. */ readonly sketchEntities?: readonly SketchEntity[] }[] }
   | { readonly kind: "set-design-feature-suppressed"; readonly featureId: string; readonly suppressed: boolean }
   | { readonly kind: "delete-design-feature"; readonly featureId: string }
   | { readonly kind: "set-design-rollback"; readonly index: number }

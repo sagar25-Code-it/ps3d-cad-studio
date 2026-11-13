@@ -397,7 +397,8 @@ function validateWorkbenchOperationShape(rawInput: unknown): WorkbenchResult<Wor
       break;
     case "regenerate-design":
       if (!keys(input, [...common, "results"]) || !boundedList(input.results, 200, isRecord)
-        || input.results.some((result) => !stableId(result.featureId) || Object.keys(result).some((key) => !["featureId", "body", "pieces", "message", "sketchPlaneOffsetMm"].includes(key))
+        || input.results.some((result) => !stableId(result.featureId) || Object.keys(result).some((key) => !["featureId", "body", "pieces", "message", "sketchPlaneOffsetMm", "sketchEntities"].includes(key))
+          || (Object.hasOwn(result, "sketchEntities") && (!boundedList(result.sketchEntities, WORKBENCH_LIMITS.maxEntities, isRecord) || result.sketchEntities.some((entity) => sketchEntityProblem(entity) !== undefined)))
           || (Object.hasOwn(result, "sketchPlaneOffsetMm") && !finiteRange(result.sketchPlaneOffsetMm, -MODEL_ENVELOPE.maxPlaneOffsetMm, MODEL_ENVELOPE.maxPlaneOffsetMm))
           || (Object.hasOwn(result, "body") && !validGeneralSolidBodyPayload(result.body))
           // Pieces a cut or hole severed off the solid; they ride with the result that holds the solid itself.
@@ -1534,6 +1535,9 @@ function applySketchEdit(project: WorkbenchProject, operation: Extract<Workbench
   );
 }
 
+/** Operations that put another sketch in the working slot (or rebuild the timeline): a difference from the sketch before them is not a hand edit. */
+const SKETCH_SWAPPING_KINDS: ReadonlySet<WorkbenchOperation["kind"]> = new Set(["commit-design-sketch", "edit-design-sketch", "new-design-sketch", "regenerate-design", "set-sketch-plane", "set-design-rollback", "delete-design-feature"]);
+
 /**
  * After an operation that changed the sketch: keeps text objects and associative patterns in step with their curves (a pattern
  * re-generates its instances from its sources), and says in the summary what was reset or let go.
@@ -1544,7 +1548,7 @@ function reconcileOperationSketch(
   operation: WorkbenchOperation
 ): WorkbenchResult<{ readonly project: WorkbenchProject; readonly changedIds: readonly string[]; readonly summary: string }> {
   if (result.project.sketch === before.sketch) return { ok: true, value: result };
-  const outcome = reconcileSketchObjects(before.sketch, result.project.sketch, explicitObjectIds(operation.kind === "apply-sketch-edit" ? operation.objects : undefined));
+  const outcome = reconcileSketchObjects(before.sketch, result.project.sketch, explicitObjectIds(operation.kind === "apply-sketch-edit" ? operation.objects : undefined), { detectHandEdits: !SKETCH_SWAPPING_KINDS.has(operation.kind) });
   if (!outcome.ok) return failure("RESOURCE_LIMIT", outcome.message, outcome.relatedIds, "Change the pattern, or remove curves from the sketch, and try again.");
   if (outcome.sketch === result.project.sketch) return { ok: true, value: result };
   return { ok: true, value: { ...result, project: { ...result.project, sketch: outcome.sketch }, summary: outcome.notes.length === 0 ? result.summary : `${result.summary} ${outcome.notes.join(" ")}` } };

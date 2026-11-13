@@ -176,6 +176,7 @@ import { sketchStateColourTests } from "./sketch-state-colours.test.js";
 import { sketchSlotCentrelineTests } from "./sketch-slot-centreline.test.js";
 import { sketchOffsetAssociativeTests } from "./sketch-offset-associative.test.js";
 import { sketchDimensionLabelTests } from "./sketch-dimension-label.test.js";
+import { sketchProjectLinkedTests } from "./sketch-project-linked.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -374,6 +375,7 @@ const tests: readonly TestCase[] = [
   ...sketchSlotCentrelineTests,
   ...sketchOffsetAssociativeTests,
   ...sketchDimensionLabelTests,
+  ...sketchProjectLinkedTests,
 ];
 let failures = 0;
 

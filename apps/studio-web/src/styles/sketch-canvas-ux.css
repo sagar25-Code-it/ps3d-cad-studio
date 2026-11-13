@@ -119,6 +119,13 @@
 .sketch-entity.fixed.selected, .sketch-entity.constrained.fixed.selected { stroke: var(--amber); }
 .sketch-entity.fixed.movable { stroke: #5fd08a; }
 
+/* A curve projected from a solid and still linked to it. Selection and hover still win. */
+.sketch-entity.linked, .sketch-entity.constrained.linked, .sketch-entity.linked.movable { stroke: #c792ea; }
+.sketch-entity.linked.construction, .sketch-entity.constrained.linked.construction { stroke: #9a74bd; }
+.sketch-entity.linked.hover, .sketch-entity.constrained.linked.hover { stroke: #f2d08d; }
+.sketch-entity.linked.selected, .sketch-entity.constrained.linked.selected { stroke: var(--amber); }
+.colour-key-swatch.linked { background: linear-gradient(#c792ea, #c792ea) center / 22px 3px no-repeat, #121a21; }
+
 /* The key to the curve colours in the Sketch palette. */
 .sketch-palette .sketch-colour-key summary { cursor: pointer; font-size: 12px; }
 .sketch-palette .sketch-colour-key ul { list-style: none; margin: 0.3rem 0 0.2rem; padding: 0; display: grid; gap: 0.2rem; }

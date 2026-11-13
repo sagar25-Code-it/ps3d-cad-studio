@@ -39,7 +39,7 @@ export const sketchStateColourTests: readonly TestCase[] = [
         { id: "constraint:level", kind: "horizontal", entityIds: ["entity:free"] }
       ]);
       equal([...fixedEntityIds(sketch)].join(","), "entity:held", "the whole-curve Fix; not the pinned point, the relaxed Fix or another relation");
-      equal(SKETCH_STATE_COLOURS.map((state) => state.key).join(" "), "free constrained fixed construction selected reference", "the key covers every curve colour");
+      equal(SKETCH_STATE_COLOURS.map((state) => state.key).join(" "), "free constrained fixed linked construction selected reference", "the key covers every curve colour");
       const css = repoFile("apps/studio-web/src/styles/sketch-canvas-ux.css");
       assert(css.includes(".sketch-entity.fixed") && css.includes(".sketch-entity.fixed.selected"), "the canvas has a colour for a fixed curve, and selection still wins over it");
       for (const state of SKETCH_STATE_COLOURS) assert(state.key === "free" || css.includes(`.colour-key-swatch.${state.key}`), `the key has a swatch for ${state.key}`);

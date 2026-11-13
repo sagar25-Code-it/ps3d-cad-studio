@@ -263,7 +263,7 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   const optionalTilt = isRecord(value) && Object.hasOwn(value, "planeTilt") ? ["planeTilt"] : [];
   const optionalFrame = isRecord(value) && Object.hasOwn(value, "planeFrame") ? ["planeFrame"] : [];
   const optionalFace = isRecord(value) && Object.hasOwn(value, "planeFace") ? ["planeFace"] : [];
-  const optionalObjects = isRecord(value) ? ["texts", "patterns", "underlay"].filter((key) => Object.hasOwn(value, key)) : [];
+  const optionalObjects = isRecord(value) ? ["texts", "patterns", "underlay", "projections"].filter((key) => Object.hasOwn(value, key)) : [];
   const optionalConvention = isRecord(value) && Object.hasOwn(value, "planeConvention") ? ["planeConvention"] : [];
   if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame, ...optionalFace, ...optionalObjects, ...optionalConvention])
     || (optionalConvention.length > 0 && (value.planeConvention !== "z-up" || value.plane !== "datum:yz"))
@@ -292,7 +292,7 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
     }
     constraintIds.add(constraint.id);
   }
-  if (!validSketchObjectFields(value, entityIds)) return invalid("A sketch text, pattern or underlay record is invalid or refers to a missing curve.");
+  if (!validSketchObjectFields(value, entityIds)) return invalid("A sketch text, pattern, underlay or projection record is invalid or refers to a missing curve.");
   return { ok: true, value: value as unknown as WorkbenchSketch };
 }
 
