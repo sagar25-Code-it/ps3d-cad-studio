@@ -18,7 +18,8 @@ export interface DimensionEditorProps {
   readonly onChange: (text: string) => void;
   readonly onReferenceChange?: (reference: boolean) => void;
   readonly onCommit: () => void;
-  readonly onCancel: () => void;
+  /** Closes the editor. `escape` when the person pressed Esc, `blur` when the focus left it (a click elsewhere). */
+  readonly onCancel: (reason: "escape" | "blur") => void;
 }
 
 export function DimensionEditor(props: DimensionEditorProps): React.JSX.Element {
@@ -44,7 +45,7 @@ export function DimensionEditor(props: DimensionEditorProps): React.JSX.Element 
     role="group"
     aria-label={`Edit ${props.label.toLowerCase()}`}
     // Moving focus to the checkbox must not close the editor; leaving the editor entirely does.
-    onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) props.onCancel(); }}
+    onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) props.onCancel("blur"); }}
   >
     <label><span>{props.label}</span>
       <input
@@ -58,13 +59,13 @@ export function DimensionEditor(props: DimensionEditorProps): React.JSX.Element 
         onChange={(event) => props.onChange(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter") { event.preventDefault(); props.onCommit(); }
-          else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel(); }
+          else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel("escape"); }
         }}
       />
       <small>{props.unitLabel}</small>
     </label>
     {props.reference !== undefined && <label className="dimension-reference-toggle">
-      <input type="checkbox" checked={props.reference} onChange={(event) => props.onReferenceChange?.(event.target.checked)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel(); } }} />
+      <input type="checkbox" checked={props.reference} onChange={(event) => props.onReferenceChange?.(event.target.checked)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); props.onCancel("escape"); } }} />
       <span>Reference (measured, does not drive)</span>
     </label>}
     <em id={hintId}>{props.hint ?? "A number, or a parameter such as plate_w / 4 · Enter applies · Esc closes"}</em>

@@ -157,6 +157,7 @@ import { sketchLevelPointsTests } from "./sketch-level-points.test.js";
 import { sketchChainSelectTests } from "./sketch-chain-select.test.js";
 import { sketchDimensionOverConstraintTests } from "./sketch-dimension-overconstraint.test.js";
 import { trimJointTests } from "./trim-joints.test.js";
+import { sketchDimensionPickTests } from "./sketch-dimension-pick.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import { regionWave3Tests } from "./region-wave3.test.js";
@@ -344,6 +345,7 @@ const tests: readonly TestCase[] = [
   ...sketchChainSelectTests,
   ...sketchDimensionOverConstraintTests,
   ...trimJointTests,
+  ...sketchDimensionPickTests,
 ];
 let failures = 0;
 
