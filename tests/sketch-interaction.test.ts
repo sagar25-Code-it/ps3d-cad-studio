@@ -27,7 +27,8 @@ export const sketchInteractionTests: readonly TestCase[] = [
       equal(JSON.stringify(resolveSketchHotkey(press("t"), idle)), JSON.stringify({ kind: "edit-tool", tool: "trim" }), "T opens Trim");
       equal(JSON.stringify(resolveSketchHotkey(press("o"), idle)), JSON.stringify({ kind: "edit-tool", tool: "offset" }), "O opens Offset");
       equal(resolveSketchHotkey(press("f"), idle)?.kind, "fit", "F fits the view");
-      equal(resolveSketchHotkey(press("x"), idle)?.kind, "toggle-construction", "X toggles construction");
+      equal(resolveSketchHotkey(press("x"), { ...idle, selectionCount: 1, curveSelectionCount: 1 })?.kind, "toggle-construction", "X toggles construction on the selected curves");
+      equal(resolveSketchHotkey(press("x"), idle)?.kind, "toggle-draw-construction", "and with nothing selected, on what is drawn next");
       equal(resolveSketchHotkey(press("l", { shift: true }), idle), undefined, "Shift+L is not a tool shortcut");
       equal(resolveSketchHotkey(press("l", { alt: true }), idle), undefined, "Alt+L is left to the browser");
       equal(resolveSketchHotkey(press("z", { ctrl: true }), idle), undefined, "Ctrl+Z falls through to undo");

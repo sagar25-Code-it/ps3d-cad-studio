@@ -159,6 +159,7 @@ import { sketchDimensionOverConstraintTests } from "./sketch-dimension-overconst
 import { trimJointTests } from "./trim-joints.test.js";
 import { sketchDimensionPickTests } from "./sketch-dimension-pick.test.js";
 import { sketchConstraintToolTests } from "./sketch-constraint-tools.test.js";
+import { sketchKeysConstructionProjectTests } from "./sketch-keys-construction-project.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import { regionWave3Tests } from "./region-wave3.test.js";
@@ -348,6 +349,7 @@ const tests: readonly TestCase[] = [
   ...trimJointTests,
   ...sketchDimensionPickTests,
   ...sketchConstraintToolTests,
+  ...sketchKeysConstructionProjectTests,
 ];
 let failures = 0;
 

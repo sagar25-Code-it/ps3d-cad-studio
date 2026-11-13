@@ -274,6 +274,8 @@ interface SketchWorkspaceProps {
   readonly checkOpen: boolean;
   /** A one-shot ribbon command (Fix Curve, Relax Relations or Relax Dimensions); a new serial triggers it once. */
   readonly request: { readonly command: "fix-curve" | "relax-relations" | "relax-dimensions" | `constraint:${ConstraintToolKind}`; readonly serial: number } | null;
+  /** The Project key (P): project the edges of a body onto the sketch plane, as the ribbon's Project button does. */
+  readonly onProjectBody?: () => void;
   /** Told which constraint tool is active (or none), so the ribbon can show it pressed. */
   readonly onConstraintToolChange?: (tool: ConstraintToolKind | null) => void;
   readonly onApplyEdit: (plan: SketchEditPlan) => boolean | void;
@@ -1743,6 +1745,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       case "dimension": props.onActivateDimension(); return;
       case "edit-tool": props.onActivateEditTool(action.tool); return;
       case "constraint-tool": toggleConstraintTool(action.tool); return;
+      case "project":
+        if (props.onProjectBody === undefined) props.onMessage("Project is on the ribbon: Project, body edges.");
+        else props.onProjectBody();
+        return;
       case "fit": camera.fit(); props.onMessage("Fitted the sketch to the window."); return;
       case "pan-mode": props.onNavigationMode("pan"); return;
       case "select-tool":
@@ -1783,7 +1789,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         return;
       case "toggle-draw-construction":
         setDrawAsConstruction(!drawAsConstruction);
-        props.onMessage(drawAsConstruction ? DRAW_CONSTRUCTION_OFF_MESSAGE : drawConstructionOnMessage(keyLabelForCommand("toggle-draw-construction", sketchKeymap)));
+        props.onMessage(drawAsConstruction ? DRAW_CONSTRUCTION_OFF_MESSAGE : drawConstructionOnMessage(keyLabelForCommand("toggle-draw-construction", sketchKeymap) ?? keyLabelForCommand("toggle-construction", sketchKeymap)));
         return;
       case "delete-constraints": deleteSelectedConstraints(selectedConstraintIds); return;
       case "zoom-window": startZoomWindow(); return;

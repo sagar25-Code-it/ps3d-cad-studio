@@ -667,7 +667,8 @@ export const sketchExchangeTests: readonly TestCase[] = [
       const q = resolveSketchHotkey({ key: "q", ctrl: false, meta: false, alt: false, shift: false }, context);
       equal(q?.kind, "toggle-draw-construction", "Q is the draw-as-construction toggle");
       equal(resolveSketchHotkey({ key: "Q", ctrl: false, meta: false, alt: false, shift: false }, context)?.kind, "toggle-draw-construction", "also in capitals");
-      equal(resolveSketchHotkey({ key: "x", ctrl: false, meta: false, alt: false, shift: false }, context)?.kind, "toggle-construction", "X still converts the selection");
+      equal(resolveSketchHotkey({ key: "x", ctrl: false, meta: false, alt: false, shift: false }, { ...context, tool: "select", selectionCount: 1, curveSelectionCount: 1 })?.kind, "toggle-construction", "X still converts the selection");
+      equal(resolveSketchHotkey({ key: "x", ctrl: false, meta: false, alt: false, shift: false }, context)?.kind, "toggle-draw-construction", "and with a drawing tool on, X switches what is drawn next");
       assert(resolveSketchHotkey({ key: "q", ctrl: true, meta: false, alt: false, shift: false }, context) === undefined, "Ctrl+Q is left alone");
       const shape = must(buildCurveTool("parallelogram", [[0, 0], [20, 0], [28, 12]], DEFAULT_CURVE_TOOL_OPTIONS, { entity: newId, constraint: () => `constraint:imp-${(counter += 1)}` }));
       const plan: SketchEditPlan = { label: "Added a parallelogram", removeEntityIds: [], updateEntities: [], addEntities: shape.entities, addConstraints: shape.constraints };

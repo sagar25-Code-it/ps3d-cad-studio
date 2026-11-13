@@ -16,18 +16,18 @@ type SketchRibbonCommand = "fix-curve" | "relax-relations" | "relax-dimensions" 
 
 /** The Constraints group: pick the relation here, then pick the geometry on the canvas. The tool stays on until Esc. */
 const CONSTRAINT_RIBBON_TOOLS: readonly { readonly tool: ConstraintToolKind; readonly icon: string; readonly hint: string }[] = [
-  { tool: "coincident", icon: "coincident", hint: "point · point or curve" },
+  { tool: "coincident", icon: "coincident", hint: "point Â· point or curve" },
   { tool: "collinear", icon: "collinear", hint: "two lines" },
   { tool: "concentric", icon: "concentric", hint: "two circles / arcs" },
-  { tool: "midpoint", icon: "midpoint", hint: "point · line" },
+  { tool: "midpoint", icon: "midpoint", hint: "point Â· line" },
   { tool: "fixed", icon: "fixed", hint: "curve or point" },
   { tool: "parallel", icon: "parallel", hint: "two lines" },
   { tool: "perpendicular", icon: "perpendicular", hint: "two lines" },
   { tool: "horizontal", icon: "horizontal", hint: "line or two points" },
   { tool: "vertical", icon: "vertical", hint: "line or two points" },
-  { tool: "tangent", icon: "tangent", hint: "line · arc, arc · arc" },
+  { tool: "tangent", icon: "tangent", hint: "line Â· arc, arc Â· arc" },
   { tool: "equal", icon: "equal", hint: "two alike" },
-  { tool: "symmetry", icon: "mirror", hint: "two curves · axis" }
+  { tool: "symmetry", icon: "mirror", hint: "two curves Â· axis" }
 ];
 type SurfaceParameter = "widthMm" | "depthMm" | "crownMm" | "twistDeg" | "uSegments" | "vSegments";
 
@@ -143,10 +143,16 @@ function hotkeyHint(tool: SketchTool, keymap: SketchKeymap): string {
   return sketchToolHotkeyChip(tool, keymap) ?? "";
 }
 
+/** "body edges Â· P": the Project button names the key the command has in the live keymap. */
+function projectHint(keymap: SketchKeymap): string {
+  const key = keyLabelForCommand("project", keymap);
+  return key === undefined ? "body edges" : `body edges Â· ${shortKeyLabel(key)}`;
+}
+
 /** What a constraint tool picks, with its key when the user has given it one. */
 function constraintHint(tool: ConstraintToolKind, hint: string, keymap: SketchKeymap): string {
   const key = keyLabelForCommand(`constraint:${tool}`, keymap);
-  return key === undefined ? hint : `${hint} · ${shortKeyLabel(key)}`;
+  return key === undefined ? hint : `${hint} Â· ${shortKeyLabel(key)}`;
 }
 
 /** The extra sketch curve tools, grouped under "More curves" (their geometry lives in packages/workbench-sketch/src/curve-tools.ts). */
@@ -247,7 +253,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         {CONSTRAINT_RIBBON_TOOLS.map((entry) => <RibbonButton key={entry.tool} icon={entry.icon} label={CONSTRAINT_TOOL_INFO[entry.tool].label} hint={constraintHint(entry.tool, entry.hint, sketchKeymap)} active={props.sketchConstraintTool === entry.tool} onClick={() => props.onSketchCommand(`constraint:${entry.tool}`)} />)}
       </RibbonGroup>
       <RibbonGroup label="Project">
-        <RibbonButton icon="projection" label="Project" hint="body edges" onClick={() => props.onSketchCommand("project-body")} />
+        <RibbonButton icon="projection" label="Project" hint={projectHint(sketchKeymap)} onClick={() => props.onSketchCommand("project-body")} />
         <RibbonButton icon="edge" label="Project edge" hint="pick a run" onClick={() => props.onSketchCommand("project-edge")} />
         <RibbonButton icon="section" label="Intersect" hint="plane cuts body" onClick={() => props.onSketchCommand("intersect-body")} />
         <RibbonButton icon="shaded" label="Silhouette" hint="outline" onClick={() => props.onSketchCommand("silhouette-body")} />

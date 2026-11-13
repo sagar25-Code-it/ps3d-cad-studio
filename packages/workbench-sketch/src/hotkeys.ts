@@ -6,7 +6,7 @@ import { CONSTRAINT_TOOLS, CONSTRAINT_TOOL_INFO, type ConstraintToolKind } from 
  * one action (or nothing, which lets the key fall through to the rest of the app: undo, save, command search).
  *
  * The letter keys are a KEYMAP: a table from command to key that the user can change in the shortcut editor. The default
- * follows Fusion's sketch habits (L line, R rectangle, C circle, A arc, D dimension, T trim, O offset) and adds Shift
+ * follows the usual sketch habits (L line, R rectangle, C circle, A arc, D dimension, T trim, O offset, X construction, P project) and adds Shift
  * variants for the sibling tools (Shift+R centre rectangle, Shift+C 2-point circle, Shift+A centerpoint arc ...). The ribbon
  * chips and the help sheet read the live keymap through keyLabelForTool, so they can never advertise a key that does nothing.
  */
@@ -21,9 +21,12 @@ export type SketchHotkeyAction =
   | { readonly kind: "edit-tool"; readonly tool: SketchEditHotkeyTool }
   /** A constraint tool: the relation is chosen, then its geometry is picked on the canvas until Esc. */
   | { readonly kind: "constraint-tool"; readonly tool: ConstraintToolKind }
+  /** X with curves selected: turn the selection into construction geometry, or back. */
   | { readonly kind: "toggle-construction" }
-  /** Q: everything drawn from now on is construction geometry (or back). */
+  /** X with nothing selected (or while a drawing tool is on), and Q: everything drawn from now on is construction geometry (or back). */
   | { readonly kind: "toggle-draw-construction" }
+  /** P: project the edges of a body onto the sketch plane. */
+  | { readonly kind: "project" }
   | { readonly kind: "fit" }
   | { readonly kind: "pan-mode" }
   | { readonly kind: "select-tool" }
@@ -104,7 +107,7 @@ export type SketchCommandId =
   | `tool:${Exclude<SketchTool, "select">}`
   | `edit:${SketchEditHotkeyTool}`
   | `constraint:${ConstraintToolKind}`
-  | "dimension" | "toggle-construction" | "toggle-draw-construction" | "fit" | "zoom-selection" | "zoom-window" | "measure" | "pan-mode" | "select-tool"
+  | "dimension" | "project" | "toggle-construction" | "toggle-draw-construction" | "fit" | "zoom-selection" | "zoom-window" | "measure" | "pan-mode" | "select-tool"
   | "toggle-snap" | "toggle-ortho" | "toggle-polar";
 
 export type SketchCommandGroup = "Draw" | "Modify" | "Constrain" | "Dimension and view" | "Input assistance";
@@ -155,6 +158,7 @@ export const SKETCH_KEYMAP_COMMANDS: readonly SketchCommandInfo[] = [
   c("tool:profile", "Profile", "Draw"),
   c("tool:text", "Text", "Draw"),
   c("tool:block", "Insert block", "Draw"),
+  c("project", "Project: body edges onto the sketch plane", "Draw", "P"),
   c("edit:trim", "Trim", "Modify", "T"),
   c("edit:extend", "Extend", "Modify", "Shift+T"),
   c("edit:offset", "Offset", "Modify", "O"),
@@ -171,10 +175,11 @@ export const SKETCH_KEYMAP_COMMANDS: readonly SketchCommandInfo[] = [
   // The constraint tools ship without keys; any of them can be given one here.
   ...CONSTRAINT_TOOLS.map((tool) => c(`constraint:${tool}`, `${CONSTRAINT_TOOL_INFO[tool].label} constraint tool`, "Constrain")),
   c("dimension", "Sketch dimension", "Dimension and view", "D"),
-  c("toggle-construction", "Toggle construction on the selection", "Dimension and view", "X"),
+  c("toggle-construction", "Construction: toggle the selected curves, or what is drawn next when nothing is selected", "Dimension and view", "X"),
   c("toggle-draw-construction", "Draw as construction: new curves are construction geometry (toggle)", "Dimension and view", "Q"),
   c("select-tool", "Select tool", "Dimension and view", "V"),
-  c("pan-mode", "Pan navigation", "Dimension and view", "P"),
+  // Pan ships without a key: the middle button and Space-drag pan, and P is Project.
+  c("pan-mode", "Pan navigation", "Dimension and view"),
   c("fit", "Fit the sketch to the window", "Dimension and view", "F"),
   c("zoom-selection", "Zoom to the selected curves", "Dimension and view", "Shift+F"),
   c("zoom-window", "Zoom window: drag a rectangle to zoom to it", "Dimension and view", "Z"),
@@ -435,6 +440,7 @@ function actionForCommand(id: SketchCommandId): SketchHotkeyAction | undefined {
   if (id.startsWith("constraint:")) return { kind: "constraint-tool", tool: id.slice(11) as ConstraintToolKind };
   switch (id) {
     case "dimension": return { kind: "dimension" };
+    case "project": return { kind: "project" };
     case "toggle-construction": return { kind: "toggle-construction" };
     case "toggle-draw-construction": return { kind: "toggle-draw-construction" };
     case "fit": return { kind: "fit" };
@@ -510,6 +516,9 @@ export function resolveSketchHotkey(input: SketchHotkeyInput, context: SketchHot
   if (spec === undefined) return undefined;
   const command = keymap.commands.get(spec);
   const action = command === undefined ? undefined : actionForCommand(command);
+  // The construction key acts on the selection when curves are selected in the Select tool; with nothing selected, or while a drawing
+  // tool is on, it switches what is drawn next between normal and construction.
+  if (action?.kind === "toggle-construction" && (context.curveSelectionCount === 0 || context.tool !== "select")) return { kind: "toggle-draw-construction" };
   // Pressing the key of a family's first tool again while one of its tools is active steps to the next variant (R: 2-point, centre, 3-point).
   if (action?.kind === "tool" && context.tool !== "select") {
     const family = familyOf(action.tool);
