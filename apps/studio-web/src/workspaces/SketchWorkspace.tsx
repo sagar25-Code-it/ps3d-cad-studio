@@ -54,7 +54,7 @@ import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../
 import { profileSnapRelations, shapeSnapRelations } from "../../../../packages/workbench-sketch/src/shape-snap-relations.js";
 import { typedShapeIntent } from "../../../../packages/workbench-sketch/src/typed-shape-intent.js";
 import { inferTypedPoint } from "../../../../packages/workbench-sketch/src/typed-inference.js";
-import { autoConstraintsFor, dropConstraintFor, inheritedTangentDirection, tangentArcPoints, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
+import { autoConstraintsFor, bornConstraintsFor, dropConstraintFor, inheritedTangentDirection, tangentArcPoints, type PlacedPointInference } from "../../../../packages/workbench-sketch/src/auto-constraints.js";
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, POLYGON_MODES, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
@@ -1082,9 +1082,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const typedRelations = typedIntentConstraints({ tool: props.tool, entity: built.value, typed: typedTrail.current, newId: () => `constraint:typed-${crypto.randomUUID()}` })
       .filter((relation) => !snappedRelations.some((existing) => existing.kind === relation.kind && relation.dimension === undefined));
     typedTrail.current = {};
-    const relations = [...snappedRelations, ...typedRelations];
+    // What the shape is born with whether or not it snapped to anything: a corner-to-corner or centre rectangle is level.
+    const ownRelations = bornConstraintsFor({ tool: props.tool, entity: built.value, newId: () => `constraint:own-${crypto.randomUUID()}` });
+    let relations = [...ownRelations, ...snappedRelations, ...typedRelations];
     let accepted: boolean | void = undefined;
     if (relations.length > 0) {
+      accepted = applyDrawn({ label: `Added ${sketchToolLabel(props.tool)} with ${relations.length} relation${relations.length === 1 ? "" : "s"}`, removeEntityIds: [], updateEntities: [], addEntities: [built.value], addConstraints: relations });
+    }
+    // If the solver refused the snap or typed relations, the shape keeps the relations it is born with.
+    if (accepted === false && ownRelations.length > 0 && relations.length > ownRelations.length) {
+      relations = [...ownRelations];
       accepted = applyDrawn({ label: `Added ${sketchToolLabel(props.tool)} with ${relations.length} relation${relations.length === 1 ? "" : "s"}`, removeEntityIds: [], updateEntities: [], addEntities: [built.value], addConstraints: relations });
     }
     // If the solver refused the relations, the shape itself is still drawn.

@@ -266,6 +266,19 @@ export function autoConstraintsFor(input: AutoConstraintInput): readonly Workben
   return found;
 }
 
+/**
+ * The relations a shape is born with, whatever it snapped to. A rectangle drawn corner to corner or from its centre is level: it gets
+ * Horizontal (on a rectangle this holds its sides level and plumb), as a rectangle of four lines has Horizontal and Vertical on its
+ * sides. Without it the rectangle's turn was a free degree of freedom unless a corner sat on a point, so a rectangle sized by a width and
+ * a height and placed by two distances still read as under-constrained. A 3-point rectangle is drawn at its own angle and gets nothing.
+ */
+export function bornConstraintsFor(input: { readonly tool: SketchTool; readonly entity: SketchEntity; readonly newId: () => string }): readonly WorkbenchSketchConstraint[] {
+  const { tool, entity } = input;
+  if (entity.kind !== "rectangle" || (tool !== "rectangle" && tool !== "rectangle-center")) return [];
+  if (Math.abs(entity.rotationDeg) > 1e-9) return [];
+  return [{ id: input.newId(), kind: "horizontal", entityIds: [entity.id] }];
+}
+
 export interface DropConstraintInput {
   /** The curve whose point was dragged. */
   readonly entity: SketchEntity;
