@@ -111,3 +111,22 @@
 /* A dimension that is waiting for its placement click (Sketch Dimension): drawn where it would go, lighter than a placed one. */
 .dimension-placement-preview { opacity: 0.8; }
 .dimension-placement-preview .driving-dimension line { stroke-dasharray: 5 3; }
+
+/* A curve held by a Fix relation: its own colour, whether or not the rest of the sketch defines it (selection and hover still win). */
+.sketch-entity.fixed, .sketch-entity.constrained.fixed { stroke: #5fd08a; }
+.sketch-entity.fixed.construction, .sketch-entity.constrained.fixed.construction { stroke: #4c9f73; }
+.sketch-entity.fixed.hover, .sketch-entity.constrained.fixed.hover { stroke: #f2d08d; }
+.sketch-entity.fixed.selected, .sketch-entity.constrained.fixed.selected { stroke: var(--amber); }
+.sketch-entity.fixed.movable { stroke: #5fd08a; }
+
+/* The key to the curve colours in the Sketch palette. */
+.sketch-palette .sketch-colour-key summary { cursor: pointer; font-size: 12px; }
+.sketch-palette .sketch-colour-key ul { list-style: none; margin: 0.3rem 0 0.2rem; padding: 0; display: grid; gap: 0.2rem; }
+.sketch-palette .sketch-colour-key li { display: flex; align-items: center; gap: 0.45rem; font-size: 12px; }
+/* Each swatch is a piece of the dark canvas with the curve colour drawn on it, so the light colours read on a light palette too. */
+.colour-key-swatch { display: inline-block; flex: none; width: 28px; height: 12px; border-radius: 2px; background: linear-gradient(#76d9e7, #76d9e7) center / 22px 3px no-repeat, #121a21; }
+.colour-key-swatch.constrained { background: linear-gradient(#e9f0f6, #e9f0f6) center / 22px 3px no-repeat, #121a21; }
+.colour-key-swatch.fixed { background: linear-gradient(#5fd08a, #5fd08a) center / 22px 3px no-repeat, #121a21; }
+.colour-key-swatch.construction { background: repeating-linear-gradient(90deg, #7a8ca0 0 5px, transparent 5px 8px) center / 22px 3px no-repeat, #121a21; }
+.colour-key-swatch.selected { background: linear-gradient(#e2bd7b, #e2bd7b) center / 22px 3px no-repeat, #121a21; }
+.colour-key-swatch.reference { background: linear-gradient(rgba(168, 152, 224, 0.6), rgba(168, 152, 224, 0.6)) center / 22px 2px no-repeat, #121a21; }

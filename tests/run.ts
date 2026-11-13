@@ -172,6 +172,7 @@ import { sketchDimensionPlacementTests } from "./sketch-dimension-placement.test
 import { sketchFacePickTests } from "./sketch-face-pick.test.js";
 import { sketchDimensionNameTests } from "./sketch-dimension-names.test.js";
 import { sketchMarkingMenuTests } from "./sketch-marking-menu.test.js";
+import { sketchStateColourTests } from "./sketch-state-colours.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -366,6 +367,7 @@ const tests: readonly TestCase[] = [
   ...sketchFacePickTests,
   ...sketchDimensionNameTests,
   ...sketchMarkingMenuTests,
+  ...sketchStateColourTests,
 ];
 let failures = 0;
 
