@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { SketchDimensionName, SketchEntity, SketchPointRef, Vec2, WorkbenchSketch, WorkbenchSketchConstraint } from "../../../../../packages/workbench-core/src/index.js";
 import { SolverRelations } from "./SolverRelations.js";
 import { measureDimensionConstraint } from "../../../../../packages/workbench-core/src/sketch-measure.js";
-import { isSketchDatumEntityId } from "../../../../../packages/workbench-core/src/index.js";
+import { isSketchDatumEntityId, offsetGroupFollowerIds } from "../../../../../packages/workbench-core/src/index.js";
 import { ellipseRadiusLayout, isEllipseRadiusConstraint, isPointDistanceConstraint, pointDistanceLayout } from "../../../../../packages/workbench-sketch/src/point-distance-layout.js";
 import type { DimensionOffsets } from "../../../../../packages/workbench-sketch/src/dimension-display.js";
 import { describeLength, formatLength, getDimensionLabelUnit } from "../../../../../packages/workbench-sketch/src/sketch-units.js";
@@ -103,7 +103,10 @@ export function ExtraDimensionMarks(props: {
   readonly selectedIds?: readonly string[];
 }): React.JSX.Element {
   const { sketch, px } = props;
+  // One Offset is one dimension on the canvas: the other distances of its group follow the one that is shown.
+  const followers = offsetGroupFollowerIds(sketch.constraints);
   const marks = sketch.constraints.flatMap((constraint) => {
+    if (followers.has(constraint.id)) return [];
     const isExtra = constraint.kind === "angle" || constraint.kind === "arc-length" || constraint.kind === "perimeter" || isPointDistanceConstraint(constraint) || isEllipseRadiusConstraint(constraint);
     if (!isExtra && constraint.driven !== true) return [];
     const offsetPx = props.offsets?.[constraint.id];

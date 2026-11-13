@@ -38,6 +38,7 @@ export { analyzeLiveSketch, type LiveSketchAnalysis } from "./sketch-analysis.js
 export { anchorsForConstraint, anchorsForDimension, preserveForConstraint, type LiveAnchor } from "./sketch-anchors.js";
 export { describeConstraint, entityKindOf, entityNames, liveConstraintId } from "./sketch-translate.js";
 export { redriveDimension, dimensionNameOf, locateDimensionConstraint } from "./sketch-dimension-edit.js";
+export { isOffsetGroupId, offsetGroupFollowerIds, offsetGroupMembers, withOffsetGroupValue } from "./offset-group.js";
 export type { LiveRelationSet, LiveSolveOptions } from "./sketch-solve.js";
 export * from "./envelope.js";
 export * from "./envelope-limits.js";

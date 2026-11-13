@@ -107,7 +107,7 @@ export function constraintReferences(constraint: SketchConstraint): readonly Geo
 }
 
 export function dimensionReferences(dimension: SketchDimension): readonly GeometryReference[] {
-  if (dimension.kind === "linear" || dimension.kind === "angle" || dimension.kind === "line-line-distance") return [dimension.first, dimension.second];
+  if (dimension.kind === "linear" || dimension.kind === "angle" || dimension.kind === "line-line-distance" || dimension.kind === "radius-difference") return [dimension.first, dimension.second];
   if (dimension.kind === "point-line-distance") return [dimension.point, dimension.line];
   return [dimension.target];
 }
@@ -239,6 +239,11 @@ function validateDimensionCompatibility(
     const first = geometryById.get(dimension.first.entityId);
     const second = geometryById.get(dimension.second.entityId);
     if ((first !== undefined && first.kind !== "line") || (second !== undefined && second.kind !== "line")) incompatible("requires two lines");
+  } else if (dimension.kind === "radius-difference") {
+    const first = geometryById.get(dimension.first.entityId);
+    const second = geometryById.get(dimension.second.entityId);
+    const round = (geometry: SketchGeometry | undefined): boolean => geometry === undefined || geometry.kind === "circle" || geometry.kind === "arc";
+    if (!round(first) || !round(second)) incompatible("requires two circles or arcs");
   } else if (dimension.kind === "perimeter") {
     const geometry = geometryById.get(dimension.target.entityId);
     if (geometry !== undefined && geometry.kind !== "circle" && geometry.kind !== "ellipse" && geometry.kind !== "rectangle") incompatible("requires a circle, ellipse or rectangle");

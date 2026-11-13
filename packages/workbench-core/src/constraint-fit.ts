@@ -195,7 +195,7 @@ function levelPointsFit(kind: "horizontal" | "vertical", kinds: readonly SketchE
 
 function distanceFit(kinds: readonly SketchEntityKind[], points: readonly SketchPointRef[] | undefined, dimension: SketchDimensionName | undefined): ConstraintFit {
   const [first, second] = kinds;
-  const relative = dimension === "aligned" || dimension === "horizontal" || dimension === "vertical" || dimension === "point-line" || dimension === "line-line";
+  const relative = dimension === "aligned" || dimension === "horizontal" || dimension === "vertical" || dimension === "point-line" || dimension === "line-line" || dimension === "offset";
   if (!relative) {
     if (dimension === "width" || dimension === "height") return kinds.length === 1 && first === "rectangle" ? FITS : no(`A ${dimension} dimension applies to one rectangle.`);
     if (dimension === "length") return kinds.length === 1 && first === "line" ? FITS : no("A length dimension applies to one line.");
@@ -204,6 +204,10 @@ function distanceFit(kinds: readonly SketchEntityKind[], points: readonly Sketch
     return distanceFit(kinds, points, "aligned");
   }
   if (kinds.length !== 2) return no("This distance is measured between two things.");
+  if (dimension === "offset") {
+    const round = (kind: SketchEntityKind | undefined): boolean => kind === "circle" || kind === "arc";
+    return round(first) && round(second) ? FITS : no("An offset between curves needs two circles or arcs (two lines take a line-to-line distance).");
+  }
   if (dimension === "line-line") {
     if (!lineLike(first) || !lineLike(second)) return no("A line-to-line distance needs two lines.");
     return first === "axis" && second === "axis" ? no("Pick at least one real line.") : FITS;

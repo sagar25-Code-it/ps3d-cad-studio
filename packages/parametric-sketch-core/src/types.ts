@@ -205,6 +205,11 @@ export type SketchDimension =
   | (DimensionBase & { readonly kind: "point-line-distance"; readonly point: GeometryReference; readonly line: GeometryReference; readonly unit: "mm" })
   /** Perpendicular distance from the first line to the midpoint of the second (the distance between two parallel lines). */
   | (DimensionBase & { readonly kind: "line-line-distance"; readonly first: GeometryReference; readonly second: GeometryReference; readonly unit: "mm" })
+  /**
+   * The gap between two circles or arcs: the radius of the second minus the radius of the first. The value is signed: positive puts
+   * the second outside the first, negative inside it. With a Concentric relation this holds an offset copy to its source.
+   */
+  | (DimensionBase & { readonly kind: "radius-difference"; readonly first: GeometryReference; readonly second: GeometryReference; readonly unit: "mm" })
   /** Length of a circle's circumference, an ellipse's perimeter or a rectangle's perimeter. */
   | (DimensionBase & { readonly kind: "perimeter"; readonly target: GeometryReference; readonly unit: "mm" })
   /** A rectangle's side along its own X (width) or Y (height). */

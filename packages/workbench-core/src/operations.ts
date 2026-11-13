@@ -259,7 +259,7 @@ function containsNonFinite(value: unknown, depth = 0): boolean {
   return Object.values(value as Record<string, unknown>).some((item) => containsNonFinite(item, depth + 1));
 }
 
-const SKETCH_DIMENSION_NAMES: readonly string[] = ["length", "width", "height", "radius", "diameter", "angle", "arc-length", "perimeter", "aligned", "horizontal", "vertical", "point-line", "line-line", "major-radius", "minor-radius"];
+const SKETCH_DIMENSION_NAMES: readonly string[] = ["length", "width", "height", "radius", "diameter", "angle", "arc-length", "perimeter", "aligned", "horizontal", "vertical", "point-line", "line-line", "offset", "major-radius", "minor-radius"];
 
 /** Says what is wrong with a malformed set-sketch-dimension payload instead of a bare "invalid". */
 function sketchDimensionProblem(input: Record<string, unknown>): string {

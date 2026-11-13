@@ -3,6 +3,7 @@ import { sampleSpline } from "./index.js";
 import type { SketchEditContext, SketchEditResult } from "./edit-tools.js";
 import { arcTravel, circleCircle, lineCircle, lineLine } from "./corner-tools.js";
 import { finishPlan, jointRelation, pairRelation } from "./edit-relations.js";
+import { arcShape } from "../../workbench-core/src/sketch-measure.js";
 
 /**
  * Offset: a chain of lines and arcs (a slot, a rounded rectangle, a gasket outline) is offset as one piece with its corners joined, on the
@@ -607,7 +608,8 @@ export function offsetEntities(context: SketchEditContext, ids: readonly string[
         if (radiusMm < MIN_MM) return reject("The inward offset is larger than the circle's radius.", [entity.id]);
         const made: SketchEntity = { ...entity, id: context.newId("entity"), radiusMm };
         added.push(made);
-        if (withRelations) constraints.push(pairRelation(context, "concentric", entity.id, made.id));
+        // The copy shares the centre and keeps the gap: one offset dimension that can be edited, and that carries the copy along when the source is resized.
+        if (withRelations) constraints.push(pairRelation(context, "concentric", entity.id, made.id), roundOffsetRelation(context, entity.id, made.id, Math.abs(outward), outward < 0, undefined));
       } else if (entity.kind === "rectangle") {
         const widthMm = entity.widthMm + 2 * outward;
         const heightMm = entity.heightMm + 2 * outward;
@@ -687,15 +689,38 @@ export function offsetEntities(context: SketchEditContext, ids: readonly string[
   return finishPlan(context, { label: `Offset ${total} curve${total === 1 ? "" : "s"} by ${fmt(distanceMm)} mm${sides}`, removeEntityIds: [], updateEntities: [], addEntities: added, addConstraints: constraints }, { prune: true });
 }
 
+/** The id that ties the distances of one Offset together, made from a fresh constraint id so it is unique in the sketch. */
+function newOffsetGroup(context: SketchEditContext): string {
+  const tail = context.newId("constraint").replace(/^[^:]*:/u, "").toLowerCase().replace(/[^a-z0-9._-]/gu, "-").replace(/^[^a-z0-9]+/u, "");
+  return `offset:${tail === "" ? "group" : tail}`.slice(0, 128);
+}
+
+/** The gap an offset copy of a circle or arc keeps to its source (the difference of the two radii). */
+function roundOffsetRelation(context: SketchEditContext, sourceId: string, madeId: string, distanceMm: number, inside: boolean, group: string | undefined): WorkbenchSketchConstraint {
+  return { id: context.newId("constraint"), kind: "distance", entityIds: [sourceId, madeId], valueMm: distanceMm, dimension: "offset", ...(inside ? { inside: true as const } : {}), ...(group === undefined ? {} : { offsetGroup: group }) };
+}
+
+function radiusOfRound(entity: SketchEntity): number {
+  return entity.kind === "arc" ? arcShape(entity.start, entity.mid, entity.end)?.radiusMm ?? 0 : entity.kind === "circle" ? entity.radiusMm : 0;
+}
+
 function offsetRelations(context: SketchEditContext, chain: Chain, built: Built, distanceMm: number): readonly WorkbenchSketchConstraint[] {
   const relations: WorkbenchSketchConstraint[] = [];
-  // A chain of straight lines keeps its offset distance: each copy stays that far from its source line, so a source dimension edit carries the offset along.
-  const allLines = built.fillers.length === 0 && built.parts.every((part) => part.source.kind === "line");
+  // A chain whose every piece is the copy of one source curve keeps its offset distance: each line stays that far from its source line and
+  // each arc keeps that gap to its source arc, so a source dimension edit carries the offset along and the distance can be edited later.
+  // Corners that were closed with an added round or chamfer have no source curve to follow, so such a chain stays a plain copy.
+  // Where the chain is smooth (a slot) its joints and tangents already carry the distance from piece to piece, so the edit keeps only
+  // the distances that are needed (edit-prune.ts drops the implied ones); the ones that stay share the group and move together.
+  const held = built.fillers.length === 0;
+  const group = held && built.parts.length > 1 ? newOffsetGroup(context) : undefined;
   for (const part of built.parts) {
     if (part.source.kind === "line") {
       relations.push(pairRelation(context, "parallel", part.source.id, part.made.id));
-      if (allLines) relations.push({ id: context.newId("constraint"), kind: "distance", entityIds: [part.source.id, part.made.id], valueMm: distanceMm, dimension: "line-line" });
-    } else relations.push(pairRelation(context, "concentric", part.source.id, part.made.id));
+      if (held) relations.push({ id: context.newId("constraint"), kind: "distance", entityIds: [part.source.id, part.made.id], valueMm: distanceMm, dimension: "line-line", ...(group === undefined ? {} : { offsetGroup: group }) });
+    } else {
+      relations.push(pairRelation(context, "concentric", part.source.id, part.made.id));
+      if (held) relations.push(roundOffsetRelation(context, part.source.id, part.made.id, distanceMm, radiusOfRound(part.made) < radiusOfRound(part.source), group));
+    }
   }
   const count = built.parts.length;
   const joints = chain.closed ? count : count - 1;

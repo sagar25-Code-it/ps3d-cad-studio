@@ -59,7 +59,7 @@ export function readDimensionText(text: string, options: DimensionTextOptions): 
 
 /** Whether a dimension name may be zero when it is a distance between two things (a hole on the axis is 0 from it). */
 export function dimensionAllowsZero(dimension: string): boolean {
-  return dimension === "aligned" || dimension === "horizontal" || dimension === "vertical" || dimension === "point-line" || dimension === "line-line";
+  return dimension === "aligned" || dimension === "horizontal" || dimension === "vertical" || dimension === "point-line" || dimension === "line-line" || dimension === "offset";
 }
 
 /**

@@ -156,6 +156,12 @@ export function measureDimensionConstraint(sketch: Pick<WorkbenchSketch, "entiti
           // A diameter across the line reads twice the distance to it.
           return (constraint.doubled === true ? 2 : 1) * Math.abs(ux * (other[1] - line.start[1]) - uy * (other[0] - line.start[0])) / Math.max(Math.hypot(ux, uy), 1e-12);
         }
+        case "offset": {
+          const radiusOf = (entity: SketchEntity | undefined): number | undefined => entity?.kind === "circle" ? entity.radiusMm : entity?.kind === "arc" ? arcShape(entity.start, entity.mid, entity.end)?.radiusMm : undefined;
+          const a = radiusOf(first);
+          const b = radiusOf((entities as readonly (SketchEntity | undefined)[])[1]);
+          return a === undefined || b === undefined ? undefined : Math.abs(b - a);
+        }
         default:
           break;
       }

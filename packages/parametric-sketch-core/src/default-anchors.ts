@@ -33,7 +33,7 @@ export function defaultAnchors(document: ParametricSketchDocument): readonly Sol
   const dimensioned = new Set<string>();
   for (const dimension of document.dimensions) {
     if (dimension.suppressed || dimension.mode !== "driving") continue;
-    if (dimension.kind === "linear" || dimension.kind === "angle" || dimension.kind === "line-line-distance") dimensioned.add(dimension.first.entityId).add(dimension.second.entityId);
+    if (dimension.kind === "linear" || dimension.kind === "angle" || dimension.kind === "line-line-distance" || dimension.kind === "radius-difference") dimensioned.add(dimension.first.entityId).add(dimension.second.entityId);
     else if (dimension.kind === "point-line-distance") dimensioned.add(dimension.point.entityId).add(dimension.line.entityId);
     else dimensioned.add(dimension.target.entityId);
   }
@@ -156,6 +156,10 @@ export function defaultAnchors(document: ParametricSketchDocument): readonly Sol
         release(dimension.point);
         break;
       case "line-line-distance":
+        hold(self(dimension.first));
+        break;
+      case "radius-difference":
+        // The source keeps its place and its size; the copy takes the change.
         hold(self(dimension.first));
         break;
       case "width":

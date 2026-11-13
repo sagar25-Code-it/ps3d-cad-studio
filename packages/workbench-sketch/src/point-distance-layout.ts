@@ -1,5 +1,5 @@
 import { SKETCH_AXIS_X_ID, SKETCH_AXIS_Y_ID, SKETCH_ORIGIN_ID, type SketchEntity, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../workbench-core/src/index.js";
-import { livePointOf } from "../../workbench-core/src/sketch-measure.js";
+import { arcShape, livePointOf } from "../../workbench-core/src/sketch-measure.js";
 import { DIMENSION_GAP_PX, DIMENSION_OFFSET_PX, DIMENSION_OVERSHOOT_PX, linearDimensionLayout, upwardNormal, type DimensionLayout, type DimensionLayoutOptions } from "./dimension-layout.js";
 import { formatDimensionLabelValue } from "./sketch-units.js";
 
@@ -11,9 +11,9 @@ import { formatDimensionLabelValue } from "./sketch-units.js";
  * stacked like the rest.
  */
 
-const POINT_DISTANCE_NAMES: ReadonlySet<string> = new Set(["aligned", "horizontal", "vertical", "point-line", "line-line"]);
+const POINT_DISTANCE_NAMES: ReadonlySet<string> = new Set(["aligned", "horizontal", "vertical", "point-line", "line-line", "offset"]);
 
-/** True for a distance between points, a point and a line, or two lines (not the length of one line or the size of a rectangle). */
+/** True for a distance between points, a point and a line, two lines, or two round curves (not the length of one line or the size of a rectangle). */
 export function isPointDistanceConstraint(constraint: Pick<WorkbenchSketchConstraint, "kind" | "dimension">): boolean {
   return constraint.kind === "distance" && constraint.dimension !== undefined && POINT_DISTANCE_NAMES.has(constraint.dimension);
 }
@@ -92,6 +92,7 @@ export function pointDistanceLayout(sketch: Pick<WorkbenchSketch, "entities">, c
     if (length < 1e-9) return undefined;
     return linearDimensionLayout(a, b, upwardNormal([(b[0] - a[0]) / length, (b[1] - a[1]) / length]), valueMm, pxMm, "", options);
   }
+  if (name === "offset") return roundOffsetLayout(sketch, constraint, valueMm, pxMm, options);
   // A point to a line (the first thing is the point), or two lines (from the middle of the second to the first).
   const line = name === "point-line" ? lineOf(sketch, constraint.entityIds[1]) : lineOf(sketch, constraint.entityIds[0]);
   let point: Vec2 | undefined;
@@ -109,6 +110,37 @@ export function pointDistanceLayout(sketch: Pick<WorkbenchSketch, "entities">, c
   // A diameter across the line runs from the point to its mirror image on the far side, with a diameter sign before the value.
   if (constraint.doubled === true) return linearDimensionLayout(point, [2 * base[0] - point[0], 2 * base[1] - point[1]], upwardNormal(direction), valueMm, pxMm, "\u00d8", options);
   return linearDimensionLayout(point, base, upwardNormal(direction), valueMm, pxMm, "", options);
+}
+
+interface RoundShape {
+  readonly center: Vec2;
+  readonly radiusMm: number;
+  /** The direction from the centre to the middle of an arc; undefined for a full circle. */
+  readonly towards?: Vec2;
+}
+
+function roundOf(entity: SketchEntity | undefined): RoundShape | undefined {
+  if (entity?.kind === "circle") return { center: entity.center, radiusMm: entity.radiusMm };
+  if (entity?.kind !== "arc") return undefined;
+  const shape = arcShape(entity.start, entity.mid, entity.end);
+  if (shape === undefined || !(shape.radiusMm > 1e-9)) return undefined;
+  return { center: shape.center, radiusMm: shape.radiusMm, towards: [(entity.mid[0] - shape.center[0]) / shape.radiusMm, (entity.mid[1] - shape.center[1]) / shape.radiusMm] };
+}
+
+/**
+ * The gap between a round curve and its offset copy: a short dimension across the gap, along the radius through the middle of the
+ * copy when it is an arc (so the dimension sits on the arcs, not in empty space) and up and to the right on a full circle.
+ */
+function roundOffsetLayout(sketch: Pick<WorkbenchSketch, "entities">, constraint: WorkbenchSketchConstraint, valueMm: number, pxMm: number, options?: DimensionLayoutOptions): DimensionLayout | undefined {
+  const source = roundOf(sketch.entities.find((candidate) => candidate.id === constraint.entityIds[0]));
+  const copy = roundOf(sketch.entities.find((candidate) => candidate.id === constraint.entityIds[1]));
+  if (source === undefined || copy === undefined) return undefined;
+  const direction: Vec2 = copy.towards ?? source.towards ?? [Math.SQRT1_2, Math.SQRT1_2];
+  const from: Vec2 = [source.center[0] + direction[0] * source.radiusMm, source.center[1] + direction[1] * source.radiusMm];
+  const to: Vec2 = [copy.center[0] + direction[0] * copy.radiusMm, copy.center[1] + direction[1] * copy.radiusMm];
+  const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  if (length < 1e-9) return undefined;
+  return linearDimensionLayout(from, to, upwardNormal([(to[0] - from[0]) / length, (to[1] - from[1]) / length]), valueMm, pxMm, "", options);
 }
 
 /** A radius line from an ellipse's centre to the end of its major or minor axis, with the value in the label ("Major R 12"). */

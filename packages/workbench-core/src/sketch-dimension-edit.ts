@@ -11,6 +11,7 @@ import { isSketchDatumEntityId, SKETCH_RELATIVE_DISTANCE_NAMES } from "./types.j
 import { failure, WORKBENCH_LIMITS } from "./validation.js";
 import { MODEL_ENVELOPE } from "./envelope.js";
 import { missingSketchEntityFailure } from "./finished-sketch-hint.js";
+import { offsetGroupMembers, withOffsetGroupValue } from "./offset-group.js";
 
 type SetDimension = Extract<WorkbenchOperation, { readonly kind: "set-sketch-dimension" }>;
 type Applied = WorkbenchResult<{ readonly project: WorkbenchProject; readonly changedIds: readonly string[]; readonly summary: string }>;
@@ -122,9 +123,12 @@ function heldByFix(sketch: WorkbenchSketch, id: string): boolean {
  * solved at once, the dimensioned curve keeping its place and its neighbours moving as little as they can. The `constraint` is already part
  * of `sketch.constraints` with its new value.
  */
-export function redriveDimension(sketch: WorkbenchSketch, constraint: WorkbenchSketchConstraint): RedriveResult {
+export function redriveDimension(given: WorkbenchSketch, constraint: WorkbenchSketchConstraint): RedriveResult {
+  // The distances of one Offset move together: the others take this one's value before anything is solved.
+  const sketch: WorkbenchSketch = constraint.offsetGroup === undefined ? given : { ...given, constraints: withOffsetGroupValue(given.constraints, constraint) };
+  const followers = offsetGroupMembers(sketch.constraints, constraint).filter((member) => member.id !== constraint.id && member.suppressed !== true);
   const entityIds = constraint.entityIds;
-  const real = entityIds.filter((id) => !isSketchDatumEntityId(id));
+  const real = [...new Set([...entityIds, ...followers.flatMap((member) => member.entityIds)])].filter((id) => !isSketchDatumEntityId(id));
   const target = sketch.entities.find((entity) => entity.id === entityIds[0]);
   const name = dimensionNameOf(constraint, target?.kind);
   const value = dimensionTargetValue(constraint);
@@ -137,7 +141,9 @@ export function redriveDimension(sketch: WorkbenchSketch, constraint: WorkbenchS
   const baseSketch: WorkbenchSketch = { ...sketch, entities: resized === undefined || target === undefined ? sketch.entities : sketch.entities.map((entity) => entity.id === target.id ? resized : entity) };
   const entityMap = new Map(baseSketch.entities.map((entity) => [entity.id, entity] as const));
   // Once the curve has its new size by direct resize it is the reference and its neighbours follow; otherwise only part of it is held.
-  const anchors = resized !== undefined && target !== undefined ? anchorsAfterResize(target, entityMap, sketch.constraints) : anchorsForDimension(constraint, entityMap, sketch.constraints);
+  const ownAnchors = resized !== undefined && target !== undefined ? anchorsAfterResize(target, entityMap, sketch.constraints) : anchorsForDimension(constraint, entityMap, sketch.constraints);
+  // Every source curve of the offset stays where it is, so the whole copy moves and the source does not.
+  const anchors = followers.length === 0 ? ownAnchors : [...ownAnchors, ...followers.flatMap((member) => anchorsForDimension(member, entityMap, sketch.constraints))];
   const solveWith = (constraints: readonly WorkbenchSketchConstraint[]): LiveSketchSolveReport => solveLiveSketch(constraints === baseSketch.constraints ? baseSketch : { ...baseSketch, constraints }, real, { anchors, preserve: preserveForConstraint(constraint, entityMap), keepChains: false });
   let solved = solveWith(baseSketch.constraints);
   if (!solved.ok) return { ok: false, applied: solveFailure(solved, sketch, constraint) as Extract<Applied, { readonly ok: false }> };
@@ -246,7 +252,13 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
     : sketch.constraints.map((candidate) => candidate.id === existing.id ? constraint : candidate);
   // A distance to a line keeps being a diameter across it (or a plain distance) unless the request says otherwise.
   const doubled = (name === "point-line" || name === "line-line") && (operation.doubled ?? existing?.doubled === true);
-  const dimensionKey = kind === "distance" || kind === "radius" ? { dimension: name as NonNullable<WorkbenchSketchConstraint["dimension"]>, ...(doubled ? { doubled: true as const } : {}) } : {};
+  // The gap between two round curves keeps the side it has: the side it was made on, or, for a new one, the side the copy is on now.
+  const roundRadius = (id: string | undefined): number | undefined => {
+    const entity = id === undefined ? undefined : sketch.entities.find((candidate) => candidate.id === id);
+    return entity?.kind === "circle" ? entity.radiusMm : entity?.kind === "arc" ? arcShape(entity.start, entity.mid, entity.end)?.radiusMm : undefined;
+  };
+  const inside = name === "offset" && (existing !== undefined ? existing.inside === true : (roundRadius(entityIds[1]) ?? 0) < (roundRadius(entityIds[0]) ?? 0));
+  const dimensionKey = kind === "distance" || kind === "radius" ? { dimension: name as NonNullable<WorkbenchSketchConstraint["dimension"]>, ...(doubled ? { doubled: true as const } : {}), ...(inside ? { inside: true as const } : {}) } : {};
   const pointKey = points === undefined ? {} : { points: [...points] as readonly SketchPointRef[] };
 
   if (driven) {
@@ -289,7 +301,8 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
     ...dimensionKey,
     ...pointKey,
     ...(name === "angle" ? { valueDeg: value } : { valueMm: value }),
-    ...(existing?.suppressed === true ? { suppressed: true as const } : {})
+    ...(existing?.suppressed === true ? { suppressed: true as const } : {}),
+    ...(existing?.offsetGroup === undefined || kind !== "distance" ? {} : { offsetGroup: existing.offsetGroup })
   };
   const constraints = withDimension(constraint);
 

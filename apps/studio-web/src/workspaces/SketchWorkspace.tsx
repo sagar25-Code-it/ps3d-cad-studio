@@ -1375,7 +1375,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (named !== undefined && constraint.dimension !== undefined) {
       const measuredNamed = reference ? measureDimensionConstraint(props.sketch, constraint) : constraint.valueMm;
       if (measuredNamed === undefined) return;
-      const labels: Readonly<Record<string, string>> = { aligned: "Distance", horizontal: "Horizontal distance", vertical: "Vertical distance", "point-line": "Distance to the line", "line-line": "Distance between the lines", "major-radius": "Major radius", "minor-radius": "Minor radius" };
+      const labels: Readonly<Record<string, string>> = { aligned: "Distance", horizontal: "Horizontal distance", vertical: "Vertical distance", "point-line": "Distance to the line", "line-line": "Distance between the lines", offset: "Offset", "major-radius": "Major radius", "minor-radius": "Minor radius" };
       const edit: DimensionEditState = {
         entityId: constraint.entityIds[0]!, dimension: "length", anchor, label: constraint.doubled === true ? DOUBLED_DISTANCE_LABEL : labels[constraint.dimension] ?? "Distance", storedValue: reference ? undefined : measuredNamed, wasReference: reference,
         ...(constraint.entityIds[1] === undefined ? {} : { secondEntityId: constraint.entityIds[1] }),

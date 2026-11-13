@@ -32,6 +32,7 @@ function dimensionReferences(dimension: SketchDimension): readonly GeometryRefer
   switch (dimension.kind) {
     case "point-line-distance": return [dimension.point, dimension.line];
     case "line-line-distance": return [dimension.first, dimension.second];
+    case "radius-difference": return [dimension.first, dimension.second];
     case "angle": return [dimension.first, dimension.second];
     case "linear": return [dimension.first, dimension.second];
     default: return [dimension.target];

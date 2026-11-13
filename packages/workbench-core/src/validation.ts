@@ -1,5 +1,6 @@
 import { circleThroughThreePoints } from "./arc-geometry.js";
 import { DIMENSION_NAME_PATTERN } from "./dimension-names.js";
+import { isOffsetGroupId } from "./offset-group.js";
 import { SPLINE_MAX_FIT_POINTS, SPLINE_MIN_FIT_POINTS } from "./spline-limits.js";
 import { NEW_PRIMITIVE_SHAPES, validPrimitiveBody } from "./primitive-bodies.js";
 import { validConstructionBinder, validNewPlaneDefinition } from "./construction-refs.js";
@@ -318,12 +319,18 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   const hasRatio = Object.hasOwn(value, "ratio");
   const hasDoubled = Object.hasOwn(value, "doubled");
   const hasName = Object.hasOwn(value, "name");
+  const hasOffsetGroup = Object.hasOwn(value, "offsetGroup");
+  // An offset group ties the distances of one Offset together.
+  if (hasOffsetGroup && !(isOffsetGroupId(value.offsetGroup) && value.kind === "distance")) return false;
+  const hasInside = Object.hasOwn(value, "inside");
+  // Inside or outside is a property of the gap between two round curves only.
+  if (hasInside && (typeof value.inside !== "boolean" || value.kind !== "distance" || value.dimension !== "offset")) return false;
   // A dimension name is d followed by a number (dimension-names.ts).
   if (hasName && !(typeof value.name === "string" && DIMENSION_NAME_PATTERN.test(value.name))) return false;
   // A diameter across a line is a point-to-line or line-to-line distance.
   if (hasDoubled && (typeof value.doubled !== "boolean" || value.kind !== "distance" || (value.dimension !== "point-line" && value.dimension !== "line-line"))) return false;
   const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : []), ...(hasPoints ? ["points"] : []),
-    ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : []), ...(hasExpression ? ["expression"] : []), ...(hasDoubled ? ["doubled"] : []), ...(hasName ? ["name"] : [])];
+    ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : []), ...(hasExpression ? ["expression"] : []), ...(hasDoubled ? ["doubled"] : []), ...(hasName ? ["name"] : []), ...(hasOffsetGroup ? ["offsetGroup"] : []), ...(hasInside ? ["inside"] : [])];
   if (!exactKeys(value, expectedKeys) || (hasSuppressed && typeof value.suppressed !== "boolean")) return false;
   // An expression only drives a dimension, and must be short, parseable text.
   if (hasExpression && (!(hasValue || hasValueDeg) || typeof value.expression !== "string" || value.expression.length < 1 || value.expression.length > MAX_EXPRESSION_LENGTH || !parseExpression(value.expression).ok)) return false;
@@ -332,7 +339,7 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   // A driven (reference) dimension is measured: it carries no value of its own, and only dimension kinds can be driven.
   if (driven && (hasValue || hasValueDeg || !["radius", "distance", "angle", "arc-length", "perimeter"].includes(String(value.kind)))) return false;
   if (hasDimension && (!hasValue && !driven)) return false;
-  if (hasDimension && !["length", "width", "height", "radius", "diameter", "aligned", "horizontal", "vertical", "point-line", "line-line", "major-radius", "minor-radius"].includes(String(value.dimension))) return false;
+  if (hasDimension && !["length", "width", "height", "radius", "diameter", "aligned", "horizontal", "vertical", "point-line", "line-line", "offset", "major-radius", "minor-radius"].includes(String(value.dimension))) return false;
   if (hasValueDeg && (value.kind !== "angle" || !(typeof value.valueDeg === "number" && Number.isFinite(value.valueDeg) && value.valueDeg >= 0 && value.valueDeg < 360))) return false;
   if (value.kind === "angle" && !driven && !hasValueDeg) return false;
   // An angle is between two lines (or a line and an axis); an ellipse alone gives the turn of its major axis.

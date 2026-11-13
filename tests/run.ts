@@ -174,6 +174,7 @@ import { sketchDimensionNameTests } from "./sketch-dimension-names.test.js";
 import { sketchMarkingMenuTests } from "./sketch-marking-menu.test.js";
 import { sketchStateColourTests } from "./sketch-state-colours.test.js";
 import { sketchSlotCentrelineTests } from "./sketch-slot-centreline.test.js";
+import { sketchOffsetAssociativeTests } from "./sketch-offset-associative.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -370,6 +371,7 @@ const tests: readonly TestCase[] = [
   ...sketchMarkingMenuTests,
   ...sketchStateColourTests,
   ...sketchSlotCentrelineTests,
+  ...sketchOffsetAssociativeTests,
 ];
 let failures = 0;
 

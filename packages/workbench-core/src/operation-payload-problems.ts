@@ -160,7 +160,7 @@ export function sketchObjectsProblem(value: unknown): string | undefined {
   return undefined;
 }
 
-const DIMENSION_NAMES = ["length", "width", "height", "radius", "diameter", "aligned", "horizontal", "vertical", "point-line", "line-line", "major-radius", "minor-radius"];
+const DIMENSION_NAMES = ["length", "width", "height", "radius", "diameter", "aligned", "horizontal", "vertical", "point-line", "line-line", "offset", "major-radius", "minor-radius"];
 
 /**
  * What is wrong in the shape of one sketch relation or dimension, or undefined when it is well formed. It looks only at the record
@@ -191,10 +191,11 @@ export function constraintPayloadProblem(value: unknown, index?: number): string
     if (Object.hasOwn(value, field) && !isFinite(value[field])) return `${named}: ${field} must be a finite number, but it is ${describeGivenValue(value[field])}.`;
   }
   if (Object.hasOwn(value, "dimension") && !(typeof value.dimension === "string" && DIMENSION_NAMES.includes(value.dimension))) return `${named}: dimension must be one of ${DIMENSION_NAMES.join(", ")}, but it is ${describeGivenValue(value.dimension)}.`;
-  for (const field of ["driven", "suppressed", "doubled"] as const) {
+  for (const field of ["driven", "suppressed", "doubled", "inside"] as const) {
     if (Object.hasOwn(value, field) && typeof value[field] !== "boolean") return `${named}: ${field} must be true or false, but it is ${describeGivenValue(value[field])}.`;
   }
   if (Object.hasOwn(value, "expression") && typeof value.expression !== "string") return `${named}: expression must be text, but it is ${describeGivenValue(value.expression)}.`;
+  if (Object.hasOwn(value, "offsetGroup") && typeof value.offsetGroup !== "string") return `${named}: offsetGroup must be an id like "offset:a1", but it is ${describeGivenValue(value.offsetGroup)}.`;
   if (Object.hasOwn(value, "pierce") && !isRecord(value.pierce)) return `${named}: pierce must be an object, but it is ${describeGivenValue(value.pierce)}.`;
   return undefined;
 }

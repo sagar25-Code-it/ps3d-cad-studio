@@ -1,6 +1,7 @@
 import { MODEL_ENVELOPE, type EnvelopeProblem } from "./envelope.js";
 import { SKETCH_POINT_REFS, SKETCH_RELATIVE_DISTANCE_NAMES } from "./types.js";
 import { MAX_EXPRESSION_LENGTH } from "./expressions.js";
+import { isOffsetGroupId } from "./offset-group.js";
 
 /**
  * The shape check of a sketch relation or dimension that arrives as data (add-sketch-constraint, the addConstraints of
@@ -11,8 +12,8 @@ import { MAX_EXPRESSION_LENGTH } from "./expressions.js";
 
 const ID_PATTERN = /^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9._-]*$/u;
 const KINDS = ["horizontal", "vertical", "parallel", "perpendicular", "tangent", "collinear", "midpoint", "symmetry", "coincident", "concentric", "equal", "radius", "distance", "fixed", "angle", "arc-length", "perimeter", "smooth", "pierce", "refraction"] as const;
-const DIMENSION_NAMES = ["length", "width", "height", "radius", "diameter", "aligned", "horizontal", "vertical", "point-line", "line-line", "major-radius", "minor-radius"] as const;
-const ALLOWED_KEYS = ["id", "kind", "entityIds", "valueMm", "dimension", "suppressed", "points", "valueDeg", "driven", "pierce", "ratio", "expression", "doubled", "name"] as const;
+const DIMENSION_NAMES = ["length", "width", "height", "radius", "diameter", "aligned", "horizontal", "vertical", "point-line", "line-line", "offset", "major-radius", "minor-radius"] as const;
+const ALLOWED_KEYS = ["id", "kind", "entityIds", "valueMm", "dimension", "suppressed", "points", "valueDeg", "driven", "pierce", "ratio", "expression", "doubled", "name", "offsetGroup", "inside"] as const;
 const DRIVABLE = ["radius", "distance", "angle", "arc-length", "perimeter"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,6 +75,14 @@ export function sketchConstraintPayloadProblem(value: unknown): EnvelopeProblem 
   if (has("doubled")) {
     if (typeof value.doubled !== "boolean") return bad(`needs doubled to be true or false, but it is ${shown(value.doubled)}.`);
     if (kind !== "distance" || (value.dimension !== "point-line" && value.dimension !== "line-line")) return bad("is marked doubled (a diameter across a line), which only a point-line or line-line distance can be.");
+  }
+  if (has("offsetGroup")) {
+    if (!isOffsetGroupId(value.offsetGroup)) return bad(`has the offset group ${shown(value.offsetGroup)}; an offset group is an id in the form offset:name.`);
+    if (kind !== "distance") return bad(`is a ${kind} relation, which cannot belong to an offset group; only a distance can.`);
+  }
+  if (has("inside")) {
+    if (typeof value.inside !== "boolean") return bad(`needs inside to be true or false, but it is ${shown(value.inside)}.`);
+    if (kind !== "distance" || value.dimension !== "offset") return bad("is marked inside, which only the offset gap between two circles or arcs can be.");
   }
   const driven = value.driven === true;
   if (has("dimension") && (typeof value.dimension !== "string" || !(DIMENSION_NAMES as readonly string[]).includes(value.dimension))) {

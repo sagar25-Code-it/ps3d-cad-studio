@@ -203,12 +203,13 @@ export function isSketchDatumEntityId(id: string): boolean {
 /**
  * The dimensions `set-sketch-dimension` can drive or measure. `aligned`, `horizontal` and `vertical` are distances between two points
  * (or from the origin), `point-line` a point to a line and `line-line` two lines; `major-radius` and `minor-radius` size an ellipse.
+ * `offset` is the gap between two circles or arcs (the difference of their radii): what an Offset copy of a round curve keeps to its source.
  */
 export type SketchDimensionName = "length" | "width" | "height" | "radius" | "diameter" | "angle" | "arc-length" | "perimeter"
-  | "aligned" | "horizontal" | "vertical" | "point-line" | "line-line" | "major-radius" | "minor-radius";
+  | "aligned" | "horizontal" | "vertical" | "point-line" | "line-line" | "offset" | "major-radius" | "minor-radius";
 
-/** The dimension names that are distances between points, or a point and a line, or two lines. */
-export const SKETCH_RELATIVE_DISTANCE_NAMES: readonly SketchDimensionName[] = ["aligned", "horizontal", "vertical", "point-line", "line-line"];
+/** The dimension names that are distances between points, or a point and a line, or two lines, or two round curves. */
+export const SKETCH_RELATIVE_DISTANCE_NAMES: readonly SketchDimensionName[] = ["aligned", "horizontal", "vertical", "point-line", "line-line", "offset"];
 
 export interface WorkbenchSketchConstraint {
   readonly id: string;
@@ -221,7 +222,7 @@ export interface WorkbenchSketchConstraint {
    */
   readonly points?: readonly SketchPointRef[];
   readonly valueMm?: number;
-  readonly dimension?: "length" | "width" | "height" | "radius" | "diameter" | "aligned" | "horizontal" | "vertical" | "point-line" | "line-line" | "major-radius" | "minor-radius";
+  readonly dimension?: "length" | "width" | "height" | "radius" | "diameter" | "aligned" | "horizontal" | "vertical" | "point-line" | "line-line" | "offset" | "major-radius" | "minor-radius";
   /**
    * Angle dimension only: the angle in degrees, counter-clockwise, from the direction of `entityIds[0]` to the direction of
    * `entityIds[1]` (each line runs from its start to its end). Held by the solver unless the dimension is `driven`.
@@ -254,6 +255,17 @@ export interface WorkbenchSketchConstraint {
    * how the half profile of a turned part is dimensioned across its centreline. Absent (or false) means a plain distance.
    */
   readonly doubled?: boolean;
+  /**
+   * A distance only: the Offset this dimension belongs to. One Offset of a chain makes one distance per curve (line to line, or the
+   * gap between two arcs); they share this id, so setting one sets them all and the canvas shows a single dimension for the offset.
+   * Absent on every other dimension, and on offsets made before this field existed (each of their distances stands alone).
+   */
+  readonly offsetGroup?: string;
+  /**
+   * An `offset` gap between two round curves only: true when the second curve (the copy) lies inside the first (its source), so it is
+   * the smaller of the two. Absent (or false) means the copy is outside. `valueMm` is the size of the gap either way.
+   */
+  readonly inside?: boolean;
 }
 
 /** What a Pierce constraint holds its point to: a construction axis, or one chain of sharp edges (by chain number) of a general body. */

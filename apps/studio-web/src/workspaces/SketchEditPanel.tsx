@@ -84,7 +84,7 @@ export const SKETCH_EDIT_TOOL_LABELS: Readonly<Record<SketchEditToolId, string>>
 };
 
 const INSTRUCTIONS: Readonly<Record<SketchEditToolId, string>> = {
-  offset: "Select a curve (a smooth chain of lines and arcs is picked up whole), set the distance, then Apply. Positive is outward for circles, arcs, rectangles and closed loops; on an open chain it is the left of the chain read from its lower-left end. Flip or Both sides change the side, and the preview shows where it lands.",
+  offset: "Select a curve (a smooth chain of lines and arcs is picked up whole), set the distance, then Apply. Positive is outward for circles, arcs, rectangles and closed loops; on an open chain it is the left of the chain read from its lower-left end. Flip or Both sides change the side, and the preview shows where it lands. The copy keeps one offset dimension to its source: it follows when the source changes, and double-clicking the dimension changes the distance. A copy whose outside corners were closed with a round or chamfer, and an offset of an ellipse, a spline or a one-piece rectangle, is a plain copy with no dimension.",
   mirror: "Select the entities to mirror, then the mirror line last (or choose the sketch X or Y axis), then Apply. Copies keep their relations and are linked to the originals by symmetry.",
   pattern: "Select the entities to repeat, choose a layout, then Apply. The original is the first instance. A direction angle runs a linear pattern along any line; Total extent spaces the instances evenly between the first and last.",
   move: "Select the entities, enter the X and Y distance, then Apply. Tick Copy to leave the originals and add moved copies (several in one go if you set the count).",

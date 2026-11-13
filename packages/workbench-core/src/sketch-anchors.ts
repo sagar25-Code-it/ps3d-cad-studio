@@ -180,6 +180,9 @@ export function anchorsForDimension(constraint: WorkbenchSketchConstraint, entit
           return [hold(second!), ...carry(entities, first!, points[0] ?? "self")];
         case "line-line":
           return [hold(first!)];
+        case "offset":
+          // The source curve keeps its place and its size; the copy takes the change.
+          return [hold(first!)];
         case "width":
         case "height":
           // Nothing holds the centre: a rectangle whose corner is pinned (a Fix, a joint) lets the centre move rather than turn or stretch.

@@ -239,6 +239,7 @@ export function describeConstraint(constraint: WorkbenchSketchConstraint, names:
           return `${constraint.dimension === "aligned" ? "Distance" : `${constraint.dimension[0]!.toUpperCase()}${constraint.dimension.slice(1)} distance`} ${value}between ${at(0)} and ${at(1)}${reference}`;
         case "point-line": return constraint.doubled === true ? `Diameter ${value}of ${at(0)} across ${of(1)}${reference}` : `Distance ${value}from ${at(0)} to ${of(1)}${reference}`;
         case "line-line": return constraint.doubled === true ? `Diameter ${value}of ${of(1)} across ${of(0)}${reference}` : `Distance ${value}between ${of(0)} and ${of(1)}${reference}`;
+        case "offset": return `Offset ${value}of ${of(1)} ${constraint.inside === true ? "inside" : "outside"} ${of(0)}${reference}`;
         case "width": return `Width ${value}on ${of(0)}${reference}`;
         case "height": return `Height ${value}on ${of(0)}${reference}`;
         default: return `Length ${value}on ${of(0)}${reference}`;
@@ -326,6 +327,8 @@ function translateConstraint(constraint: WorkbenchSketchConstraint, entities: Re
       if (name === "aligned" || name === "horizontal" || name === "vertical") {
         return dimension(constraint.valueMm, { kind: "linear", first: reference(first!, constraint.points?.[0]), second: reference(second!, constraint.points?.[1]), orientation: name });
       }
+      // The gap between two round curves: with their Concentric relation this is what holds an offset copy to its source.
+      if (name === "offset") return dimension(constraint.inside === true ? -constraint.valueMm : constraint.valueMm, { kind: "radius-difference", first: whole(first!), second: whole(second!) });
       // A diameter across the line is held as half its value: the distance to the line.
       const held = constraint.doubled === true ? constraint.valueMm / 2 : constraint.valueMm;
       if (name === "point-line") return dimension(held, { kind: "point-line-distance", point: reference(first!, constraint.points?.[0]), line: lineRef(second!) });

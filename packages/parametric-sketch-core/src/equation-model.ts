@@ -904,6 +904,16 @@ class ModelBuilder {
         const entities = dimension.kind === "point-line-distance" ? [dimension.point.entityId, dimension.line.entityId] : [dimension.first.entityId, dimension.second.entityId];
         return one(entities, [line.p.vars, line.q.vars, point.vars], (x) => signed(x) - sign * magnitude);
       }
+      case "radius-difference": {
+        const a = this.layout.get(dimension.first.entityId);
+        const b = this.layout.get(dimension.second.entityId);
+        const round = (entry: EntityLayout | undefined): entry is EntityLayout => entry !== undefined && (entry.geometry.kind === "circle" || entry.geometry.kind === "arc");
+        if (!round(a) || !round(b) || a.id === b.id) return this.invalidDimension(id, "An offset between curves needs two different circles or arcs.");
+        const ra = a.base + 2;
+        const rb = b.base + 2;
+        // The value is signed, so the copy stays outside or inside its source however far the source is resized in one step.
+        return one([a.id, b.id], [[ra], [rb]], (x) => x[rb]! - x[ra]! - target);
+      }
       case "perimeter": {
         const entry = this.layout.get(dimension.target.entityId);
         if (entry === undefined) return this.invalidDimension(id, "A perimeter applies to a circle, ellipse or rectangle.");
@@ -1217,6 +1227,12 @@ export function measureDimensionValue(document: ParametricSketchDocument, dimens
       const ux = line.q.x(x) - line.p.x(x);
       const uy = line.q.y(x) - line.p.y(x);
       return Math.abs(ux * (py - line.p.y(x)) - uy * (px - line.p.x(x))) / Math.max(Math.hypot(ux, uy), 1e-12);
+    }
+    case "radius-difference": {
+      const a = entry(dimension.first);
+      const b = entry(dimension.second);
+      const round = (e: EntityLayout | undefined): e is EntityLayout => e !== undefined && (e.geometry.kind === "circle" || e.geometry.kind === "arc");
+      return round(a) && round(b) ? x[b.base + 2]! - x[a.base + 2]! : undefined;
     }
     case "perimeter": {
       const e = entry(dimension.target);

@@ -72,7 +72,7 @@ type NodeResult = { readonly ok: true; readonly quantity: Quantity } | { readonl
 /** The long dimensions (arc length, perimeter, diameter) reach twice as far as a length. */
 const LONG_DIMENSIONS: readonly SketchDimensionName[] = ["arc-length", "perimeter", "diameter"];
 /** A distance between points or lines may be zero. */
-const ZERO_ALLOWED: readonly SketchDimensionName[] = ["aligned", "horizontal", "vertical", "point-line", "line-line"];
+const ZERO_ALLOWED: readonly SketchDimensionName[] = ["aligned", "horizontal", "vertical", "point-line", "line-line", "offset"];
 
 /**
  * Whether an evaluated expression is acceptable as the value of the named sketch dimension, and the value it gives (millimetres, or
@@ -107,7 +107,7 @@ function sketchesOf(history: DesignHistory, working: WorkbenchSketch | undefined
 
 const DIMENSION_WORD: Readonly<Record<SketchDimensionName, string>> = {
   length: "length", width: "width", height: "height", radius: "radius", diameter: "diameter", angle: "angle", "arc-length": "arc length", perimeter: "perimeter",
-  aligned: "distance", horizontal: "horizontal distance", vertical: "vertical distance", "point-line": "distance to line", "line-line": "distance between lines",
+  aligned: "distance", horizontal: "horizontal distance", vertical: "vertical distance", "point-line": "distance to line", "line-line": "distance between lines", offset: "offset",
   "major-radius": "major radius", "minor-radius": "minor radius"
 };
 
