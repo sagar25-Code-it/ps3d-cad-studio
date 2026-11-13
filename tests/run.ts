@@ -150,6 +150,7 @@ import { sketchUi3ChromeTests } from "./sketch-ui3-chrome.test.js";
 import { sketchUi3ErrorTests } from "./sketch-ui3-errors.test.js";
 import { sketchFitInsetsTests } from "./sketch-fit-insets.test.js";
 import { layoutWindowSizeTests } from "./layout-window-size.test.js";
+import { sketchEntryPointTests } from "./sketch-entry-points.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import { regionWave3Tests } from "./region-wave3.test.js";
@@ -330,6 +331,7 @@ const tests: readonly TestCase[] = [
   ...sketchUi3ErrorTests,
   ...sketchFitInsetsTests,
   ...layoutWindowSizeTests,
+  ...sketchEntryPointTests,
 ];
 let failures = 0;
 

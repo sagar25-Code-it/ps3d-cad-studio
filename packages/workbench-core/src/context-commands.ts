@@ -18,6 +18,8 @@ export interface WorkbenchContextRequest {
   readonly workspace: WorkspaceId;
   readonly selectionId: string | null;
   readonly selectionKind?: WorkbenchSelectionKind;
+  /** For a timeline step: whether it is a sketch (opened with Edit Sketch) or a solid step. Absent for anything else. */
+  readonly featureKind?: "sketch" | "solid";
   readonly canUndo?: boolean;
   readonly canRedo?: boolean;
 }
@@ -88,7 +90,12 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
     command("inspect.properties", "Profile Area & Properties", "inspect", "inspect", false, PROPERTIES_REASON)
   );
 
-  if (kind === "feature") commands.push(
+  // A finished sketch in the timeline is opened with Edit Sketch, like a sketch anywhere else; a solid step edits its parameters.
+  if (kind === "feature" && request.featureKind === "sketch") commands.push(
+    command("sketch.edit", "Edit Sketch", "sketch", "edit"),
+    command("inspect.properties", "Properties", "inspect", "inspect", false, PROPERTIES_REASON)
+  );
+  else if (kind === "feature") commands.push(
     command("feature.edit", "Edit Feature Parameters", "edit", "edit"),
     command("feature.reveal-inputs", "Show Parent Sketch", "sketch", "select"),
     command("feature.suppress", "Suppress Feature", "hide", "edit", false, "Feature suppression requires an ordered dependency graph."),

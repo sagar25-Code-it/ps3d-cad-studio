@@ -166,3 +166,44 @@ export function decidePlaneOffer(state: PlaneOfferState, entering: WorkspaceId, 
 export function planeOfferAfterFinish(state: PlaneOfferState): PlaneOfferState {
   return { ...state, finishedSinceOffer: true };
 }
+
+/** What a "Create Sketch" or "Edit Sketch" entry of a right-click menu does. */
+export type ContextSketchAction =
+  /** Finish the working sketch into the timeline (if it has unrecorded work) and start a new, empty sketch on this origin plane. */
+  | { readonly kind: "new-on-plane"; readonly plane: SketchDatumPlane }
+  /** Ask which plane or face the new sketch goes on (the plane dialog in its "new sketch" mode). */
+  | { readonly kind: "ask-plane" }
+  /** Reopen a finished sketch of the timeline for editing. */
+  | { readonly kind: "edit-feature"; readonly featureId: string }
+  /** Go back into the working sketch as it is. */
+  | { readonly kind: "open-working" };
+
+/**
+ * Decides what the right-click sketch commands do. Create Sketch always starts a NEW sketch: on the origin plane that was
+ * right-clicked, or after asking for a plane when nothing that names one is selected. It never moves the sketch that is already
+ * drawn (it used to re-plane the working sketch, which after Finish is still the last finished sketch). Edit Sketch is the only
+ * command that reopens existing geometry: the timeline sketch that was right-clicked, or the working sketch.
+ */
+export function contextSketchAction(commandId: "sketch.create" | "sketch.edit", selectionId: string | null, sketchFeatureIds: readonly string[] = []): ContextSketchAction {
+  if (commandId === "sketch.edit") {
+    return selectionId !== null && sketchFeatureIds.includes(selectionId) ? { kind: "edit-feature", featureId: selectionId } : { kind: "open-working" };
+  }
+  if (selectionId === "datum:xy" || selectionId === "datum:xz" || selectionId === "datum:yz") return { kind: "new-on-plane", plane: selectionId };
+  return { kind: "ask-plane" };
+}
+
+/** What a double-click on a browser row does. */
+export type BrowserOpenAction =
+  | { readonly kind: "edit-feature"; readonly featureId: string }
+  | { readonly kind: "open-working" }
+  | { readonly kind: "none" };
+
+/**
+ * Double-click in the browser opens the thing for editing, as the timeline strip does: a timeline step by the ID its row selects
+ * (a sketch by its own ID, a solid through its body), or the working sketch's own row. Any other row only selects.
+ */
+export function browserOpenAction(rowId: string, timeline: readonly { readonly id: string; readonly selectionId: string }[], workingSketchId: string): BrowserOpenAction {
+  const feature = timeline.find((candidate) => candidate.id === rowId) ?? timeline.find((candidate) => candidate.selectionId === rowId);
+  if (feature !== undefined) return { kind: "edit-feature", featureId: feature.id };
+  return rowId === workingSketchId ? { kind: "open-working" } : { kind: "none" };
+}

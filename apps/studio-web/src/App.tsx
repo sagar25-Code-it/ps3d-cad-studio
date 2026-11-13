@@ -172,7 +172,7 @@ import { AboutDialog } from "./ui/AboutDialog.js";
 import { useBuildUpdate } from "./ui/useBuildUpdate.js";
 import { formatBuildLabel } from "./build-info.js";
 import { dimensionModeStatus } from "./sketch-help-text.js";
-import { INITIAL_PLANE_OFFER, decidePlaneOffer, conventionOf, describeSketchPlane, existingSketchPlanes, planeOfferAfterFinish } from "./sketch-plane-ui.js";
+import { INITIAL_PLANE_OFFER, browserOpenAction, contextSketchAction, decidePlaneOffer, conventionOf, describeSketchPlane, existingSketchPlanes, planeOfferAfterFinish } from "./sketch-plane-ui.js";
 import { ShortcutsOverlay } from "./ui/ShortcutsOverlay.js";
 import { describeFailure } from "./failure-text.js";
 import { shortcutGroupsFor } from "./ui/sketch-shortcut-items.js";
@@ -2833,6 +2833,24 @@ export function App(): React.JSX.Element {
     setFeatureEdit(feature);
   };
 
+  /**
+   * Create Sketch on an origin plane from a right-click: the working sketch's unrecorded work goes into the timeline first, then a new
+   * empty sketch starts on the plane. Both are one project, so one Undo takes back the whole step and no finished sketch is moved.
+   */
+  const startSketchOnPlane = (plane: "datum:xy" | "datum:xz" | "datum:yz"): void => {
+    void (async () => {
+      lastSketchCommitRef.current = undefined;
+      await commitWorkingSketch([{ kind: "new-design-sketch", plane }]);
+      const outcome = lastSketchCommit();
+      if (outcome === undefined) return;
+      setSelectedId(null);
+      planeOfferRef.current = { offered: true, finishedSinceOffer: false };
+      if (outcome.failed.length > 0) return;
+      setStatus("ready");
+      setStatusText(`New sketch started. ${describeSketchPlane(projectRef.current.sketch).status}${outcome.sketchFeatureId === undefined ? "" : " The previous sketch is in the timeline."}`);
+    })();
+  };
+
   // The unit is a property of the project (saved with it, restored on open) and is remembered for the next session; the CAD document follows.
   const changeUnit = async (unit: DisplayUnit): Promise<void> => {
     rememberDisplayUnit(unit);
@@ -3508,9 +3526,15 @@ export function App(): React.JSX.Element {
     if (commandId === "sketch.look-at" && projectRef.current.activeWorkspace === "sketch") { setSketchFitSerial((serial) => serial + 1); setStatusText("The sketch is always shown face-on; fitted it to the window."); return; }
     if (commandId === "view.look-at" || commandId === "sketch.look-at") { setViewportOrientation(selectionId === "datum:yz" ? "right" : selectionId === "datum:xz" ? "front" : "top"); return; }
     if (commandId === "inspect.measure") { setViewportNavigation("measure"); return; }
-    if (commandId === "sketch.create" || commandId === "sketch.edit") {
-      // Creating a sketch on a datum plane from the tree or a right-click moves the sketch onto that plane.
-      if ((selectionId === "datum:xy" || selectionId === "datum:xz" || selectionId === "datum:yz") && projectRef.current.sketch.plane !== selectionId) applyProjectOperation({ kind: "set-sketch-plane", plane: selectionId });
+    if (commandId === "sketch.create" || commandId === "sketch.edit" || commandId === "feature.edit") {
+      // Edit on a timeline step reopens that step: a sketch for editing, a solid in its parameter dialog.
+      const timelineFeature = commandId === "sketch.create" ? undefined : designOf(projectRef.current).features.find((feature) => feature.id === selectionId);
+      if (timelineFeature !== undefined) { editTimelineFeature(timelineFeature); return; }
+      if (commandId === "feature.edit") { switchWorkspace("part"); if (selectionId !== null) setSelectedId(selectionId); return; }
+      const action = contextSketchAction(commandId, selectionId);
+      // Create Sketch always starts a new sketch; it never moves the one that is already drawn (see contextSketchAction).
+      if (action.kind === "new-on-plane") { startSketchOnPlane(action.plane); return; }
+      if (action.kind === "ask-plane") { openSketchPlaneDialog("new"); return; }
       switchWorkspace("sketch");
       if (selectionId !== null && !selectionId.startsWith("datum:")) setSelectedId(selectionId);
       return;
@@ -3543,7 +3567,7 @@ export function App(): React.JSX.Element {
     if (commandId === "body.pattern-feature") { runPartFeatureAction("pattern-feature", "Pattern Feature", selectionId); return; }
     if (commandId === "body.mirror-feature") { runPartFeatureAction("mirror-feature", "Mirror Feature", selectionId); return; }
     if (commandId === "body.update-model") { runPartFeatureAction("update-model", "Update Model"); return; }
-    if (commandId === "feature.edit" || commandId === "body.appearance" || commandId === "body.move") { switchWorkspace("part"); if (selectionId !== null) setSelectedId(selectionId); return; }
+    if (commandId === "body.appearance" || commandId === "body.move") { switchWorkspace("part"); if (selectionId !== null) setSelectedId(selectionId); return; }
     if (commandId === "feature.reveal-inputs") { switchWorkspace("sketch"); setSelectedId(projectRef.current.sketch.id); setTreeRevealRequest((request) => request + 1); return; }
     if (commandId === "body.boolean-intersect" && selectionId?.startsWith("general-body:") === true) { if ((projectRef.current.part.generalBodies ?? []).length < 2) { setStatusText("Intersect needs a second solid body. Create another with Make solid first."); return; } setCombineRequest({ targetId: selectionId, mode: "intersect" }); return; }
     if (commandId === "body.create-component") {
@@ -3718,7 +3742,19 @@ export function App(): React.JSX.Element {
       }
     }
   };
-  const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo });
+  const contextFeatureKind = contextMenu === undefined ? undefined : designOf(project).features.find((feature) => feature.id === contextMenu.selectionId)?.kind;
+  const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo, ...(contextFeatureKind === undefined ? {} : { featureKind: contextFeatureKind === "sketch" ? "sketch" as const : "solid" as const }) });
+
+  /** Double-click in the browser: a timeline step opens for editing (a sketch in the sketcher, a solid in its dialog); the working sketch row opens the sketcher. */
+  const openTreeItem = (id: string): void => {
+    const action = browserOpenAction(id, designOf(projectRef.current).features.map((feature) => ({ id: feature.id, selectionId: feature.kind === "sketch" ? feature.id : feature.bodyId })), projectRef.current.sketch.id);
+    if (action.kind === "edit-feature") {
+      const feature = designOf(projectRef.current).features.find((candidate) => candidate.id === action.featureId);
+      if (feature !== undefined) editTimelineFeature(feature);
+      return;
+    }
+    if (action.kind === "open-working" && projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
+  };
 
   /** The ribbon's Remote MCP entry and the Tools menu land here: the Automate workspace, remote recipes in view. */
   const revealRemoteMcp = (): void => {
@@ -3997,7 +4033,7 @@ export function App(): React.JSX.Element {
     />}
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
-      {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} />}
+      {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openContextMenu} onOpenItem={openTreeItem} />}
       {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace displayUnit={unitToShow(project, document.displayUnit)} finishedSketches={finishedSketches} workingTimelineId={designOf(project).editingSketchId} projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={(text) => setStatusText(friendlySketchText(text, [projectRef.current.sketch]))} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => guard(createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams), "Creating the solid")} onChangePlane={() => openSketchPlaneDialog("set")} onDisplayUnit={(unit) => guard(changeUnit(unit), "Changing the unit")} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => guard(finishSketch(), "Finishing the sketch")} onCancelSketch={cancelSketch} onSelectionCount={setSketchSelectionCount} evaluateText={(text) => evaluateTextInDesign(designOf(project), text)} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />

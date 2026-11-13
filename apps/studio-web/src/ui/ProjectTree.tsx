@@ -19,11 +19,13 @@ interface ProjectTreeProps {
   readonly designHealth: DesignHealthReport;
   readonly onSelect: (id: string | null) => void;
   readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null) => void;
+  /** Double-click on a row that can be opened: a timeline step (by the row's ID) or the working sketch. */
+  readonly onOpenItem?: (id: string) => void;
 }
 
 type TreeKind = "project" | "health" | "datum" | "sketch" | "feature" | "body" | "component" | "mate" | "surface" | "drawing" | "electrical" | "vehicle" | "route" | "tool" | "history";
 
-export function ProjectTree({ project, selectedId, revealSelectionRequest, designHealth, onSelect, onContextMenu }: ProjectTreeProps): React.JSX.Element {
+export function ProjectTree({ project, selectedId, revealSelectionRequest, designHealth, onSelect, onContextMenu, onOpenItem }: ProjectTreeProps): React.JSX.Element {
   const treeRef = useRef<HTMLElement>(null);
   const handledRevealRequest = useRef(0);
   // Curves are listed as "Line 3", "Circle 1" (derived, see sketch-names.ts), never by their generated ids.
@@ -92,7 +94,7 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
       {(project.part.constructionPoints ?? []).map((point) => <TreeItem key={point.id} kind="datum" id={point.id} label={point.name} meta={`point · ${point.definition.kind.replaceAll("-", " ")}${point.visible ? "" : " · hidden"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
     </TreeSection>}
     {showSketch && <TreeSection title={`Sketches · ${project.sketch.entities.length} entities · ${sketchProfiles.length} profiles`} badge="preview">
-      <TreeItem kind="sketch" id={project.sketch.id} label={project.sketch.name} meta={`${project.sketch.constraints.length} constraints${workingSketchFullyConstrained ? " · fully constrained" : ""}`} selectedId={selectedId} onSelect={onSelect} {...(workingSketchFullyConstrained ? { trailingIcon: "lock" as const } : {})} />
+      <TreeItem kind="sketch" id={project.sketch.id} label={project.sketch.name} meta={`${project.sketch.constraints.length} constraints${workingSketchFullyConstrained ? " · fully constrained" : ""}`} selectedId={selectedId} onSelect={onSelect} {...(onOpenItem === undefined || project.activeWorkspace === "sketch" ? {} : { onOpen: onOpenItem, openHint: "Double-click to edit this sketch" })} {...(workingSketchFullyConstrained ? { trailingIcon: "lock" as const } : {})} />
       {project.activeWorkspace === "sketch"
         ? <SketchNavigator project={project} sketchProfiles={sketchProfiles} selectedId={selectedId} onSelect={onSelect} />
         : <>
@@ -114,6 +116,7 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
           meta={`${describeFeature(history, feature)}${locked ? " · fully constrained" : ""}${status === "" ? "" : ` · ${status}`}${feature.health === undefined ? "" : ` · ${feature.health.message}`}`}
           selectedId={selectedId}
           onSelect={onSelect}
+          {...(onOpenItem === undefined ? {} : { onOpen: onOpenItem, openHint: feature.kind === "sketch" ? "Double-click to edit this sketch" : "Double-click to edit this step" })}
           {...(locked ? { trailingIcon: "lock" as const } : {})}
         />;
       })}
@@ -276,9 +279,11 @@ function TreeSection({ title, badge, children, initiallyOpen = true }: { readonl
   return <details className="tree-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}><summary><span className="tree-chevron" aria-hidden="true">›</span><strong>{title}</strong><CapabilityBadge level={badge} /></summary><div>{children}</div></details>;
 }
 
-function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean; readonly icon?: string; readonly trailingIcon?: string }): React.JSX.Element {
+function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean; readonly icon?: string; readonly trailingIcon?: string; readonly onOpen?: (id: string) => void; readonly openHint?: string }): React.JSX.Element {
   const selected = props.selectedId === props.id;
-  return <button data-tree-id={props.id} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => props.onSelect(selected ? null : props.id)}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={props.icon ?? treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span>{props.trailingIcon !== undefined && <span className="tree-trailing" aria-label="Fully constrained" title="Fully constrained"><CommandIcon name={props.trailingIcon} /></span>}</button>;
+  // A double-click is two clicks first (select, then deselect); opening selects the row again so it reads as the thing being edited.
+  const open = props.onOpen;
+  return <button data-tree-id={props.id} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => props.onSelect(selected ? null : props.id)} {...(open === undefined ? {} : { onDoubleClick: () => { props.onSelect(props.id); open(props.id); }, "data-opens": "true", title: props.openHint ?? "Double-click to open" })}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={props.icon ?? treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span>{props.trailingIcon !== undefined && <span className="tree-trailing" aria-label="Fully constrained" title="Fully constrained"><CommandIcon name={props.trailingIcon} /></span>}</button>;
 }
 
 /** A sketch is fully constrained when every drawn primitive has a determined pose: the solver reports zero degrees of freedom. An empty sketch is not called "fully constrained" because there is nothing to constrain yet. */
