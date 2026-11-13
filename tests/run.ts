@@ -165,6 +165,7 @@ import { regionWave2Tests } from "./region-wave2.test.js";
 import { regionWave3Tests } from "./region-wave3.test.js";
 import type { TestCase } from "./test-kit.js";
 import { sketchLineRectangleTests } from "./sketch-line-rectangle.test.js";
+import { sketchReferenceLayerTests } from "./sketch-reference-layer.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -352,6 +353,7 @@ const tests: readonly TestCase[] = [
   ...sketchConstraintToolTests,
   ...sketchKeysConstructionProjectTests,
   ...sketchLineRectangleTests,
+  ...sketchReferenceLayerTests,
 ];
 let failures = 0;
 

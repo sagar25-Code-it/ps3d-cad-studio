@@ -102,3 +102,8 @@
 @media (prefers-reduced-motion: reduce) {
   .sketch-stage *, .sketch-palette, .sketch-palette.palette-reveal { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* The model behind the sketch (sketch-reference.ts): dimmed, never interactive. */
+.sketch-entity.reference { stroke: #a898e0; stroke-width: 1.2; stroke-dasharray: none; fill: none; opacity: 0.5; pointer-events: none; }
+.sketch-entity.reference.sketch-point { fill: #a898e0; stroke: none; }
+.sketch-palette .palette-reference-note { display: block; margin: 0.1rem 0 0.3rem; color: #697178; font-size: 12px; line-height: 1.35; }

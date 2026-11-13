@@ -52,6 +52,7 @@ import { convertLengthField, parseLengthField } from "../../../../packages/workb
 import { defaultLengthText, gridStepsForUnit, lengthTextFromDisplay, lengthTextToDisplay } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
 import { WORKING_PATH_SKETCH, chainFromCurve, describePath, pathCurvesOf, pathSketchChoices, pathSketchOf } from "../sweep-path-ui.js";
 import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
+import { describeReferenceLayer, isReferenceId, sketchWithReference, type SketchReferenceLayer } from "../sketch-reference.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
 import { profileSnapRelations, shapeSnapRelations } from "../../../../packages/workbench-sketch/src/shape-snap-relations.js";
 import { typedShapeIntent } from "../../../../packages/workbench-sketch/src/typed-shape-intent.js";
@@ -214,6 +215,8 @@ interface SketchWorkspaceProps {
   readonly optionsRevealRequest: number;
   /** The finished sketches of the timeline: a sweep path may come from one of them (another plane). */
   readonly finishedSketches?: readonly DesignSketchFeature[];
+  /** The model behind the sketch: edges of the visible solids and curves of the other sketches, in this sketch's coordinates. Shown dimmed, snapped to, never stored. */
+  readonly reference?: SketchReferenceLayer;
   /** The timeline id of the sketch being edited, when it was opened from the timeline (it is then not offered as a separate path sketch). */
   readonly workingTimelineId?: string | null;
   readonly onCreateSolid: (
@@ -523,6 +526,10 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [edgeKind, setEdgeKind] = useSketchPref<"none" | "chamfer" | "fillet">("edgeKind", "none");
   const [edgeSize, setEdgeSize] = useSketchPref("edgeSize", "2");
   const [showProfiles, setShowProfiles] = useSketchPref("showProfiles", true);
+  // The model and the other sketches behind this one (see sketch-reference.ts): shown dimmed and used as snap targets only.
+  const [showReference, setShowReference] = useSketchPref("showReference", true);
+  const referenceShown = showReference && props.reference !== undefined && props.reference.entities.length > 0;
+  const snapSketch = useMemo(() => sketchWithReference(props.sketch, props.reference, showReference), [props.sketch, props.reference, showReference]);
   const [showDimensions, setShowDimensions] = useSketchPref("showDimensions", true);
   const [showConstraints, setShowConstraints] = useSketchPref("showConstraints", true);
   const [showComb, setShowComb] = useSketchPref("showComb", false);
@@ -600,10 +607,12 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     return region.ok ? region.value.warnings : [region.diagnostics[0]?.message ?? "These regions cannot be built together."];
   }, [profiles, selectedProfileIds]);
   const fitExtents = useMemo(() => {
-    if (visibleEntities.length === 0) return undefined;
-    const bounds = sketchBounds(visibleEntities);
+    // Fit frames the sketch together with the model shown behind it, so a new sketch on a face opens looking at that face.
+    const framed = referenceShown ? [...visibleEntities, ...(props.reference?.entities ?? [])] : visibleEntities;
+    if (framed.length === 0) return undefined;
+    const bounds = sketchBounds(framed);
     return { min: bounds.min, max: bounds.max };
-  }, [visibleEntities]);
+  }, [visibleEntities, referenceShown, props.reference]);
   const camera = useSketchCamera(fitExtents, `${props.projectId}:${props.sketch.plane}`, props.fitSerial);
   const px = camera.mmPerPx;
   const grid = gridStepsForUnit(props.sketch.gridMm, px, props.displayUnit ?? "mm");
@@ -922,7 +931,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const assistedAt = (point: Vec2, modifiers: SnapModifiers): InferenceResult => assistedInference({
     tool: props.tool,
     pointer: point,
-    sketch: props.sketch,
+    sketch: snapSketch,
     toleranceMm: SNAP_PIXELS * px,
     gridMm: grid.minorMm,
     anchor: anchorFor(props.tool, pending),
@@ -964,7 +973,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       ? assistedAt(point, { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey })
       : { point, snapped: false, guides: [] };
     if (!placing && !commit) updateHoverStack(point);
-    const snapped = { point: result.point, snapped: result.snapped, label: result.primary === undefined ? "" : INFERENCE_LABELS[result.primary.kind].toLowerCase() };
+    const snapped = { point: result.point, snapped: result.snapped, label: result.primary === undefined ? "" : `${INFERENCE_LABELS[result.primary.kind].toLowerCase()}${isReferenceId(result.primary.entityId) ? " of the model behind the sketch, not tied to it" : ""}` };
     setCursor(snapped.point);
     if (props.tool === "arc-center" && pending.length === 2) arcTrack.current = advanceArcSweepTrack(arcTrack.current ?? startArcSweepTrack(pending[0]!, pending[1]!), pending[0]!, snapped.point);
     setInference(placing ? result : undefined);
@@ -1890,7 +1899,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     // Holding Ctrl while dragging a point switches snapping off, and the palette's snap step replaces the grid step.
     const snapping = snapEnabled && !(event.ctrlKey || event.metaKey) && gesture.handle.kind !== "body";
     const snap: InferenceResult | undefined = snapping
-      ? inferSketchPoint(raw, gesture.base, { toleranceMm: SNAP_PIXELS * px, gridMm: assist.snapStepMm ?? grid.minorMm, excludeEntityIds: [gesture.entityId, ...jointNeighbours(gesture.entityId)] })
+      ? inferSketchPoint(raw, sketchWithReference(gesture.base, props.reference, showReference), { toleranceMm: SNAP_PIXELS * px, gridMm: assist.snapStepMm ?? grid.minorMm, excludeEntityIds: [gesture.entityId, ...jointNeighbours(gesture.entityId)] })
       : undefined;
     const target = snap?.point ?? raw;
     setCursor(target);
@@ -2229,6 +2238,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           verticalLabel={planeInfo.verticalLabel}
         />
         {props.sketch.underlay !== undefined && <UnderlayLayer underlay={props.sketch.underlay} />}
+        {referenceShown && <g className="sketch-reference-layer" pointerEvents="none" aria-hidden="true">{props.reference?.entities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} px={px} selected={false} hovered={false} reference />)}</g>}
         {showProfiles && profiles.map((profile) => <SketchProfileShape key={profile.id} profile={profile} selected={selectedProfileIds.includes(profile.id)} {...(interactive ? { onSelect: (additive: boolean) => selectProfile(profile, additive) } : {})} />)}
         {visibleEntities.map((entity) => <SketchEntityShape key={entity.id} entity={entity} name={entityNames.get(entity.id)} px={px} selected={selectionIds.includes(entity.id)} hovered={hoverId === entity.id} related={relatedIds.has(entity.id)} focused={focusedId === entity.id} handleRadiusPx={hitSizes.grabHandlePx} hitRadiusPx={hitSizes.grabHitPx} movable={props.showMovable && movableIds.has(entity.id)} constrained={analysis.entityFreedom[entity.id] === 0} {...(interactive ? { onSelect: (additive: boolean) => selectEntity(entity.id, additive), onHover: (inside: boolean) => setHoverId(inside ? entity.id : null), onGrab: (event: React.PointerEvent, handle: DragHandle) => beginDrag(event, entity.id, handle), onHandlePick: (handle: SketchGrabHandle) => setActiveFit(handle.handle.kind === "fit" ? { entityId: entity.id, index: handle.handle.index } : undefined), handles: grabHandlesOf(entity) } : {})} />)}
         {interactive && activeSpline?.kind === "spline" && activeFit !== undefined && selectionIds.includes(activeSpline.id) && <SplineHandles spline={activeSpline} activeIndex={activeFit.index} px={px} handleRadiusPx={hitSizes.grabHandlePx} hitRadiusPx={hitSizes.grabHitPx} canRemove={activeSpline.fitPoints.length > 3} onGrab={(event, handle) => beginDrag(event, activeSpline.id, handle)} onRemove={() => { removeActiveFitPoint(); }} />}
@@ -2383,6 +2393,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {props.tool === "select" && selectedEntity !== undefined && findTextObject(props.sketch, selectedEntity.id) !== undefined && <button className="palette-action" title="Re-open this text (or double-click it)" onClick={() => startTextEdit(findTextObject(props.sketch, selectedEntity.id)!)}><CommandIcon name="edit" />Edit text</button>}
         <PaletteToggle label="Profiles" active={showProfiles} onToggle={setShowProfiles} />
         <PaletteToggle label="Dimensions" active={showDimensions} onToggle={setShowDimensions} />
+        <PaletteToggle label="Model behind sketch" active={showReference} onToggle={setShowReference} />
+        {showReference && <small className="palette-reference-note">{describeReferenceLayer(props.reference)} Reference only: the pointer snaps to it, nothing is tied to it (use Project for that), and the view stays straight at the sketch plane.</small>}
         <PaletteToggle label="Constraints" active={showConstraints} onToggle={setShowConstraints} />
         {showConstraints && <ConstraintDisplayPanel settings={constraintDisplay} present={constraintKinds} onChange={setConstraintDisplay} />}
         {showDimensions && <details className="palette-dimension-display">
@@ -2866,7 +2878,7 @@ function DirectDimensionPreview({ dimension, px }: { readonly dimension: DirectS
   </g>;
 }
 
-function SketchEntityShape({ entity, name, px, selected, hovered, related = false, focused = false, handleRadiusPx = 5, hitRadiusPx = 10, onSelect, onHover, onGrab, onHandlePick, handles, preview = false, movable = false, constrained = false }: { readonly entity: SketchEntity; /** "Line 3": shown as the tooltip. */ readonly name?: string | undefined; readonly px: number; readonly selected: boolean; readonly hovered: boolean; readonly related?: boolean; readonly focused?: boolean; readonly handleRadiusPx?: number; readonly hitRadiusPx?: number; readonly onSelect?: (additive: boolean) => void; readonly onHover?: (inside: boolean) => void; readonly onGrab?: (event: React.PointerEvent, handle: DragHandle) => void; readonly onHandlePick?: (handle: SketchGrabHandle) => void; readonly handles?: readonly SketchGrabHandle[]; readonly preview?: boolean; readonly movable?: boolean; readonly constrained?: boolean }): React.JSX.Element {
+function SketchEntityShape({ entity, name, px, selected, hovered, related = false, focused = false, handleRadiusPx = 5, hitRadiusPx = 10, onSelect, onHover, onGrab, onHandlePick, handles, preview = false, reference = false, movable = false, constrained = false }: { readonly entity: SketchEntity; /** "Line 3": shown as the tooltip. */ readonly name?: string | undefined; readonly px: number; readonly selected: boolean; readonly hovered: boolean; readonly related?: boolean; readonly focused?: boolean; readonly handleRadiusPx?: number; readonly hitRadiusPx?: number; readonly onSelect?: (additive: boolean) => void; readonly onHover?: (inside: boolean) => void; readonly onGrab?: (event: React.PointerEvent, handle: DragHandle) => void; readonly onHandlePick?: (handle: SketchGrabHandle) => void; readonly handles?: readonly SketchGrabHandle[]; readonly preview?: boolean; /** A curve of the model behind the sketch: dimmed, takes no pointer input and has no selection id. */ readonly reference?: boolean; readonly movable?: boolean; readonly constrained?: boolean }): React.JSX.Element {
   // Fully constrained curves are drawn in a neutral tone and under-constrained ones in the working colour, so what can still move is visible at a glance.
   const className = `sketch-entity ${entity.construction ? "construction" : ""} ${selected ? "selected" : ""} ${hovered && !selected ? "hover" : ""} ${related ? "related" : ""} ${focused ? "kb-focus" : ""} ${preview ? "tool-preview" : ""} ${movable && !selected ? "movable" : ""} ${constrained && !preview && entity.kind !== "point" ? "constrained" : ""}`;
   const geometry = (cls: string, hit: boolean): React.JSX.Element => {
@@ -2878,6 +2890,7 @@ function SketchEntityShape({ entity, name, px, selected, hovered, related = fals
     if (entity.kind === "spline") return <path className={cls} d={sampleSplineToBound(entity.fitPoints).map((point, index) => `${index === 0 ? "M" : "L"} ${point[0]} ${-point[1]}`).join(" ")} />;
     return <path className={cls} d={arcPathData(entity.start, entity.mid, entity.end)} />;
   };
+  if (reference) return <g data-reference-id={entity.id}>{geometry("sketch-entity reference", false)}</g>;
   if (preview || onSelect === undefined) return <g data-selection-id={entity.id}>{geometry(className, false)}</g>;
   return <g
     className="sketch-entity-group"
