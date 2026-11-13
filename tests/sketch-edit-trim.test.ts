@@ -25,7 +25,9 @@ export const sketchEditTrimTests: readonly TestCase[] = [
       clean(trimmed);
       assert(closeTo(endOf(trimmed, "entity:a"), [60, 0]), "line a is cut back to the crossing");
       equal(relationsOf(trimmed, "horizontal").length, 1, "and stays horizontal");
-      equal(relationsOf(trimmed, "coincident").length, 0, "the joint that no longer holds is dropped, not a conflict");
+      const ties = relationsOf(trimmed, "coincident");
+      assert(!ties.some((relation) => relation.id === "constraint:joint"), "the joint that no longer holds is dropped, not a conflict");
+      equal(ties.map((relation) => `${relation.entityIds.join("+")}@${(relation.points ?? []).join("+")}`).join(), "entity:a+entity:x@end+curve", "and the new end is held on the line it was cut against");
       // Extend the joined end of a toward a wall beyond it.
       const extendable = projectWith([line("a", [0, 0], [100, 0]), line("b", [100, 0], [100, 50]), line("wall", [150, -20], [150, 20])], joined);
       const extended = applyOk(extendable, extendAt(ctx(extendable), "entity:a", [99, 0]));

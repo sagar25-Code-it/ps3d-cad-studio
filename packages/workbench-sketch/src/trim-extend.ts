@@ -15,12 +15,15 @@ import {
 } from "./edit-tools.js";
 import { explodeRectangle } from "./corner-tools.js";
 import { splitAt } from "./split-jog.js";
-import { carriedRelations, diffPlan, finishPlan, sketchAfter } from "./edit-relations.js";
+import { carriedRelations, diffPlan, finishPlan, jointRelation, sketchAfter } from "./edit-relations.js";
 
 /**
  * Trim and Extend for lines, arcs, circles, rectangles, ellipses and splines. A relation the edit makes untrue is removed by the plan
  * (never a conflict), the pieces a trim leaves keep the relations of the curve they came from, and a rectangle is a set of lines for
  * the purpose of trimming. Power Trim cuts everything a dragged path crosses in one edit.
+ *
+ * Each new end a trim makes on a line, arc or circle is tied to the curve it was cut against: joined to that curve's own end when the
+ * cut lands on it, otherwise held on the curve (point on curve). So the pieces of a trimmed outline stay together when one is dragged.
  */
 
 type Line = Extract<SketchEntity, { kind: "line" }>;
@@ -52,11 +55,68 @@ function boundariesOf(sketch: WorkbenchSketch, excludeId: string): readonly Curv
   return sketch.entities.filter((entity) => entity.id !== excludeId && entity.visible !== false && entity.kind !== "point").flatMap(curvesOf);
 }
 
+/** A boundary curve with the entity it belongs to, so a cut can be tied to what it was cut against. */
+interface Boundary {
+  readonly entityId: string;
+  readonly curve: Curve;
+}
+
+function boundaryList(sketch: WorkbenchSketch, excludeId: string): readonly Boundary[] {
+  return sketch.entities.filter((entity) => entity.id !== excludeId && entity.visible !== false && entity.kind !== "point").flatMap((entity) => curvesOf(entity).map((curve) => ({ entityId: entity.id, curve })));
+}
+
+/** A crossing on the curve being trimmed: where along it (a line parameter or an angle) and which curve made it. */
+interface Crossing {
+  readonly at: number;
+  readonly boundaryId: string;
+}
+
+/** A new end made by a trim: which piece owns it, which of its ends it is, where it is, and the curve it was cut against. */
+interface NewEnd {
+  readonly pieceId: string;
+  readonly ref: "start" | "end";
+  readonly point: Vec2;
+  readonly boundaryId: string;
+}
+
+const JOIN_MM = 1e-6;
+
+/**
+ * The relations that tie the new ends to the curves they were cut against. A cut that lands on the other curve's own end joins the two
+ * points; any other cut on a line, circle, arc or ellipse holds the new end on that curve. A rectangle or a spline cannot hold a point
+ * yet, so a cut against one leaves the end free. `replaced` lists existing point-on-curve relations (the other curve's end held on the
+ * trimmed curve) that a new joint at the same place makes redundant.
+ */
+function tieNewEnds(context: SketchEditContext, sketch: WorkbenchSketch, targetId: string, ends: readonly NewEnd[]): { readonly add: readonly WorkbenchSketchConstraint[]; readonly replaced: readonly WorkbenchSketchConstraint[] } {
+  const add: WorkbenchSketchConstraint[] = [];
+  const replaced: WorkbenchSketchConstraint[] = [];
+  for (const end of ends) {
+    const boundary = sketch.entities.find((entity) => entity.id === end.boundaryId);
+    if (boundary === undefined) continue;
+    const ownEnd: "start" | "end" | undefined = boundary.kind === "line" || boundary.kind === "arc"
+      ? (dist(boundary.start, end.point) <= JOIN_MM ? "start" : dist(boundary.end, end.point) <= JOIN_MM ? "end" : undefined)
+      : undefined;
+    if (ownEnd !== undefined) {
+      add.push(jointRelation(context, end.pieceId, end.ref, boundary.id, ownEnd));
+      for (const constraint of sketch.constraints) {
+        if (constraint.kind !== "coincident" || constraint.entityIds.length !== 2) continue;
+        const index = constraint.entityIds.indexOf(boundary.id);
+        if (index < 0 || constraint.points?.[index] !== ownEnd) continue;
+        if (constraint.entityIds[1 - index] === targetId && constraint.points?.[1 - index] === "curve") replaced.push(constraint);
+      }
+    } else if (boundary.kind === "line" || boundary.kind === "circle" || boundary.kind === "arc" || boundary.kind === "ellipse") {
+      add.push({ id: context.newId("constraint"), kind: "coincident", entityIds: [end.pieceId, boundary.id], points: [end.ref, "curve"] });
+    }
+  }
+  return { add, replaced };
+}
+
 /** Joints at one end of a curve (`ref`), re-pointed at a new piece that now owns that end. */
 function carriedJoints(context: SketchEditContext, sketch: WorkbenchSketch, fromId: string, toId: string, ref: "start" | "end"): readonly WorkbenchSketchConstraint[] {
   const carried: WorkbenchSketchConstraint[] = [];
   for (const constraint of sketch.constraints) {
-    if (constraint.kind !== "coincident" || constraint.suppressed === true) continue;
+    const levelPoints = (constraint.kind === "horizontal" || constraint.kind === "vertical") && constraint.entityIds.length === 2;
+    if ((constraint.kind !== "coincident" && !levelPoints) || constraint.suppressed === true) continue;
     const index = constraint.entityIds.indexOf(fromId);
     if (index < 0 || constraint.points?.[index] !== ref) continue;
     carried.push({ ...constraint, id: context.newId("constraint"), entityIds: constraint.entityIds.map((id) => (id === fromId ? toId : id)) });
@@ -69,7 +129,7 @@ function carriedRoundRelations(context: SketchEditContext, sketch: WorkbenchSket
   return sketch.constraints
     .filter((constraint) => constraint.suppressed !== true && constraint.driven !== true && constraint.entityIds.includes(fromId))
     .filter((constraint) => constraint.kind === "radius" || constraint.kind === "concentric" || constraint.kind === "equal" || constraint.kind === "tangent"
-      || (constraint.kind === "coincident" && (constraint.points ?? []).every((ref, index) => constraint.entityIds[index] !== fromId || ref === "center")))
+      || (constraint.kind === "coincident" && (constraint.points ?? []).every((ref, index) => constraint.entityIds[index] !== fromId || ref === "center" || ref === "curve")))
     .map((constraint): WorkbenchSketchConstraint => ({ ...constraint, id: context.newId("constraint"), entityIds: constraint.entityIds.map((id) => (id === fromId ? toId : id)) }));
 }
 
@@ -89,10 +149,12 @@ function trimLine(context: SketchEditContext, target: Line, pick: Vec2): SketchE
   const sketch = context.sketch;
   const direction: Vec2 = [target.end[0] - target.start[0], target.end[1] - target.start[1]];
   const length = Math.hypot(direction[0], direction[1]);
-  const hits = boundariesOf(sketch, target.id).flatMap((curve) => lineHits(target.start, target.end, curve)).filter((t) => t > 1e-6 && t < 1 - 1e-6).sort((a, b) => a - b);
+  const crossings: readonly Crossing[] = boundaryList(sketch, target.id).flatMap((boundary) => lineHits(target.start, target.end, boundary.curve).map((at) => ({ at, boundaryId: boundary.entityId }))).filter((hit) => hit.at > 1e-6 && hit.at < 1 - 1e-6).sort((a, b) => a.at - b.at);
   const pickT = clamp(((pick[0] - target.start[0]) * direction[0] + (pick[1] - target.start[1]) * direction[1]) / (length * length), 0, 1);
-  let lower = [...hits].reverse().find((t) => t <= pickT) ?? 0;
-  let upper = hits.find((t) => t >= pickT) ?? 1;
+  const lowerHit = [...crossings].reverse().find((hit) => hit.at <= pickT);
+  const upperHit = crossings.find((hit) => hit.at >= pickT);
+  let lower = lowerHit?.at ?? 0;
+  let upper = upperHit?.at ?? 1;
   if (lower === 0 && upper === 1) return rawPlan("Trim (deleted the whole line: nothing crosses it)", { removeEntityIds: [target.id] });
   // A leftover shorter than the model minimum is a sliver of the same cut, not a piece worth keeping.
   if (lower * length < MIN_PIECE_MM) lower = 0;
@@ -102,39 +164,63 @@ function trimLine(context: SketchEditContext, target: Line, pick: Vec2): SketchE
   const updates: Line[] = [];
   const additions: Line[] = [];
   const constraints: WorkbenchSketchConstraint[] = [];
-  if (lower > 0) updates.push({ ...target, end: at(lower) });
+  const ends: NewEnd[] = [];
+  if (lower > 0) {
+    updates.push({ ...target, end: at(lower) });
+    if (lowerHit !== undefined) ends.push({ pieceId: target.id, ref: "end", point: at(lower), boundaryId: lowerHit.boundaryId });
+  }
   if (upper < 1) {
+    let ownerId = target.id;
     if (lower > 0) {
       const second: Line = { ...target, id: context.newId("entity"), start: at(upper) };
       additions.push(second);
+      ownerId = second.id;
       constraints.push(...carriedRelations(context, sketch, target.id, second.id), ...carriedJoints(context, sketch, target.id, second.id, "end"));
     } else updates.push({ ...target, start: at(upper) });
+    if (upperHit !== undefined) ends.push({ pieceId: ownerId, ref: "start", point: at(upper), boundaryId: upperHit.boundaryId });
   }
-  return rawPlan("Trim line", { updateEntities: updates, addEntities: additions, addConstraints: constraints });
+  const ties = tieNewEnds(context, sketch, target.id, ends);
+  return tiedPlan("Trim line", { updateEntities: updates, addEntities: additions, addConstraints: [...constraints, ...ties.add] }, ties.replaced);
+}
+
+/** A raw plan that also removes the point-on-curve relations a new joint replaces. */
+function tiedPlan(label: string, parts: Partial<Omit<SketchEditPlan, "label">>, replaced: readonly WorkbenchSketchConstraint[]): SketchEditResult {
+  const plan = rawPlan(label, parts);
+  if (!plan.ok || replaced.length === 0) return plan;
+  return { ok: true, value: { ...plan.value, removeConstraintIds: [...new Set(replaced.map((constraint) => constraint.id))] } };
 }
 
 function trimCircle(context: SketchEditContext, target: Circle, pick: Vec2): SketchEditResult {
-  const boundaries = boundariesOf(context.sketch, target.id);
-  const angles = boundaries.flatMap((curve) => circleHits(target.center, target.radiusMm, curve)).map(wrapTwoPi).sort((a, b) => a - b);
-  const unique = angles.filter((angle, index) => index === 0 || angle - angles[index - 1]! > 1e-6);
+  const crossings: readonly Crossing[] = boundaryList(context.sketch, target.id).flatMap((boundary) => circleHits(target.center, target.radiusMm, boundary.curve).map((angle) => ({ at: wrapTwoPi(angle), boundaryId: boundary.entityId }))).sort((a, b) => a.at - b.at);
+  const unique = crossings.filter((hit, index) => index === 0 || hit.at - crossings[index - 1]!.at > 1e-6);
   if (unique.length < 2) return reject(unique.length === 0 ? "Nothing crosses this circle, so there is nothing to trim against." : "A circle needs at least two crossings to trim an arc out of it.", [target.id]);
   const pickAngle = wrapTwoPi(Math.atan2(pick[1] - target.center[1], pick[0] - target.center[0]));
-  const before = [...unique].reverse().find((angle) => angle <= pickAngle) ?? unique[unique.length - 1]!;
-  const after = unique.find((angle) => angle > pickAngle) ?? unique[0]!;
+  const before = [...unique].reverse().find((hit) => hit.at <= pickAngle) ?? unique[unique.length - 1]!;
+  const after = unique.find((hit) => hit.at > pickAngle) ?? unique[0]!;
   // Keep the arc from `after` counter-clockwise round to `before`.
-  const kept = arcOnCircle(target, context.newId("entity"), target.center, target.radiusMm, after, wrapTwoPi(before - after), false);
-  return rawPlan("Trim circle into an arc", { removeEntityIds: [target.id], addEntities: [kept], addConstraints: [...carriedRoundRelations(context, context.sketch, target.id, kept.id)] });
+  const kept = arcOnCircle(target, context.newId("entity"), target.center, target.radiusMm, after.at, wrapTwoPi(before.at - after.at), false);
+  const ties = tieNewEnds(context, context.sketch, target.id, [
+    { pieceId: kept.id, ref: "start", point: kept.start, boundaryId: after.boundaryId },
+    { pieceId: kept.id, ref: "end", point: kept.end, boundaryId: before.boundaryId }
+  ]);
+  // A point that was held on the circle and is now joined to an end of the arc needs no second relation.
+  const replaced = new Set(ties.replaced.map((constraint) => constraint.id));
+  const carried = context.sketch.constraints.some((constraint) => replaced.has(constraint.id))
+    ? carriedRoundRelations(context, { ...context.sketch, constraints: context.sketch.constraints.filter((constraint) => !replaced.has(constraint.id)) }, target.id, kept.id)
+    : carriedRoundRelations(context, context.sketch, target.id, kept.id);
+  return rawPlan("Trim circle into an arc", { removeEntityIds: [target.id], addEntities: [kept], addConstraints: [...carried, ...ties.add] });
 }
 
 function trimArc(context: SketchEditContext, target: Arc, pick: Vec2): SketchEditResult {
   const frame = arcFrame(target);
   if (frame === undefined) return reject("The arc is degenerate.", [target.id]);
-  const boundaries = boundariesOf(context.sketch, target.id);
-  const offsets = boundaries.flatMap((curve) => circleHits(frame.center, frame.radius, curve)).map((angle) => wrapTwoPi(angle - frame.startAngle)).filter((offset) => offset > 1e-6 && offset < frame.sweep - 1e-6).sort((a, b) => a - b);
+  const crossings: readonly Crossing[] = boundaryList(context.sketch, target.id).flatMap((boundary) => circleHits(frame.center, frame.radius, boundary.curve).map((angle) => ({ at: wrapTwoPi(angle - frame.startAngle), boundaryId: boundary.entityId }))).filter((hit) => hit.at > 1e-6 && hit.at < frame.sweep - 1e-6).sort((a, b) => a.at - b.at);
   const pickOffset = wrapTwoPi(Math.atan2(pick[1] - frame.center[1], pick[0] - frame.center[0]) - frame.startAngle);
   const pickClamped = pickOffset > frame.sweep ? (pickOffset - frame.sweep < TWO_PI - pickOffset ? frame.sweep : 0) : pickOffset;
-  let lower = [...offsets].reverse().find((offset) => offset <= pickClamped) ?? 0;
-  let upper = offsets.find((offset) => offset >= pickClamped) ?? frame.sweep;
+  const lowerHit = [...crossings].reverse().find((hit) => hit.at <= pickClamped);
+  const upperHit = crossings.find((hit) => hit.at >= pickClamped);
+  let lower = lowerHit?.at ?? 0;
+  let upper = upperHit?.at ?? frame.sweep;
   if (lower === 0 && upper === frame.sweep) return rawPlan("Trim (deleted the whole arc: nothing crosses it)", { removeEntityIds: [target.id] });
   if (lower * frame.radius < MIN_PIECE_MM) lower = 0;
   if ((frame.sweep - upper) * frame.radius < MIN_PIECE_MM) upper = frame.sweep;
@@ -142,15 +228,26 @@ function trimArc(context: SketchEditContext, target: Arc, pick: Vec2): SketchEdi
   const additions: Arc[] = [];
   const updates: Arc[] = [];
   const constraints: WorkbenchSketchConstraint[] = [];
-  if (lower > 0) updates.push(arcOnCircle(target, target.id, frame.center, frame.radius, frame.startAngle, lower, frame.clockwise));
+  const ends: NewEnd[] = [];
+  // In counter-clockwise terms a piece runs from its low angle to its high angle; a clockwise arc stores those the other way round.
+  const lowRef: "start" | "end" = frame.clockwise ? "end" : "start";
+  const highRef: "start" | "end" = frame.clockwise ? "start" : "end";
+  if (lower > 0) {
+    const first = arcOnCircle(target, target.id, frame.center, frame.radius, frame.startAngle, lower, frame.clockwise);
+    updates.push(first);
+    if (lowerHit !== undefined) ends.push({ pieceId: first.id, ref: highRef, point: first[highRef], boundaryId: lowerHit.boundaryId });
+  }
   if (upper < frame.sweep) {
     const second = arcOnCircle(target, lower > 0 ? context.newId("entity") : target.id, frame.center, frame.radius, frame.startAngle + upper, frame.sweep - upper, frame.clockwise);
     if (lower > 0) {
       additions.push(second);
-      constraints.push(...carriedRoundRelations(context, context.sketch, target.id, second.id), ...carriedJoints(context, context.sketch, target.id, second.id, "end"));
+      // The far end of the arc (its high-angle end) now belongs to the second piece, with whatever was joined there.
+      constraints.push(...carriedRoundRelations(context, context.sketch, target.id, second.id), ...carriedJoints(context, context.sketch, target.id, second.id, highRef));
     } else updates.push(second);
+    if (upperHit !== undefined) ends.push({ pieceId: second.id, ref: lowRef, point: second[lowRef], boundaryId: upperHit.boundaryId });
   }
-  return rawPlan("Trim arc", { updateEntities: updates, addEntities: additions, addConstraints: constraints });
+  const ties = tieNewEnds(context, context.sketch, target.id, ends);
+  return tiedPlan("Trim arc", { updateEntities: updates, addEntities: additions, addConstraints: [...constraints, ...ties.add] }, ties.replaced);
 }
 
 /** Parameter values (0 to 2 pi) where an ellipse meets the boundary curves, found by sign changes along the ellipse and bisection. */

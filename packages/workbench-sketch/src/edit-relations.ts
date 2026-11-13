@@ -482,7 +482,8 @@ export function carriedRelations(
   kinds: readonly WorkbenchSketchConstraint["kind"][] = ["horizontal", "vertical", "parallel", "perpendicular", "collinear"]
 ): readonly WorkbenchSketchConstraint[] {
   return sketch.constraints
-    .filter((constraint) => constraint.suppressed !== true && kinds.includes(constraint.kind) && constraint.entityIds.includes(fromId))
+    // Horizontal or Vertical between two points names an end of the curve, not its direction: it follows that end (see carriedJoints in trim-extend.ts).
+    .filter((constraint) => constraint.suppressed !== true && kinds.includes(constraint.kind) && constraint.entityIds.includes(fromId) && !((constraint.kind === "horizontal" || constraint.kind === "vertical") && constraint.entityIds.length === 2))
     .map((constraint): WorkbenchSketchConstraint => ({ ...constraint, id: context.newId("constraint"), entityIds: constraint.entityIds.map((id) => (id === fromId ? toId : id)) }));
 }
 
