@@ -133,6 +133,13 @@ export function constraintHolds(sketch: Pick<WorkbenchSketch, "entities"> & Part
     if (constraint.valueMm === undefined) return true;
     return Math.abs(measured - constraint.valueMm) <= HOLD_TOLERANCE_MM * Math.max(1, Math.abs(constraint.valueMm));
   }
+  if ((constraint.kind === "horizontal" || constraint.kind === "vertical") && constraint.entityIds.length === 2) {
+    // Two points level with each other (Horizontal) or in line (Vertical).
+    const a = first === undefined ? undefined : pointOfEntity(first, constraint.points?.[0] ?? "self");
+    const b = second === undefined ? undefined : pointOfEntity(second, constraint.points?.[1] ?? "self");
+    if (a === undefined || b === undefined) return true;
+    return Math.abs(constraint.kind === "horizontal" ? b[1] - a[1] : b[0] - a[0]) <= HOLD_TOLERANCE_MM;
+  }
   switch (constraint.kind) {
     case "horizontal": return first?.kind !== "line" || Math.abs(first.end[1] - first.start[1]) <= HOLD_TOLERANCE_MM;
     case "vertical": return first?.kind !== "line" || Math.abs(first.end[0] - first.start[0]) <= HOLD_TOLERANCE_MM;

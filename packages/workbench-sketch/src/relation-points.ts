@@ -1,4 +1,4 @@
-import { SOLVABLE_POINT_REFS, type SketchEntity, type SketchPointRef, type Vec2 } from "../../workbench-core/src/index.js";
+import { SKETCH_ORIGIN_ID, SOLVABLE_POINT_REFS, type SketchEntity, type SketchPointRef, type Vec2 } from "../../workbench-core/src/index.js";
 import { entityPoints } from "./index.js";
 
 /** A point of a curve that the canvas offers when a Coincident or Midpoint relation is being picked. */
@@ -9,6 +9,9 @@ export interface RelationPoint {
   readonly point: Vec2;
   readonly label: string;
 }
+
+/** The sketch origin as a point to pick: a hole centre can be put level with it, or a point joined to it. */
+export const ORIGIN_RELATION_POINT: RelationPoint = { id: `relation-point:${SKETCH_ORIGIN_ID}:self`, entityId: SKETCH_ORIGIN_ID, ref: "self", point: [0, 0], label: "Sketch origin" };
 
 function centreOf(start: Vec2, mid: Vec2, end: Vec2): Vec2 | undefined {
   const d = 2 * (start[0] * (mid[1] - end[1]) + mid[0] * (end[1] - start[1]) + end[0] * (start[1] - mid[1]));

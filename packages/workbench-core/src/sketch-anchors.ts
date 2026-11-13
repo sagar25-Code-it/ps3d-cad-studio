@@ -58,6 +58,8 @@ export function anchorsForConstraint(constraint: WorkbenchSketchConstraint, enti
   switch (constraint.kind) {
     case "horizontal":
     case "vertical":
+      // Two points: the first pick stays and the second curve is carried level with it (or in line with it).
+      if (ids.length === 2) return [hold(first!), ...carry(entities, second!, points[1] ?? "self")];
       return kindOf(first) === "rectangle" ? [keep(first!, "center", 1)] : [keep(first!, "start")];
     case "parallel":
     case "perpendicular":
@@ -103,7 +105,7 @@ export function preserveForConstraint(constraint: WorkbenchSketchConstraint, ent
   // The refracted line keeps its length while it is bent and carried.
   if (constraint.kind === "refraction" && second !== undefined && entities.get(second)?.kind === "line") return [second];
   // A line turned horizontal or vertical keeps its length: a relation that only asks for a direction does not shorten the line.
-  if ((constraint.kind === "horizontal" || constraint.kind === "vertical") && first !== undefined && entities.get(first)?.kind === "line") return [first];
+  if ((constraint.kind === "horizontal" || constraint.kind === "vertical") && constraint.entityIds.length === 1 && first !== undefined && entities.get(first)?.kind === "line") return [first];
   // The line turned to an angle with a sketch axis keeps its length.
   if (constraint.kind === "angle" && constraint.driven !== true && first !== undefined && second !== undefined && isSketchDatumEntityId(second) && entities.get(first)?.kind === "line") return [first];
   if (second === undefined || entities.get(second)?.kind !== "line") return [];

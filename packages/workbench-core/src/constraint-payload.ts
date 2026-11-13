@@ -85,7 +85,8 @@ export function sketchConstraintPayloadProblem(value: unknown): EnvelopeProblem 
     if (points.length < 1 || points.length > entityIds.length || unknownPoint !== undefined) {
       return bad(unknownPoint !== undefined ? `names the point ${shown(unknownPoint)}, which is not one of ${SKETCH_POINT_REFS.join(", ")}.` : `needs between 1 and ${entityIds.length} point names, but has ${points.length}.`);
     }
-    if (kind !== "coincident" && kind !== "midpoint" && kind !== "smooth" && kind !== "fixed" && kind !== "distance") return bad(`is a ${kind} relation, which does not name points.`);
+    if (kind !== "coincident" && kind !== "midpoint" && kind !== "smooth" && kind !== "fixed" && kind !== "distance" && kind !== "horizontal" && kind !== "vertical") return bad(`is a ${kind} relation, which does not name points.`);
+    if ((kind === "horizontal" || kind === "vertical") && (points.length !== 2 || entityIds.length !== 2 || points.includes("curve"))) return bad(`is a ${kind} relation between two points, which needs two curves and one point of each in points.`);
   }
   if (has("pierce")) {
     const pierce = value.pierce;

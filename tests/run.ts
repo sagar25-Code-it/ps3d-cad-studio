@@ -153,6 +153,7 @@ import { layoutWindowSizeTests } from "./layout-window-size.test.js";
 import { sketchEntryPointTests } from "./sketch-entry-points.test.js";
 import { sketchCircleDiameterTests } from "./sketch-circle-diameter.test.js";
 import { sketchRectangleLevelTests } from "./sketch-rectangle-level.test.js";
+import { sketchLevelPointsTests } from "./sketch-level-points.test.js";
 import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import { regionWave3Tests } from "./region-wave3.test.js";
@@ -336,6 +337,7 @@ const tests: readonly TestCase[] = [
   ...sketchEntryPointTests,
   ...sketchCircleDiameterTests,
   ...sketchRectangleLevelTests,
+  ...sketchLevelPointsTests,
 ];
 let failures = 0;
 

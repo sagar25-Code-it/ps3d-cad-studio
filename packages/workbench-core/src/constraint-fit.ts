@@ -138,6 +138,11 @@ export function constraintFit(kind: SketchConstraintKind, kinds: readonly (Sketc
     }
     case "pierce":
       return kinds.length === 1 && first === "point" ? FITS : no("Pierce puts one sketch point where an axis or edge crosses the sketch plane.");
+    case "horizontal":
+    case "vertical":
+      // Two points level with each other (Horizontal) or one above the other (Vertical); the origin can be one of them.
+      if (kinds.length === 2) return levelPointsFit(kind, kinds as readonly SketchEntityKind[], points);
+      break;
     case "refraction":
       return kinds.length === 3 && kinds.every((entry) => entry === "line") ? FITS : no("Refraction needs the incident line, the refracted line and the interface line.");
     default:
@@ -150,7 +155,7 @@ export function constraintFit(kind: SketchConstraintKind, kinds: readonly (Sketc
   switch (kind) {
     case "horizontal":
     case "vertical":
-      return kinds.length === 1 && (first === "line" || first === "rectangle") ? FITS : no(`${kind === "horizontal" ? "Horizontal" : "Vertical"} applies to one line or rectangle.`);
+      return kinds.length === 1 && (first === "line" || first === "rectangle") ? FITS : no(`${kind === "horizontal" ? "Horizontal" : "Vertical"} applies to one line or rectangle, or to two points.`);
     case "parallel":
     case "perpendicular":
     case "collinear":
@@ -175,6 +180,17 @@ export function constraintFit(kind: SketchConstraintKind, kinds: readonly (Sketc
     default:
       return no("This relation is not supported.");
   }
+}
+
+function levelPointsFit(kind: "horizontal" | "vertical", kinds: readonly SketchEntityKind[], points: readonly SketchPointRef[] | undefined): ConstraintFit {
+  const name = kind === "horizontal" ? "Horizontal" : "Vertical";
+  if (points === undefined || points.length !== 2) return no(`${name} between two curves needs a point on each; pick the two points on the canvas.`);
+  if (kinds[0] === "origin" && kinds[1] === "origin") return no("The origin cannot be lined up with itself.");
+  for (let index = 0; index < 2; index += 1) {
+    const fit = pointOk(kinds[index]!, points[index]);
+    if (!fit.ok) return fit;
+  }
+  return FITS;
 }
 
 function distanceFit(kinds: readonly SketchEntityKind[], points: readonly SketchPointRef[] | undefined, dimension: SketchDimensionName | undefined): ConstraintFit {

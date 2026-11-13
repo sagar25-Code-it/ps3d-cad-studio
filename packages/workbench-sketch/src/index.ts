@@ -192,7 +192,7 @@ export function analyzeWorkbenchSketch(sketch: WorkbenchSketch): SketchAnalysis 
       const fit = constraintFit(constraint.kind, kinds, constraint.points, { driven: constraint.driven === true, ...(constraint.dimension === undefined ? {} : { dimension: constraint.dimension }) });
       if (!fit.ok) conflicts.push(`${describeConstraint(constraint, names)} cannot apply: ${fit.reason}`);
     }
-    if (constraint.kind === "horizontal" || constraint.kind === "vertical") {
+    if ((constraint.kind === "horizontal" || constraint.kind === "vertical") && constraint.entityIds.length === 1) {
       const id = constraint.entityIds[0]!;
       const set = orientations.get(id) ?? new Set<string>();
       set.add(constraint.kind);

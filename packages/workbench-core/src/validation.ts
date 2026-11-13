@@ -333,9 +333,11 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   if (hasPoints) {
     // Only point-level relations name defining points, and each name must be a known point reference.
     const points = value.points;
-    if ((value.kind !== "coincident" && value.kind !== "midpoint" && value.kind !== "smooth" && value.kind !== "fixed" && value.kind !== "distance") || !Array.isArray(points) || points.length < 1 || points.length > value.entityIds.length
+    if ((value.kind !== "coincident" && value.kind !== "midpoint" && value.kind !== "smooth" && value.kind !== "fixed" && value.kind !== "distance" && value.kind !== "horizontal" && value.kind !== "vertical") || !Array.isArray(points) || points.length < 1 || points.length > value.entityIds.length
       || points.some((point) => !(SKETCH_POINT_REFS as readonly unknown[]).includes(point))) return false;
     if (value.kind === "smooth" && (points.length !== 2 || points.some((point) => point !== "start" && point !== "end"))) return false;
+    // Horizontal or Vertical names points only in its two-point form: one point on each of two curves.
+    if ((value.kind === "horizontal" || value.kind === "vertical") && (points.length !== 2 || value.entityIds.length !== 2 || points.includes("curve"))) return false;
   }
   if (value.kind === "smooth" && (!hasPoints || value.entityIds.length !== 2)) return false;
   if (hasPierce) {

@@ -58,7 +58,8 @@ import { autoConstraintsFor, bornConstraintsFor, dropConstraintFor, inheritedTan
 import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle } from "../../../../packages/workbench-sketch/src/drag.js";
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, POLYGON_MODES, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
-import { relationPointsOf, type RelationPoint } from "../../../../packages/workbench-sketch/src/relation-points.js";
+import { ORIGIN_RELATION_POINT, relationPointsOf, type RelationPoint } from "../../../../packages/workbench-sketch/src/relation-points.js";
+import { CONSTRAINT_TOOL_INFO, constraintToolStep, type ConstraintToolKind, type ConstraintToolPick } from "../../../../packages/workbench-sketch/src/constraint-tool.js";
 import { POLYGON_MODE_LABELS, buildPolygonByMode, parsePolygonMode, polygonCentreRelations } from "../../../../packages/workbench-sketch/src/polygon-modes.js";
 import { buildControlPointSpline, buildCurveTool, isFixedCurveTool } from "../../../../packages/workbench-sketch/src/curve-tools.js";
 import { extendProfileChain, startProfileChain, type ProfileChain } from "../../../../packages/workbench-sketch/src/blend-profile.js";
@@ -156,6 +157,14 @@ const PLANE_INFO: Readonly<Record<PlaneKey, { readonly name: string; readonly ho
 
 /** The Right (YZ) plane of a Z-up sketch: horizontal along world +Y, vertical along +Z (plane-convention.ts). Older sketches keep PLANE_INFO.yz. */
 const PLANE_INFO_YZ_ZUP: (typeof PLANE_INFO)["yz"] = { name: "Right (YZ)", horizontal: "y", vertical: "z", horizontalLabel: "Y", verticalLabel: "Z" };
+
+/** The relations that are picked point by point on the canvas, offered in the inspector. */
+const POINT_RELATION_TOOLS: readonly { readonly tool: ConstraintToolKind; readonly label: string; readonly title: string }[] = [
+  { tool: "coincident", label: "Coincident", title: "Join two points, or put a point on a curve: pick one, then the point that should move onto it." },
+  { tool: "midpoint", label: "Midpoint", title: "Put a point at the middle of a line: pick the point, then the line." },
+  { tool: "horizontal", label: "Level points", title: "Horizontal between two points: pick the point that stays, then the point to put level with it. A click on a line makes the line level." },
+  { tool: "vertical", label: "Stack points", title: "Vertical between two points: pick the point that stays, then the point to put straight above or below it. A click on a line makes the line upright." }
+];
 
 function planeKeyOf(plane: SketchDatumPlane): PlaneKey {
   return plane === "datum:xz" ? "xz" : plane === "datum:yz" ? "yz" : "xy";
@@ -320,8 +329,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [textEditId, setTextEditId] = useState<string | null>(null);
   const [underlayPick, setUnderlayPick] = useState<UnderlayPickState>({ active: false, points: [] });
   const [pendingInference, setPendingInference] = useState<readonly PlacedPointInference[]>([]);
-  // Picking the points of a Coincident or Midpoint relation on the canvas.
-  const [pickRelation, setPickRelation] = useState<"coincident" | "midpoint" | null>(null);
+  // A constraint tool: the relation is chosen first, then its points and curves are picked on the canvas. It stays on until Esc.
+  const [pickRelation, setPickRelation] = useState<ConstraintToolKind | null>(null);
   // Rotate, Scale and a circular Pattern: the centre can be clicked on the canvas (the panels hold the fields, this holds the pick).
   const centrePick = useCentrePickState(String(props.editTool));
   // Trim: what a click on the curve under the pointer would remove, drawn as a highlight (see trim-preview.ts).
@@ -330,7 +339,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   useEffect(() => { if (props.editTool !== "trim") { setTrimHover(undefined); lastTrimPick.current = undefined; } }, [props.editTool]);
   useEffect(() => { lastTrimPick.current = undefined; }, [props.sketch]);
   useEffect(() => { if (centrePick.picking) props.onMessage("Click the centre on the canvas; it snaps to endpoints, centres and the origin (hold Ctrl to place it freely). Esc cancels."); }, [centrePick.picking]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [pickedPoint, setPickedPoint] = useState<RelationPoint | undefined>(undefined);
+  const [toolPicks, setToolPicks] = useState<readonly ConstraintToolPick[]>([]);
   // The in-place value editor for a driving dimension (opened from Sketch Dimension, or by clicking a dimension's text).
   const [dimensionEdit, setDimensionEdit] = useState<DimensionEditState | undefined>(undefined);
   const [dimensionText, setDimensionText] = useState("");
@@ -850,7 +859,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   }, [props.sketch.entities]);
   // Starting a drawing tool, Sketch Dimension or an edit tool ends relation picking; switching to Select (which picking itself does) does not.
   useEffect(() => {
-    if (props.tool !== "select" || props.dimensionMode || props.editTool !== null) { setPickRelation(null); setPickedPoint(undefined); }
+    if (props.tool !== "select" || props.dimensionMode || props.editTool !== null) { setPickRelation(null); setToolPicks([]); }
   }, [props.tool, props.dimensionMode, props.editTool]);
   useEffect(() => { setFieldText({}); }, [props.tool, props.cancelVersion, pending.length]);
   // A new tool says what its first click means, and that the point can be typed instead.
@@ -1356,52 +1365,35 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setDimensionEdit(undefined);
   };
 
-  /** Second step of Midpoint: the line the first point should sit at the middle of. */
-  const completeMidpoint = (lineId: string): void => {
-    const first = pickedPoint;
-    if (first === undefined) return;
-    const line = props.sketch.entities.find((entity) => entity.id === lineId);
-    if (line === undefined || line.kind !== "line") { props.onMessage("Midpoint needs a line: click the line the point should sit in the middle of."); return; }
-    if (line.id === first.entityId) { props.onMessage("A line's own point cannot be the middle of that same line. Click another line."); return; }
-    props.onAddConstraint({ id: `constraint:user-${crypto.randomUUID()}`, kind: "midpoint", entityIds: [first.entityId, line.id], points: [first.ref] });
-    setPickedPoint(undefined);
-    setPickRelation(null);
-  };
-
-  /** A click on one of the relation handles: the first pick is remembered, the second completes a Coincident. */
-  const pickRelationPoint = (picked: RelationPoint): void => {
+  /**
+   * One pick for the active constraint tool: a curve that was clicked, or one of the blue point squares. The pure step function decides
+   * whether the relation is complete; a complete one is added and the tool stays on for the next.
+   */
+  const takeToolPick = (next: ConstraintToolPick): void => {
     if (pickRelation === null) return;
-    const first = pickedPoint;
-    if (first === undefined || first.id === picked.id) {
-      setPickedPoint(first?.id === picked.id ? undefined : picked);
-      props.onMessage(first?.id === picked.id
-        ? "Point cleared. Pick a point to start the relation."
-        : pickRelation === "coincident" ? `${picked.label} picked. Now pick the point that should move onto it.` : `${picked.label} picked. Now click the line it should sit in the middle of.`);
-      return;
-    }
-    if (pickRelation === "midpoint") {
-      setPickedPoint(picked);
-      props.onMessage(`${picked.label} picked instead. Now click the line it should sit in the middle of.`);
-      return;
-    }
-    if (picked.entityId === first.entityId) { props.onMessage("Two points of one shape cannot be made coincident: that would collapse it."); return; }
-    props.onAddConstraint({ id: `constraint:user-${crypto.randomUUID()}`, kind: "coincident", entityIds: [first.entityId, picked.entityId], points: [first.ref, picked.ref] });
-    setPickedPoint(undefined);
-    setPickRelation(null);
+    const step = constraintToolStep(pickRelation, toolPicks, next);
+    setToolPicks(step.picks);
+    if (step.status === "refused") { props.onMessage(step.message); return; }
+    if (step.status === "ready") props.onAddConstraint({ id: `constraint:user-${crypto.randomUUID()}`, ...step.constraint });
+    props.onMessage(step.prompt);
+  };
+  const pickRelationPoint = (picked: RelationPoint): void => {
+    takeToolPick({ entityId: picked.entityId, kind: isSketchDatumEntityId(picked.entityId) ? "origin" : props.sketch.entities.find((entity) => entity.id === picked.entityId)?.kind ?? "point", ref: picked.ref, label: picked.label });
   };
 
-  const startPickRelation = (relation: "coincident" | "midpoint"): void => {
+  const startPickRelation = (relation: ConstraintToolKind): void => {
     if (props.tool !== "select") props.onActivateTool("select");
     setPickRelation(relation);
-    setPickedPoint(undefined);
-    props.onMessage(relation === "coincident"
-      ? "Coincident: pick a point (blue squares), then the point that should move onto it. Esc cancels."
-      : "Midpoint: pick a point, then click the line it should sit in the middle of. Esc cancels.");
+    setToolPicks([]);
+    props.onMessage(`${CONSTRAINT_TOOL_INFO[relation].label}: ${CONSTRAINT_TOOL_INFO[relation].prompt} Esc finishes.`);
   };
 
   const selectEntity = (id: string, additive: boolean): void => {
-    if (pickRelation === "midpoint" && pickedPoint !== undefined) { completeMidpoint(id); return; }
-    if (pickRelation !== null) return;
+    if (pickRelation !== null) {
+      const entity = props.sketch.entities.find((candidate) => candidate.id === id);
+      if (entity !== undefined) takeToolPick({ entityId: id, kind: entity.kind, label: entityNames.get(id) ?? entity.kind });
+      return;
+    }
     if (!additive) setSelectedConstraintIds([]);
     if (activeFit !== undefined && activeFit.entityId !== id) setActiveFit(undefined);
     if (props.viewportState.selectionFilter === "profile") {
@@ -1662,7 +1654,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         return;
       case "exit-pick":
         if (centrePick.picking) { centrePick.cancel(); props.onMessage("Centre picking cancelled. Type the centre, or press Pick on canvas to try again."); return; }
-        setPickRelation(null); setPickedPoint(undefined); props.onMessage("Relation picking cancelled."); return;
+        setPickRelation(null); setToolPicks([]); props.onMessage(pickRelation === null ? "Relation picking cancelled." : `${CONSTRAINT_TOOL_INFO[pickRelation].label} finished.`); return;
       case "exit-dimension": props.onExitDimension(); return;
       case "exit-edit-tool":
         // Esc also ends the zoom window and the Measure tool, which behave like edit tools.
@@ -2134,9 +2126,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         {showDimensions && visibleEntities.filter((entity) => !dimensionedIds.has(entity.id)).map((entity) => <SketchDimensionGlyph key={`dimension:${entity.id}`} entity={entity} px={px} label={(value) => formatLengthLabel(value, dimensionDisplay)} />)}
         <ConstraintGlyphLayer glyphs={glyphs} px={px} selectedIds={selectedConstraintIds} hoveredId={hoverConstraintId} interactive={interactive} titles={constraintTitles} onHover={setHoverConstraintId} onSelect={selectConstraint} />
         {measureMode && <MeasureOverlay state={measureState} px={px} />}
-        {pickRelation !== null && visibleEntities.flatMap(relationPointsOf).map((handle) => <rect
+        {pickRelation !== null && CONSTRAINT_TOOL_INFO[pickRelation].takesPoints && [...visibleEntities.flatMap(relationPointsOf), ...(pickRelation === "fixed" ? [] : [ORIGIN_RELATION_POINT])].map((handle) => <rect
           key={handle.id}
-          className={`relation-point${pickedPoint?.id === handle.id ? " selected" : ""}`}
+          className={`relation-point${toolPicks.some((pick) => pick.entityId === handle.entityId && pick.ref === handle.ref) ? " selected" : ""}`}
           data-relation-point={handle.id}
           x={handle.point[0] - hitSizes.relationPointPx * px}
           y={-handle.point[1] - hitSizes.relationPointPx * px}
@@ -2144,7 +2136,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
           height={2 * hitSizes.relationPointPx * px}
           role="button"
           tabIndex={0}
-          aria-pressed={pickedPoint?.id === handle.id}
+          aria-pressed={toolPicks.some((pick) => pick.entityId === handle.entityId && pick.ref === handle.ref)}
           aria-label={`${handle.label} (relation point)`}
           onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); pickRelationPoint(handle); }}
           onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); pickRelationPoint(handle); } }}
@@ -2572,12 +2564,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       {props.editTool !== null && props.editTool !== "pattern" && props.editTool !== "import-drawing" && props.editTool !== "export-drawing" && props.editTool !== "underlay" && <SketchEditPanel key={`${props.editTool}-${unit}`} unit={unit} centrePick={centrePick.bridge} tool={props.editTool} sketch={props.sketch} selectionIds={selectionIds} stretchWindow={stretchWindow} onStretchWindow={setStretchWindow} onApply={(plan) => { props.onApplyEdit(plan); }} onMessage={props.onMessage} onClose={props.onCloseEditTool} jog={jogParams} onJog={setJogParams} corner={cornerParams} onCorner={setCornerParams} onPreview={setEditPreview} dynamicMirrorAxis={dynamicMirrorAxis} onDynamicMirror={(axisId) => { setDynamicMirrorAxis(axisId); props.onMessage(axisId === null ? "Dynamic mirror stopped." : `Dynamic mirror on: pick a drawing tool; everything you draw is mirrored about ${axisId.replace(/^entity:/u, "")}.`); }} />}
       {props.checkOpen && <SketchRepairPanel sketch={props.sketch} onApplyEdit={props.onApplyEdit} onSetSuppressed={props.onSetSuppressed} onSelect={(ids) => { setSelectionIds(ids); props.onSelect(ids.at(-1) ?? null); }} onMessage={props.onMessage} onClose={props.onCloseCheck} />}
       {props.showMovable && <div className="inline-warning movable-note">{movableIds.size === 0 ? "Show Movable: every entity is fully constrained." : `Show Movable: ${movableIds.size} entit${movableIds.size === 1 ? "y has" : "ies have"} estimated degrees of freedom (amber).`}</div>}
-      <section className="inspector-section point-relations"><header><strong>Point relations</strong><span>{pickRelation === null ? "pick points" : pickRelation}</span></header>
+      <section className="inspector-section point-relations"><header><strong>Point relations</strong><span>{pickRelation === null ? "pick points" : CONSTRAINT_TOOL_INFO[pickRelation].label}</span></header>
         <div className="constraint-buttons">
-          <button className={pickRelation === "coincident" ? "active" : ""} aria-pressed={pickRelation === "coincident"} title="Join two points: pick one, then the one that should move onto it." onClick={() => pickRelation === "coincident" ? setPickRelation(null) : startPickRelation("coincident")}><CommandIcon name="coincident" />Coincident</button>
-          <button className={pickRelation === "midpoint" ? "active" : ""} aria-pressed={pickRelation === "midpoint"} title="Put a point at the middle of a line: pick the point, then the line." onClick={() => pickRelation === "midpoint" ? setPickRelation(null) : startPickRelation("midpoint")}><CommandIcon name="midpoint" />Midpoint</button>
+          {POINT_RELATION_TOOLS.map((entry) => <button key={entry.tool} className={pickRelation === entry.tool ? "active" : ""} aria-pressed={pickRelation === entry.tool} title={entry.title} onClick={() => { if (pickRelation === entry.tool) { setPickRelation(null); setToolPicks([]); } else startPickRelation(entry.tool); }}><CommandIcon name={entry.tool} />{entry.label}</button>)}
         </div>
-        {pickRelation !== null && <p className="profile-help">{pickedPoint === undefined ? "Pick a point on the canvas (blue squares)." : pickRelation === "coincident" ? `${pickedPoint.label} picked. Pick the point that should move onto it.` : `${pickedPoint.label} picked. Click the line it should sit in the middle of.`} Esc cancels.</p>}
+        {pickRelation !== null && <p className="profile-help" role="status">{toolPicks.length === 0 ? CONSTRAINT_TOOL_INFO[pickRelation].prompt : `${toolPicks.map((pick) => pick.label).join(", ")} picked. Pick the next one on the canvas.`} The tool stays on for the next relation; Esc finishes.</p>}
       </section>
 
       <section className="inspector-section"><header><strong>Selection controller</strong><span>{selectionIds.length} selected</span></header>

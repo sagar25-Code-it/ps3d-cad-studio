@@ -199,7 +199,7 @@ function findRelationProblems(sketch: WorkbenchSketch): readonly RelationFinding
     let others: WorkbenchSketchConstraint[] = [];
     const [first, second] = constraint.entityIds;
     const bothLines = (): boolean => constraint.entityIds.length === 2 && constraint.entityIds.every((id) => entities.get(id)?.kind === "line");
-    if ((constraint.kind === "horizontal" || constraint.kind === "vertical") && first !== undefined && entities.get(first)?.kind === "line") {
+    if ((constraint.kind === "horizontal" || constraint.kind === "vertical") && constraint.entityIds.length === 1 && first !== undefined && entities.get(first)?.kind === "line") {
       outcome = angles.relate(first, "axis:x", constraint.kind === "horizontal" ? 0 : 90);
       others = orientationOf(first).filter((c) => c.id !== constraint.id);
     } else if ((constraint.kind === "parallel" || constraint.kind === "perpendicular") && bothLines()) {

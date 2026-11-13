@@ -216,8 +216,8 @@ export function describeConstraint(constraint: WorkbenchSketchConstraint, names:
     : constraint.valueMm === undefined ? "" : `${formatNumber(constraint.valueMm)} `;
   const reference = constraint.driven === true ? " (reference)" : "";
   switch (constraint.kind) {
-    case "horizontal": return `Horizontal on ${of(0)}`;
-    case "vertical": return `Vertical on ${of(0)}`;
+    case "horizontal": return constraint.entityIds.length === 2 ? `Horizontal: ${at(0)} level with ${at(1)}` : `Horizontal on ${of(0)}`;
+    case "vertical": return constraint.entityIds.length === 2 ? `Vertical: ${at(0)} in line with ${at(1)}` : `Vertical on ${of(0)}`;
     case "parallel": return `Parallel between ${of(0)} and ${of(1)}`;
     case "perpendicular": return `Perpendicular between ${of(0)} and ${of(1)}`;
     case "collinear": return `Collinear between ${of(0)} and ${of(1)}`;
@@ -362,6 +362,11 @@ function translateConstraint(constraint: WorkbenchSketchConstraint, entities: Re
     }
     case "horizontal":
     case "vertical":
+      if (ids.length === 2) {
+        // Two points level with each other: their vertical distance is held at 0 (Vertical: their horizontal distance).
+        if (!ids.every(solverHas)) return none("The points are not solved by the live solver.");
+        return dimension(0, { kind: "linear", first: reference(first!, constraint.points?.[0]), second: reference(second!, constraint.points?.[1]), orientation: constraint.kind === "horizontal" ? "vertical" : "horizontal" });
+      }
       if (!present.has(first!)) return none("The entity is not solved by the live solver.");
       return { constraints: [{ ...stable, kind: constraint.kind, line: whole(first!) }], dimensions: [] };
     case "parallel":

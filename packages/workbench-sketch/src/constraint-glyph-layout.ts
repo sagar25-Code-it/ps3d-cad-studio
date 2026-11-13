@@ -176,6 +176,22 @@ function pointOf(entity: SketchEntity, ref: SketchPointRef | undefined): Vec2 | 
   return undefined;
 }
 
+/** Any defining point a two-point relation can name: also an arc's ends and middle and a rectangle's centre and corners. */
+function namedPoint(entity: SketchEntity, ref: SketchPointRef | undefined): Vec2 | undefined {
+  if (ref === undefined) return undefined;
+  if (entity.kind === "arc" && ref !== "center") return ref === "start" ? entity.start : ref === "end" ? entity.end : ref === "mid" ? entity.mid : undefined;
+  if (entity.kind === "rectangle") {
+    if (ref === "center") return entity.center;
+    const index = ["corner-0", "corner-1", "corner-2", "corner-3"].indexOf(ref);
+    if (index < 0) return undefined;
+    const sx = (index === 0 || index === 3 ? -0.5 : 0.5) * entity.widthMm;
+    const sy = (index === 0 || index === 1 ? -0.5 : 0.5) * entity.heightMm;
+    const radians = (entity.rotationDeg * Math.PI) / 180;
+    return [entity.center[0] + sx * Math.cos(radians) - sy * Math.sin(radians), entity.center[1] + sx * Math.sin(radians) + sy * Math.cos(radians)];
+  }
+  return pointOf(entity, ref);
+}
+
 export interface GlyphAnchor {
   readonly point: Vec2;
   /** Unit direction, in screen terms (x right, y down), the glyph is pushed away from the curve. */
@@ -212,6 +228,14 @@ export function glyphAnchor(constraint: WorkbenchSketchConstraint, entity: Sketc
  */
 export function constraintAnchor(constraint: WorkbenchSketchConstraint, byId: ReadonlyMap<string, SketchEntity>): GlyphAnchor | undefined {
   if ((constraint.kind === "coincident" || constraint.kind === "midpoint") && constraint.entityIds.includes(SKETCH_ORIGIN_ID)) return { point: [0, 0], away: [DIAGONAL, -DIAGONAL] };
+  // Horizontal or Vertical between two points is drawn at the point that was lined up (the second pick), or the first when the second is the origin.
+  if ((constraint.kind === "horizontal" || constraint.kind === "vertical") && constraint.entityIds.length === 2) {
+    for (const index of [1, 0]) {
+      const entity = byId.get(constraint.entityIds[index] ?? "");
+      const point = entity === undefined ? undefined : namedPoint(entity, constraint.points?.[index]);
+      if (point !== undefined) return { point, away: [DIAGONAL, -DIAGONAL] };
+    }
+  }
   for (let index = 0; index < constraint.entityIds.length; index += 1) {
     const entity = byId.get(constraint.entityIds[index] ?? "");
     if (entity === undefined) continue;
