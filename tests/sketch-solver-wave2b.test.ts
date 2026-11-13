@@ -350,7 +350,8 @@ export const sketchSolverWave2MoreTests: readonly TestCase[] = [
       const ids: ShapeIds = { entity: () => `entity:s3-${(counter += 1)}`, constraint: () => `constraint:s3-${(counter += 1)}` };
       /** Largest distance between the end of each entity and the start of the next one around the ring. */
       const worstGap = (project: WorkbenchProject): number => {
-        const ring = project.sketch.entities;
+        // The outline only: a slot's construction centreline is not part of the ring.
+        const ring = project.sketch.entities.filter((entity) => !entity.construction);
         let worst = 0;
         ring.forEach((entity, index) => {
           const next = ring[(index + 1) % ring.length]!;

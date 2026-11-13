@@ -76,8 +76,8 @@ export const sketchArcAndSlotModeTests: readonly TestCase[] = [
       const result = buildSlotOverall([0, 0], [10, 0], [5, 2], ids);
       assert(result.ok, result.ok ? "" : "overall slot build failed");
       if (!result.ok) return;
-      assert(result.value.entities.length === 4, "a slot has four entities (two lines and two arcs)");
-      const lines = result.value.entities.filter((entity) => entity.kind === "line");
+      assert(result.value.entities.length === 5, "a slot has five entities (two lines, two arcs and the construction centreline)");
+      const lines = result.value.entities.filter((entity) => entity.kind === "line" && !entity.construction);
       assert(lines.length === 2, "two straight lines");
       // The top line should go from (2, 2) to (8, 2) — pulled inward by the half-width (2) from each end, at +2 y.
       const top = lines.find((line) => line.kind === "line" && line.start[1] > 0 && line.end[1] > 0);

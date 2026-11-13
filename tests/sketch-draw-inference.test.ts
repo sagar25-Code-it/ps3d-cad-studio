@@ -436,7 +436,9 @@ export const sketchDrawInferenceTests: readonly TestCase[] = [
     name: "Shape tools wire into the draw path: a slot placed with the ortho lock on keeps its width and is built with joints",
     run: () => {
       const slot = buildSlot([0, 0], [20, 0], [10, 3], shapeIds());
-      assert(slot.ok && slot.value.constraints.filter((constraint) => constraint.kind === "coincident").length === 4, "four joints");
+      // Four joints close the outline; two more hold the ends of the centreline on the cap centres.
+      assert(slot.ok && slot.value.constraints.filter((constraint) => constraint.kind === "coincident" && !constraint.points?.includes("center")).length === 4, "four joints");
+      assert(slot.ok && slot.value.constraints.filter((constraint) => constraint.kind === "coincident" && constraint.points?.includes("center") === true).length === 2, "and the centreline is held on both cap centres");
     }
   }
 ];

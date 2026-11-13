@@ -75,7 +75,8 @@ export const sketchShapeTests: readonly TestCase[] = [
       const built = buildSlot([0, 0], [40, 0], [10, 6], ids);
       assert(built.ok, "the slot builds");
       const { entities, constraints } = built.value;
-      equal(entities.map((entity) => entity.kind).join(","), "line,arc,line,arc", "line, arc, line, arc");
+      // The outline (line, arc, line, arc) and, last, the construction centreline between the cap centres.
+      equal(entities.map((entity) => `${entity.kind}${entity.construction ? "*" : ""}`).join(","), "line,arc,line,arc,line*", "line, arc, line, arc and the construction centreline");
       equal(constraints.filter((constraint) => constraint.kind === "tangent").length, 4, "four tangent joints");
       equal(constraints.filter((constraint) => constraint.kind === "equal").length, 1, "the caps are equal");
       const top = entities[0]!;

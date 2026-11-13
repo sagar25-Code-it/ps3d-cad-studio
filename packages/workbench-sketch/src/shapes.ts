@@ -3,8 +3,8 @@ import { failure, type SketchEntity, type Vec2, type WorkbenchResult, type Workb
 
 /**
  * Tools that place a whole parametric shape rather than one entity: a regular polygon (lines joined end to end with equal
- * sides) and a center-to-center slot (two lines and two end arcs held tangent). The shape is returned as entities plus the
- * relations that keep it what it is, ready to be added in one edit.
+ * sides) and a center-to-center slot (two lines and two end arcs held tangent, with a construction centreline between the cap
+ * centres). The shape is returned as entities plus the relations that keep it what it is, ready to be added in one edit.
  */
 export interface SketchShape {
   readonly entities: readonly SketchEntity[];
@@ -52,7 +52,12 @@ export function buildSlotOverall(firstEnd: Vec2, secondEnd: Vec2, widthPoint: Ve
   return buildSlot(firstCenter, secondCenter, widthPoint, ids);
 }
 
-/** Center-to-center slot: the two end centres, then a point whose distance from the axis is the half-width. */
+/**
+ * Center-to-center slot: the two end centres, then a point whose distance from the axis is the half-width. Besides the outline it
+ * has a construction centreline whose ends are held on the two cap centres. The centreline is what the slot is dimensioned and
+ * placed by: its length is the centre distance, its middle is the slot's centre (for Midpoint or Symmetric), and it can be made
+ * Horizontal, Vertical or Parallel to turn the slot. It never bounds a profile.
+ */
 export function buildSlot(first: Vec2, second: Vec2, widthPoint: Vec2, ids: ShapeIds): WorkbenchResult<SketchShape> {
   const unusable = sketchPointsProblem([first, second, widthPoint]);
   if (unusable !== undefined) return bad(unusable);
@@ -78,5 +83,11 @@ export function buildSlot(first: Vec2, second: Vec2, widthPoint: Vec2, ids: Shap
     { id: ids.constraint(), kind: "tangent", entityIds: [top.id, startCap.id] },
     { id: ids.constraint(), kind: "equal", entityIds: [endCap.id, startCap.id] }
   ];
-  return { ok: true, value: { entities: [top, endCap, bottom, startCap], constraints } };
+  // The centreline: listed after the outline so the outline's own order (top, end cap, bottom, start cap) is unchanged.
+  const centreline: SketchEntity = { id: ids.entity(), kind: "line", start: first, end: second, construction: true };
+  constraints.push(
+    { id: ids.constraint(), kind: "coincident", entityIds: [centreline.id, startCap.id], points: ["start", "center"] },
+    { id: ids.constraint(), kind: "coincident", entityIds: [centreline.id, endCap.id], points: ["end", "center"] }
+  );
+  return { ok: true, value: { entities: [top, endCap, bottom, startCap, centreline], constraints } };
 }

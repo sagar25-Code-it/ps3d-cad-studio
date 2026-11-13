@@ -250,7 +250,7 @@ export const sketchPathMirrorMoveTests: readonly TestCase[] = [
       if (!slot.ok) return;
       const slotPlan = { label: "Added slot", removeEntityIds: [], updateEntities: [], addEntities: slot.value.entities, addConstraints: slot.value.constraints };
       const slotOutcome = withDynamicMirror(context(project), "entity:axis", slotPlan);
-      equal(slotOutcome.mirrored, 4, "all four parts of the slot are mirrored");
+      equal(slotOutcome.mirrored, 5, "the four parts of the slot's outline and its centreline are mirrored");
       project = commitOk(project, slotOutcome.plan);
       equal(detectSketchProfiles(project.sketch).length, 2, "the slot and its image are two closed profiles");
 
