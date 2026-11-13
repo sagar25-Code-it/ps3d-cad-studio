@@ -13,7 +13,8 @@ import type { SketchShape } from "./shapes.js";
 
 /** Tools whose clicks are points of the shape they build (the others pick curves, or are control points of a spline, and earn nothing). */
 const SNAPPING_SHAPE_TOOLS: ReadonlySet<SketchTool> = new Set<SketchTool>([
-  "polygon", "slot", "slot-straight", "line-midpoint", "centerline", "parallelogram", "rectangle-rounded", "slot-arc-three-point", "slot-arc-center", "ellipse-arc"
+  "polygon", "slot", "slot-straight", "line-midpoint", "centerline", "parallelogram", "rectangle-rounded", "slot-arc-three-point", "slot-arc-center", "ellipse-arc",
+  "rectangle", "rectangle-center", "rectangle-three-point"
 ]);
 
 export interface ShapeSnapInput {
@@ -64,6 +65,21 @@ export function shapeSnapRelations(input: ShapeSnapInput): readonly WorkbenchSke
   input.placed.forEach((inference, index) => {
     const primary = inference.primary;
     if (primary === undefined || input.skip?.has(index) === true) return;
+    // The centre of a centre rectangle is the middle of its construction diagonal: a centre snapped to a point is held there by Midpoint.
+    if (input.tool === "rectangle-center" && index === 0) {
+      const diagonal = input.shape.entities.find((entity) => entity.kind === "line" && entity.construction && apart([(entity.start[0] + entity.end[0]) / 2, (entity.start[1] + entity.end[1]) / 2], inference.point) <= AT);
+      if (diagonal === undefined) return;
+      if (primary.kind === "origin" && primary.entityId === undefined) { found.push({ id: input.newId(), kind: "midpoint", entityIds: [SKETCH_ORIGIN_ID, diagonal.id], points: ["self"] }); return; }
+      const target = existing(primary.entityId);
+      if (target === undefined) return;
+      if (primary.kind === "endpoint" || primary.kind === "center") {
+        const targetRef = pointRefOf(target, primary);
+        if (targetRef !== undefined) found.push({ id: input.newId(), kind: "midpoint", entityIds: [target.id, diagonal.id], points: [targetRef] });
+      } else if (primary.kind === "midpoint" && target.kind === "line") {
+        found.push({ id: input.newId(), kind: "coincident", entityIds: [target.id, diagonal.id], points: ["mid", "mid"] });
+      }
+      return;
+    }
     // The shape's own point at this click: the first one, in the order a single curve uses (centre, ends, ...).
     let own: { readonly entity: SketchEntity; readonly ref: SketchPointRef } | undefined;
     for (const entity of input.shape.entities) {

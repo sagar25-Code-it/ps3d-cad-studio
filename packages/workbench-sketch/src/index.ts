@@ -19,6 +19,7 @@ import { tidy, tidyPoint } from "./clean-numbers.js";
 import { directedSweep, type SweepDirection } from "./arc-sweep.js";
 import { sketchEntityLimitProblem, sketchPointsProblem } from "./entity-limits.js";
 import { CURVE_TOOL_LABELS, curveToolRequiredPoints, isFixedCurveTool, type CurveToolId, type FixedCurveToolId } from "./curve-tools.js";
+import { isLineRectangleTool, type LineRectangleTool } from "./line-rectangle.js";
 import { pointInRing } from "./arrangement.js";
 import { profileOutlineMm } from "./profile-outline.js";
 import { matchProfileRef, resolveProfileRegion, type ProfileRegion } from "./profile-select.js";
@@ -28,6 +29,7 @@ import type { ProfileDetectionOptions } from "./profile-regions.js";
 import { sampleArc, sampleSpline } from "./curve-sampling.js";
 export { sampleArc, sampleArcToBound, sampleSpline, sampleSplineToBound, CHORD_TOLERANCE_MM, isClosedFitSpline } from "./curve-sampling.js";
 export { PROFILE_GAP_TOLERANCE_MM } from "./arrangement.js";
+export { buildLineRectangle, isLineRectangleTool, lineRectangleCentreDiagonal, lineRectangleSizeSides, type LineRectangleTool } from "./line-rectangle.js";
 export { profileBaseOf, profileRefOf, parseProfileRef, signedProfileId, type ProfileDetectionOptions } from "./profile-regions.js";
 export { profileOutlineMm, resolveProfileRegion, type ProfileRegion };
 export { lostProfileRefs, matchProfileRef, profileInBox, type ProfileRegionGroup } from "./profile-select.js";
@@ -70,8 +72,8 @@ export type SketchTool =
   | CurveToolId;
 
 /** Tools whose result is a whole parametric shape (several entities and relations) rather than one entity. */
-export function isShapeTool(tool: SketchTool): tool is "polygon" | "slot" | "slot-straight" | FixedCurveToolId {
-  return tool === "polygon" || tool === "slot" || tool === "slot-straight" || isFixedCurveTool(tool);
+export function isShapeTool(tool: SketchTool): tool is "polygon" | "slot" | "slot-straight" | LineRectangleTool | FixedCurveToolId {
+  return tool === "polygon" || tool === "slot" || tool === "slot-straight" || isLineRectangleTool(tool) || isFixedCurveTool(tool);
 }
 
 export type SketchProfileBoundary =

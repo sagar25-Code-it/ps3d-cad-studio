@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SOLVABLE_POINT_REFS, SPLINE_MAX_FIT_POINTS, constraintFit, planeWorldCoordinate, type DesignExtentTarget, type GeneralSolidBody, type ConstraintFit, type SketchDatumPlane, type SketchDimensionName, type SketchEntity, type SketchConstraintKind, type SketchPointRef, type Vec2, type WorkbenchSketch, type WorkbenchSketchConstraint } from "../../../../packages/workbench-core/src/index.js";
 import {
   analyzeWorkbenchSketch,
+  buildLineRectangle,
   buildSketchEntity,
   detectSketchProfiles,
   explainNoProfiles,
   matchProfileRef,
   profileInBox,
   resolveProfileRegion,
+  isLineRectangleTool,
   isShapeTool,
   profileOutlineMm,
   requiredSketchPoints,
@@ -675,6 +677,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       const options = curveOptionsFromFields(curveFields, { entities: props.sketch.entities, centerlineReachMm: Math.max(1000, camera.camera.widthMm * 3 + Math.hypot(camera.camera.centerMm[0], camera.camera.centerMm[1])), pickReachMm: Math.max(props.sketch.snapToleranceMm, PICK_PIXELS * px), block: blockLibrary.get(curveFields.blockChoice) });
       return buildCurveTool(tool, points, options, ids);
     }
+    if (isLineRectangleTool(tool)) return buildLineRectangle(tool, points, ids);
     if (tool === "polygon") return buildPolygonByMode(points[0]!, points[1]!, Math.round(Number(polygonSides)), polygonMode, ids);
     if (tool === "slot-straight") return buildSlotOverall(points[0]!, points[1]!, points[2]!, ids);
     return buildSlot(points[0]!, points[1]!, points[2]!, ids);

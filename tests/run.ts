@@ -164,6 +164,7 @@ import { sketchCanvasHandleTests } from "./sketch-canvas-handles.test.js";
 import { regionWave2Tests } from "./region-wave2.test.js";
 import { regionWave3Tests } from "./region-wave3.test.js";
 import type { TestCase } from "./test-kit.js";
+import { sketchLineRectangleTests } from "./sketch-line-rectangle.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -350,6 +351,7 @@ const tests: readonly TestCase[] = [
   ...sketchDimensionPickTests,
   ...sketchConstraintToolTests,
   ...sketchKeysConstructionProjectTests,
+  ...sketchLineRectangleTests,
 ];
 let failures = 0;
 

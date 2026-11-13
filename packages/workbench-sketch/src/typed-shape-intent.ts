@@ -63,6 +63,14 @@ export function typedShapeIntent(input: TypedShapeIntentInput): readonly Workben
     }
     return found;
   }
+  if (tool === "rectangle" || tool === "rectangle-center" || tool === "rectangle-three-point") {
+    // The first side carries the width (a 3-point rectangle types its first edge as a length), the second side the height.
+    const widthTyped = tool === "rectangle-three-point" ? typed.length : typed.width;
+    const [widthSide, heightSide] = shape.entities;
+    if (widthSide !== undefined && usable(widthTyped)) length(widthSide, Math.abs(widthTyped));
+    if (heightSide !== undefined && usable(typed.height)) length(heightSide, Math.abs(typed.height));
+    return found;
+  }
   if (tool === "line-midpoint") {
     const line = shape.entities.find((entity) => entity.kind === "line");
     if (line !== undefined && usable(typed.length)) length(line, Math.abs(typed.length) * 2);
