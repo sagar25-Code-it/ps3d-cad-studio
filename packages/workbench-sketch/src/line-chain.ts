@@ -43,8 +43,9 @@ export interface LineChainReconcile {
   readonly tailInference: PlacedPointInference | undefined;
 }
 
+/** The end of a piece of the chain: a line, or a tangent arc drawn by dragging from the chain's last point. */
 function endOfLine(entity: SketchEntity | undefined): Vec2 | undefined {
-  return entity?.kind === "line" ? entity.end : undefined;
+  return entity?.kind === "line" || entity?.kind === "arc" ? entity.end : undefined;
 }
 
 /**

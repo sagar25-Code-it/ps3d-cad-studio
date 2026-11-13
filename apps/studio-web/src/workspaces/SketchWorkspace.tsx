@@ -51,6 +51,7 @@ import { isEllipseRadiusConstraint, isPointDistanceConstraint } from "../../../.
 import { convertLengthField, parseLengthField } from "../../../../packages/workbench-sketch/src/edit-fields.js";
 import { defaultLengthText, gridStepsForUnit, lengthTextFromDisplay, lengthTextToDisplay } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
 import { WORKING_PATH_SKETCH, chainFromCurve, describePath, pathCurvesOf, pathSketchChoices, pathSketchOf } from "../sweep-path-ui.js";
+import { LINE_ARC_DRAG_PIXELS, buildLineTangentArc, lineArcDragStart, type LineArcDragStart } from "../../../../packages/workbench-sketch/src/line-arc-drag.js";
 import { UnderlayLayer } from "./sketch/UnderlayLayer.js";
 import { describeReferenceLayer, isReferenceId, sketchWithReference, type SketchReferenceLayer } from "../sketch-reference.js";
 import { INFERENCE_LABELS, inferSketchPoint, type InferenceResult } from "../../../../packages/workbench-sketch/src/inference.js";
@@ -341,6 +342,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [textEditId, setTextEditId] = useState<string | null>(null);
   const [underlayPick, setUnderlayPick] = useState<UnderlayPickState>({ active: false, points: [] });
   const [pendingInference, setPendingInference] = useState<readonly PlacedPointInference[]>([]);
+  // The Line tool's tangent arc: a press on the chain's last point that is being dragged (line-arc-drag.ts), and where the drag is now.
+  const lineArcGesture = useRef<{ readonly pointerId: number; readonly startClient: Vec2; readonly start: LineArcDragStart; moved: boolean } | undefined>(undefined);
+  const [lineArcEnd, setLineArcEnd] = useState<{ readonly start: LineArcDragStart; readonly end: InferenceResult } | undefined>(undefined);
   // A constraint tool: the relation is chosen first, then its points and curves are picked on the canvas. It stays on until Esc.
   const [pickRelation, setPickRelation] = useState<ConstraintToolKind | null>(null);
   // Rotate, Scale and a circular Pattern: the centre can be clicked on the canvas (the panels hold the fields, this holds the pick).
@@ -647,6 +651,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     return start === undefined && end === undefined ? undefined : { start, end };
   }, [curveFields.splineStartAngle, curveFields.splineEndAngle]);
   const previewEntity = useMemo(() => {
+    // The Line tool's tangent arc, while the press on the chain's last point is being dragged.
+    if (props.tool === "line" && lineArcEnd !== undefined) {
+      const arc = buildLineTangentArc({ start: lineArcEnd.start, end: { point: lineArcEnd.end.point }, sketch: props.sketch, id: "entity:tool-preview", newId: () => "constraint:tool-preview" });
+      return arc.ok ? arc.value.entity : undefined;
+    }
     if (props.tool === "profile") {
       const chain = profileChain.current;
       if (chain === undefined || pending.length === 0) return undefined;
@@ -677,7 +686,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       return { id: "entity:tool-preview", kind: "line" as const, start: pending[pending.length - 1]!, end: cursor, construction: false } satisfies SketchEntity;
     }
     return undefined;
-  }, [cursor, pending, props.tool, curveFields.profileMode, curveFields.splineMode, splineTangents]);
+  }, [cursor, pending, props.tool, curveFields.profileMode, curveFields.splineMode, splineTangents, lineArcEnd]);
   const navigationPan = props.tool === "select" && props.viewportState.navigationMode === "pan";
   /** A whole polygon or slot is built from the points placed so far plus the cursor, so it can be previewed and then placed. */
   const buildShape = (tool: Exclude<SketchTool, "select">, points: readonly Vec2[]): WorkbenchResult<SketchShape> => {
@@ -859,6 +868,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     dragGesture.current = undefined;
     dragLatest.current = undefined;
     setDragLive(undefined);
+    lineArcGesture.current = undefined;
+    setLineArcEnd(undefined);
   }, [props.sketch, props.tool, props.cancelVersion]);
   useEffect(() => setPending([]), [props.tool, props.cancelVersion]);
   useEffect(() => {
@@ -1144,11 +1155,32 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       setPending([point]);
       // The next segment starts where this one ended, so it is joined to it automatically.
       setPendingInference([{ point, primary: { kind: "endpoint", point, entityId: built.value.id, selector: "end", distanceMm: 0 } }]);
-      say(`Added line ${segments}${relationNote}. Keep clicking to continue the chain, click the first point to close it, or press Esc to stop.`);
+      say(`Added line ${segments}${relationNote}. Keep clicking to continue the chain, press on this point and drag for a tangent arc, click the first point to close it, or press Esc to stop.`);
       return;
     }
     setPending([]);
     say(`Added ${sketchToolLabel(props.tool).toLowerCase()}${relationNote}.`);
+  };
+
+  /** The Line tool's tangent arc, placed when a drag from the chain's last point is released: the arc joins the chain and the next line starts at its end. */
+  const placeLineArc = (start: LineArcDragStart, end: InferenceResult): void => {
+    const built = buildLineTangentArc({ start, end: { point: end.point, ...(end.primary === undefined ? {} : { primary: end.primary }), guides: end.guides }, sketch: props.sketch, id: `entity:user-${crypto.randomUUID()}`, newId: () => `constraint:auto-${crypto.randomUUID()}` });
+    if (!built.ok) { props.onMessage(`${built.diagnostics[0]?.message ?? "The tangent arc was rejected."} Drag to another place, or click to draw a line.`); return; }
+    const relations = autoConstrain ? built.value.constraints : [];
+    let accepted: boolean | void = undefined;
+    if (relations.length > 0) accepted = applyDrawn({ label: `Added tangent arc with ${relations.length} relation${relations.length === 1 ? "" : "s"}`, removeEntityIds: [], updateEntities: [], addEntities: [built.value.entity], addConstraints: relations });
+    // If the solver refused the relations, the arc itself is still drawn.
+    if (relations.length === 0 || accepted === false) addDrawn(built.value.entity);
+    const arc = built.value.entity;
+    const tail: Vec2 = arc.kind === "arc" ? arc.end : end.point;
+    if (lineChain.current.start === undefined) lineChain.current = startLineChain(start.anchor.point, start.anchor);
+    lineChain.current = extendLineChain(lineChain.current, arc.id);
+    lastPlaced.current = tail;
+    typedTrail.current = {};
+    setFieldText({});
+    setPending([tail]);
+    setPendingInference([{ point: tail, primary: { kind: "endpoint", point: tail, entityId: arc.id, selector: "end", distanceMm: 0 } }]);
+    props.onMessage(`Added a tangent arc${relations.length > 0 && accepted !== false ? ` (${[...new Set(relations.map((relation) => relation.kind))].join(", ")})` : ""}. Keep clicking to continue with lines, drag from this point for another arc, or press Esc to stop.`);
   };
 
   const dynamicFields = useMemo(() => dynamicFieldsFor(props.tool, pending.length, polygonMode), [props.tool, pending.length, polygonMode]);
@@ -1998,6 +2030,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       trimSweep.current = { pointerId: event.pointerId, startClient: [event.clientX, event.clientY], path: [camera.toSketch(event.clientX, event.clientY)] };
       return;
     }
+    if (props.tool === "line" && !props.dimensionMode && !isClickEditTool(props.editTool)) {
+      // A press on the chain's last point (or on the end of an existing line or arc) may become a tangent arc if it is dragged; released in place it is a click.
+      const pressMm = camera.toSketch(event.clientX, event.clientY);
+      const press = assistedAt(pressMm, { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey });
+      const start = lineArcDragStart({ pending, pendingInference, pressMm, press: { point: press.point, ...(press.primary === undefined ? {} : { primary: press.primary }), guides: press.guides }, reachMm: PICK_PIXELS * px, sketch: props.sketch });
+      if (start !== undefined) {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        lineArcGesture.current = { pointerId: event.pointerId, startClient: [event.clientX, event.clientY], start, moved: false };
+        return;
+      }
+    }
     pointer(event, true);
   };
 
@@ -2021,6 +2064,16 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       if (!grab.moved && Math.hypot(event.clientX - grab.startClient[0], event.clientY - grab.startClient[1]) < 4) return;
       grab.moved = true;
       updateDrag(event, grab);
+      return;
+    }
+    const arcDrag = lineArcGesture.current;
+    if (arcDrag !== undefined && arcDrag.pointerId === event.pointerId) {
+      if (!arcDrag.moved && Math.hypot(event.clientX - arcDrag.startClient[0], event.clientY - arcDrag.startClient[1]) < LINE_ARC_DRAG_PIXELS) return;
+      arcDrag.moved = true;
+      const end = assistedAt(camera.toSketch(event.clientX, event.clientY), { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey });
+      setCursor(end.point);
+      setInference(end);
+      setLineArcEnd({ start: arcDrag.start, end });
       return;
     }
     const gesture = boxGesture.current;
@@ -2066,6 +2119,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
       if (grab.moved && event.type !== "pointercancel") commitDrag(grab);
       else { dragLatest.current = undefined; setDragLive(undefined); }
+      return;
+    }
+    const arcDrag = lineArcGesture.current;
+    if (arcDrag !== undefined && arcDrag.pointerId === event.pointerId) {
+      lineArcGesture.current = undefined;
+      setLineArcEnd(undefined);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      if (event.type === "pointercancel") return;
+      // A press that never became a drag is the ordinary click it would have been.
+      if (!arcDrag.moved) { pointer(event, true); return; }
+      placeLineArc(arcDrag.start, assistedAt(camera.toSketch(event.clientX, event.clientY), { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey }));
       return;
     }
     const gesture = boxGesture.current;
