@@ -1,4 +1,5 @@
 import type { SketchTool } from "./index.js";
+import { CONSTRAINT_TOOLS, CONSTRAINT_TOOL_INFO, type ConstraintToolKind } from "./constraint-tool.js";
 
 /**
  * Pure keyboard model for the sketch canvas. The workspace feeds it a key and the current interaction state and gets back
@@ -18,6 +19,8 @@ export type SketchHotkeyAction =
   | { readonly kind: "tool"; readonly tool: Exclude<SketchTool, "select"> }
   | { readonly kind: "dimension" }
   | { readonly kind: "edit-tool"; readonly tool: SketchEditHotkeyTool }
+  /** A constraint tool: the relation is chosen, then its geometry is picked on the canvas until Esc. */
+  | { readonly kind: "constraint-tool"; readonly tool: ConstraintToolKind }
   | { readonly kind: "toggle-construction" }
   /** Q: everything drawn from now on is construction geometry (or back). */
   | { readonly kind: "toggle-draw-construction" }
@@ -79,7 +82,7 @@ export interface SketchHotkeyContext {
   readonly curveSelectionCount: number;
   readonly dimensionMode: boolean;
   readonly editToolActive: boolean;
-  /** Picking the points of a Coincident or Midpoint relation on the canvas. */
+  /** A constraint tool is active (its points and curves are being picked on the canvas), or a centre is being picked. */
   readonly pickingRelation: boolean;
   /** A curve or point is being dragged. Escape abandons the drag and puts everything back. */
   readonly dragging: boolean;
@@ -100,10 +103,11 @@ export interface SketchHotkeyContext {
 export type SketchCommandId =
   | `tool:${Exclude<SketchTool, "select">}`
   | `edit:${SketchEditHotkeyTool}`
+  | `constraint:${ConstraintToolKind}`
   | "dimension" | "toggle-construction" | "toggle-draw-construction" | "fit" | "zoom-selection" | "zoom-window" | "measure" | "pan-mode" | "select-tool"
   | "toggle-snap" | "toggle-ortho" | "toggle-polar";
 
-export type SketchCommandGroup = "Draw" | "Modify" | "Dimension and view" | "Input assistance";
+export type SketchCommandGroup = "Draw" | "Modify" | "Constrain" | "Dimension and view" | "Input assistance";
 
 export interface SketchCommandInfo {
   readonly id: SketchCommandId;
@@ -164,6 +168,8 @@ export const SKETCH_KEYMAP_COMMANDS: readonly SketchCommandInfo[] = [
   c("edit:corner", "Corner", "Modify"),
   c("edit:stretch", "Stretch", "Modify"),
   c("edit:split", "Split", "Modify"),
+  // The constraint tools ship without keys; any of them can be given one here.
+  ...CONSTRAINT_TOOLS.map((tool) => c(`constraint:${tool}`, `${CONSTRAINT_TOOL_INFO[tool].label} constraint tool`, "Constrain")),
   c("dimension", "Sketch dimension", "Dimension and view", "D"),
   c("toggle-construction", "Toggle construction on the selection", "Dimension and view", "X"),
   c("toggle-draw-construction", "Draw as construction: new curves are construction geometry (toggle)", "Dimension and view", "Q"),
@@ -426,6 +432,7 @@ export function sketchToolHotkeyChip(tool: SketchTool, keymap: SketchKeymap = ac
 function actionForCommand(id: SketchCommandId): SketchHotkeyAction | undefined {
   if (id.startsWith("tool:")) return { kind: "tool", tool: id.slice(5) as Exclude<SketchTool, "select"> };
   if (id.startsWith("edit:")) return { kind: "edit-tool", tool: id.slice(5) as SketchEditHotkeyTool };
+  if (id.startsWith("constraint:")) return { kind: "constraint-tool", tool: id.slice(11) as ConstraintToolKind };
   switch (id) {
     case "dimension": return { kind: "dimension" };
     case "toggle-construction": return { kind: "toggle-construction" };

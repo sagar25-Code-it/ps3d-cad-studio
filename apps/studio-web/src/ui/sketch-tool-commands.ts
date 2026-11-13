@@ -1,6 +1,7 @@
 import { CAD_COMMANDS, type CadCommandRecord, type CadSketchCommand, type CadSketchEditTool, type CadSketchTool } from "../../../../packages/workbench-core/src/index.js";
 import { CURVE_TOOL_PROMPTS, isFixedCurveTool } from "../../../../packages/workbench-sketch/src/curve-tools.js";
-import { getActiveSketchKeymap, keyLabelForTool, type SketchKeymap } from "../../../../packages/workbench-sketch/src/hotkeys.js";
+import { getActiveSketchKeymap, keyLabelForCommand, keyLabelForTool, type SketchKeymap } from "../../../../packages/workbench-sketch/src/hotkeys.js";
+import { CONSTRAINT_TOOLS, CONSTRAINT_TOOL_INFO, type ConstraintToolKind } from "../../../../packages/workbench-sketch/src/constraint-tool.js";
 import { sketchToolLabel, type SketchTool } from "../../../../packages/workbench-sketch/src/index.js";
 import { nextClickPrompt } from "../../../../packages/workbench-sketch/src/tool-prompts.js";
 
@@ -110,6 +111,28 @@ function commandRecord(entry: (typeof EXTRA_COMMANDS)[number]): CadCommandRecord
   };
 }
 
+/** A constraint tool: the relation is chosen here, then its geometry is picked on the canvas, again and again until Esc. */
+function constraintRecord(tool: ConstraintToolKind): CadCommandRecord {
+  const info = CONSTRAINT_TOOL_INFO[tool];
+  return {
+    id: `command:sketch-constraint-${tool}`,
+    workspace: "sketch",
+    category: "construct",
+    name: `${info.label} constraint`,
+    description: `${info.prompt} The tool stays on for the next relation until Esc.`,
+    level: "preview",
+    action: { kind: "sketch-command", command: `constraint:${tool}` },
+    keywords: [tool, info.label.toLowerCase(), "constraint", "constrain", "relation", "pick"],
+    group: "Sketch / Constrain",
+    guide: {
+      selection: "Nothing has to be selected first: the tool asks for each pick.",
+      steps: ["Open the Sketch workspace.", `Run ${info.label}.`, info.prompt, "Keep picking for the next relation, or press Esc to finish."],
+      result: `Adds a ${info.label} relation to the picked geometry and solves the sketch at once.`,
+      boundary: "A relation the sketch cannot hold is refused with the reason and the sketch is left as it was."
+    }
+  };
+}
+
 function toolIdOf(record: CadCommandRecord): string | undefined {
   return record.action.kind === "activate-sketch-tool" || record.action.kind === "activate-sketch-edit" ? record.action.tool : record.action.kind === "activate-sketch-dimension" ? "dimension" : undefined;
 }
@@ -120,15 +143,17 @@ export function extraSketchSearchCommands(keymap: SketchKeymap = getActiveSketch
   const records = [
     ...EXTRA_DRAW_TOOLS.map(drawRecord),
     ...EXTRA_EDIT_TOOLS.map(editRecord),
-    ...EXTRA_COMMANDS.map(commandRecord)
+    ...EXTRA_COMMANDS.map(commandRecord),
+    ...CONSTRAINT_TOOLS.map(constraintRecord)
   ].filter((record) => !present.has(`${record.action.kind}:${toolIdOf(record) ?? (record.action.kind === "sketch-command" ? record.action.command : "")}`));
   return records.map((record) => withKeymapShortcut(record, keymap));
 }
 
 function withKeymapShortcut(record: CadCommandRecord, keymap: SketchKeymap): CadCommandRecord {
   const tool = toolIdOf(record);
-  if (record.workspace !== "sketch" || tool === undefined) return record;
-  const key = keyLabelForTool(tool, keymap);
+  const constraint = record.action.kind === "sketch-command" && record.action.command.startsWith("constraint:") ? record.action.command : undefined;
+  if (record.workspace !== "sketch" || (tool === undefined && constraint === undefined)) return record;
+  const key = constraint !== undefined ? keyLabelForCommand(constraint as `constraint:${ConstraintToolKind}`, keymap) : keyLabelForTool(tool!, keymap);
   if (key === undefined) {
     if (record.shortcut === undefined) return record;
     const { shortcut: _removed, ...rest } = record;

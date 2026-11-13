@@ -62,7 +62,7 @@ import { ORIGIN_RELATION_POINT, relationPointsOf, type RelationPoint } from "../
 import { placePointDistance, resolveDimensionPair, type DimensionPairResult, type DimensionPick, type PairDimension, type PointPairPlacement } from "../../../../packages/workbench-sketch/src/dimension-pick.js";
 import { dimensionOverConstraint } from "../../../../packages/workbench-sketch/src/dimension-overconstraint.js";
 import { chainSelectionFor } from "../../../../packages/workbench-sketch/src/chain-select.js";
-import { CONSTRAINT_TOOL_INFO, constraintToolStep, type ConstraintToolKind, type ConstraintToolPick } from "../../../../packages/workbench-sketch/src/constraint-tool.js";
+import { CONSTRAINT_TOOL_INFO, constraintToolStep, isConstraintToolKind, type ConstraintToolKind, type ConstraintToolPick } from "../../../../packages/workbench-sketch/src/constraint-tool.js";
 import { POLYGON_MODE_LABELS, buildPolygonByMode, parsePolygonMode, polygonCentreRelations } from "../../../../packages/workbench-sketch/src/polygon-modes.js";
 import { buildControlPointSpline, buildCurveTool, isFixedCurveTool } from "../../../../packages/workbench-sketch/src/curve-tools.js";
 import { extendProfileChain, startProfileChain, type ProfileChain } from "../../../../packages/workbench-sketch/src/blend-profile.js";
@@ -273,7 +273,9 @@ interface SketchWorkspaceProps {
   readonly showMovable: boolean;
   readonly checkOpen: boolean;
   /** A one-shot ribbon command (Fix Curve, Relax Relations or Relax Dimensions); a new serial triggers it once. */
-  readonly request: { readonly command: "fix-curve" | "relax-relations" | "relax-dimensions"; readonly serial: number } | null;
+  readonly request: { readonly command: "fix-curve" | "relax-relations" | "relax-dimensions" | `constraint:${ConstraintToolKind}`; readonly serial: number } | null;
+  /** Told which constraint tool is active (or none), so the ribbon can show it pressed. */
+  readonly onConstraintToolChange?: (tool: ConstraintToolKind | null) => void;
   readonly onApplyEdit: (plan: SketchEditPlan) => boolean | void;
   readonly onSetSuppressed: (constraintIds: readonly string[], suppressed: boolean) => boolean | void;
   readonly onCloseEditTool: () => void;
@@ -343,6 +345,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   useEffect(() => { lastTrimPick.current = undefined; }, [props.sketch]);
   useEffect(() => { if (centrePick.picking) props.onMessage("Click the centre on the canvas; it snaps to endpoints, centres and the origin (hold Ctrl to place it freely). Esc cancels."); }, [centrePick.picking]); // eslint-disable-line react-hooks/exhaustive-deps
   const [toolPicks, setToolPicks] = useState<readonly ConstraintToolPick[]>([]);
+  useEffect(() => { props.onConstraintToolChange?.(pickRelation); }, [pickRelation]); // eslint-disable-line react-hooks/exhaustive-deps
   // The in-place value editor for a driving dimension (opened from Sketch Dimension, or by clicking a dimension's text).
   const [dimensionEdit, setDimensionEdit] = useState<DimensionEditState | undefined>(undefined);
   const [dimensionText, setDimensionText] = useState("");
@@ -1446,7 +1449,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     takeToolPick({ entityId: picked.entityId, kind: isSketchDatumEntityId(picked.entityId) ? "origin" : props.sketch.entities.find((entity) => entity.id === picked.entityId)?.kind ?? "point", ref: picked.ref, label: picked.label });
   };
 
+  /** Starts a constraint tool, or ends it when it is the one that is already on (a second press of its button or key). */
+  const toggleConstraintTool = (relation: ConstraintToolKind): void => {
+    if (pickRelation !== relation) { startPickRelation(relation); return; }
+    setPickRelation(null);
+    setToolPicks([]);
+    props.onMessage(`${CONSTRAINT_TOOL_INFO[relation].label} finished.`);
+  };
   const startPickRelation = (relation: ConstraintToolKind): void => {
+    // A constraint tool reads the canvas clicks itself: it ends Sketch Dimension, an edit tool and a drawing tool.
+    if (props.dimensionMode) props.onExitDimension();
+    if (props.editTool !== null) props.onCloseEditTool();
     if (props.tool !== "select") props.onActivateTool("select");
     setPickRelation(relation);
     setToolPicks([]);
@@ -1624,6 +1637,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const request = props.request;
     if (request === null || request.serial === handledRequestRef.current) return;
     handledRequestRef.current = request.serial;
+    if (request.command.startsWith("constraint:")) {
+      const relation = request.command.slice("constraint:".length);
+      if (isConstraintToolKind(relation)) toggleConstraintTool(relation);
+      return;
+    }
     if (selectionIds.length === 0) { props.onMessage("Select one or more curves first."); return; }
     if (request.command === "fix-curve") { runSelectionAction(fixSelectionPlan(props.sketch, selectedEntities, newConstraintId)); return; }
     const family = request.command === "relax-relations" ? "relations" : "dimensions";
@@ -1724,6 +1742,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       case "tool": props.onActivateTool(action.tool); return;
       case "dimension": props.onActivateDimension(); return;
       case "edit-tool": props.onActivateEditTool(action.tool); return;
+      case "constraint-tool": toggleConstraintTool(action.tool); return;
       case "fit": camera.fit(); props.onMessage("Fitted the sketch to the window."); return;
       case "pan-mode": props.onNavigationMode("pan"); return;
       case "select-tool":
@@ -2312,6 +2331,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         : dimensionFirst !== undefined
           ? "Type the value, or click a second curve or point for the distance or angle between the two."
           : "Click a curve for its size, then a second curve or point for a distance or an angle. Esc to finish."}</span></div>}
+      {pickRelation !== null && <div className="dimension-mode-banner constraint-tool-banner" role="status"><CommandIcon name={pickRelation === "symmetry" ? "mirror" : pickRelation} /><span><strong>{CONSTRAINT_TOOL_INFO[pickRelation].label}</strong>{toolPicks.length === 0 ? CONSTRAINT_TOOL_INFO[pickRelation].prompt : `${toolPicks.map((pick) => pick.label).join(", ")} picked. Pick the next one.`} Esc to finish.</span></div>}
       {relaxPrompt !== undefined && <div className="dimension-mode-banner relax-fix-prompt" role="alert">
         <span><strong>{relaxPrompt.names} {relaxPrompt.names.includes(" and ") ? "are" : "is"} Fixed</strong>A Fixed curve cannot change size. Relax the Fix and apply the value in one step?</span>
         <button type="button" className="primary" onClick={() => { const run = relaxPrompt.apply; setRelaxPrompt(undefined); run(); }}>Relax the Fix and apply</button>
@@ -2675,7 +2695,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       {props.showMovable && <div className="inline-warning movable-note">{movableIds.size === 0 ? "Show Movable: every entity is fully constrained." : `Show Movable: ${movableIds.size} entit${movableIds.size === 1 ? "y has" : "ies have"} estimated degrees of freedom (amber).`}</div>}
       <section className="inspector-section point-relations"><header><strong>Point relations</strong><span>{pickRelation === null ? "pick points" : CONSTRAINT_TOOL_INFO[pickRelation].label}</span></header>
         <div className="constraint-buttons">
-          {POINT_RELATION_TOOLS.map((entry) => <button key={entry.tool} className={pickRelation === entry.tool ? "active" : ""} aria-pressed={pickRelation === entry.tool} title={entry.title} onClick={() => { if (pickRelation === entry.tool) { setPickRelation(null); setToolPicks([]); } else startPickRelation(entry.tool); }}><CommandIcon name={entry.tool} />{entry.label}</button>)}
+          {POINT_RELATION_TOOLS.map((entry) => <button key={entry.tool} className={pickRelation === entry.tool ? "active" : ""} aria-pressed={pickRelation === entry.tool} title={entry.title} onClick={() => toggleConstraintTool(entry.tool)}><CommandIcon name={entry.tool} />{entry.label}</button>)}
         </div>
         {pickRelation !== null && <p className="profile-help" role="status">{toolPicks.length === 0 ? CONSTRAINT_TOOL_INFO[pickRelation].prompt : `${toolPicks.map((pick) => pick.label).join(", ")} picked. Pick the next one on the canvas.`} The tool stays on for the next relation; Esc finishes.</p>}
       </section>

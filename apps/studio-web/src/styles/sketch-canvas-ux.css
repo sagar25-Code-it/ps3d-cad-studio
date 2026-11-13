@@ -84,6 +84,12 @@
   .sketch-palette input[type="checkbox"] { width: 1.3rem; height: 1.3rem; }
 }
 
+/* ---- mode banners (Sketch Dimension, a constraint tool, Measure, Zoom window) ----
+   They say what the next click does, so their text is never under 12 px and a long prompt wraps inside the canvas width. */
+.studio-app .sketch-stage .dimension-mode-banner { max-width: min(340px, calc(100% - 1.7rem)); }
+.studio-app .sketch-stage .dimension-mode-banner span { font-size: max(0.48rem, 12px); line-height: 1.35; }
+.studio-app .sketch-stage .dimension-mode-banner strong { font-size: max(0.55rem, 13px); }
+
 /* ---- prompts that ask a question (relax a Fix, add a reference dimension) ----
    The mode banner ignores the pointer; a prompt has buttons, so it takes it. It sits under the mode banner, its text is 12 px, and it
    never grows past the canvas: a long reason scrolls inside it. */

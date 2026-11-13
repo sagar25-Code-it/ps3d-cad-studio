@@ -1,7 +1,8 @@
 import type { DisplayUnit } from "../../../../packages/model-schema/src/index.js";
 import type { AssemblyTemplateId, DrawingDatumScheme, DrawingDisplayStyle, DrawingDraftingStandard, DrawingSettings, ElectricalComponentKind, ElectricalStandard, ElectricalTemplateId, PartPreviewBodyShape, SurfaceIntent, VehicleLayerId, VehicleSimulationState, VehicleTemplateId, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { SketchTool } from "../../../../packages/workbench-sketch/src/index.js";
-import { sketchToolHotkeyChip, type SketchKeymap } from "../../../../packages/workbench-sketch/src/hotkeys.js";
+import { keyLabelForCommand, shortKeyLabel, sketchToolHotkeyChip, type SketchKeymap } from "../../../../packages/workbench-sketch/src/hotkeys.js";
+import { CONSTRAINT_TOOL_INFO, type ConstraintToolKind } from "../../../../packages/workbench-sketch/src/constraint-tool.js";
 import { useSketchKeymap } from "../workspaces/sketch/useSketchKeymap.js";
 import { describeSketchPlane } from "../sketch-plane-ui.js";
 import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/index.js";
@@ -11,7 +12,23 @@ import type { SketchEditToolId } from "../workspaces/SketchEditPanel.js";
 import type { SurfaceAction } from "../surface-actions.js";
 import { baseGridLabel } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
 
-type SketchRibbonCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check" | "project-body" | "project-edge" | "intersect-body" | "silhouette-body" | "convert-face" | "project-reference";
+type SketchRibbonCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check" | "project-body" | "project-edge" | "intersect-body" | "silhouette-body" | "convert-face" | "project-reference" | `constraint:${ConstraintToolKind}`;
+
+/** The Constraints group: pick the relation here, then pick the geometry on the canvas. The tool stays on until Esc. */
+const CONSTRAINT_RIBBON_TOOLS: readonly { readonly tool: ConstraintToolKind; readonly icon: string; readonly hint: string }[] = [
+  { tool: "coincident", icon: "coincident", hint: "point · point or curve" },
+  { tool: "collinear", icon: "collinear", hint: "two lines" },
+  { tool: "concentric", icon: "concentric", hint: "two circles / arcs" },
+  { tool: "midpoint", icon: "midpoint", hint: "point · line" },
+  { tool: "fixed", icon: "fixed", hint: "curve or point" },
+  { tool: "parallel", icon: "parallel", hint: "two lines" },
+  { tool: "perpendicular", icon: "perpendicular", hint: "two lines" },
+  { tool: "horizontal", icon: "horizontal", hint: "line or two points" },
+  { tool: "vertical", icon: "vertical", hint: "line or two points" },
+  { tool: "tangent", icon: "tangent", hint: "line · arc, arc · arc" },
+  { tool: "equal", icon: "equal", hint: "two alike" },
+  { tool: "symmetry", icon: "mirror", hint: "two curves · axis" }
+];
 type SurfaceParameter = "widthMm" | "depthMm" | "crownMm" | "twistDeg" | "uSegments" | "vSegments";
 
 interface WorkbenchRibbonProps {
@@ -31,6 +48,8 @@ interface WorkbenchRibbonProps {
   readonly sketchCheckOpen: boolean;
   /** New projected curves are made as construction (reference) geometry. */
   readonly sketchProjectReference: boolean;
+  /** The constraint tool that is on in the sketch (its button shows pressed), or null. */
+  readonly sketchConstraintTool?: ConstraintToolKind | null;
   readonly onSketchEditTool: (tool: SketchEditToolId) => void;
   readonly onSketchCommand: (command: SketchRibbonCommand) => void;
   readonly onOpenSketchOptions: () => void;
@@ -122,6 +141,12 @@ const SKETCH_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; r
 /** The chip under a tool button, read from the live keymap: the tool's own key ("R", "â‡§R"), or "R Ã—3" when R is pressed three times in a row. */
 function hotkeyHint(tool: SketchTool, keymap: SketchKeymap): string {
   return sketchToolHotkeyChip(tool, keymap) ?? "";
+}
+
+/** What a constraint tool picks, with its key when the user has given it one. */
+function constraintHint(tool: ConstraintToolKind, hint: string, keymap: SketchKeymap): string {
+  const key = keyLabelForCommand(`constraint:${tool}`, keymap);
+  return key === undefined ? hint : `${hint} · ${shortKeyLabel(key)}`;
 }
 
 /** The extra sketch curve tools, grouped under "More curves" (their geometry lives in packages/workbench-sketch/src/curve-tools.ts). */
@@ -217,6 +242,9 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="line" label="Stretch" hint="window Â· dx Â· dy" active={props.sketchEditTool === "stretch"} onClick={() => props.onSketchEditTool("stretch")} />
         <RibbonButton icon="scale" label="Scale" hint="factor Â· centre" active={props.sketchEditTool === "scale"} onClick={() => props.onSketchEditTool("scale")} />
         <RibbonButton icon="mirror" label="Mirror" hint="about a line" active={props.sketchEditTool === "mirror"} onClick={() => props.onSketchEditTool("mirror")} />
+      </RibbonGroup>
+      <RibbonGroup label="Constraints">
+        {CONSTRAINT_RIBBON_TOOLS.map((entry) => <RibbonButton key={entry.tool} icon={entry.icon} label={CONSTRAINT_TOOL_INFO[entry.tool].label} hint={constraintHint(entry.tool, entry.hint, sketchKeymap)} active={props.sketchConstraintTool === entry.tool} onClick={() => props.onSketchCommand(`constraint:${entry.tool}`)} />)}
       </RibbonGroup>
       <RibbonGroup label="Project">
         <RibbonButton icon="projection" label="Project" hint="body edges" onClick={() => props.onSketchCommand("project-body")} />

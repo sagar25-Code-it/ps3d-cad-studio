@@ -6,7 +6,7 @@ import { CommandIcon } from "../../ui/CommandIcon.js";
 import { useDialogFocus } from "../../ui/useDialogFocus.js";
 import { updateSketchKeymap, useSketchKeymap } from "./useSketchKeymap.js";
 
-const GROUPS: readonly SketchCommandGroup[] = ["Draw", "Modify", "Dimension and view", "Input assistance"];
+const GROUPS: readonly SketchCommandGroup[] = ["Draw", "Modify", "Constrain", "Dimension and view", "Input assistance"];
 
 type Notice =
   | { readonly kind: "info" | "error"; readonly text: string }

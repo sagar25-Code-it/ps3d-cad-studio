@@ -11,7 +11,9 @@ export type CadSketchEditTool = "offset" | "mirror" | "pattern" | "move" | "rota
   | "split" | "jog" | "delete-curve" | "offset-move" | "make-path" | "dynamic-mirror"
   | "break" | "import-drawing" | "export-drawing" | "underlay";
 /** One-shot sketch commands that act on the current selection or toggle a display mode. */
-export type CadSketchCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check" | "project-body" | "project-edge" | "intersect-body" | "silhouette-body" | "convert-face" | "project-reference";
+/** The relations that have a constraint tool: pick the relation, then pick the geometry on the canvas. */
+export type CadSketchConstraintTool = "coincident" | "collinear" | "concentric" | "midpoint" | "fixed" | "parallel" | "perpendicular" | "horizontal" | "vertical" | "tangent" | "equal" | "symmetry";
+export type CadSketchCommand = "fix-curve" | "relax-relations" | "relax-dimensions" | "show-movable" | "sketch-check" | "project-body" | "project-edge" | "intersect-body" | "silhouette-body" | "convert-face" | "project-reference" | `constraint:${CadSketchConstraintTool}`;
 
 export type CadCommandAction =
   | { readonly kind: "open-workspace" }
