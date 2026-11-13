@@ -84,6 +84,14 @@
   .sketch-palette input[type="checkbox"] { width: 1.3rem; height: 1.3rem; }
 }
 
+/* ---- prompts that ask a question (relax a Fix, add a reference dimension) ----
+   The mode banner ignores the pointer; a prompt has buttons, so it takes it. It sits under the mode banner, its text is 12 px, and it
+   never grows past the canvas: a long reason scrolls inside it. */
+.studio-app .sketch-stage .dimension-mode-banner.relax-fix-prompt { top: 8.6rem; pointer-events: auto; flex-wrap: wrap; align-items: flex-start; max-width: min(360px, calc(100% - 1.7rem)); max-height: calc(100% - 9.6rem); overflow-y: auto; }
+.studio-app .sketch-stage .dimension-mode-banner.relax-fix-prompt span { flex: 1 1 100%; font-size: 12px; line-height: 1.4; }
+.studio-app .sketch-stage .dimension-mode-banner.relax-fix-prompt strong { font-size: 13px; }
+.studio-app .sketch-stage .dimension-mode-banner.relax-fix-prompt button { font-size: 12px; min-height: 28px; }
+
 /* ---- reduced motion ---- */
 @media (prefers-reduced-motion: reduce) {
   .sketch-stage *, .sketch-palette, .sketch-palette.palette-reveal { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

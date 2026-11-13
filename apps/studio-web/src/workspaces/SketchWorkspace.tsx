@@ -59,6 +59,7 @@ import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, POLYGON_MODES, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
 import { ORIGIN_RELATION_POINT, relationPointsOf, type RelationPoint } from "../../../../packages/workbench-sketch/src/relation-points.js";
+import { dimensionOverConstraint } from "../../../../packages/workbench-sketch/src/dimension-overconstraint.js";
 import { chainSelectionFor } from "../../../../packages/workbench-sketch/src/chain-select.js";
 import { CONSTRAINT_TOOL_INFO, constraintToolStep, type ConstraintToolKind, type ConstraintToolPick } from "../../../../packages/workbench-sketch/src/constraint-tool.js";
 import { POLYGON_MODE_LABELS, buildPolygonByMode, parsePolygonMode, polygonCentreRelations } from "../../../../packages/workbench-sketch/src/polygon-modes.js";
@@ -1235,8 +1236,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   // A dimension on a curve that is Fixed would contradict the Fix. Instead of failing with a solver conflict, offer the one-click way out:
   // relax the Fix and apply the value in the same step.
   const [relaxPrompt, setRelaxPrompt] = useState<{ readonly names: string; readonly apply: () => void } | undefined>(undefined);
-  useEffect(() => { setRelaxPrompt(undefined); }, [props.sketch]);
+  // A new dimension that the sketch already decides, or that contradicts it, is offered as a reference dimension instead of being refused.
+  const [overPrompt, setOverPrompt] = useState<{ readonly message: string; readonly apply: () => void } | undefined>(undefined);
+  useEffect(() => { setRelaxPrompt(undefined); setOverPrompt(undefined); }, [props.sketch]);
   const setDimension: SetDimensionRequest = (entityId, dimension, valueMm, extra) => {
+    setOverPrompt(undefined);
     if (extra?.driven !== true) {
       const involved = [entityId, ...(extra?.secondEntityId === undefined ? [] : [extra.secondEntityId])];
       const blocking = fixesBlockingDimension(props.sketch, involved);
@@ -1248,6 +1252,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       }
     }
     setRelaxPrompt(undefined);
+    const over = dimensionOverConstraint(props.sketch, { entityId, dimension, valueMm, secondEntityId: extra?.secondEntityId, points: extra?.points, expression: extra?.expression, driven: extra?.driven });
+    if (over !== undefined) {
+      const { expression: _unused, ...rest } = extra ?? {};
+      setOverPrompt({ message: over.reason, apply: () => props.onSetDimension(entityId, dimension, valueMm, { ...rest, driven: true }) });
+      props.onMessage(`${over.message} Press "Add as a reference dimension" to show the value without driving the sketch, or Cancel.`);
+      return;
+    }
     props.onSetDimension(entityId, dimension, valueMm, extra);
   };
   /** A field's request (a value, or a parameter expression) sent through the same path as the canvas editor. */
@@ -2226,6 +2237,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         <span><strong>{relaxPrompt.names} {relaxPrompt.names.includes(" and ") ? "are" : "is"} Fixed</strong>A Fixed curve cannot change size. Relax the Fix and apply the value in one step?</span>
         <button type="button" className="primary" onClick={() => { const run = relaxPrompt.apply; setRelaxPrompt(undefined); run(); }}>Relax the Fix and apply</button>
         <button type="button" onClick={() => setRelaxPrompt(undefined)}>Cancel</button>
+      </div>}
+      {overPrompt !== undefined && <div className="dimension-mode-banner relax-fix-prompt over-constraint-prompt" role="alert">
+        <span><strong>This dimension would over-constrain the sketch</strong>{overPrompt.message} Add it as a reference dimension instead? A reference dimension shows the value and never drives the geometry.</span>
+        <button type="button" className="primary" onClick={() => { const run = overPrompt.apply; setOverPrompt(undefined); run(); }}>Add as a reference dimension</button>
+        <button type="button" onClick={() => { setOverPrompt(undefined); props.onMessage("Dimension cancelled; nothing was added."); }}>Cancel</button>
       </div>}
 
       {selectOther !== undefined && props.tool === "select" && <SelectOtherPopup
