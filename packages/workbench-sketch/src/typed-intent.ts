@@ -47,7 +47,8 @@ export function typedIntentConstraints(input: TypedIntentInput): readonly Workbe
     if (usable(widthTyped)) dimension("width", widthTyped);
     if (usable(typed.height)) dimension("height", typed.height);
   } else if (entity.kind === "circle") {
-    if (tool === "circle" && usable(typed.radius)) found.push({ id: input.newId(), kind: "radius", entityIds: [entity.id], valueMm: Math.abs(typed.radius), dimension: "radius" });
+    // A circle drawn from its centre is typed, shown and stored as a diameter: 5.5 typed for a 5.5 mm hole is a 5.5 mm diameter dimension.
+    if (tool === "circle" && usable(typed.diameter)) found.push({ id: input.newId(), kind: "radius", entityIds: [entity.id], valueMm: Math.abs(typed.diameter), dimension: "diameter" });
     if (tool === "circle-two-point" && usable(typed.diameter)) found.push({ id: input.newId(), kind: "radius", entityIds: [entity.id], valueMm: Math.abs(typed.diameter) / 2, dimension: "radius" });
   } else if (entity.kind === "arc" && tool === "arc-center") {
     // A typed radius and a typed sweep are the arc's size: the radius and, with it, the arc length the sweep covers.

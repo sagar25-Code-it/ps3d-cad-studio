@@ -445,7 +445,7 @@ export function sketchToolLabel(tool: SketchTool): string {
     rectangle: "2-point rectangle",
     "rectangle-center": "Center rectangle",
     "rectangle-three-point": "3-point rectangle",
-    circle: "Center-radius circle",
+    circle: "Center-diameter circle",
     "circle-two-point": "2-point circle",
     "circle-three-point": "3-point circle",
     ellipse: "Center ellipse",

@@ -11,7 +11,7 @@ const OLDER_PROMPTS: Readonly<Partial<Record<SketchTool, readonly string[]>>> = 
   rectangle: ["the first corner", "the opposite corner"],
   "rectangle-center": ["the centre", "a corner"],
   "rectangle-three-point": ["the start of the first edge", "the other end of the first edge", "a point that gives the height"],
-  circle: ["the centre", "a point on the circle (sets the radius)"],
+  circle: ["the centre", "a point on the circle, or type the diameter"],
   "circle-two-point": ["one end of the diameter", "the other end of the diameter"],
   "circle-three-point": ["a first point on the circle", "a second point on the circle", "a third point on the circle"],
   ellipse: ["the centre", "the end of the major axis", "a point that gives the minor radius"],

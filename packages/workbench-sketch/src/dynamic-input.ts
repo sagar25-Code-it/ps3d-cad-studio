@@ -6,7 +6,7 @@ import type { SketchTool } from "./index.js";
 /**
  * Dynamic input: while a drawing tool is active the canvas shows editable fields next to the cursor. Before the first point
  * they are the X and Y of that point; after it they are what the next point needs (length and angle for a line, width and
- * height for a rectangle, a radius for a circle, a sweep for a centerpoint arc ...). Typing into a field locks that value;
+ * height for a rectangle, a diameter for a circle, a sweep for a centerpoint arc ...). Typing into a field locks that value;
  * the fields you have not typed in keep following the pointer. Enter places the point with the typed values.
  *
  * The maths lives here, free of any UI, so it can be tested. Parsing what was typed (units, expressions, @ and # prefixes)
@@ -48,8 +48,11 @@ const FIELD = {
 /** How a tool reads its typed fields for the point it is about to place. */
 type Mode =
   | { readonly kind: "absolute" }
-  /** A distance and a direction from an already placed point (`baseIndex`). Either field may be missing: a circle has no angle field, a tangent direction has no length. */
-  | { readonly kind: "polar"; readonly baseIndex: number; readonly length: DynamicField | undefined; readonly angle: boolean }
+  /**
+   * A distance and a direction from an already placed point (`baseIndex`). Either field may be missing: a circle has no angle field, a tangent direction has no length.
+   * `factor` is how far the point sits from the base per unit typed: 1 for a length or a radius, 0.5 for the diameter of a circle drawn from its centre.
+   */
+  | { readonly kind: "polar"; readonly baseIndex: number; readonly length: DynamicField | undefined; readonly angle: boolean; readonly factor: number }
   | { readonly kind: "box"; readonly centred: boolean }
   /** A signed sweep about placed[0], starting at placed[1]. */
   | { readonly kind: "sweep" }
@@ -59,7 +62,7 @@ type Mode =
   | { readonly kind: "offset"; readonly field: DynamicField; readonly factor: number };
 
 /** `length` of null means "no length field" (a direction only); the default is the plain Length field. */
-const polar = (baseIndex: number, length: DynamicField | null = FIELD.length, angle = true): Mode => ({ kind: "polar", baseIndex, length: length ?? undefined, angle });
+const polar = (baseIndex: number, length: DynamicField | null = FIELD.length, angle = true, factor = 1): Mode => ({ kind: "polar", baseIndex, length: length ?? undefined, angle, factor });
 
 /** Tools that have no typed absolute first point (their first click picks existing geometry). */
 const NO_ABSOLUTE_FIRST: ReadonlySet<SketchTool> = new Set<SketchTool>(["blend"]);
@@ -90,7 +93,8 @@ function modeFor(tool: SketchTool, placedPoints: number, polygonMode: PolygonFie
     case "rectangle-center": return placedPoints === 1 ? { kind: "box", centred: true } : undefined;
     // A 3-point rectangle takes its first edge like a line, then a height.
     case "rectangle-three-point": return placedPoints === 1 ? polar(0) : placedPoints === 2 ? { kind: "offset", field: FIELD.height, factor: 1 } : undefined;
-    case "circle": return placedPoints === 1 ? polar(0, FIELD.radius, false) : undefined;
+    // A circle from its centre is sized by its diameter (the number on a drawing and on a drill), so the rim point sits half the typed value out.
+    case "circle": return placedPoints === 1 ? polar(0, FIELD.diameter, false, 0.5) : undefined;
     case "circle-two-point": return placedPoints === 1 ? polar(0, FIELD.diameter, false) : undefined;
     case "circle-three-point":
     case "arc": return placedPoints === 1 ? polar(0) : placedPoints === 2 ? { kind: "circumradius" } : undefined;
@@ -197,7 +201,7 @@ export function measureFromCursor(tool: SketchTool, placed: readonly Vec2[], cur
       const dx = cursor[0] - base[0];
       const dy = cursor[1] - base[1];
       const values: DynamicValues = {};
-      if (mode.length !== undefined) values[mode.length.id] = Math.hypot(dx, dy);
+      if (mode.length !== undefined) values[mode.length.id] = Math.hypot(dx, dy) / mode.factor;
       if (mode.angle) values.angle = toDegrees(Math.atan2(dy, dx));
       return values;
     }
@@ -270,7 +274,7 @@ export function solveDynamicInput(tool: SketchTool, placed: readonly Vec2[], cur
         length = Math.hypot(cursor[0] - base[0], cursor[1] - base[1]);
         if (length < MIN_SIZE_MM) length = 10;
       } else {
-        length = typed[lengthField.id] ?? live[lengthField.id] ?? 0;
+        length = (typed[lengthField.id] ?? live[lengthField.id] ?? 0) * mode.factor;
       }
       let angle = mode.angle ? typed.angle ?? live.angle ?? 0 : toDegrees(Math.atan2(cursor[1] - base[1], cursor[0] - base[0]));
       if (lengthField !== undefined && typed[lengthField.id] !== undefined && length < 0) {
@@ -280,7 +284,7 @@ export function solveDynamicInput(tool: SketchTool, placed: readonly Vec2[], cur
         angle += 180;
         notes.push(`A negative length points the other way, so the point is placed at ${normalizeAngleDeg(angle)}°.`);
       }
-      if (length < MIN_SIZE_MM) return fail(`${lengthField?.label ?? "Length"} must be at least ${MIN_SIZE_MM} mm.`, lengthField === undefined ? [] : [lengthField.id]);
+      if (length < MIN_SIZE_MM) return fail(`${lengthField?.label ?? "Length"} must be at least ${cleanNumber(MIN_SIZE_MM / mode.factor)} mm.`, lengthField === undefined ? [] : [lengthField.id]);
       if (mode.angle && typed.angle !== undefined) {
         const wrapped = normalizeAngleDeg(typed.angle);
         if (wrapped !== cleanNumber(typed.angle)) notes.push(`Angle ${cleanNumber(typed.angle)}° is read as ${wrapped}°.`);

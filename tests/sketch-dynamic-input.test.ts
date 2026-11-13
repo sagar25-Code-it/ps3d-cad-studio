@@ -11,7 +11,7 @@ export const sketchDynamicInputTests: readonly TestCase[] = [
       equal(dynamicFieldsFor("line", 1).map((field) => field.id).join(","), "length,angle", "a line takes length and angle");
       equal(dynamicFieldsFor("rectangle", 1).map((field) => field.id).join(","), "width,height", "a rectangle takes width and height");
       equal(dynamicFieldsFor("rectangle-center", 1).map((field) => field.id).join(","), "width,height", "so does a centre rectangle");
-      equal(dynamicFieldsFor("circle", 1).map((field) => field.id).join(","), "radius", "a circle takes a radius");
+      equal(dynamicFieldsFor("circle", 1).map((field) => field.id).join(","), "diameter", "a circle from its centre takes a diameter");
       equal(dynamicFieldsFor("circle-two-point", 1).map((field) => field.id).join(","), "diameter", "a two-point circle takes a diameter");
       equal(dynamicFieldsFor("rectangle-three-point", 1).map((field) => field.id).join(","), "length,angle", "a 3-point rectangle starts with an edge");
       equal(dynamicFieldsFor("rectangle-three-point", 2).map((field) => field.id).join(","), "height", "then asks for the height");
@@ -53,11 +53,11 @@ export const sketchDynamicInputTests: readonly TestCase[] = [
       const centred = pointFromDynamicInput("rectangle-center", [[5, 5]], [9, 7], { width: 30, height: 10 })!;
       near(centred[0], 5 + 15, 1e-9, "a centre rectangle puts the corner half the width away");
       near(centred[1], 5 + 5, 1e-9, "and half the height away");
-      const circle = pointFromDynamicInput("circle", [[0, 0]], [0, 8], { radius: 12.5 })!;
-      near(circle[0], 0, 1e-9, "a circle radius is applied along the cursor direction (x)");
-      near(circle[1], 12.5, 1e-9, "a circle radius is applied along the cursor direction (y)");
+      const circle = pointFromDynamicInput("circle", [[0, 0]], [0, 8], { diameter: 25 })!;
+      near(circle[0], 0, 1e-9, "a circle diameter is applied along the cursor direction (x)");
+      near(circle[1], 12.5, 1e-9, "the rim point sits half the typed diameter from the centre (y)");
       const builtCircle = buildSketchEntity("circle", [[0, 0], circle], "e:c");
-      assert(builtCircle.ok && builtCircle.value.kind === "circle" && Math.abs(builtCircle.value.radiusMm - 12.5) < 1e-9, "the built circle has the typed radius");
+      assert(builtCircle.ok && builtCircle.value.kind === "circle" && Math.abs(builtCircle.value.radiusMm - 12.5) < 1e-9, "the built circle has the typed diameter of 25 (radius 12.5)");
       const diameter = pointFromDynamicInput("circle-two-point", [[0, 0]], [30, 0], { diameter: 50 })!;
       const builtTwo = buildSketchEntity("circle-two-point", [[0, 0], diameter], "e:d");
       assert(builtTwo.ok && builtTwo.value.kind === "circle" && Math.abs(builtTwo.value.radiusMm - 25) < 1e-9, "a typed diameter of 50 gives a radius of 25");

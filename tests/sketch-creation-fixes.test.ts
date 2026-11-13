@@ -425,15 +425,15 @@ export const sketchCreationFixTests: readonly TestCase[] = [
     }
   },
   {
-    name: "Curve creation T17: typed rectangle sizes, circle radius and 2-point diameter are driving dimensions",
+    name: "Curve creation T17: typed rectangle sizes, circle diameter and 2-point diameter are driving dimensions",
     run: () => {
       const rectangle = build("rectangle", [[0, 0], [40, 25]]);
       const rectRelations = typedIntentConstraints({ tool: "rectangle", entity: rectangle, typed: { width: 40, height: 25 }, newId: newConstraintId });
       equal(rectRelations.map((relation) => `${relation.dimension}:${relation.valueMm}`).sort().join(" "), "height:25 width:40", "width and height");
       mustApply(emptyProject(), [rectangle], rectRelations);
       const circle = build("circle", [[0, 0], [8, 0]]);
-      const radius = typedIntentConstraints({ tool: "circle", entity: circle, typed: { radius: 8 }, newId: newConstraintId });
-      equal(radius.map((relation) => `${relation.kind}:${relation.valueMm}`).join(","), "radius:8", "radius");
+      const radius = typedIntentConstraints({ tool: "circle", entity: circle, typed: { diameter: 16 }, newId: newConstraintId });
+      equal(radius.map((relation) => `${relation.kind}:${relation.dimension}:${relation.valueMm}`).join(","), "radius:diameter:16", "a typed diameter of 16 is a diameter dimension of 16 on the radius-8 circle");
       mustApply(emptyProject(), [circle], radius);
       const diameterCircle = build("circle-two-point", [[0, 0], [12, 0]]);
       const diameter = typedIntentConstraints({ tool: "circle-two-point", entity: diameterCircle, typed: { diameter: 12 }, newId: newConstraintId });

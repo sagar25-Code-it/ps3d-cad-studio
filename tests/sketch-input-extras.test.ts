@@ -193,10 +193,10 @@ export const sketchInputExtrasTests: readonly TestCase[] = [
       const backwards = entry("line", [[0, 0]], [10, 0], { length: "-8", angle: "0" });
       assert(backwards.ok && backwards.point[0] === -8 && backwards.point[1] === 0, "a negative length at 0 degrees points to -X");
       assert(backwards.ok && backwards.notes.some((note) => /negative length/i.test(note)), "and says so");
-      const radius = entry("circle", [[0, 0]], [10, 0], { radius: "-5" });
-      assert(!radius.ok && /negative/i.test(radius.message), `a negative radius is refused with a reason: ${radius.ok ? "" : radius.message}`);
-      const zero = entry("circle", [[0, 0]], [10, 0], { radius: "0" });
-      assert(!zero.ok && zero.errors["radius"] !== undefined, "a zero radius is refused on the radius field");
+      const radius = entry("circle", [[0, 0]], [10, 0], { diameter: "-5" });
+      assert(!radius.ok && /negative/i.test(radius.message), `a negative diameter is refused with a reason: ${radius.ok ? "" : radius.message}`);
+      const zero = entry("circle", [[0, 0]], [10, 0], { diameter: "0" });
+      assert(!zero.ok && zero.errors["diameter"] !== undefined, "a zero diameter is refused on the diameter field");
       const wrapped = entry("line", [[0, 0]], [10, 3], { length: "5", angle: "-90" });
       assert(wrapped.ok && wrapped.point[0] === 0 && wrapped.point[1] === -5 && wrapped.notes.some((note) => /270/.test(note)), "a negative angle is read as 270 degrees and reported");
       equal(normalizeAngleDeg(-0), 0, "-0 is 0");
