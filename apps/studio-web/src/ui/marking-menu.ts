@@ -31,6 +31,34 @@ export interface MarkingRequest extends WorkbenchContextRequest {
   readonly faceSelected?: boolean;
   /** Number of solid bodies, for the analysis entries. */
   readonly bodyCount?: number;
+  /** While sketching: the tool that is running (its name), and the last sketch command that was started, for Repeat. */
+  readonly sketchActivity?: SketchActivity;
+}
+
+export interface SketchActivity {
+  /** The name of the drawing tool, edit tool or Sketch Dimension that is active now; absent when the Select tool is. */
+  readonly running?: string;
+  /** The sketch command started last, by the id this menu repeats it with and the name shown. */
+  readonly last?: { readonly id: string; readonly label: string };
+}
+
+/** The marking-menu ids of the daily sketch commands. `sketch.repeat-last` and `sketch.tool-stop` act on the activity above. */
+export const SKETCH_MARKING_TOOLS: Readonly<Record<string, { readonly label: string; readonly icon: string }>> = {
+  "sketch.tool.line": { label: "Line", icon: "line" },
+  "sketch.tool.rectangle": { label: "Rectangle", icon: "rectangle" },
+  "sketch.tool.circle": { label: "Circle", icon: "circle" },
+  "sketch.edit.trim": { label: "Trim", icon: "trim" }
+};
+
+/**
+ * The sketch menu's candidates, most relevant first. With a tool running, stopping it comes first (what a right-click means while
+ * drawing); on a curve, the things done to a curve; on empty canvas, Repeat and the daily tools.
+ */
+function sketchCandidates(request: MarkingRequest): readonly string[] {
+  const tools = ["sketch.tool.line", "sketch.tool.rectangle", "sketch.tool.circle", "sketch.edit.trim"];
+  if (request.sketchActivity?.running !== undefined) return ["sketch.tool-stop", "sketch.dimension", "sketch.finish", ...tools, "history.undo", "view.fit"];
+  if (request.selectionId?.startsWith("entity:") === true) return ["sketch.repeat-last", "sketch.dimension", "sketch.toggle-construction", "selection.delete", "sketch.edit.trim", "sketch.finish", "sketch.select-connected", "sketch.tool.line", "sketch.select-tangent", "selection.toggle-visibility", "history.undo", "view.fit"];
+  return ["sketch.repeat-last", "sketch.dimension", "sketch.finish", ...tools, "history.undo", "sketch.look-at", "history.redo", "view.fit"];
 }
 
 export const MARKING_SLOTS = 8;
@@ -71,7 +99,20 @@ export function buildMarkingMenu(request: MarkingRequest): MarkingMenuModel {
   const available = flatten(resolveWorkbenchContextCommands(request));
   const hasBodies = (request.bodyCount ?? 0) > 0;
   const candidates: MarkingItem[] = [];
-  for (const id of CANDIDATES[context]) {
+  const sketching = context === "sketch" && request.workspace === "sketch";
+  for (const id of sketching ? sketchCandidates(request) : CANDIDATES[context]) {
+    if (sketching) {
+      const tool = SKETCH_MARKING_TOOLS[id];
+      if (tool !== undefined) { candidates.push({ id, label: tool.label, icon: tool.icon, enabled: true }); continue; }
+      if (id === "sketch.tool-stop") { candidates.push({ id, label: `Stop ${request.sketchActivity?.running ?? "tool"}`, icon: "cancel", enabled: true, shortcut: "Esc" }); continue; }
+      if (id === "sketch.repeat-last") {
+        // Repeat is offered only when there is something to repeat: a slot that could do nothing is not shown.
+        const last = request.sketchActivity?.last;
+        if (last !== undefined) candidates.push({ id, label: `Repeat ${last.label}`, icon: "redo", enabled: true });
+        continue;
+      }
+      if (id === "sketch.dimension" && !available.has(id)) { candidates.push({ id, label: "Dimension", icon: "dimension", enabled: true, shortcut: "D" }); continue; }
+    }
     const analysis = ANALYSIS_ITEMS[id];
     if (analysis !== undefined) {
       // Analysis tools belong to the Part workspace.

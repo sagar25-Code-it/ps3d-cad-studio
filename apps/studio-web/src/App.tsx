@@ -183,7 +183,7 @@ import { useSketchKeymap } from "./workspaces/sketch/useSketchKeymap.js";
 import { friendlySketchText } from "../../../packages/workbench-core/src/sketch-names.js";
 import { WorkbenchContextMenu } from "./ui/WorkbenchContextMenu.js";
 import { MarkingMenu } from "./ui/MarkingMenu.js";
-import { buildMarkingMenu } from "./ui/marking-menu.js";
+import { SKETCH_MARKING_TOOLS, buildMarkingMenu, type SketchActivity } from "./ui/marking-menu.js";
 import { useOnViewInput } from "./ui/OnViewInput.js";
 import { AnalysisLayer } from "./analysis/AnalysisLayer.js";
 import type { AnalysisMode } from "./analysis/analysis-session.js";
@@ -300,6 +300,12 @@ const SHORTCUT_GROUPS: readonly { readonly title: string; readonly items: readon
     ]
   }
 ];
+
+/** What the sketch marking menu needs to know: the tool that is running now (by name) and the command started last. */
+function sketchActivityOf(tool: SketchTool, editTool: SketchEditToolId | null, dimensionMode: boolean, last: SketchActivity["last"]): SketchActivity {
+  const running = tool !== "select" ? sketchToolLabel(tool) : editTool !== null ? SKETCH_EDIT_TOOL_LABELS[editTool] : dimensionMode ? "Sketch Dimension" : undefined;
+  return { ...(running === undefined ? {} : { running }), ...(last === undefined ? {} : { last }) };
+}
 
 export function App(): React.JSX.Element {
   const initialDocument = useMemo(() => createBracketDocument(`document:${crypto.randomUUID()}`), []);
@@ -3418,6 +3424,7 @@ export function App(): React.JSX.Element {
       setStatusText(`${SKETCH_EDIT_TOOL_LABELS[tool]} closed.`);
       return;
     }
+    lastSketchCommandRef.current = { id: `edit:${tool}`, label: SKETCH_EDIT_TOOL_LABELS[tool] };
     setSketchTool("select");
     setSketchDimensionMode(false);
     setSketchCheckOpen(false);
@@ -3483,7 +3490,10 @@ export function App(): React.JSX.Element {
     setSketchRequest((current) => ({ command, serial: (current?.serial ?? 0) + 1 }));
   };
 
+  // The sketch command started last, for the marking menu's Repeat.
+  const lastSketchCommandRef = useRef<{ readonly id: string; readonly label: string } | undefined>(undefined);
   const activateSketchTool = (tool: SketchTool, source: string): void => {
+    if (tool !== "select") lastSketchCommandRef.current = { id: `tool:${tool}`, label: sketchToolLabel(tool) };
     setSketchTool(tool);
     setSketchEditTool(null);
     setSketchDimensionMode(false);
@@ -3494,6 +3504,7 @@ export function App(): React.JSX.Element {
   };
 
   const activateSketchDimension = (source: string): void => {
+    lastSketchCommandRef.current = { id: "dimension", label: "Sketch Dimension" };
     if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
     setSketchTool("select");
     setSketchEditTool(null);
@@ -3589,6 +3600,22 @@ export function App(): React.JSX.Element {
       return;
     }
     if (commandId === "sketch.finish") { guard(finishSketch(), "Finishing the sketch"); return; }
+    // The sketch marking menu's own entries: stop the running tool, repeat the last command, and the daily tools.
+    if (commandId === "sketch.tool-stop") {
+      setSketchCancelVersion((version) => version + 1);
+      setSketchEditTool(null);
+      setSketchDimensionMode(false);
+      activateSketchTool("select", "after stopping the tool from the marking menu");
+      return;
+    }
+    if (commandId === "sketch.repeat-last" || commandId in SKETCH_MARKING_TOOLS) {
+      const run = commandId === "sketch.repeat-last" ? lastSketchCommandRef.current?.id : commandId === "sketch.edit.trim" ? "edit:trim" : `tool:${commandId.slice("sketch.tool.".length)}`;
+      if (run === undefined) { setStatusText("There is no sketch command to repeat yet."); return; }
+      if (run === "dimension") activateSketchDimension("from the marking menu");
+      else if (run.startsWith("edit:")) { if (sketchEditTool !== run.slice(5)) activateSketchEdit(run.slice(5) as SketchEditToolId, "from the marking menu"); }
+      else activateSketchTool(run.slice(5) as SketchTool, "from the marking menu");
+      return;
+    }
     if (commandId === "sketch.select-profile" || commandId === "sketch.select-curve" || commandId === "sketch.select-connected" || commandId === "sketch.select-tangent") {
       if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
       setViewportSelectionFilter(commandId === "sketch.select-profile" ? "profile" : commandId === "sketch.select-curve" ? "sketch-curve" : commandId === "sketch.select-connected" ? "connected" : "tangent");
@@ -4140,7 +4167,7 @@ export function App(): React.JSX.Element {
     {contextMenu !== undefined && contextMenu.radial === true && <MarkingMenu
       x={contextMenu.x}
       y={contextMenu.y}
-      model={buildMarkingMenu({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo, faceSelected: selectedFace !== null && selectedFace.bodyId === contextMenu.selectionId, bodyCount: (project.part.generalBodies ?? []).length + (project.part.previewBodies ?? []).length })}
+      model={buildMarkingMenu({ ...(project.activeWorkspace === "sketch" ? { sketchActivity: sketchActivityOf(sketchTool, sketchEditTool, sketchDimensionMode, lastSketchCommandRef.current) } : {}), workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo, faceSelected: selectedFace !== null && selectedFace.bodyId === contextMenu.selectionId, bodyCount: (project.part.generalBodies ?? []).length + (project.part.previewBodies ?? []).length })}
       onRun={runContextCommand}
       onMore={() => setContextMenu({ ...contextMenu, radial: false })}
       onClose={() => setContextMenu(undefined)}
