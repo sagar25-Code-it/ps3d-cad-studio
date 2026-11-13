@@ -398,8 +398,11 @@ export const sketchChromeAppTests: TestCase[] = [
       assert(ribbon.indexOf("<SketchPlaneChip", newSketch) < createGeometry, "the plane chip sits next to it");
       assert(ribbon.includes("onNewSketch") && ribbon.indexOf('label="New Sketch" hint="plane or face"') > 0, "the Part ribbon still has its New Sketch button");
       const app = repoFile("apps/studio-web/src/App.tsx");
-      assert(app.includes('onNewSketch={() => openSketchPlaneDialog("new")}') && app.includes('onChangeSketchPlane={() => openSketchPlaneDialog("set")}'), "the ribbon's New Sketch opens new-sketch mode and the chip opens change mode");
-      assert(app.includes('onNewSketch: () => openSketchPlaneDialog("new")'), "Create > New Sketch opens the same dialog in new-sketch mode");
+      // New Sketch goes through beginNewSketch: a face or origin plane selected in the Part view is used at once, otherwise the dialog opens in new-sketch mode.
+      assert(app.includes("onNewSketch={beginNewSketch}") && app.includes('onChangeSketchPlane={() => openSketchPlaneDialog("set")}'), "the ribbon's New Sketch starts a new sketch and the chip opens change mode");
+      assert(app.includes("onNewSketch: beginNewSketch"), "Create > New Sketch takes the same path");
+      const begin = app.slice(app.indexOf("const beginNewSketch"), app.indexOf("const pickFaceForSketch"));
+      assert(begin.includes('openSketchPlaneDialog("new")') && begin.includes("startSketchOnFace(") && begin.includes("startSketchOnPlane("), "which uses the selected face or plane, and otherwise opens the same dialog in new-sketch mode");
       assert(app.includes("decidePlaneOffer(") && app.includes("planeOfferAfterFinish("), "entering Sketch and Finish Sketch go through the offer rules");
       assert(app.includes("describeSketchPlane(projectRef.current.sketch).status"), "the status line states the plane after choosing");
       assert(app.includes('workspace === "sketch" ? ` ${describeSketchPlane(current.sketch).status}` : ""'), "and when the Sketch workspace is entered without choosing (Continue with the current sketch)");
