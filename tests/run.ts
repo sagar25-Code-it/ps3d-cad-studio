@@ -168,6 +168,7 @@ import { sketchLineRectangleTests } from "./sketch-line-rectangle.test.js";
 import { sketchReferenceLayerTests } from "./sketch-reference-layer.test.js";
 import { sketchLineArcDragTests } from "./sketch-line-arc-drag.test.js";
 import { sketchDiameterAcrossTests } from "./sketch-diameter-across.test.js";
+import { sketchDimensionPlacementTests } from "./sketch-dimension-placement.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -358,6 +359,7 @@ const tests: readonly TestCase[] = [
   ...sketchReferenceLayerTests,
   ...sketchLineArcDragTests,
   ...sketchDiameterAcrossTests,
+  ...sketchDimensionPlacementTests,
 ];
 let failures = 0;
 

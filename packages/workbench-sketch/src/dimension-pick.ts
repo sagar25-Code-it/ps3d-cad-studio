@@ -242,6 +242,26 @@ export function orientationForPlacement(from: Vec2, to: Vec2, cursor: Vec2): "al
   return "aligned";
 }
 
+/**
+ * A sloped line picked on its own, as its two ends: clicking a curve gives its length at once, and a placement click above or below
+ * the line then gives its horizontal extent, beside it its vertical extent. A level or plumb line has no separate extent, so it
+ * gives nothing here.
+ */
+export function lineExtentPlacement(sketch: WorkbenchSketch, pick: DimensionPick | undefined): PointPairPlacement | undefined {
+  if (pick === undefined || pick.ref !== undefined) return undefined;
+  const entity = sketch.entities.find((candidate) => candidate.id === pick.entityId);
+  if (entity?.kind !== "line") return undefined;
+  if (Math.abs(entity.end[0] - entity.start[0]) < 1e-9 || Math.abs(entity.end[1] - entity.start[1]) < 1e-9) return undefined;
+  return { entityId: entity.id, secondEntityId: entity.id, points: ["start", "end"], from: entity.start, to: entity.end };
+}
+
+/** The horizontal or vertical extent of a picked line for a placement click at `cursor`; undefined where the placement means its own length. */
+export function placeLineExtent(sketch: WorkbenchSketch, pick: DimensionPick | undefined, cursor: Vec2): PairDimension | string | undefined {
+  const placement = lineExtentPlacement(sketch, pick);
+  if (placement === undefined || orientationForPlacement(placement.from, placement.to, cursor) === "aligned") return undefined;
+  return placePointDistance(sketch, placement, cursor);
+}
+
 /** The distance between two picked points, of the kind the placement chooses. */
 export function placePointDistance(sketch: WorkbenchSketch, placement: PointPairPlacement, cursor: Vec2): PairDimension | string {
   return distanceBetween(sketch, placement.entityId, placement.secondEntityId, orientationForPlacement(placement.from, placement.to, cursor), placement.points);

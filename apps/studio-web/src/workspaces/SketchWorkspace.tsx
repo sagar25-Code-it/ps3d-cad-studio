@@ -63,7 +63,7 @@ import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, POLYGON_MODES, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
 import { ORIGIN_RELATION_POINT, relationPointsOf, type RelationPoint } from "../../../../packages/workbench-sketch/src/relation-points.js";
-import { DOUBLED_DISTANCE_LABEL, placeAcrossDistance, placePointDistance, placementPreview, resolveDimensionPair, type AcrossLinePlacement, type DimensionPairResult, type DimensionPick, type PairDimension, type PointPairPlacement } from "../../../../packages/workbench-sketch/src/dimension-pick.js";
+import { DOUBLED_DISTANCE_LABEL, lineExtentPlacement, orientationForPlacement, placeLineExtent, placeAcrossDistance, placePointDistance, placementPreview, resolveDimensionPair, type AcrossLinePlacement, type DimensionPairResult, type DimensionPick, type PairDimension, type PointPairPlacement } from "../../../../packages/workbench-sketch/src/dimension-pick.js";
 import { dimensionOverConstraint } from "../../../../packages/workbench-sketch/src/dimension-overconstraint.js";
 import { chainSelectionFor } from "../../../../packages/workbench-sketch/src/chain-select.js";
 import { CONSTRAINT_TOOL_INFO, constraintToolStep, isConstraintToolKind, type ConstraintToolKind, type ConstraintToolPick } from "../../../../packages/workbench-sketch/src/constraint-tool.js";
@@ -1038,6 +1038,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       if (event.shiftKey || event.ctrlKey || event.metaKey) return;
       // Two points are picked in Sketch Dimension: this click places their dimension and opens its value.
       if (props.dimensionMode && dimensionPlacement !== undefined) { placeDimensionAt(point); return; }
+      // A line was picked and the click lands above, below or beside it: its horizontal or vertical extent, as the preview shows.
+      const extent = props.dimensionMode ? placeLineExtent(props.sketch, dimensionFirst, point) : undefined;
+      if (extent !== undefined && typeof extent !== "string") { setDimensionEdit(undefined); openPairDimension(extent, point); return; }
       setSelectionIds([]);
       setSelectedProfileIds([]);
       setSelectedConstraintIds([]);
@@ -1398,11 +1401,15 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   };
 
   // The dimension that is waiting to be placed, drawn as it would be with the pointer where it is now.
+  // A sloped line picked on its own: a click above, below or beside it gives its horizontal or vertical extent instead of its length.
+  const lineExtent = useMemo(() => (props.dimensionMode && dimensionPlacement === undefined ? lineExtentPlacement(props.sketch, dimensionFirst) : undefined), [props.dimensionMode, dimensionPlacement, dimensionFirst, props.sketch]);
   const placementLayout = useMemo(() => {
-    if (!props.dimensionMode || dimensionPlacement === undefined) return undefined;
-    const preview = placementPreview(props.sketch, dimensionPlacement, cursor);
+    if (!props.dimensionMode) return undefined;
+    const waiting = dimensionPlacement ?? (lineExtent !== undefined && orientationForPlacement(lineExtent.from, lineExtent.to, cursor) !== "aligned" ? lineExtent : undefined);
+    if (waiting === undefined) return undefined;
+    const preview = placementPreview(props.sketch, waiting, cursor);
     return preview === undefined ? undefined : pointDistanceLayout(props.sketch, preview.constraint, preview.measured, px, { format: (value) => formatLengthLabel(value, dimensionDisplay) });
-  }, [props.dimensionMode, dimensionPlacement, cursor, props.sketch, px, dimensionDisplay]);
+  }, [props.dimensionMode, dimensionPlacement, lineExtent, cursor, props.sketch, px, dimensionDisplay]);
 
   /** Opens the value editor for a dimension between two picks (a distance or an angle), at the place given. */
   const openPairDimension = (found: PairDimension, anchor: Vec2): void => {
@@ -2422,7 +2429,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       {props.dimensionMode && <div className="dimension-mode-banner"><CommandIcon name="dimension" /><span><strong>Sketch Dimension</strong>{dimensionPlacement !== undefined
         ? "axis" in dimensionPlacement ? "Click to place the dimension: beyond the centreline for a diameter across it, on this side for the distance to it." : "Click to place the dimension: above or below the two points for horizontal, beside them for vertical, elsewhere for straight."
         : dimensionFirst !== undefined
-          ? "Type the value, or click a second curve or point for the distance or angle between the two."
+          ? lineExtent !== undefined ? "Type the length, click above or beside the line for its horizontal or vertical extent, or click a second curve or point." : "Type the value, or click a second curve or point for the distance or angle between the two."
           : "Click a curve for its size, then a second curve or point for a distance or an angle. Esc to finish."}</span></div>}
       {pickRelation !== null && <div className="dimension-mode-banner constraint-tool-banner" role="status"><CommandIcon name={pickRelation === "symmetry" ? "mirror" : pickRelation} /><span><strong>{CONSTRAINT_TOOL_INFO[pickRelation].label}</strong>{toolPicks.length === 0 ? CONSTRAINT_TOOL_INFO[pickRelation].prompt : `${toolPicks.map((pick) => pick.label).join(", ")} picked. Pick the next one.`} Esc to finish.</span></div>}
       {relaxPrompt !== undefined && <div className="dimension-mode-banner relax-fix-prompt" role="alert">
