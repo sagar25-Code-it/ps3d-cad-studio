@@ -39,6 +39,7 @@ export { anchorsForConstraint, anchorsForDimension, preserveForConstraint, type 
 export { describeConstraint, entityKindOf, entityNames, liveConstraintId } from "./sketch-translate.js";
 export { redriveDimension, dimensionNameOf, locateDimensionConstraint } from "./sketch-dimension-edit.js";
 export { isOffsetGroupId, offsetGroupFollowerIds, offsetGroupMembers, withOffsetGroupValue } from "./offset-group.js";
+export { hasDimensionLabel, MAX_LABEL_OFFSET_PX, mergedLabelOffsets, MIN_LABEL_OFFSET_PX, savedLabelOffsets, storedLabelOffsetPx, validLabelOffsetPx } from "./dimension-label.js";
 export type { LiveRelationSet, LiveSolveOptions } from "./sketch-solve.js";
 export * from "./envelope.js";
 export * from "./envelope-limits.js";

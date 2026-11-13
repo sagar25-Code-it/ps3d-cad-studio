@@ -187,7 +187,7 @@ export function constraintPayloadProblem(value: unknown, index?: number): string
     const badPoint = points.findIndex((entry) => !(SKETCH_POINT_REFS as readonly unknown[]).includes(entry));
     if (badPoint >= 0) return `${named}: points entry ${badPoint + 1} must be one of ${SKETCH_POINT_REFS.join(", ")}, but it is ${describeGivenValue(points[badPoint])}.`;
   }
-  for (const field of ["valueMm", "valueDeg", "ratio"] as const) {
+  for (const field of ["valueMm", "valueDeg", "ratio", "labelOffsetPx"] as const) {
     if (Object.hasOwn(value, field) && !isFinite(value[field])) return `${named}: ${field} must be a finite number, but it is ${describeGivenValue(value[field])}.`;
   }
   if (Object.hasOwn(value, "dimension") && !(typeof value.dimension === "string" && DIMENSION_NAMES.includes(value.dimension))) return `${named}: dimension must be one of ${DIMENSION_NAMES.join(", ")}, but it is ${describeGivenValue(value.dimension)}.`;

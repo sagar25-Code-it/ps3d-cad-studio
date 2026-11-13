@@ -1,6 +1,7 @@
 import { circleThroughThreePoints } from "./arc-geometry.js";
 import { DIMENSION_NAME_PATTERN } from "./dimension-names.js";
 import { isOffsetGroupId } from "./offset-group.js";
+import { hasDimensionLabel, validLabelOffsetPx } from "./dimension-label.js";
 import { SPLINE_MAX_FIT_POINTS, SPLINE_MIN_FIT_POINTS } from "./spline-limits.js";
 import { NEW_PRIMITIVE_SHAPES, validPrimitiveBody } from "./primitive-bodies.js";
 import { validConstructionBinder, validNewPlaneDefinition } from "./construction-refs.js";
@@ -322,6 +323,9 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   const hasOffsetGroup = Object.hasOwn(value, "offsetGroup");
   // An offset group ties the distances of one Offset together.
   if (hasOffsetGroup && !(isOffsetGroupId(value.offsetGroup) && value.kind === "distance")) return false;
+  const hasLabelOffset = Object.hasOwn(value, "labelOffsetPx");
+  // A dragged label position belongs to a dimension and is a stand-off the canvas can draw.
+  if (hasLabelOffset && !(validLabelOffsetPx(value.labelOffsetPx) && hasDimensionLabel({ kind: value.kind as WorkbenchSketchConstraint["kind"] }))) return false;
   const hasInside = Object.hasOwn(value, "inside");
   // Inside or outside is a property of the gap between two round curves only.
   if (hasInside && (typeof value.inside !== "boolean" || value.kind !== "distance" || value.dimension !== "offset")) return false;
@@ -330,7 +334,7 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   // A diameter across a line is a point-to-line or line-to-line distance.
   if (hasDoubled && (typeof value.doubled !== "boolean" || value.kind !== "distance" || (value.dimension !== "point-line" && value.dimension !== "line-line"))) return false;
   const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : []), ...(hasPoints ? ["points"] : []),
-    ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : []), ...(hasExpression ? ["expression"] : []), ...(hasDoubled ? ["doubled"] : []), ...(hasName ? ["name"] : []), ...(hasOffsetGroup ? ["offsetGroup"] : []), ...(hasInside ? ["inside"] : [])];
+    ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : []), ...(hasExpression ? ["expression"] : []), ...(hasDoubled ? ["doubled"] : []), ...(hasName ? ["name"] : []), ...(hasOffsetGroup ? ["offsetGroup"] : []), ...(hasInside ? ["inside"] : []), ...(hasLabelOffset ? ["labelOffsetPx"] : [])];
   if (!exactKeys(value, expectedKeys) || (hasSuppressed && typeof value.suppressed !== "boolean")) return false;
   // An expression only drives a dimension, and must be short, parseable text.
   if (hasExpression && (!(hasValue || hasValueDeg) || typeof value.expression !== "string" || value.expression.length < 1 || value.expression.length > MAX_EXPRESSION_LENGTH || !parseExpression(value.expression).ok)) return false;

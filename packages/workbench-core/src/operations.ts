@@ -1,5 +1,6 @@
 import { isNewPrimitiveShape, NEW_PRIMITIVE_SHAPES, normalizePrimitiveSize, validPrimitiveBody } from "./primitive-bodies.js";
 import { nameSketchDimensions, unbindLostDimensionNames } from "./dimension-names.js";
+import { hasDimensionLabel, MAX_LABEL_OFFSET_PX, MIN_LABEL_OFFSET_PX, storedLabelOffsetPx, validLabelOffsetPx } from "./dimension-label.js";
 import { planeDependencies, validConstructionBinder, validNewPlaneDefinition } from "./construction-refs.js";
 import type {
   AppliedWorkbenchOperation,
@@ -364,6 +365,10 @@ function validateWorkbenchOperationShape(rawInput: unknown): WorkbenchResult<Wor
     case "set-sketch-constraints-suppressed":
       if (!keys(input, [...common, "constraintIds", "suppressed"]) || !boundedList(input.constraintIds, 500, stableId) || input.constraintIds.length < 1
         || typeof input.suppressed !== "boolean") return invalidOperation("The constraint relax payload is invalid.");
+      break;
+    case "set-sketch-dimension-label":
+      if (!keys(input, [...common, "constraintId", "offsetPx"]) || !stableId(input.constraintId)) return invalidOperation("Placing a dimension label needs the dimension's constraintId and an offsetPx.");
+      if (!validLabelOffsetPx(input.offsetPx)) return invalidOperation(`A dimension label stands ${MIN_LABEL_OFFSET_PX} to ${MAX_LABEL_OFFSET_PX} screen pixels off its geometry; offsetPx must be a number in that range.`);
       break;
     case "set-sketch-plane":
       if (!validSketchPlacementInput(input, common)) return invalidOperation(sketchPlacementProblem(input, common));
@@ -772,6 +777,18 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       return changed({ ...project, sketch: { ...project.sketch, constraints: project.sketch.constraints.filter((constraint) => constraint.id !== operation.constraintId) } }, [operation.constraintId], `Deleted constraint ${operation.constraintId}.`);
     case "set-sketch-dimension":
       return setSketchDimension(project, operation);
+    case "set-sketch-dimension-label": {
+      const target = project.sketch.constraints.find((constraint) => constraint.id === operation.constraintId);
+      if (target === undefined) return broken(operation.constraintId, "The sketch dimension does not exist.");
+      if (!hasDimensionLabel(target)) return failure("INVALID_OPERATION", `A ${target.kind} relation has no dimension text to place.`, [target.id], "Pick a dimension (a length, radius, distance or angle).");
+      const labelOffsetPx = storedLabelOffsetPx(operation.offsetPx);
+      // Only where the text stands changes: the geometry, the value and every relation stay exactly as they are.
+      return changed(
+        { ...project, sketch: { ...project.sketch, constraints: project.sketch.constraints.map((constraint) => constraint.id === target.id ? { ...constraint, labelOffsetPx } : constraint) } },
+        [target.id],
+        "Moved the dimension text. Its position is saved with the sketch."
+      );
+    }
     case "apply-sketch-edit":
       return applySketchEdit(project, operation);
     case "set-sketch-constraints-suppressed": {

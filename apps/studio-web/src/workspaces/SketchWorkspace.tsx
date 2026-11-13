@@ -41,7 +41,7 @@ import { keyLabelForCommand, sketchHotkeyHelp, type SketchCommandId, type Sketch
 import { DRAW_CONSTRUCTION_OFF_MESSAGE, drawConstructionOnMessage, entityForDrawMode, planForDrawMode } from "../../../../packages/workbench-sketch/src/draw-construction.js";
 import { findTextObject, planSketchText, planSketchTextEdit, textSpecFromFields } from "../../../../packages/workbench-sketch/src/sketch-text.js";
 import type { DesignSketchFeature, SketchTextObject, WorkbenchResult } from "../../../../packages/workbench-core/src/index.js";
-import { isSketchDatumEntityId, usesZUpPlane } from "../../../../packages/workbench-core/src/index.js";
+import { isSketchDatumEntityId, mergedLabelOffsets, usesZUpPlane } from "../../../../packages/workbench-core/src/index.js";
 import { SketchExportPanel, SketchImportPanel, SketchUnderlayPanel, type UnderlayPickState } from "./sketch/SketchExchangePanel.js";
 import { SketchPatternPanel } from "./sketch/SketchPatternPanel.js";
 import { useDimensionOffsets } from "./sketch/useDimensionOffsets.js";
@@ -287,6 +287,8 @@ interface SketchWorkspaceProps {
   readonly onConstraintToolChange?: (tool: ConstraintToolKind | null) => void;
   readonly onApplyEdit: (plan: SketchEditPlan) => boolean | void;
   readonly onSetSuppressed: (constraintIds: readonly string[], suppressed: boolean) => boolean | void;
+  /** Saves where a dimension's text was dragged to with the sketch (one Undo step). Without it the position is remembered in this browser only. */
+  readonly onPlaceDimensionLabel?: (constraintId: string, offsetPx: number) => boolean | void;
   readonly onCloseEditTool: () => void;
   readonly onCloseCheck: () => void;
   readonly onActivateTool: (tool: SketchTool) => void;
@@ -392,7 +394,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const dimensionDisplay: DimensionDisplaySettings = { ...storedDimensionDisplay, unit: props.displayUnit ?? "mm" };
   // Where dimension labels were dragged to: per project and sketch, and forgotten for dimensions that are gone.
   const liveConstraintIds = useMemo(() => new Set(props.sketch.constraints.map((constraint) => constraint.id)), [props.sketch.constraints]);
-  const [dimensionOffsets, setDimensionOffsets] = useDimensionOffsets(props.projectId, props.sketch.id, liveConstraintIds);
+  const [localDimensionOffsets, setDimensionOffsets] = useDimensionOffsets(props.projectId, props.sketch.id, liveConstraintIds);
+  // The positions saved with the sketch win; a dimension that has none keeps the one this browser remembered for it.
+  const dimensionOffsets = useMemo(() => mergedLabelOffsets(props.sketch.constraints, localDimensionOffsets), [props.sketch.constraints, localDimensionOffsets]);
   const dimensionDrag = useRef<{ readonly pointerId: number; readonly constraintId: string; readonly startMm: Vec2; readonly startClient: readonly [number, number]; readonly startOffsetPx: number; readonly layoutAt: (offsetPx: number) => DimensionLayout | undefined; moved: boolean } | undefined>(undefined);
   const [dimensionDragOffset, setDimensionDragOffset] = useState<{ readonly constraintId: string; readonly offsetPx: number } | undefined>(undefined);
   // Keyboard access to the canvas, spline fit-point work, zoom window and the Measure tool.
@@ -2139,8 +2143,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       const dragged = dimensionDragOffset;
       setDimensionDragOffset(undefined);
       if (labelDrag.moved && event.type !== "pointercancel" && dragged !== undefined && dragged.constraintId === labelDrag.constraintId) {
-        setDimensionOffsets((current) => ({ ...current, [labelDrag.constraintId]: dragged.offsetPx }));
-        props.onMessage("Moved the dimension. Its position is remembered in this browser; it is not part of the model.");
+        // The position is part of the sketch: one operation, one Undo step, saved with the design. (Without a project to write to it stays in this browser.)
+        if (props.onPlaceDimensionLabel === undefined) {
+          setDimensionOffsets((current) => ({ ...current, [labelDrag.constraintId]: dragged.offsetPx }));
+          props.onMessage("Moved the dimension. Its position is remembered in this browser.");
+        } else {
+          props.onPlaceDimensionLabel(labelDrag.constraintId, dragged.offsetPx);
+        }
       }
       return;
     }

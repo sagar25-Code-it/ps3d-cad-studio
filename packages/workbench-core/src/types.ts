@@ -266,6 +266,11 @@ export interface WorkbenchSketchConstraint {
    * the smaller of the two. Absent (or false) means the copy is outside. `valueMm` is the size of the gap either way.
    */
   readonly inside?: boolean;
+  /**
+   * A dimension only: how far its dimension line stands off the geometry, in screen pixels (12 to 400), after its text was dragged.
+   * Saved with the sketch, so the label is where it was put when the design is opened elsewhere. Absent means the default place.
+   */
+  readonly labelOffsetPx?: number;
 }
 
 /** What a Pierce constraint holds its point to: a construction axis, or one chain of sharp edges (by chain number) of a general body. */
@@ -1587,6 +1592,8 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly label: string;
     }
   | { readonly kind: "set-sketch-constraints-suppressed"; readonly constraintIds: readonly string[]; readonly suppressed: boolean }
+  /** Records where a dimension's text was dragged to: the stand-off of its dimension line in screen pixels. Moves no geometry. */
+  | { readonly kind: "set-sketch-dimension-label"; readonly constraintId: string; readonly offsetPx: number }
   | { readonly kind: "set-sketch-plane"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame; readonly face?: SketchPlaneFaceRef; readonly convention?: SketchPlaneConventionRequest }
   /** Finishes the working sketch into the timeline: a new sketch feature, or an update of the one being edited. */
   | { readonly kind: "commit-design-sketch"; readonly featureId: string; readonly name: string }
@@ -1753,7 +1760,7 @@ export type WorkbenchOperation = OperationEnvelope & (
  */
 export const WORKBENCH_OPERATION_KINDS = [
   "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
-  "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-sketch-plane",
+  "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-sketch-dimension-label", "set-sketch-plane",
   "commit-design-sketch", "edit-design-sketch", "new-design-sketch", "add-design-solid", "update-design-solid", "regenerate-design", "set-design-parameters",
   "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
   "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility", "modify-general-body",

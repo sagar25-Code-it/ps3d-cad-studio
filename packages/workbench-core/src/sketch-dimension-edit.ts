@@ -261,8 +261,10 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
   const dimensionKey = kind === "distance" || kind === "radius" ? { dimension: name as NonNullable<WorkbenchSketchConstraint["dimension"]>, ...(doubled ? { doubled: true as const } : {}), ...(inside ? { inside: true as const } : {}) } : {};
   const pointKey = points === undefined ? {} : { points: [...points] as readonly SketchPointRef[] };
 
+  // Where the text was dragged to stays with the dimension when its value changes or it becomes a reference.
+  const labelKey = existing?.labelOffsetPx === undefined ? {} : { labelOffsetPx: existing.labelOffsetPx };
   if (driven) {
-    const reference: WorkbenchSketchConstraint = { id: dimensionId, kind, entityIds, ...dimensionKey, ...pointKey, driven: true };
+    const reference: WorkbenchSketchConstraint = { id: dimensionId, kind, entityIds, ...dimensionKey, ...pointKey, driven: true, ...labelKey };
     const measured = measureDimensionConstraint({ entities: sketch.entities }, reference);
     return {
       ok: true,
@@ -302,7 +304,8 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
     ...pointKey,
     ...(name === "angle" ? { valueDeg: value } : { valueMm: value }),
     ...(existing?.suppressed === true ? { suppressed: true as const } : {}),
-    ...(existing?.offsetGroup === undefined || kind !== "distance" ? {} : { offsetGroup: existing.offsetGroup })
+    ...(existing?.offsetGroup === undefined || kind !== "distance" ? {} : { offsetGroup: existing.offsetGroup }),
+    ...labelKey
   };
   const constraints = withDimension(constraint);
 
