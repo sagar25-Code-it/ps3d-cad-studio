@@ -244,7 +244,9 @@ export function setSketchDimension(project: WorkbenchProject, operation: SetDime
   const withDimension = (constraint: WorkbenchSketchConstraint): readonly WorkbenchSketchConstraint[] => existing === undefined
     ? [...sketch.constraints, constraint]
     : sketch.constraints.map((candidate) => candidate.id === existing.id ? constraint : candidate);
-  const dimensionKey = kind === "distance" || kind === "radius" ? { dimension: name as NonNullable<WorkbenchSketchConstraint["dimension"]> } : {};
+  // A distance to a line keeps being a diameter across it (or a plain distance) unless the request says otherwise.
+  const doubled = (name === "point-line" || name === "line-line") && (operation.doubled ?? existing?.doubled === true);
+  const dimensionKey = kind === "distance" || kind === "radius" ? { dimension: name as NonNullable<WorkbenchSketchConstraint["dimension"]>, ...(doubled ? { doubled: true as const } : {}) } : {};
   const pointKey = points === undefined ? {} : { points: [...points] as readonly SketchPointRef[] };
 
   if (driven) {

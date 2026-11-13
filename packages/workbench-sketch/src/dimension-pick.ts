@@ -35,6 +35,26 @@ export interface PairDimension {
   readonly measured: number;
   /** The dimension this pair already has, if any: its value (or its expression), or that it is a reference. */
   readonly existing?: { readonly value?: number; readonly expression?: string; readonly reference: boolean };
+  /**
+   * A distance to a line only. True: the value is a diameter across the line (twice the distance). False: a plain distance, chosen by
+   * placing the dimension on the near side of a centreline. Absent: the dimension keeps the form it has.
+   */
+  readonly doubled?: boolean;
+}
+
+/**
+ * A point (or a line) and a centreline picked: the dimension is made when it is placed. Beyond the centreline it is a diameter across
+ * it, as the half profile of a turned part is dimensioned; on the near side it is the distance to the centreline.
+ */
+export interface AcrossLinePlacement {
+  readonly entityId: string;
+  readonly secondEntityId: string;
+  readonly dimension: "point-line" | "line-line";
+  readonly points?: readonly SketchPointRef[];
+  /** Where the distance is measured from: the picked point, or the middle of the picked line. */
+  readonly from: Vec2;
+  /** The centreline (a construction line). */
+  readonly axis: { readonly start: Vec2; readonly end: Vec2 };
 }
 
 /** Two points picked: the dimension is made when it is placed, because the place chooses straight, horizontal or vertical. */
@@ -49,6 +69,7 @@ export interface PointPairPlacement {
 export type DimensionPairResult =
   | { readonly status: "ready"; readonly dimension: PairDimension }
   | { readonly status: "place"; readonly placement: PointPairPlacement; readonly prompt: string }
+  | { readonly status: "place-across"; readonly placement: AcrossLinePlacement; readonly prompt: string }
   | { readonly status: "none"; readonly message: string };
 
 export const PAIR_DIMENSION_LABELS: Readonly<Record<PairDimensionName, string>> = {
@@ -59,6 +80,10 @@ export const PAIR_DIMENSION_LABELS: Readonly<Record<PairDimensionName, string>> 
   horizontal: "Horizontal distance",
   vertical: "Vertical distance"
 };
+
+export const DOUBLED_DISTANCE_LABEL = "Diameter across the centreline";
+
+export const ACROSS_PROMPT = "Click where the dimension should go: beyond the centreline for a diameter across it, on this side of it for the distance to it.";
 
 export const PLACEMENT_PROMPT = "Click where the dimension should go: above or below the two points for the horizontal distance, beside them for the vertical distance, anywhere else for the straight distance.";
 
@@ -93,16 +118,58 @@ function existingOf(sketch: WorkbenchSketch, key: { readonly entityId: string; r
   return { reference: found.driven === true, ...(value === undefined ? {} : { value }), ...(found.expression === undefined ? {} : { expression: found.expression }) };
 }
 
-function distanceBetween(sketch: WorkbenchSketch, entityId: string, secondEntityId: string, dimension: Exclude<PairDimensionName, "angle">, points: readonly SketchPointRef[] | undefined): PairDimension | string {
+/**
+ * `doubled` is the form the placement asked for (a diameter across the line, or a plain distance); left out, the pair keeps the form
+ * its dimension already has. A dimension that exists in the other form is not reported as existing: its value is not this one's, and
+ * accepting the editor then turns it into the form that was placed.
+ */
+function distanceBetween(sketch: WorkbenchSketch, entityId: string, secondEntityId: string, dimension: Exclude<PairDimensionName, "angle">, points: readonly SketchPointRef[] | undefined, doubled?: boolean): PairDimension | string {
   const kinds = [entityId, secondEntityId].map((id): SketchEntityKind | undefined => (id === SKETCH_ORIGIN_ID ? "origin" : sketch.entities.find((entity) => entity.id === id)?.kind));
   const fit = constraintFit("distance", kinds, points, { dimension });
   if (!fit.ok) return fit.reason;
-  const probe: WorkbenchSketchConstraint = { id: "constraint:pair-probe", kind: "distance", dimension, entityIds: [entityId, secondEntityId], ...(points === undefined ? {} : { points }), driven: true };
+  const key = { entityId, secondEntityId, dimension, ...(points === undefined ? {} : { points }) };
+  const stored = locateDimensionConstraint(sketch, key);
+  const storedDoubled = stored?.doubled === true;
+  const form = doubled ?? storedDoubled;
+  const probe: WorkbenchSketchConstraint = { id: "constraint:pair-probe", kind: "distance", dimension, entityIds: [entityId, secondEntityId], ...(points === undefined ? {} : { points }), driven: true, ...(form ? { doubled: true } : {}) };
   const measured = measureDimensionConstraint(sketch, probe);
   if (measured === undefined) return "That distance cannot be measured on this geometry.";
-  const existing = existingOf(sketch, { entityId, secondEntityId, dimension, ...(points === undefined ? {} : { points }) });
-  return { entityId, secondEntityId, dimension, ...(points === undefined ? {} : { points }), label: PAIR_DIMENSION_LABELS[dimension], measured, ...(existing === undefined ? {} : { existing }) };
+  const existing = stored !== undefined && storedDoubled !== form ? undefined : existingOf(sketch, key);
+  return { ...key, label: form ? DOUBLED_DISTANCE_LABEL : PAIR_DIMENSION_LABELS[dimension], measured, ...(existing === undefined ? {} : { existing }), ...(doubled === undefined && !form ? {} : { doubled: form }) };
 }
+
+/** Which side of a line a point is on: 1, -1, or 0 when it is on the line. */
+function sideOf(axis: { readonly start: Vec2; readonly end: Vec2 }, point: Vec2): number {
+  const cross = (axis.end[0] - axis.start[0]) * (point[1] - axis.start[1]) - (axis.end[1] - axis.start[1]) * (point[0] - axis.start[0]);
+  const scale = Math.max(Math.hypot(axis.end[0] - axis.start[0], axis.end[1] - axis.start[1]), 1e-12);
+  return Math.abs(cross) / scale < 1e-9 ? 0 : Math.sign(cross);
+}
+
+/** True when the dimension placed at `cursor` is a diameter: the cursor is beyond the centreline, on the side away from what was picked. */
+export function placedAcross(placement: AcrossLinePlacement, cursor: Vec2): boolean {
+  const near = sideOf(placement.axis, placement.from);
+  return near !== 0 && sideOf(placement.axis, cursor) === -near;
+}
+
+/** The dimension a point (or line) and a centreline get where it is placed: a diameter across the centreline, or the distance to it. */
+export function placeAcrossDistance(sketch: WorkbenchSketch, placement: AcrossLinePlacement, cursor: Vec2): PairDimension | string {
+  return distanceBetween(sketch, placement.entityId, placement.secondEntityId, placement.dimension, placement.points, placedAcross(placement, cursor));
+}
+
+/**
+ * The dimension a waiting placement would make with the pointer at `cursor`, as a reference constraint the canvas can lay out and
+ * draw while the pointer moves. It is never stored.
+ */
+export function placementPreview(sketch: WorkbenchSketch, placement: PointPairPlacement | AcrossLinePlacement, cursor: Vec2): { readonly constraint: WorkbenchSketchConstraint; readonly measured: number } | undefined {
+  const found = "axis" in placement ? placeAcrossDistance(sketch, placement, cursor) : placePointDistance(sketch, placement, cursor);
+  if (typeof found === "string" || found.dimension === "angle") return undefined;
+  return {
+    constraint: { id: "constraint:placement-preview", kind: "distance", dimension: found.dimension, entityIds: [found.entityId, found.secondEntityId], ...(found.points === undefined ? {} : { points: found.points }), driven: true, ...(found.doubled === true ? { doubled: true } : {}) },
+    measured: found.measured
+  };
+}
+
+const isCentreline = (entity: { readonly kind: string; readonly construction?: boolean } | undefined): boolean => entity?.kind === "line" && entity.construction === true;
 
 /** What the two picks are dimensioned by, in the order they were picked. */
 export function resolveDimensionPair(sketch: WorkbenchSketch, first: DimensionPick, second: DimensionPick): DimensionPairResult {
@@ -122,7 +189,20 @@ export function resolveDimensionPair(sketch: WorkbenchSketch, first: DimensionPi
     const v: Vec2 = [two.end[0] - two.start[0], two.end[1] - two.start[1]];
     const scale = Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]);
     if (scale < 1e-12) return none("One of the lines has no length.");
-    if (Math.abs(u[0] * v[1] - u[1] * v[0]) <= 1e-9 * scale) return ready(distanceBetween(sketch, a.id, b.id, "line-line", undefined));
+    if (Math.abs(u[0] * v[1] - u[1] * v[0]) <= 1e-9 * scale) {
+      // A line and a centreline (the second pick when both are construction lines): where the dimension is placed chooses diameter or distance.
+      const axis = isCentreline(two) ? two : isCentreline(one) ? one : undefined;
+      const other = axis === two ? one : two;
+      if (axis !== undefined) {
+        // A dimension these two already have (stored centreline first) is edited as it is.
+        if (existingOf(sketch, { entityId: axis.id, secondEntityId: other.id, dimension: "line-line" }) !== undefined) return ready(distanceBetween(sketch, axis.id, other.id, "line-line", undefined));
+        const from: Vec2 = [(other.start[0] + other.end[0]) / 2, (other.start[1] + other.end[1]) / 2];
+        if (existingOf(sketch, { entityId: a.id, secondEntityId: b.id, dimension: "line-line" }) === undefined && sideOf(axis, from) !== 0) {
+          return { status: "place-across", placement: { entityId: axis.id, secondEntityId: other.id, dimension: "line-line", from, axis: { start: axis.start, end: axis.end } }, prompt: ACROSS_PROMPT };
+        }
+      }
+      return ready(distanceBetween(sketch, a.id, b.id, "line-line", undefined));
+    }
     const existing = existingOf(sketch, { entityId: a.id, secondEntityId: b.id, dimension: "angle" });
     return { status: "ready", dimension: { entityId: a.id, secondEntityId: b.id, dimension: "angle", label: PAIR_DIMENSION_LABELS.angle, measured: angleBetweenLinesDeg(one, two), ...(existing === undefined ? {} : { existing }) } };
   }
@@ -139,6 +219,12 @@ export function resolveDimensionPair(sketch: WorkbenchSketch, first: DimensionPi
   const point = a.type === "point" ? a : (b as Extract<Role, { type: "point" }>);
   const line = a.type === "line" ? a : (b as Extract<Role, { type: "line" }>);
   if (point.id === line.id) return none("That point belongs to the line itself; pick a point of another curve.");
+  const axisLine = sketch.entities.find((entity) => entity.id === line.id);
+  if (axisLine?.kind === "line" && axisLine.construction) {
+    // A point and a centreline: where the dimension is placed chooses a diameter across the centreline or the distance to it.
+    const from = point.kind === "origin" ? ([0, 0] as Vec2) : livePointOf(sketch.entities.find((entity) => entity.id === point.id), point.ref);
+    if (from !== undefined && sideOf(axisLine, from) !== 0 && existingOf(sketch, { entityId: point.id, secondEntityId: line.id, dimension: "point-line", points: [point.ref] }) === undefined) return { status: "place-across", placement: { entityId: point.id, secondEntityId: line.id, dimension: "point-line", points: [point.ref], from, axis: { start: axisLine.start, end: axisLine.end } }, prompt: ACROSS_PROMPT };
+  }
   return ready(distanceBetween(sketch, point.id, line.id, "point-line", [point.ref]));
 }
 

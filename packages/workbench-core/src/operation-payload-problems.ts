@@ -191,7 +191,7 @@ export function constraintPayloadProblem(value: unknown, index?: number): string
     if (Object.hasOwn(value, field) && !isFinite(value[field])) return `${named}: ${field} must be a finite number, but it is ${describeGivenValue(value[field])}.`;
   }
   if (Object.hasOwn(value, "dimension") && !(typeof value.dimension === "string" && DIMENSION_NAMES.includes(value.dimension))) return `${named}: dimension must be one of ${DIMENSION_NAMES.join(", ")}, but it is ${describeGivenValue(value.dimension)}.`;
-  for (const field of ["driven", "suppressed"] as const) {
+  for (const field of ["driven", "suppressed", "doubled"] as const) {
     if (Object.hasOwn(value, field) && typeof value[field] !== "boolean") return `${named}: ${field} must be true or false, but it is ${describeGivenValue(value[field])}.`;
   }
   if (Object.hasOwn(value, "expression") && typeof value.expression !== "string") return `${named}: expression must be text, but it is ${describeGivenValue(value.expression)}.`;

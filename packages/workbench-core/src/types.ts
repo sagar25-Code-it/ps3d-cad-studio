@@ -243,6 +243,11 @@ export interface WorkbenchSketchConstraint {
   readonly expression?: string;
   /** A relaxed constraint stays recorded but is ignored by the solver and the degree-of-freedom estimate. */
   readonly suppressed?: boolean;
+  /**
+   * A point-to-line or line-to-line distance only: `valueMm` is a diameter across the line, twice the distance the solver holds. This is
+   * how the half profile of a turned part is dimensioned across its centreline. Absent (or false) means a plain distance.
+   */
+  readonly doubled?: boolean;
 }
 
 /** What a Pierce constraint holds its point to: a construction axis, or one chain of sharp edges (by chain number) of a general body. */
@@ -1542,6 +1547,11 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly driven?: boolean;
       /** With `expression`, the dimension is bound to it and the evaluated expression wins over `valueMm`. */
       readonly expression?: string;
+      /**
+       * A point-line or line-line distance only: true makes the value a diameter across the line (twice the distance), false a plain
+       * distance. Left out, the dimension keeps the form it has.
+       */
+      readonly doubled?: boolean;
     }
   | { readonly kind: "toggle-sketch-construction"; readonly entityId: string }
   | { readonly kind: "toggle-sketch-entity-visibility"; readonly entityId: string }

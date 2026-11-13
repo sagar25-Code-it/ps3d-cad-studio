@@ -237,8 +237,8 @@ export function describeConstraint(constraint: WorkbenchSketchConstraint, names:
       switch (constraint.dimension) {
         case "aligned": case "horizontal": case "vertical":
           return `${constraint.dimension === "aligned" ? "Distance" : `${constraint.dimension[0]!.toUpperCase()}${constraint.dimension.slice(1)} distance`} ${value}between ${at(0)} and ${at(1)}${reference}`;
-        case "point-line": return `Distance ${value}from ${at(0)} to ${of(1)}${reference}`;
-        case "line-line": return `Distance ${value}between ${of(0)} and ${of(1)}${reference}`;
+        case "point-line": return constraint.doubled === true ? `Diameter ${value}of ${at(0)} across ${of(1)}${reference}` : `Distance ${value}from ${at(0)} to ${of(1)}${reference}`;
+        case "line-line": return constraint.doubled === true ? `Diameter ${value}of ${of(1)} across ${of(0)}${reference}` : `Distance ${value}between ${of(0)} and ${of(1)}${reference}`;
         case "width": return `Width ${value}on ${of(0)}${reference}`;
         case "height": return `Height ${value}on ${of(0)}${reference}`;
         default: return `Length ${value}on ${of(0)}${reference}`;
@@ -326,8 +326,10 @@ function translateConstraint(constraint: WorkbenchSketchConstraint, entities: Re
       if (name === "aligned" || name === "horizontal" || name === "vertical") {
         return dimension(constraint.valueMm, { kind: "linear", first: reference(first!, constraint.points?.[0]), second: reference(second!, constraint.points?.[1]), orientation: name });
       }
-      if (name === "point-line") return dimension(constraint.valueMm, { kind: "point-line-distance", point: reference(first!, constraint.points?.[0]), line: lineRef(second!) });
-      if (name === "line-line") return dimension(constraint.valueMm, { kind: "line-line-distance", first: lineRef(first!), second: lineRef(second!) });
+      // A diameter across the line is held as half its value: the distance to the line.
+      const held = constraint.doubled === true ? constraint.valueMm / 2 : constraint.valueMm;
+      if (name === "point-line") return dimension(held, { kind: "point-line-distance", point: reference(first!, constraint.points?.[0]), line: lineRef(second!) });
+      if (name === "line-line") return dimension(held, { kind: "line-line-distance", first: lineRef(first!), second: lineRef(second!) });
       return none(`${name} is not a supported distance.`);
     }
     case "angle": {

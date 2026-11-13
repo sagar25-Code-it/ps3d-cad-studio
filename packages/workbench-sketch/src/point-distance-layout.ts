@@ -106,6 +106,8 @@ export function pointDistanceLayout(sketch: Pick<WorkbenchSketch, "entities">, c
   const length = Math.hypot(base[0] - point[0], base[1] - point[1]);
   if (length < 1e-9) return undefined;
   const direction: Vec2 = [(base[0] - point[0]) / length, (base[1] - point[1]) / length];
+  // A diameter across the line runs from the point to its mirror image on the far side, with a diameter sign before the value.
+  if (constraint.doubled === true) return linearDimensionLayout(point, [2 * base[0] - point[0], 2 * base[1] - point[1]], upwardNormal(direction), valueMm, pxMm, "\u00d8", options);
   return linearDimensionLayout(point, base, upwardNormal(direction), valueMm, pxMm, "", options);
 }
 

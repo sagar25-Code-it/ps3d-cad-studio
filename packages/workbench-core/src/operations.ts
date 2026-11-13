@@ -249,6 +249,7 @@ const SKETCH_DIMENSION_NAMES: readonly string[] = ["length", "width", "height", 
 function sketchDimensionProblem(input: Record<string, unknown>): string {
   if (!SKETCH_DIMENSION_NAMES.includes(String(input.dimension))) return `The sketch dimension "${String(input.dimension)}" is not one of: ${SKETCH_DIMENSION_NAMES.join(", ")}.`;
   if (!finite(input.valueMm)) return "The sketch dimension needs a finite number for its value.";
+  if (Object.hasOwn(input, "doubled") && (typeof input.doubled !== "boolean" || (input.dimension !== "point-line" && input.dimension !== "line-line"))) return "Only a point-line or line-line distance can be doubled (a diameter across the line), and doubled must be true or false.";
   if (Object.hasOwn(input, "points") && (!Array.isArray(input.points) || input.points.length < 1 || input.points.length > 2 || input.points.some((point) => !(SKETCH_POINT_REFS as readonly unknown[]).includes(point)))) {
     return `The dimension's points must be one or two of: ${SKETCH_POINT_REFS.join(", ")}.`;
   }
@@ -306,9 +307,10 @@ function validateWorkbenchOperationShape(rawInput: unknown): WorkbenchResult<Wor
       if (!keys(input, [...common, "constraintId"]) || !stableId(input.constraintId)) return invalidOperation("The sketch constraint ID is invalid.");
       break;
     case "set-sketch-dimension":
-      if (!keys(input, [...common, "entityId", "dimension", "valueMm", ...(Object.hasOwn(input, "secondEntityId") ? ["secondEntityId"] : []), ...(Object.hasOwn(input, "points") ? ["points"] : []), ...(Object.hasOwn(input, "driven") ? ["driven"] : []), ...(Object.hasOwn(input, "expression") ? ["expression"] : [])]) || !stableId(input.entityId)
+      if (!keys(input, [...common, "entityId", "dimension", "valueMm", ...(Object.hasOwn(input, "secondEntityId") ? ["secondEntityId"] : []), ...(Object.hasOwn(input, "points") ? ["points"] : []), ...(Object.hasOwn(input, "driven") ? ["driven"] : []), ...(Object.hasOwn(input, "expression") ? ["expression"] : []), ...(Object.hasOwn(input, "doubled") ? ["doubled"] : [])]) || !stableId(input.entityId)
         || !SKETCH_DIMENSION_NAMES.includes(String(input.dimension)) || !finite(input.valueMm)
         || (Object.hasOwn(input, "secondEntityId") && !stableId(input.secondEntityId)) || (Object.hasOwn(input, "driven") && typeof input.driven !== "boolean")
+        || (Object.hasOwn(input, "doubled") && (typeof input.doubled !== "boolean" || (input.dimension !== "point-line" && input.dimension !== "line-line")))
         || (Object.hasOwn(input, "points") && (!Array.isArray(input.points) || input.points.length < 1 || input.points.length > 2 || input.points.some((point) => !(SKETCH_POINT_REFS as readonly unknown[]).includes(point))))
         // An expression binds any driving dimension (a length, a radius, an angle in degrees...) to the parameter table; a reference (driven) dimension carries none.
         || (Object.hasOwn(input, "expression") && (!(typeof input.expression === "string" && input.expression.length >= 1 && input.expression.length <= 400) || input.driven === true))) {

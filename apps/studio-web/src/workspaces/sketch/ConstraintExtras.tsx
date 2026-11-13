@@ -35,7 +35,7 @@ export interface ConstraintExtrasBridge {
   readonly pierceUnresolved: () => readonly { readonly constraintId: string; readonly message: string }[];
 }
 
-export type SetDimensionRequest = (entityId: string, dimension: SketchDimensionName, value: number, extra?: { readonly secondEntityId?: string; readonly driven?: boolean; readonly expression?: string; readonly points?: readonly SketchPointRef[] }) => void;
+export type SetDimensionRequest = (entityId: string, dimension: SketchDimensionName, value: number, extra?: { readonly secondEntityId?: string; readonly driven?: boolean; readonly expression?: string; readonly points?: readonly SketchPointRef[]; /** A distance to a line: a diameter across it (true) or a plain distance (false). */ readonly doubled?: boolean }) => void;
 
 const format = (value: number): string => String(Number(value.toFixed(3)));
 

@@ -315,8 +315,11 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
   const hasDriven = Object.hasOwn(value, "driven");
   const hasPierce = Object.hasOwn(value, "pierce");
   const hasRatio = Object.hasOwn(value, "ratio");
+  const hasDoubled = Object.hasOwn(value, "doubled");
+  // A diameter across a line is a point-to-line or line-to-line distance.
+  if (hasDoubled && (typeof value.doubled !== "boolean" || value.kind !== "distance" || (value.dimension !== "point-line" && value.dimension !== "line-line"))) return false;
   const expectedKeys = ["id", "kind", "entityIds", ...(hasValue ? ["valueMm"] : []), ...(hasDimension ? ["dimension"] : []), ...(hasSuppressed ? ["suppressed"] : []), ...(hasPoints ? ["points"] : []),
-    ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : []), ...(hasExpression ? ["expression"] : [])];
+    ...(hasValueDeg ? ["valueDeg"] : []), ...(hasDriven ? ["driven"] : []), ...(hasPierce ? ["pierce"] : []), ...(hasRatio ? ["ratio"] : []), ...(hasExpression ? ["expression"] : []), ...(hasDoubled ? ["doubled"] : [])];
   if (!exactKeys(value, expectedKeys) || (hasSuppressed && typeof value.suppressed !== "boolean")) return false;
   // An expression only drives a dimension, and must be short, parseable text.
   if (hasExpression && (!(hasValue || hasValueDeg) || typeof value.expression !== "string" || value.expression.length < 1 || value.expression.length > MAX_EXPRESSION_LENGTH || !parseExpression(value.expression).ok)) return false;

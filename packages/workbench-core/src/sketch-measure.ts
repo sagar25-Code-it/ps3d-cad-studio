@@ -153,7 +153,8 @@ export function measureDimensionConstraint(sketch: Pick<WorkbenchSketch, "entiti
           if (line === undefined || other === undefined) return undefined;
           const ux = line.end[0] - line.start[0];
           const uy = line.end[1] - line.start[1];
-          return Math.abs(ux * (other[1] - line.start[1]) - uy * (other[0] - line.start[0])) / Math.max(Math.hypot(ux, uy), 1e-12);
+          // A diameter across the line reads twice the distance to it.
+          return (constraint.doubled === true ? 2 : 1) * Math.abs(ux * (other[1] - line.start[1]) - uy * (other[0] - line.start[0])) / Math.max(Math.hypot(ux, uy), 1e-12);
         }
         default:
           break;

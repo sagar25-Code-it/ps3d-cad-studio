@@ -47,7 +47,7 @@ import { SketchPatternPanel } from "./sketch/SketchPatternPanel.js";
 import { useDimensionOffsets } from "./sketch/useDimensionOffsets.js";
 import { MEASURE_CONTEXT, effectiveSolidResult, modalModeEnded, type ModalContext } from "../../../../packages/workbench-sketch/src/sketch-modes.js";
 import { circleDimensionFacts, fixesBlockingDimension } from "../../../../packages/workbench-sketch/src/dimension-edit-model.js";
-import { isEllipseRadiusConstraint, isPointDistanceConstraint } from "../../../../packages/workbench-sketch/src/point-distance-layout.js";
+import { isEllipseRadiusConstraint, isPointDistanceConstraint, pointDistanceLayout } from "../../../../packages/workbench-sketch/src/point-distance-layout.js";
 import { convertLengthField, parseLengthField } from "../../../../packages/workbench-sketch/src/edit-fields.js";
 import { defaultLengthText, gridStepsForUnit, lengthTextFromDisplay, lengthTextToDisplay } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
 import { WORKING_PATH_SKETCH, chainFromCurve, describePath, pathCurvesOf, pathSketchChoices, pathSketchOf } from "../sweep-path-ui.js";
@@ -63,7 +63,7 @@ import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, POLYGON_MODES, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
 import { ORIGIN_RELATION_POINT, relationPointsOf, type RelationPoint } from "../../../../packages/workbench-sketch/src/relation-points.js";
-import { placePointDistance, resolveDimensionPair, type DimensionPairResult, type DimensionPick, type PairDimension, type PointPairPlacement } from "../../../../packages/workbench-sketch/src/dimension-pick.js";
+import { DOUBLED_DISTANCE_LABEL, placeAcrossDistance, placePointDistance, placementPreview, resolveDimensionPair, type AcrossLinePlacement, type DimensionPairResult, type DimensionPick, type PairDimension, type PointPairPlacement } from "../../../../packages/workbench-sketch/src/dimension-pick.js";
 import { dimensionOverConstraint } from "../../../../packages/workbench-sketch/src/dimension-overconstraint.js";
 import { chainSelectionFor } from "../../../../packages/workbench-sketch/src/chain-select.js";
 import { CONSTRAINT_TOOL_INFO, constraintToolStep, isConstraintToolKind, type ConstraintToolKind, type ConstraintToolPick } from "../../../../packages/workbench-sketch/src/constraint-tool.js";
@@ -150,7 +150,7 @@ interface DimensionEditState {
   /** A circle whose stored dimension is a Diameter: the stored value is the diameter itself, so it is written back as one. */
   readonly diameterConstraint?: boolean;
   /** A dimension with its own solver name: a distance between points, to a line or between lines, or an ellipse's major or minor radius. */
-  readonly named?: { readonly dimension: SketchDimensionName; readonly points?: readonly SketchPointRef[] };
+  readonly named?: { readonly dimension: SketchDimensionName; readonly points?: readonly SketchPointRef[]; /** A distance to a line: a diameter across it (true) or a plain distance (false); absent keeps the form it has. */ readonly doubled?: boolean };
   /** The expression the dimension was bound to when the editor opened (shown as the text), so Enter on it changes nothing. */
   readonly boundExpression?: string;
 }
@@ -446,7 +446,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [dimensionPoints, setDimensionPoints] = useState<readonly SketchDimensionPoint[]>([]);
   // Sketch Dimension with two picks: the first thing picked, and two picked points waiting for the click that places their dimension.
   const [dimensionFirst, setDimensionFirst] = useState<DimensionPick | undefined>(undefined);
-  const [dimensionPlacement, setDimensionPlacement] = useState<PointPairPlacement | undefined>(undefined);
+  const [dimensionPlacement, setDimensionPlacement] = useState<PointPairPlacement | AcrossLinePlacement | undefined>(undefined);
   // Snapping aids (snap on/off, snap step, polar tracking, ortho) live in the browser; Ctrl and Shift held on the keyboard override them while down.
   const [assist, setAssist] = useState<SnapAssistSettings>(() => { try { return loadStoredSnapAssist(); } catch { return DEFAULT_SNAP_ASSIST; } });
   const updateAssist = (patch: Partial<SnapAssistSettings>): void => { const next = { ...assist, ...patch }; setAssist(next); storeSnapAssist(next); };
@@ -1307,7 +1307,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       }
     }
     setRelaxPrompt(undefined);
-    const over = dimensionOverConstraint(props.sketch, { entityId, dimension, valueMm, secondEntityId: extra?.secondEntityId, points: extra?.points, expression: extra?.expression, driven: extra?.driven });
+    const over = dimensionOverConstraint(props.sketch, { entityId, dimension, valueMm, secondEntityId: extra?.secondEntityId, points: extra?.points, expression: extra?.expression, driven: extra?.driven, doubled: extra?.doubled });
     if (over !== undefined) {
       const { expression: _unused, ...rest } = extra ?? {};
       setOverPrompt({ message: over.reason, apply: () => props.onSetDimension(entityId, dimension, valueMm, { ...rest, driven: true }) });
@@ -1369,7 +1369,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       if (measuredNamed === undefined) return;
       const labels: Readonly<Record<string, string>> = { aligned: "Distance", horizontal: "Horizontal distance", vertical: "Vertical distance", "point-line": "Distance to the line", "line-line": "Distance between the lines", "major-radius": "Major radius", "minor-radius": "Minor radius" };
       const edit: DimensionEditState = {
-        entityId: constraint.entityIds[0]!, dimension: "length", anchor, label: labels[constraint.dimension] ?? "Distance", storedValue: reference ? undefined : measuredNamed, wasReference: reference,
+        entityId: constraint.entityIds[0]!, dimension: "length", anchor, label: constraint.doubled === true ? DOUBLED_DISTANCE_LABEL : labels[constraint.dimension] ?? "Distance", storedValue: reference ? undefined : measuredNamed, wasReference: reference,
         ...(constraint.entityIds[1] === undefined ? {} : { secondEntityId: constraint.entityIds[1] }),
         named: { dimension: constraint.dimension, ...(constraint.points === undefined ? {} : { points: constraint.points }) },
         ...(reference || constraint.expression === undefined ? {} : { boundExpression: constraint.expression })
@@ -1397,6 +1397,13 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     }, 0);
   };
 
+  // The dimension that is waiting to be placed, drawn as it would be with the pointer where it is now.
+  const placementLayout = useMemo(() => {
+    if (!props.dimensionMode || dimensionPlacement === undefined) return undefined;
+    const preview = placementPreview(props.sketch, dimensionPlacement, cursor);
+    return preview === undefined ? undefined : pointDistanceLayout(props.sketch, preview.constraint, preview.measured, px, { format: (value) => formatLengthLabel(value, dimensionDisplay) });
+  }, [props.dimensionMode, dimensionPlacement, cursor, props.sketch, px, dimensionDisplay]);
+
   /** Opens the value editor for a dimension between two picks (a distance or an angle), at the place given. */
   const openPairDimension = (found: PairDimension, anchor: Vec2): void => {
     setDimensionFirst(undefined);
@@ -1407,7 +1414,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const bound = driving?.expression === undefined ? {} : { boundExpression: driving.expression };
     const edit: DimensionEditState = found.dimension === "angle"
       ? { entityId: found.entityId, secondEntityId: found.secondEntityId, dimension: "angle", anchor, label: found.label, storedValue: driving?.value, wasReference: reference, ...bound }
-      : { entityId: found.entityId, secondEntityId: found.secondEntityId, dimension: "length", anchor, label: found.label, storedValue: driving?.value, wasReference: reference, named: { dimension: found.dimension, ...(found.points === undefined ? {} : { points: found.points }) }, ...bound };
+      : { entityId: found.entityId, secondEntityId: found.secondEntityId, dimension: "length", anchor, label: found.label, storedValue: driving?.value, wasReference: reference, named: { dimension: found.dimension, ...(found.points === undefined ? {} : { points: found.points }), ...(found.doubled === undefined ? {} : { doubled: found.doubled }) }, ...bound };
     setSelectionIds([found.entityId, found.secondEntityId].filter((entityId) => !isSketchDatumEntityId(entityId)));
     setSelectedProfileIds([]);
     // Opened after the press has finished, like the one-curve editor.
@@ -1418,11 +1425,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     }, 0);
     props.onMessage(`${found.label}${found.existing === undefined ? "" : " (already dimensioned)"}: type the value and press Enter. Esc closes the editor.`);
   };
-  /** The click that places a dimension between two picked points: where it lands chooses straight, horizontal or vertical. */
+  /** The click that places a waiting dimension. Between two points it chooses straight, horizontal or vertical; with a centreline, a diameter across it or the distance to it. */
   const placeDimensionAt = (at: Vec2): void => {
     const placement = dimensionPlacement;
     if (placement === undefined) return;
-    const found = placePointDistance(props.sketch, placement, at);
+    const found = "axis" in placement ? placeAcrossDistance(props.sketch, placement, at) : placePointDistance(props.sketch, placement, at);
     setDimensionPlacement(undefined);
     if (typeof found === "string") { props.onMessage(found); return; }
     openPairDimension(found, at);
@@ -1436,6 +1443,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     setDimensionPlacement(pair.placement);
     setSelectionIds([pair.placement.entityId, pair.placement.secondEntityId].filter((entityId) => !isSketchDatumEntityId(entityId)));
     setSelectedProfileIds([]);
+    if (pair.status === "place-across") { setDimensionPoints([]); props.onMessage(pair.prompt); return true; }
     // The two points are shown picked, with the line between them, while the dimension waits to be placed.
     const ends = [[pair.placement.entityId, pair.placement.points[0]], [pair.placement.secondEntityId, pair.placement.points[1]]] as const;
     setDimensionPoints(ends.flatMap(([entityId, ref]) => [...dimensionHandleEntities.flatMap(dimensionHandles), ORIGIN_POINT].filter((candidate) => candidate.entityId === entityId && solverPointRef(candidate) === ref).slice(0, 1)));
@@ -1450,10 +1458,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const entity = props.sketch.entities.find((candidate) => candidate.id === edit.entityId);
     const second = edit.secondEntityId === undefined ? undefined : { secondEntityId: edit.secondEntityId };
     const pointsOf = edit.named?.points === undefined ? {} : { points: edit.named.points };
+    const doubledOf = edit.named?.doubled === undefined ? {} : { doubled: edit.named.doubled };
     // Reference: the dimension is measured and never moves the geometry.
     if (dimensionReference) {
       if (edit.wasReference) { props.onMessage("This is already a reference dimension. Untick Reference to make it drive the geometry."); setDimensionEdit(undefined); return; }
-      setDimension(edit.entityId, edit.named?.dimension ?? edit.dimension, 1, { driven: true, ...(second ?? {}), ...pointsOf });
+      setDimension(edit.entityId, edit.named?.dimension ?? edit.dimension, 1, { driven: true, ...(second ?? {}), ...pointsOf, ...doubledOf });
       setDimensionEdit(undefined);
       return;
     }
@@ -1469,7 +1478,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     }
     if (edit.named !== undefined) {
       const request = applyOf(edit.named.dimension, read);
-      setDimension(edit.entityId, request.dimension, request.valueMm, { ...(second ?? {}), ...pointsOf, ...(request.expression === undefined ? {} : { expression: request.expression }) });
+      setDimension(edit.entityId, request.dimension, request.valueMm, { ...(second ?? {}), ...pointsOf, ...doubledOf, ...(request.expression === undefined ? {} : { expression: request.expression }) });
       setDimensionEdit(undefined);
       return;
     }
@@ -2345,7 +2354,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
         />)}
         {props.dimensionMode && <>
           {[...dimensionHandleEntities.flatMap(dimensionHandles), ORIGIN_POINT].map((point) => <circle key={point.id} className={`dimension-point ${dimensionPoints.some((candidate) => candidate.id === point.id) ? "selected" : ""}`} data-dimension-point={point.id} cx={point.point[0]} cy={-point.point[1]} r={hitSizes.dimensionPointPx * px} role="button" tabIndex={0} aria-pressed={dimensionPoints.some((candidate) => candidate.id === point.id)} aria-label={`${point.label} dimension point`} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); selectDimensionPoint(point); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); selectDimensionPoint(point); } }} />)}
-          {directDimension !== undefined && <DirectDimensionPreview dimension={directDimension} px={px} />}
+          {directDimension !== undefined && dimensionPlacement === undefined && <DirectDimensionPreview dimension={directDimension} px={px} />}
+          {placementLayout !== undefined && <g className="dimension-placement-preview" pointerEvents="none"><DimensionMarks constraintId="constraint:placement-preview" entityId={dimensionPlacement?.entityId ?? ""} layout={placementLayout} px={px} relaxed={false} selected={false} interactive={false} repositionable={false} title="Dimension being placed" onPress={() => undefined} onEdit={() => undefined} /></g>}
         </>}
         {selectionBox !== undefined && <rect
           className={`selection-box ${zoomWindowMode ? "zoom-draw" : props.editTool === "stretch" ? "stretch-draw" : selectionBoxMode(selectionBox.start, selectionBox.end)}`}
@@ -2410,7 +2420,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       {zoomWindowMode && <div className="dimension-mode-banner"><CommandIcon name="view" /><span><strong>Zoom window</strong>Drag a rectangle on the canvas. Esc cancels.</span></div>}
       {measureMode && <div className="dimension-mode-banner"><CommandIcon name="dimension" /><span><strong>Measure</strong>{measureState.result !== undefined ? describeMeasurement(measureState.result) : measureState.picks.length === 1 ? "Pick a second point for a distance, or a second line for an angle." : "Click a point, or a line. Nothing is added to the sketch. Esc finishes."}</span></div>}
       {props.dimensionMode && <div className="dimension-mode-banner"><CommandIcon name="dimension" /><span><strong>Sketch Dimension</strong>{dimensionPlacement !== undefined
-        ? "Click to place the dimension: above or below the two points for horizontal, beside them for vertical, elsewhere for straight."
+        ? "axis" in dimensionPlacement ? "Click to place the dimension: beyond the centreline for a diameter across it, on this side for the distance to it." : "Click to place the dimension: above or below the two points for horizontal, beside them for vertical, elsewhere for straight."
         : dimensionFirst !== undefined
           ? "Type the value, or click a second curve or point for the distance or angle between the two."
           : "Click a curve for its size, then a second curve or point for a distance or an angle. Esc to finish."}</span></div>}

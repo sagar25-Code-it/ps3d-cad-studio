@@ -18,6 +18,8 @@ export interface DimensionTrialRequest {
   readonly points?: readonly SketchPointRef[] | undefined;
   readonly expression?: string | undefined;
   readonly driven?: boolean | undefined;
+  /** A distance to a line: the value is a diameter across it. */
+  readonly doubled?: boolean | undefined;
 }
 
 export interface DimensionOverConstraint {
@@ -38,7 +40,7 @@ export function dimensionOverConstraint(sketch: WorkbenchSketch, request: Dimens
   const existing = locateDimensionConstraint(sketch, key);
   if (existing !== undefined && existing.driven !== true) return undefined;
   const project = { ...PROBE, sketch };
-  const applied = setSketchDimension(project, { kind: "set-sketch-dimension", operationId: "operation:dimension-probe", expectedRevision: project.revision, ...key, valueMm: request.valueMm });
+  const applied = setSketchDimension(project, { kind: "set-sketch-dimension", operationId: "operation:dimension-probe", expectedRevision: project.revision, ...key, valueMm: request.valueMm, ...(request.doubled === undefined ? {} : { doubled: request.doubled }) });
   if (!applied.ok) {
     const conflict = applied.diagnostics.find((diagnostic) => diagnostic.code === "CONSTRAINT_CONFLICT");
     if (conflict === undefined) return undefined;

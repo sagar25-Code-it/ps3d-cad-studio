@@ -107,3 +107,7 @@
 .sketch-entity.reference { stroke: #a898e0; stroke-width: 1.2; stroke-dasharray: none; fill: none; opacity: 0.5; pointer-events: none; }
 .sketch-entity.reference.sketch-point { fill: #a898e0; stroke: none; }
 .sketch-palette .palette-reference-note { display: block; margin: 0.1rem 0 0.3rem; color: #697178; font-size: 12px; line-height: 1.35; }
+
+/* A dimension that is waiting for its placement click (Sketch Dimension): drawn where it would go, lighter than a placed one. */
+.dimension-placement-preview { opacity: 0.8; }
+.dimension-placement-preview .driving-dimension line { stroke-dasharray: 5 3; }

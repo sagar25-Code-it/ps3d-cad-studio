@@ -2813,7 +2813,7 @@ export function App(): React.JSX.Element {
    * A typed number sets the dimension as before. Typed text that is not a number is an expression (`plate_w / 2`): it is checked against
    * the project's parameters first, and the dimension is bound to it, so it follows the parameters from then on.
    */
-  const setSketchDimension = (entityId: string, dimension: SketchDimensionName, valueMm: number, extra?: { readonly secondEntityId?: string; readonly driven?: boolean; readonly expression?: string }): void => {
+  const setSketchDimension = (entityId: string, dimension: SketchDimensionName, valueMm: number, extra?: { readonly secondEntityId?: string; readonly driven?: boolean; readonly expression?: string; readonly doubled?: boolean }): void => {
     const { expression, ...rest } = extra ?? {};
     if (expression === undefined) { applyProjectOperation({ kind: "set-sketch-dimension", entityId, dimension, valueMm, ...rest }); return; }
     const preview = previewSketchDimensionExpression(projectRef.current, dimension, expression);
