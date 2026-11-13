@@ -59,6 +59,7 @@ import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, POLYGON_MODES, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
 import { ORIGIN_RELATION_POINT, relationPointsOf, type RelationPoint } from "../../../../packages/workbench-sketch/src/relation-points.js";
+import { chainSelectionFor } from "../../../../packages/workbench-sketch/src/chain-select.js";
 import { CONSTRAINT_TOOL_INFO, constraintToolStep, type ConstraintToolKind, type ConstraintToolPick } from "../../../../packages/workbench-sketch/src/constraint-tool.js";
 import { POLYGON_MODE_LABELS, buildPolygonByMode, parsePolygonMode, polygonCentreRelations } from "../../../../packages/workbench-sketch/src/polygon-modes.js";
 import { buildControlPointSpline, buildCurveTool, isFixedCurveTool } from "../../../../packages/workbench-sketch/src/curve-tools.js";
@@ -1992,13 +1993,26 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     props.onMessage(next.result !== undefined ? `${describeMeasurement(next.result)}. Click again to measure something else; Esc finishes.` : `${target.kind === "line" ? "Line" : `Point (${target.label})`} picked. Pick a second point for a distance, or a second line for an angle.`);
   };
 
-  /** Double-click on a placed text re-opens it for editing; on a spline it adds a fit point where the curve is. */
+  /** Double-click on a placed text re-opens it for editing; on the selected spline it adds a fit point where the curve is; on any other curve it selects the connected chain. */
   const handleCanvasDoubleClick = (event: React.MouseEvent<SVGSVGElement>): void => {
     handleTextDoubleClick(event);
     if (event.defaultPrevented || !interactive || props.dimensionMode) return;
     const at = camera.toSketch(event.clientX, event.clientY);
     const target = selectionIds.length === 1 ? visibleEntities.find((entity) => entity.id === selectionIds[0]) : undefined;
-    if (target?.kind !== "spline") return;
+    if (target?.kind !== "spline") {
+      // On any other curve: select the whole connected chain (Shift adds it to the selection).
+      const hitId = (event.target as Element).closest<SVGElement>("[data-selection-id]")?.dataset["selectionId"];
+      const hit = hitId === undefined || pickRelation !== null || props.editTool !== null ? undefined : visibleEntities.find((entity) => entity.id === hitId);
+      const chain = hit === undefined || hit.kind === "spline" ? undefined : chainSelectionFor(props.sketch, hit.id, selectionIds, event.shiftKey);
+      if (hit === undefined || chain === undefined) return;
+      event.preventDefault();
+      setSelectionIds(chain.ids);
+      setSelectedProfileIds([]);
+      setSelectedConstraintIds([]);
+      props.onSelect(hit.id);
+      props.onMessage(chain.message);
+      return;
+    }
     const onCurve = nearestPointOnSpline(target, at);
     if (onCurve === undefined || onCurve.distanceMm > hitSizes.pickPx * 1.5 * px) return;
     // A double-click on an existing fit point is on its handle, not a request for a new point.
