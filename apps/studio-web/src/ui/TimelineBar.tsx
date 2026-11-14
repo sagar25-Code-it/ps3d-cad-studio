@@ -5,7 +5,8 @@ import { CommandIcon } from "./CommandIcon.js";
 
 interface TimelineBarProps {
   readonly history: DesignHistory;
-  readonly selectedId: string | null;
+  /** The one step the user picked (or the selection resolves to): only its chip shows as selected. */
+  readonly selectedFeatureId: string | null;
   readonly busy: boolean;
   readonly onSelect: (feature: DesignFeature) => void;
   readonly onEdit: (feature: DesignFeature) => void;
@@ -79,7 +80,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
         : <>
           {features.map((feature, index) => {
             const active = isFeatureActive(history, feature.id);
-            const selected = props.selectedId === feature.id || (feature.kind !== "sketch" && props.selectedId === feature.bodyId);
+            const selected = props.selectedFeatureId === feature.id;
             const rolledBack = index >= history.rollbackIndex;
             const classes = ["timeline-chip", selected ? "selected" : "", feature.suppressed ? "suppressed" : "", rolledBack ? "rolled-back" : "", feature.health !== undefined ? (isHealthNote(feature.health.message) ? "note" : "error") : "", !active && !rolledBack && !feature.suppressed ? "inactive" : ""].filter(Boolean).join(" ");
             return <span key={feature.id} className="timeline-slot" role="listitem">
