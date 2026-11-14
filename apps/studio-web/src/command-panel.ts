@@ -197,6 +197,33 @@ export function panelGlobalKeyCommits(key: string, options: {
   return key === "Enter" && options.panelOpen && !options.editableTarget && !options.dialogOpen && !options.busy;
 }
 
+/**
+ * PT-15: while a command runs, the canvas stays in its picking mode — a navigation-mode switch (Select / Orbit / Pan on
+ * the bar, or the V / O / P letters) must never silently disconnect the panel's picks and leave a live-looking panel that
+ * clicks cannot reach. The switch answers with this line instead; the camera stays available the whole time through the
+ * drag gestures, which work in every mode. Undefined = no panel is open, switch freely.
+ */
+export function panelNavigationLock(open: CommandPanelState | null): string | undefined {
+  if (open === null) return undefined;
+  return `${panelTitle(open)} is running: clicks in the view pick for its selection row (pan with the middle button, orbit with Shift + middle, zoom with the wheel). Esc cancels the command first.`;
+}
+
+export type PanelReopenPlan =
+  | { readonly kind: "keep"; readonly message: string }
+  | { readonly kind: "replace"; readonly note: string };
+
+/**
+ * PT-15: what starting a panel command does when the panel is already open. The same command keeps running with its picks
+ * (Fusion does not restart a command under the user's hands), so pressing F twice never discards the picked edge runs;
+ * another command — or a fresh start over an Edit Feature session — cancels the old one out loud and starts clean.
+ */
+export function panelReopenPlan(open: CommandPanelState | null, command: PanelCommand): PanelReopenPlan {
+  if (open !== null && open.command === command && open.mode === "create") {
+    return { kind: "keep", message: `${panelTitle(open)} is already running: clicks in the view pick for it, Enter commits, Esc cancels.` };
+  }
+  return { kind: "replace", note: open === null ? "" : `${panelTitle(open)} cancelled — nothing changed. ` };
+}
+
 /** Adds or removes a picked edge chain. The first pick fixes the body; a pick on another body restarts the set. */
 export function panelToggleEdge(state: CommandPanelState, pick: PanelEdgeSet, bodyName: string): CommandPanelState {
   const { error: _drop, storedGroups: _stored, ...rest } = state;

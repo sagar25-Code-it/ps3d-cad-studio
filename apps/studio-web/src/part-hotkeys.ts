@@ -55,3 +55,13 @@ export function partHotkeyCommand(key: string, workspace: string): PartHotkeyCom
   if (entry.partOnly === true && workspace !== "part") return undefined;
   return entry.command;
 }
+
+/**
+ * PT-15: the letters that start an interactive flow outside the shared command panel. Pressed while the panel is open
+ * they cancel it first, visibly, so no live-looking panel stays behind whose picks go nowhere. Fillet and Hole run
+ * through the panel itself (panelReopenPlan keeps or restarts it there), the view and navigation keys never touch it,
+ * and Appearance only focuses the inspector.
+ */
+export function hotkeyCancelsPanel(command: PartHotkeyCommand): boolean {
+  return command === "extrude" || command === "press-pull" || command === "move";
+}

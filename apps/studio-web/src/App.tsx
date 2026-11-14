@@ -111,12 +111,12 @@ import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./re
 import { blendSpecOf, facesOfBody } from "./edge-blend-step.js";
 import { blendAllFeature, centroidHoleFeature } from "./one-shot-steps.js";
 import { applyParameterValues } from "./feature-parameters.js";
-import { openCommandPanel, openCommandPanelForEdit, panelAddFace, panelClearSelection, panelDraft, panelEdgeGroups, panelGlobalKeyCommits, panelSetHolePoint, panelTitle, panelToggleEdge, panelWithError, panelWithValue, type CommandPanelState, type PanelCommand, type PanelEdgeSet } from "./command-panel.js";
+import { openCommandPanel, openCommandPanelForEdit, panelAddFace, panelClearSelection, panelDraft, panelEdgeGroups, panelGlobalKeyCommits, panelNavigationLock, panelReopenPlan, panelSetHolePoint, panelTitle, panelToggleEdge, panelWithError, panelWithValue, type CommandPanelState, type PanelCommand, type PanelEdgeSet } from "./command-panel.js";
 import { CommandPanel } from "./ui/CommandPanel.js";
 import { explicitBody, matchingSketches, profilesByAnswer, sketchByAnswer } from "./explicit-pick.js";
 import { shouldRefit } from "./view-fit.js";
 import { defaultCreateOperation, touchingBodies } from "./operation-default.js";
-import { partHotkeyCommand, type PartHotkeyCommand } from "./part-hotkeys.js";
+import { hotkeyCancelsPanel, partHotkeyCommand, type PartHotkeyCommand } from "./part-hotkeys.js";
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
 import { flatPatternForBody, isRebuildFailure, isRebuildNote, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
@@ -1286,7 +1286,12 @@ export function App(): React.JSX.Element {
   const handleHoleWizard = (preferredBodyId: string | null = selectedId): void => {
     const current = projectRef.current;
     const body = (current.part.generalBodies ?? []).find((candidate) => candidate.id === preferredBodyId);
-    if (body !== undefined && baseFeatureOf(designOf(current), body.id) === undefined) { holeWizardOnMesh(); return; }
+    if (body !== undefined && baseFeatureOf(designOf(current), body.id) === undefined) {
+      // PT-15: the prompt-driven mesh wizard takes over the interaction, so a running panel command is cancelled first.
+      if (commandPanelRef.current !== null) setCommandPanel(null);
+      holeWizardOnMesh();
+      return;
+    }
     openPanelFor("hole", preferredBodyId);
   };
 
@@ -1959,6 +1964,9 @@ export function App(): React.JSX.Element {
    * panel is open, Enter commits, Esc cancels, and Edit Feature reopens the same panel filled.
    */
   const openPanelFor = (command: PanelCommand, preferredBodyId: string | null = selectedId): void => {
+    // PT-15: the same command pressed again keeps running with its picks; a different one cancels the old out loud.
+    const plan = panelReopenPlan(commandPanelRef.current, command);
+    if (plan.kind === "keep") { setStatus("ready"); setStatusText(plan.message); return; }
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
     let state = openCommandPanel(command);
@@ -1982,11 +1990,11 @@ export function App(): React.JSX.Element {
     setFeatureEdit(undefined);
     setCommandPanel(state);
     setStatus("ready");
-    setStatusText(command === "hole"
+    setStatusText(plan.note + (command === "hole"
       ? "Hole: click the face where the hole should start, set the type and sizes, Enter commits (Esc cancels)."
       : command === "shell"
         ? "Shell: click the faces to leave open (or none for a closed shell), type the thickness, Enter commits (Esc cancels)."
-        : `${panelTitle(state)}: click edges in the view (Ctrl adds more runs), type the size, Enter commits (Esc cancels).`);
+        : `${panelTitle(state)}: click edges in the view (Ctrl adds more runs), type the size, Enter commits (Esc cancels).`));
   };
 
   /** A click fed to the open command panel: an edge run, a shell face, or the hole's start point. */
@@ -3801,6 +3809,13 @@ export function App(): React.JSX.Element {
 
   /** PT-10: what each Part letter starts (the table is part-hotkeys.ts; the overlay and menus read the same table). */
   const runPartHotkey = (command: PartHotkeyCommand): void => {
+    // PT-15: a letter that starts a flow outside the shared panel cancels the running command first — the panel closes
+    // visibly and the new command announces itself; nothing is left looking live with its picks disconnected.
+    const openPanel = commandPanelRef.current;
+    if (openPanel !== null && hotkeyCancelsPanel(command)) {
+      setCommandPanel(null);
+      setStatusText(`${panelTitle(openPanel)} cancelled — nothing changed.`);
+    }
     switch (command) {
       case "extrude": partCreateRef.current("extrude"); return;
       // Press Pull's honest subset on this kernel: pick flat faces of the selected solid and offset them.
@@ -3831,6 +3846,10 @@ export function App(): React.JSX.Element {
   partHotkeyRef.current = runPartHotkey;
 
   const setViewportNavigation = (mode: NavigationMode): void => {
+    // PT-15: while the command panel runs, the canvas keeps its picking mode. The nav switches (bar buttons, V / O / P,
+    // Measure) answer with what is going on instead of silently sending clicks past the panel.
+    const lock = projectRef.current.activeWorkspace === "part" ? panelNavigationLock(commandPanelRef.current) : undefined;
+    if (lock !== undefined) { setStatusText(lock); return; }
     if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, navigationMode: mode }));
     else viewportRef.current.setNavigationMode(mode);
     setStatusText(mode === "measure" ? "Measure active: pick two visible model points." : `${mode[0]!.toUpperCase()}${mode.slice(1)} navigation active.`);
