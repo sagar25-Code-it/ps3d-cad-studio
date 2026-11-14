@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ConstructionAxis, DesignSketchFeature, ConstructionPlane, ConstructionPoint, DesignSolidFeature, PartPreviewBody, WorkbenchOperation, WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import {
-  applyWorkbenchOperation, createWorkbenchProject, resolveWorkbenchContextCommands, deleteImpact, describeFeature, designOf, isFeatureActive, isReferenceFeature, legacyReferenceItems, referenceStepOf, validateWorkbenchOperation, validateWorkbenchProject
+  applyWorkbenchOperation, createWorkbenchProject, inactiveReferenceIds, resolveWorkbenchContextCommands, deleteImpact, describeFeature, designOf, isFeatureActive, isReferenceFeature, legacyReferenceItems, referenceStepOf, validateWorkbenchOperation, validateWorkbenchProject
 } from "../packages/workbench-core/src/index.js";
 import { detectSketchProfiles } from "../packages/workbench-sketch/src/index.js";
 import { buildDesignHealthReport } from "../packages/workbench-health/src/index.js";
@@ -105,6 +105,7 @@ export const referenceStepTests: readonly TestCase[] = [
       assert(half.axis && half.plane && !half.point && !half.box, `only the steps before the marker are shown: ${JSON.stringify(half)}`);
       project = run(project, { kind: "set-design-rollback", index: 0 });
       assert(Object.values(visibleOf(project)).every((shown) => !shown), "everything is hidden at the start of the timeline");
+      assert(inactiveReferenceIds(project).has("construction-plane:p1") && inactiveReferenceIds(project).size === 4, "the pickers are told which ones are off, so a sketch is not offered a plane that is rolled back");
       project = run(project, { kind: "set-design-rollback", index: 4 });
       assert(Object.values(visibleOf(project)).every((shown) => shown), "rolling forward shows them all again");
       project = run(project, { kind: "set-design-feature-suppressed", featureId: stepOf(project, "part-body:b1").id, suppressed: true });
@@ -265,6 +266,8 @@ export const referenceStepTests: readonly TestCase[] = [
       assert(axisImpact.dependents.some((item) => item.name === "Across the axis" && item.reason.includes("built on Spin axis")), "the plane built on the axis is named");
       const noAxis = run(built, { kind: "delete-design-feature", featureId: axis.id });
       assert((noAxis.part.constructionAxes ?? []).length === 0 && noAxis.part.construction!.every((candidate) => candidate.id !== "construction-plane:perp"), "the axis and the plane across it are gone");
+      const viaAxisList = run(built, { kind: "delete-construction-axis", axisId: "construction-axis:a1" });
+      assert((viaAxisList.part.constructionAxes ?? []).length === 0 && viaAxisList.part.construction!.every((candidate) => candidate.id !== "construction-plane:perp") && !designOf(viaAxisList).features.some((feature) => feature.name === "Across the axis"), "deleting the axis the old way takes the plane across it and its step too");
     }
   },
   {
@@ -361,6 +364,8 @@ export const referenceStepTests: readonly TestCase[] = [
       assert(!validateWorkbenchOperation({ ...envelope, kind: "follow-design-planes", frames: [{ featureId: "feature:s", frame: { originMm: [0, 0, 0], uAxis: [1, 0, 0], normal: [1, 0, 0] } }] }).ok, "a frame whose axes are not perpendicular is refused");
       assert(!validateWorkbenchOperation({ ...envelope, kind: "adopt-legacy-references", extra: true }).ok, "adopting takes no fields");
       assert(!validateWorkbenchOperation({ ...envelope, kind: "new-design-sketch", plane: "datum:xy", planeRef: "construction-plane:p1" }).ok, "a sketch cannot follow a plane without its frame");
+      const back = run(project, { kind: "set-design-rollback", index: 1 });
+      assert(refuse(back, { kind: "new-design-sketch", plane: "datum:xy", frame: { originMm: [0, 0, 20], uAxis: [1, 0, 0], normal: [0, 0, 1] }, planeRef: "construction-plane:p1" }).includes("rolled back or suppressed"), "a sketch cannot be placed on a plane that is after the marker");
       const created = run(project, { kind: "add-construction-axis", axis: axisOf("a2", "Second axis") });
       equal(designOf(created).features.length, 5, "an axis made the old way is a step after the existing ones");
       const rolled = run(project, { kind: "set-design-rollback", index: 2 });

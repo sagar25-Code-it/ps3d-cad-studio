@@ -22,7 +22,7 @@ import { BODY_EDIT_KINDS, BODY_EDIT_ONLY_KINDS, validBodyEdit } from "./body-edi
 import { FEATURE_REF_KEYS, validFeatureRefs } from "./feature-refs.js";
 import { conventionFields, type SketchPlaneConventionRequest } from "./plane-convention.js";
 import { applyProjectedCurves } from "./projection-follow.js";
-import { isReferenceFeature, isReferenceKind, planeStepOfSketch, referenceNeeds, validReferenceFeatureShape } from "./reference-feature.js";
+import { isReferenceFeature, isReferenceKind, referenceNeeds, referenceStepOf, validReferenceFeatureShape } from "./reference-feature.js";
 
 /**
  * The parametric history ("timeline"): an ordered list of sketch and solid features with a rollback marker. A sketch
@@ -255,6 +255,14 @@ export function editDesignSketch(project: WorkbenchProject, featureId: string): 
 
 export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef, convention?: SketchPlaneConventionRequest, planeRef?: string): DesignChange {
   const history = designOf(project);
+  // A sketch is inserted at the rollback marker, so a plane it follows has to be a live step before it.
+  const followed = planeRef === undefined ? undefined : referenceStepOf(history, planeRef);
+  if (planeRef !== undefined && followed !== undefined) {
+    if (followed.reference.kind !== "plane") return fail("INVALID_OPERATION", `${followed.name} is not a construction plane, so a sketch cannot follow it.`, [followed.id], "Pick a construction plane.");
+    if (history.features.indexOf(followed) >= history.rollbackIndex || !isFeatureActive(history, followed.id)) {
+      return fail("INVALID_OPERATION", `${followed.name} is rolled back or suppressed at this point of the timeline, so a sketch cannot be placed on it.`, [followed.id], `Roll the marker forward past ${followed.name} (or unsuppress it) and start the sketch again.`);
+    }
+  }
   const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, planeConvention: _previousConvention, planeRef: _previousRef, ...rest } = project.sketch;
   const { texts: _texts, patterns: _patterns, underlay: _underlay, ...fresh } = rest;
   // A new sketch on the Right plane gets the Z-up mapping unless the caller restores an older sketch with "legacy".
