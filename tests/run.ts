@@ -227,6 +227,9 @@ import { featureBindingExtrasTests } from "./feature-binding-extras.test.js";
 import { ribbonPanelTests } from "./ribbon-panels.test.js";
 import { solidContextMenuTests } from "./solid-context-menu.test.js";
 
+import { creaseEdgeTests } from "./crease-edges.test.js";
+import { curvedBlendTests } from "./blend-curved.test.js";
+
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
   ...sketchChromeTests,
@@ -474,6 +477,8 @@ const tests: readonly TestCase[] = [
   ...holeReferenceFaceTests,
   ...timelineMarkerKeyTests,
   ...partSceneTests,
+  ...creaseEdgeTests,
+  ...curvedBlendTests,
 ];
 let failures = 0;
 
