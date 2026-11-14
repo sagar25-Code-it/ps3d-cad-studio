@@ -123,6 +123,10 @@ import { blendAllFeature, centroidHoleFeature } from "./one-shot-steps.js";
 import { applyParameterValues, bindTypedSize } from "./feature-parameters.js";
 import { openCommandPanel, openCommandPanelForEdit, panelAddFace, panelClearSelection, panelDraft, panelEdgeGroups, panelGlobalKeyCommits, panelNavigationLock, panelReopenPlan, panelSetHolePoint, panelTitle, panelToggleEdge, panelWithError, panelWithValue, type CommandPanelState, type PanelCommand, type PanelEdgeSet } from "./command-panel.js";
 import { CommandPanel } from "./ui/CommandPanel.js";
+import { PartCreatePanel } from "./ui/PartCreatePanel.js";
+import { usePartCreateSession } from "./ui/use-part-create.js";
+import { createSketchChoices, openPartCreate, parseCreateValue, partCreateReduce, partCreateReopenPlan, partCreateTitle, partCreateWithError, planPartCreate, probeTouchingIds, type PartCreateKind, type PartCreateState } from "./part-create-panel.js";
+import { anotherSurfaceOpen, type EscapeAppFlags } from "./esc-order.js";
 import { explicitBody, matchingSketches, profilesByAnswer, sketchByAnswer } from "./explicit-pick.js";
 import { shouldRefit } from "./view-fit.js";
 import { defaultCreateOperation, touchingBodies } from "./operation-default.js";
@@ -396,6 +400,11 @@ export function App(): React.JSX.Element {
   const commitPanelRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const panelBusyRef = useRef(false);
   panelBusyRef.current = status === "working";
+  /** The Part Extrude / Revolve panel (replaces the browser prompts); modeless, with no viewport pick of its own. */
+  const [partCreate, setPartCreate] = useState<PartCreateState | null>(null);
+  const partCreatePanelRef = useRef<PartCreateState | null>(null);
+  partCreatePanelRef.current = partCreate;
+  const partCreateCommittingRef = useRef(false);
   const [treeRevealRequest, setTreeRevealRequest] = useState(0);
   const [sketchOptionsRevealRequest, setSketchOptionsRevealRequest] = useState(0);
   const [undoDepth, setUndoDepth] = useState(0);
@@ -1341,6 +1350,7 @@ export function App(): React.JSX.Element {
     if (body !== undefined && baseFeatureOf(designOf(current), body.id) === undefined) {
       // PT-15: the prompt-driven mesh wizard takes over the interaction, so a running panel command is cancelled first.
       if (commandPanelRef.current !== null) setCommandPanel(null);
+      if (partCreatePanelRef.current !== null) { partCreatePanelRef.current = null; setPartCreate(null); }
       holeWizardOnMesh(body.id);
       return;
     }
@@ -2023,6 +2033,9 @@ export function App(): React.JSX.Element {
     // PT-15: the same command pressed again keeps running with its picks; a different one cancels the old out loud.
     const plan = panelReopenPlan(commandPanelRef.current, command);
     if (plan.kind === "keep") { setStatus("ready"); setStatusText(plan.message); return; }
+    // The Extrude / Revolve panel gives way to this command.
+    const createOpen = partCreatePanelRef.current;
+    if (createOpen !== null) { partCreatePanelRef.current = null; setPartCreate(null); }
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
     let state = openCommandPanel(command);
@@ -2046,7 +2059,7 @@ export function App(): React.JSX.Element {
     setFeatureEdit(undefined);
     setCommandPanel(state);
     setStatus("ready");
-    setStatusText(plan.note + (command === "hole"
+    setStatusText(plan.note + (createOpen === null ? "" : `${partCreateTitle(createOpen.kind)} cancelled — nothing changed. `) + (command === "hole"
       ? "Hole: click the face where the hole should start, set the type and sizes, Enter commits (Esc cancels)."
       : command === "shell"
         ? "Shell: click the faces to leave open (or none for a closed shell), type the thickness, Enter commits (Esc cancels)."
@@ -3141,82 +3154,83 @@ export function App(): React.JSX.Element {
   };
 
   /**
-   * PT-05: start Extrude or Revolve in the Part environment (ribbon, E, right-click) on a finished sketch. The sketch
-   * is the selected timeline sketch, else the only finished one with a closed profile, else a choice by name; with
-   * several profiles the user says which (all, or numbers). The distance or angle is typed in the on-view field
-   * (numbers, units and arithmetic), and the result can join or cut the selected solid. The step and its body go
-   * through the same feature record and builder as the sketch palette, so editing and replay are identical.
+   * PT-05 / PT-06: start Extrude or Revolve in the Part environment (ribbon, E, right-click) on a finished sketch. ONE modeless
+   * command panel replaces the browser prompts: the sketch (the selected or newest one, a choice when several), the profiles
+   * (a check list with each area), the distance or angle (numbers, units, expressions, parameter names), the direction and the
+   * operation (New body, Join, Cut, Intersect; Join by default when the result touches a solid). OK builds the same feature
+   * record, through the same builder, as the sketch palette, so editing and replay are identical (see part-create-panel.ts).
    */
-  const startPartCreate = async (kind: "extrude" | "revolve", preferredSketchFeatureId?: string): Promise<void> => {
-    const lead = kind === "extrude" ? "Extrude" : "Revolve";
-    const history = designOf(projectRef.current);
-    const prompt = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
-    const preferred = preferredSketchFeatureId === undefined ? undefined : history.features.find((candidate) => candidate.id === preferredSketchFeatureId);
-    let sketchFeature = preferred?.kind === "sketch" ? preferred : selectedTimelineFeature?.kind === "sketch" ? selectedTimelineFeature : undefined;
-    if (sketchFeature !== undefined && detectSketchProfiles(sketchFeature.sketch).length === 0) sketchFeature = undefined;
-    if (sketchFeature !== undefined) {
-      const order = sketchOrderProblem(history, [sketchFeature.id], history.rollbackIndex, "feature:new");
-      if (order !== undefined && !order.ok) { setStatus("ready"); setStatusText(`${lead}: ${order.diagnostics[0]?.message ?? "that sketch is after the rollback marker."} ${order.diagnostics[0]?.recovery ?? ""}`.trim()); return; }
-    }
-    if (sketchFeature === undefined) {
-      const candidates = matchingSketches(history, (candidate) => detectSketchProfiles(candidate.sketch).length > 0);
-      if (candidates.length === 0) { setStatus("ready"); setStatusText(`${lead}: finish a sketch with a closed profile first (Create Sketch, draw, Finish Sketch).`); return; }
-      if (candidates.length === 1) sketchFeature = candidates[0]!;
-      else {
-        const raw = prompt(`${lead}: which sketch gives the profile? (${candidates.map((candidate) => candidate.name).join(", ")}; Enter keeps the newest)`, candidates[0]!.name);
-        if (raw === null) return;
-        sketchFeature = sketchByAnswer(candidates, raw);
-        if (sketchFeature === undefined) { setStatus("ready"); setStatusText(`${lead}: no finished sketch matched that name.`); return; }
-      }
-    }
-    const profiles = detectSketchProfiles(sketchFeature.sketch);
-    let profileIds: readonly string[] = [];
-    if (profiles.length > 1) {
-      const raw = prompt(`${lead}: which profiles of ${sketchFeature.name}? (all, or numbers such as "1 3": ${profiles.map((profile, index) => `P${index + 1} ${Math.round(profile.areaMm2)} mm²`).join(", ")})`, "all");
-      if (raw === null) return;
-      const chosen = profilesByAnswer(profiles, raw);
-      if (chosen === undefined) { setStatus("ready"); setStatusText(`${lead}: enter all, or profile numbers between 1 and ${profiles.length}.`); return; }
-      profileIds = chosen;
-    }
-    // HS-07: a parameter name or formula is accepted here (`plate_h / 2`, `Extrude1.distance`) and the new step stays bound to it.
-    const sizeProbe: DesignSolidFeature = { id: `feature:${kind}-size-probe`, name: lead, kind, suppressed: false, sketchFeatureId: sketchFeature.id, profileIds: [], valueMm: 1, bodyId: "general-body:size-probe" };
-    const resolveSize = (text: string): { readonly ok: true; readonly value: number } | { readonly ok: false; readonly message: string } => {
-      const preview = previewFieldExpression(projectRef.current, sizeProbe, kind === "extrude" ? "distance" : "angle", text);
-      return preview.ok ? { ok: true, value: preview.value } : { ok: false, message: preview.message };
-    };
-    const answer = await onView.askText(kind === "extrude"
-      ? { label: "Extrude distance", quantity: "length", defaultValue: 10, min: 0, exclusiveMin: true, step: 0.5, resolve: resolveSize }
-      : { label: "Revolve angle", quantity: "angle", defaultValue: 360, min: 0, exclusiveMin: true, step: 15, resolve: resolveSize });
-    if (answer === null) return;
-    const value = answer.value;
-    const valueExpression = answer.bound ? answer.text : undefined;
-    if (kind === "revolve" && value > 360) { setStatus("ready"); setStatusText("Revolve: enter an angle between 1 and 360 degrees."); return; }
-    // PT-14: the operation defaults by touch. The tool is built once to see which bodies the result meets; when it
-    // touches one, the prompt proposes Join to it (Fusion's default) and offers Cut and Intersect. The target is the
-    // selected solid, or the one touched body, named in the prompt — never a silent choice (PT-02).
-    const bodies = projectRef.current.part.generalBodies ?? [];
-    let touching: readonly GeneralSolidBody[] = [];
-    if (bodies.some((candidate) => candidate.visible)) {
-      const probe: DesignSolidFeature = { id: `feature:${kind}-probe`, name: "probe", kind, suppressed: false, sketchFeatureId: sketchFeature.id, profileIds, valueMm: value, bodyId: "general-body:probe" };
-      const builtProbe = await rebuildSolidFeature(probe, sketchFeature, undefined, sketchLookupOf(designOf(projectRef.current)));
-      if (builtProbe.ok) touching = touchingBodies(builtProbe.body.positionsMm, bodies);
-    }
-    const modifiable = bodies.find((candidate) => candidate.id === selectedId) ?? (touching.length === 1 ? touching[0] : undefined);
-    let target: { readonly mode: "join" | "cut" | "intersect"; readonly bodyId: string } | undefined;
-    if (bodies.length > 0) {
-      const touchNote = touching.length === 0 ? "" : ` — the result touches ${touching.map((candidate) => candidate.name).join(", ")}`;
-      const options = modifiable === undefined ? `"new" body` : `"new" body, "join" to ${modifiable.name}, "cut" from it or "intersect" with it`;
-      const answer = prompt(`Result: ${options}${touchNote}`, defaultCreateOperation(touching.length, modifiable !== undefined));
-      if (answer === null) return;
-      const mode = answer.trim().toLowerCase();
-      if (mode === "join" || mode === "cut" || mode === "intersect") {
-        if (modifiable === undefined) { setStatus("ready"); setStatusText(`${lead}: select the solid to ${mode} first.`); return; }
-        target = { mode, bodyId: modifiable.id };
-      } else if (mode !== "" && mode !== "new") { setStatus("ready"); setStatusText(`${lead}: enter new, join, cut or intersect.`); return; }
-    }
-    await createGeneralSolid(profileIds, "xy", kind, value, undefined, "one-side", target, valueExpression === undefined ? undefined : { valueExpression }, sketchFeature.id);
+  const startPartCreate = async (kind: PartCreateKind, preferredSketchFeatureId?: string): Promise<void> => {
+    const plan = partCreateReopenPlan(partCreatePanelRef.current, kind);
+    if (plan.kind === "keep") { setStatus("ready"); setStatusText(plan.message); return; }
+    const opened = openPartCreate(kind, designOf(projectRef.current), { preferredSketchId: preferredSketchFeatureId, selectedSketchId: selectedTimelineFeature?.kind === "sketch" ? selectedTimelineFeature.id : undefined });
+    if (!opened.ok) { setStatus("ready"); setStatusText(opened.message); return; }
+    // The shared command panel and the docked Edit panel give way, and the new command says what it cancelled.
+    const cancelled = commandPanelRef.current;
+    if (cancelled !== null) setCommandPanel(null);
+    setFeatureEdit(undefined);
+    if (projectRef.current.activeWorkspace !== "part") switchWorkspace("part");
+    setPartCreate(opened.state);
+    setStatus("ready");
+    setStatusText(`${plan.note}${cancelled === null ? "" : `${panelTitle(cancelled)} cancelled — nothing changed. `}${partCreateTitle(kind)}: tick the profiles, type the ${kind === "extrude" ? "distance" : "angle"}, choose the operation, Enter commits (Esc cancels).`);
   };
   partCreateRef.current = (kind, preferredSketchFeatureId) => { void startPartCreate(kind, preferredSketchFeatureId); };
+
+  const cancelPartCreate = (): void => {
+    const open = partCreatePanelRef.current;
+    if (open === null) return;
+    partCreatePanelRef.current = null;
+    setPartCreate(null);
+    setStatus("ready");
+    setStatusText(`${partCreateTitle(open.kind)} cancelled; nothing changed.`);
+  };
+
+  /** OK or Enter on the Extrude / Revolve panel: the typed values become one request (or a message under the rows), and the solid is built like the palette's. */
+  const commitPartCreate = async (): Promise<void> => {
+    const state = partCreatePanelRef.current;
+    // A second Enter or click while the first is still building is ignored, so one press makes one step.
+    if (state === null || partCreateCommittingRef.current) return;
+    partCreateCommittingRef.current = true;
+    try {
+      const before = projectRef.current;
+      // An operation left on its default is settled by a fresh touch test, so a quick Enter never builds a separate body beside a solid the result meets.
+      const touchingIds = state.operation === undefined ? await probeTouchingIds(state, before) : state.touchingIds;
+      const planned = planPartCreate(state, { project: projectRef.current, selectedId, touchingIds });
+      if (!planned.ok) { setPartCreate((current) => (current === null ? current : partCreateWithError(current, planned.message))); return; }
+      const request = planned.request;
+      const advanced = { ...(request.valueExpression === undefined ? {} : { valueExpression: request.valueExpression }), ...(request.secondValueMm === undefined ? {} : { secondValueMm: request.secondValueMm }) };
+      try {
+        await createGeneralSolid(request.profileIds, "xy", request.kind, request.value, undefined, request.direction, request.target, Object.keys(advanced).length === 0 ? undefined : advanced, request.sketchId);
+      } catch (error) {
+        setStatus("error");
+        setStatusText(describeFailure(error, "Creating the solid"));
+      }
+      // A solid that was not built leaves the panel open with its values, so the numbers are not lost; the status bar says why.
+      if (projectRef.current.revision === before.revision) setPartCreate((current) => (current === null ? current : partCreateWithError(current, "Nothing was added. The status bar below says why; change a value and press OK again.")));
+      else { partCreatePanelRef.current = null; setPartCreate(null); }
+    } finally {
+      partCreateCommittingRef.current = false;
+    }
+  };
+
+  /** What else is running when Esc is pressed, so a panel closes only when it is the innermost thing open (esc-order.ts). */
+  const escapeFlags = (): EscapeAppFlags => ({
+    pendingPick: pickRef.current !== null,
+    toolRunning: projectRef.current.activeWorkspace === "sketch",
+    commandPanelOpen: commandPanelRef.current !== null,
+    partCreateOpen: partCreatePanelRef.current !== null,
+    busy: panelBusyRef.current || partCreateCommittingRef.current
+  });
+  usePartCreateSession({ state: partCreate, setState: setPartCreate, projectRef, bodies: project.part.generalBodies, workspace: project.activeWorkspace, projectId: project.id, flags: escapeFlags, onCommit: () => void commitPartCreate(), onCancel: cancelPartCreate });
+  const partCreateSketches = useMemo(() => (partCreate === null ? [] : createSketchChoices(designOf(project))), [partCreate === null, project]);
+  // An Edit Feature panel opened over the Extrude / Revolve panel replaces it, saying so.
+  useEffect(() => {
+    if (featureEdit === undefined || partCreatePanelRef.current === null) return;
+    const open = partCreatePanelRef.current;
+    partCreatePanelRef.current = null;
+    setPartCreate(null);
+    setStatusText(`${partCreateTitle(open.kind)} cancelled — nothing changed.`);
+  }, [featureEdit]);
 
   /**
    * Applies an operation and then replays the timeline, as one undo step. Used when the design has joins or cuts, because
@@ -3993,6 +4007,13 @@ export function App(): React.JSX.Element {
       setCommandPanel(null);
       setStatusText(`${panelTitle(openPanel)} cancelled — nothing changed.`);
     }
+    // The Extrude / Revolve panel gives way to Press Pull and Move the same way (Extrude itself keeps or replaces it, see startPartCreate).
+    const openCreate = partCreatePanelRef.current;
+    if (openCreate !== null && command !== "extrude" && hotkeyCancelsPanel(command)) {
+      partCreatePanelRef.current = null;
+      setPartCreate(null);
+      setStatusText(`${partCreateTitle(openCreate.kind)} cancelled — nothing changed.`);
+    }
     switch (command) {
       case "extrude": partCreateRef.current("extrude"); return;
       // Press Pull's honest subset on this kernel: pick flat faces of the selected solid and offset them.
@@ -4450,7 +4471,8 @@ export function App(): React.JSX.Element {
       }
       // Fusion's S: the command search, anywhere a dialog or menu does not own the keyboard. No sketch tool uses S.
       if (event.key.toLowerCase() === "s" && !event.shiftKey) {
-        if (globalThis.document.querySelector('[role="dialog"], [role="menu"]') !== null) return;
+        // Only a visible dialog or menu owns the keyboard: the ribbon's closed drop-downs are menus in the page but not open.
+        if (anotherSurfaceOpen(globalThis.document)) return;
         event.preventDefault();
         setPaletteOpen(true);
       }
@@ -4872,6 +4894,7 @@ export function App(): React.JSX.Element {
         <ViewportChrome
           workspace={project.activeWorkspace as "part" | "assembly" | "surface" | "vehicle"}
           state={viewportState}
+          panelPicking={commandPanel !== null}
           measurePoints={measurePoints}
           onNavigationMode={setViewportNavigation}
           onSelectionFilter={setViewportSelectionFilter}
@@ -4894,6 +4917,17 @@ export function App(): React.JSX.Element {
           onClearSelection={() => setCommandPanel((current) => current === null ? current : panelClearSelection(current))}
           onCommit={() => void commitCommandPanel()}
           onCancel={() => { setCommandPanel(null); setStatus("ready"); setStatusText("Command cancelled; nothing changed."); }}
+        />}
+        {partCreate !== null && <PartCreatePanel
+          state={partCreate}
+          sketches={partCreateSketches}
+          bodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))}
+          selectedId={selectedId}
+          busy={status === "working"}
+          parse={(text, field) => parseCreateValue(project, partCreate.kind, field, text)}
+          onAction={(action) => setPartCreate((current) => (current === null ? current : partCreateReduce(current, action, partCreateSketches)))}
+          onCommit={() => void commitPartCreate()}
+          onCancel={cancelPartCreate}
         />}
         <ViewportMetrics workspace={project.activeWorkspace} model={model} imported={activeImport} project={project} interferenceCount={interferences.length} surfaceTriangles={surfacePreview.metrics.triangles} vehicleAnalysis={vehiclePreview.analysis} vehiclePrimitiveCount={vehiclePreview.scene.primitives.length} />
         {project.activeWorkspace === "part" && analysisRequest !== null && activeImport === undefined && <AnalysisLayer part={project.part} viewportRef={viewportRef} mode={analysisRequest.mode} nonce={analysisRequest.nonce} onClose={() => setAnalysisRequest(null)} onMessage={setStatusText} />}
@@ -4993,7 +5027,7 @@ export function App(): React.JSX.Element {
     <SketchPlaneDialog unit={unitToShow(project, document.displayUnit)} open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} initialTilt={sketchPlaneDialogMode === "new" ? undefined : project.sketch.planeTilt} anglePlanes={anglePlaneOptions} framePlanes={framePlaneOptions} faces={sketchFaceOptions} existingPlanes={existingSketchPlanes(designOf(project).features, project.sketch)} mode={sketchPlaneDialogMode} {...(sketchPlaneDialogMode === "new" && (project.part.generalBodies ?? []).some((body) => body.visible) ? { onPickFace: () => guard(pickFaceForSketch(), "Picking a face for the sketch") } : {})} currentPlaneChip={describeSketchPlane(project.sketch).chip} {...(sketchPlaneOffered ? { onContinue: () => { setSketchPlaneDialogOpen(false); switchWorkspace("sketch"); } } : {})} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
     <AboutDialog open={aboutOpen} update={buildUpdate} onClose={() => setAboutOpen(false)} />
     <ChangeParametersDialog open={parametersOpen} project={project} busy={status === "working"} onApply={changeParameters} onClose={() => setParametersOpen(false)} />
-    <FeatureEditDialog feature={featureEdit} project={project} busy={status === "working"} onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />
+    <FeatureEditDialog feature={featureEdit} project={project} busy={status === "working"} escapeFlags={escapeFlags}onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />
     <BendTableDialog
       open={bendTableBodyId !== undefined}
       bodyName={project.part.generalBodies?.find((body) => body.id === bendTableBodyId)?.name ?? "Sheet metal"}

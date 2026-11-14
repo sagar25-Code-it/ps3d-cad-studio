@@ -202,6 +202,8 @@ import { holeFaceNameTests } from "./hole-face-names.test.js";
 import { holePlacementTests } from "./hole-placement.test.js";
 import { editFeatureDockTests } from "./edit-feature-dock.test.js";
 import { dockedPanelTests } from "./docked-panel.test.js";
+import { partCreatePanelTests } from "./part-create-panel.test.js";
+import { escOrderTests } from "./esc-order.test.js";
 import { holePatternFollowTests } from "./hole-pattern-follows.test.js";
 import { lengthFieldDraftTests } from "./length-field-draft.test.js";
 import { timelineMenuLayerTests } from "./timeline-menu-layer.test.js";
@@ -471,6 +473,8 @@ const tests: readonly TestCase[] = [
   ...holePlacementTests,
   ...editFeatureDockTests,
   ...dockedPanelTests,
+  ...partCreatePanelTests,
+  ...escOrderTests,
   ...holePatternFollowTests,
   ...lengthFieldDraftTests,
   ...timelineMenuLayerTests,
