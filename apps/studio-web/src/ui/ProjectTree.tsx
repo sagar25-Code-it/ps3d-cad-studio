@@ -43,6 +43,10 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
     selectedItem.scrollIntoView({ block: "nearest" });
     if (revealSelectionRequest > handledRevealRequest.current) {
       handledRevealRequest.current = revealSelectionRequest;
+      // Find in browser: a section the person had folded is opened so the row can be seen.
+      const section = selectedItem.closest("details");
+      if (section !== null && !section.open) section.open = true;
+      selectedItem.scrollIntoView({ block: "nearest" });
       selectedItem.focus({ preventScroll: true });
     }
   }, [project.activeWorkspace, revealSelectionRequest, selectedId]);

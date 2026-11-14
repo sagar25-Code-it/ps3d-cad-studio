@@ -25,17 +25,21 @@
 .timeline-chip.note { border-color: #b7791f; }
 .timeline-chip.note .command-icon { color: #b7791f; }
 .timeline-chip.inactive { opacity: 0.7; }
-.timeline-badge { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; color: #fff; background: #c0392b; font-size: 0.7rem; }
+.timeline-badge { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; color: #fff; background: #c0392b; font-size: 12px; line-height: 1; }
 .timeline-marker { display: inline-block; flex: none; width: 9px; height: 30px; margin: 0 1px; border-radius: 3px; cursor: pointer; }
 .timeline-marker::before { content: ""; display: block; width: 1px; height: 100%; margin: 0 auto; background: transparent; }
 .timeline-marker:hover::before { background: #8fb7d8; }
-.timeline-marker.current { width: 11px; cursor: default; }
+.timeline-marker.current { width: 14px; cursor: ew-resize; touch-action: none; }
 .timeline-marker.current::before { width: 3px; background: #1f6fb6; box-shadow: 0 0 0 1px #fff; }
+.timeline-marker.current.dragging::before { width: 5px; }
+.timeline-marker.drop { width: 14px; }
+.timeline-marker.drop::before { width: 3px; background: #1f6fb6; opacity: 0.55; }
 .timeline-rename { height: 30px; min-width: 9rem; padding: 0 0.5rem; border: 2px solid #1f6fb6; border-radius: 5px; font: inherit; }
-.timeline-menu { position: fixed; z-index: 140; display: grid; min-width: 11.5rem; padding: 0.25rem; border: 1px solid #aeb5bb; border-radius: 6px; background: #fff; box-shadow: 0 10px 28px #15191d55; }
-.timeline-menu button { padding: 0.45rem 0.7rem; border: 0; border-radius: 4px; color: #2c3237; background: transparent; font: inherit; text-align: left; cursor: pointer; }
-.timeline-menu button:hover { background: #e4eef7; }
-.timeline-menu button.danger { color: #b02a1c; }
+.studio-app .timeline-menu { position: fixed; z-index: 140; display: grid; align-content: start; box-sizing: border-box; min-width: 11.5rem; max-width: calc(100vw - 16px); overflow-y: auto; padding: 0.25rem; border: 1px solid #aeb5bb; border-radius: 6px; background: #fff; box-shadow: 0 10px 28px #15191d55; }
+.studio-app .timeline-menu button { width: 100%; min-height: 32px; padding: 0.35rem 0.7rem; border: 0; border-radius: 4px; color: #2c3237; background: transparent; box-shadow: none; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.studio-app .timeline-menu button:hover:not(:disabled), .studio-app .timeline-menu button:focus-visible { background: #e4eef7; }
+.studio-app .timeline-menu button:disabled { color: #8b949b; cursor: default; }
+.studio-app .timeline-menu button.danger { color: #b02a1c; }
 
 /* The selected-solid card and the collapsible template-plate parameters in the Part inspector. */
 .studio-app .plate-parameters { margin: 0 0 0.6rem; border: 1px solid #c5ccd2; border-radius: 6px; background: #fff; }
