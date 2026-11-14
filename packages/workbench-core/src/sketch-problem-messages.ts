@@ -54,7 +54,7 @@ export function sketchPlacementProblem(input: Record<string, unknown>, commonKey
 export function sketchShapeProblem(value: unknown, limits: { readonly maxEntities: number; readonly maxConstraints: number }): string {
   if (!isRecord(value)) return "The primary sketch must be an object.";
   const required = ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints"];
-  const optional = ["planeOffsetMm", "planeTilt", "planeFrame", "planeFace", "planeConvention", "texts", "patterns", "underlay", "projections"];
+  const optional = ["planeOffsetMm", "planeTilt", "planeFrame", "planeFace", "planeConvention", "planeRef", "texts", "patterns", "underlay", "projections"];
   const missing = required.filter((key) => !Object.hasOwn(value, key));
   if (missing.length > 0) return `The primary sketch is missing "${missing[0]!}".`;
   const stray = Object.keys(value).filter((key) => !required.includes(key) && !optional.includes(key));

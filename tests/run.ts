@@ -192,6 +192,7 @@ import { browserRowTests } from "./browser-rows.test.js";
 import { failedBodyTests } from "./failed-body.test.js";
 import { oneShotGuardTests } from "./one-shot-guard.test.js";
 import { designReorderTests } from "./design-reorder.test.js";
+import { referenceStepTests } from "./reference-steps.test.js";
 import { typedSizeBindingTests } from "./typed-size-binding.test.js";
 import { modelParameterTests } from "./model-parameters.test.js";
 import { sketchesFolderTests } from "./sketches-folder.test.js";
@@ -471,6 +472,7 @@ const tests: readonly TestCase[] = [
   ...failedBodyTests,
   ...oneShotGuardTests,
   ...designReorderTests,
+  ...referenceStepTests,
   ...typedSizeBindingTests,
   ...modelParameterTests,
   ...sketchesFolderTests,

@@ -232,8 +232,9 @@ export const patternTests: readonly TestCase[] = [
       const patterned = await addOk(project, { shape, result: "new-bodies", sourceBodyId: PLATE });
       const copy = bodyOf(patterned, patternSteps(patterned)[0]!.bodyId);
       near(metricsOf(copy).centroidMm[0], 0, 1e-6, "a half turn about x = 50 sends x = 100 to x = 0");
-      // Move the axis: the next replay follows it.
-      const moved = { ...patterned, part: { ...patterned.part, constructionAxes: [{ id: "construction-axis:spin", name: "Spin", visible: true, definition: { kind: "point-and-direction" as const, origin: [60, 0, 0] as const, direction: [0, 0, 1] as const } }] } };
+      // Move the axis: the next replay follows it. The axis is a timeline step now, so it is edited through its step.
+      const axisStep = designOf(patterned).features.find((feature) => feature.kind !== "sketch" && feature.bodyId === "construction-axis:spin")!;
+      const moved = run(patterned, { kind: "update-design-reference", feature: { ...axisStep, reference: { kind: "axis", definition: { kind: "point-and-direction", origin: [60, 0, 0], direction: [0, 0, 1] } } } as DesignSolidFeature });
       const replayed = run(moved, { kind: "regenerate-design", results: await replayAllBodies(moved) });
       near(metricsOf(bodyOf(replayed, patternSteps(replayed)[0]!.bodyId)).centroidMm[0], 20, 1e-6, "editing the construction axis moves the copy on the next replay");
     }

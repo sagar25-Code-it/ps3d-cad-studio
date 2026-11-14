@@ -32,7 +32,8 @@ export function ConstructionReferenceCard(props: {
     </section>;
   }
   const frame = evaluateConstructionPlane(plane!, bodies, props.part.constructionAxes ?? [], props.part.constructionBinders ?? []);
-  const sketchable = !("error" in frame) && (plane!.definition.kind === "through-two-edges" || plane!.definition.kind === "along-path" || plane!.definition.kind === "three-points");
+  // Any plane that resolves is a sketch plane; the sketch follows the plane when its step is edited.
+  const sketchable = !("error" in frame);
   return <section className="inspector-section construction-reference-card" aria-label="Construction plane">
     <header><strong>{plane!.name}</strong><span>construction plane · {plane!.definition.kind.replaceAll("-", " ")}</span></header>
     <p role="status" className={"error" in frame ? "error" : undefined}>{"error" in frame ? frame.error : frame.description}</p>

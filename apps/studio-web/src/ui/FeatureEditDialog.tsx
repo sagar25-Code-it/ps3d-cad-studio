@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { DesignSolidFeature, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
-import { canRepairSketch, designOf, isMarkedBroken, lostSketchOf, previewFieldExpression, repairCandidates, repairSketchReference } from "../../../../packages/workbench-core/src/index.js";
-import { fieldAcceptsExpression, parameterFieldsOf, parameterValuesOf } from "../feature-parameters.js";
+import { canRepairSketch, designOf, isMarkedBroken, isReferenceKind, lostSketchOf, previewFieldExpression, repairCandidates, repairSketchReference } from "../../../../packages/workbench-core/src/index.js";
+import { TIMELINE_ICONS } from "./TimelineBar.js";
+import { applyParameterValues, applyPlainSize, fieldAcceptsExpression, parameterFieldsOf, parameterValuesOf } from "../feature-parameters.js";
 import { dockCandidate } from "../edit-dock-candidate.js";
 import { dockPreviewOf, type DockPreview, type ValueBridge } from "../part-preview-bridge.js";
 import { CommandIcon } from "./CommandIcon.js";
@@ -151,7 +152,7 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
 
   return <div className="dialog-backdrop save-project-backdrop feature-edit-dock" role="presentation" style={dock.style}>
     <section ref={dock.ref} tabIndex={-1} className="save-project-dialog feature-edit-dialog" role="region" aria-labelledby="feature-edit-title">
-      <header><span><CommandIcon name={feature.kind} /></span><div><small>TIMELINE / EDIT FEATURE</small><h2 id="feature-edit-title">{feature.name}</h2></div><button onClick={props.onClose} aria-label="Cancel editing"><CommandIcon name="cancel" /></button></header>
+      <header><span><CommandIcon name={TIMELINE_ICONS[feature.kind] ?? feature.kind} /></span><div><small>TIMELINE / EDIT FEATURE</small><h2 id="feature-edit-title">{feature.name}</h2></div><button onClick={props.onClose} aria-label="Cancel editing"><CommandIcon name="cancel" /></button></header>
       <div className="save-project-content feature-edit-form">
         {isMarkedBroken(feature) && <div className="inline-warning feature-edit-broken" role="alert">{feature.health?.message}</div>}
         {repairable && <label>
@@ -261,9 +262,9 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
         {(fields !== undefined || plainForm) && <p className="feature-edit-expression-hint">Type a number, or an expression such as <code>2 * pin_r</code> or <code>Extrude1.distance / 2</code>{names.length === 0 ? "." : `. Parameters: ${names.slice(0, 8).join(", ")}${names.length > 8 ? ", …" : ""}.`}</p>}
         {problem !== "" && <div className="inline-warning" role="alert">{problem}</div>}
         {props.previewNote !== undefined && <p className="feature-edit-preview" role="status">{props.previewNote}</p>}
-        <div className="save-project-note"><CommandIcon name="shield" /><span>The solid is rebuilt from the sketch it was made from. Steps built on this one rebuild with it, and Undo restores the previous solid.</span></div>
+        <div className="save-project-note"><CommandIcon name="shield" /><span>{isReferenceKind(feature.kind) ? `${feature.reference?.kind === "plane" ? "Sketches placed on this plane move with it, and whatever is built on them is rebuilt. " : ""}Steps built on this one follow it, and Undo restores the previous step.` : "The solid is rebuilt from the sketch it was made from. Steps built on this one rebuild with it, and Undo restores the previous solid."}</span></div>
       </div>
-      <footer><button onClick={props.onClose}>Cancel</button><button className="primary" disabled={props.busy} onClick={apply}><CommandIcon name={feature.kind} />Update feature</button></footer>
+      <footer><button onClick={props.onClose}>Cancel</button><button className="primary" disabled={props.busy} onClick={apply}><CommandIcon name={TIMELINE_ICONS[feature.kind] ?? feature.kind} />Update feature</button></footer>
     </section>
   </div>;
 }

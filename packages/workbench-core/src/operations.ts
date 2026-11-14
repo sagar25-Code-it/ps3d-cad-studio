@@ -70,6 +70,8 @@ import {
   type PartFeatureResult
 } from "./part-features.js";
 import { setDesignParameters, settleDesignExpressions } from "./design-parameters.js";
+import { materializeReference, validReferenceFeatureShape, type ReferenceFeature } from "./reference-feature.js";
+import { adoptLegacyReferences, followDesignPlanes, reconcileReferences, updateDesignReference } from "./reference-history.js";
 import { failure, MAX_AUDIT_CHANGED_IDS, validateWorkbenchProject, validSketchPlaneFrame, validSketchPlaneTilt, WORKBENCH_LIMITS } from "./validation.js";
 import { sketchConstraintPayloadProblem } from "./constraint-payload.js";
 import { outlineBroken, outlineBrokenMessage } from "./sketch-outline-guard.js";
@@ -172,7 +174,7 @@ function applyWorkbenchOperationChecked(
   // Messages name sketch geometry as "Line 3", never by its generated id (see sketch-names.ts).
   const reconciled = settled.ok ? reconcileOperationSketch(current.value, settled.value, operation) : settled;
   if (!reconciled.ok) return { ok: false, diagnostics: reconciled.diagnostics.map((entry) => ({ ...entry, message: friendlySketchText(entry.message, [current.value.sketch]), recovery: friendlySketchText(entry.recovery, [current.value.sketch]) })) };
-  const changed = { ok: true as const, value: { ...reconciled.value, summary: friendlySketchText(reconciled.value.summary, [reconciled.value.project.sketch, current.value.sketch]) } };
+  const changed = { ok: true as const, value: { ...reconciled.value, project: reconcileReferences(current.value, reconciled.value.project), summary: friendlySketchText(reconciled.value.summary, [reconciled.value.project.sketch, current.value.sketch]) } };
   const nextRevision = current.value.revision + 1;
   const next: WorkbenchProject = {
     ...refreshMateStatuses(changed.value.project, operation.kind),
@@ -389,8 +391,27 @@ function validateWorkbenchOperationShape(rawInput: unknown): WorkbenchResult<Wor
       if (!keys(input, [...common, "featureId", ...(Object.hasOwn(input, "keepDependents") ? ["keepDependents"] : [])]) || !stableId(input.featureId)) return invalidOperation("The timeline feature ID is invalid.");
       if (Object.hasOwn(input, "keepDependents") && typeof input.keepDependents !== "boolean") return invalidOperation("keepDependents must be true or false.");
       break;
-    case "new-design-sketch":
-      if (!validSketchPlacementInput(input, common)) return invalidOperation(sketchPlacementProblem(input, common));
+    case "new-design-sketch": {
+      // A sketch placed on a construction plane names it (planeRef) and carries the plane's frame; the rest is the ordinary placement.
+      const { planeRef, ...placement } = input;
+      if (Object.hasOwn(input, "planeRef") && (!stableId(planeRef) || !Object.hasOwn(input, "frame"))) return invalidOperation("The plane a sketch follows (planeRef) must be the ID of a construction plane and comes with that plane's frame.");
+      if (!validSketchPlacementInput(placement, common)) return invalidOperation(sketchPlacementProblem(placement, common));
+      break;
+    }
+    case "update-design-reference": {
+      if (!keys(input, [...common, "feature"]) || !isRecord(input.feature) || !validReferenceFeatureShape(input.feature)) return invalidOperation("The construction step is invalid: it needs a plane, axis, point or primitive definition of the matching kind, and no sketch, profile or size.");
+      const feature = input.feature as unknown as ReferenceFeature;
+      const probe = materializeReference(feature, true);
+      const valid = feature.reference.kind === "plane" ? validConstructionPlanePayload(probe) : feature.reference.kind === "axis" ? validConstructionAxisPayload(probe)
+        : feature.reference.kind === "point" ? validConstructionPointPayload(probe) : validPartPreviewBodyPayload(probe);
+      if (!valid) return invalidOperation(`The definition of ${feature.name} is outside what a ${feature.reference.kind === "primitive" ? "primitive" : "construction " + feature.reference.kind} supports (a finite value within the model's reach, and a shape that exists).`);
+      break;
+    }
+    case "follow-design-planes":
+      if (!keys(input, [...common, "frames"]) || !boundedList(input.frames, 200, isRecord) || input.frames.some((entry) => !keys(entry, ["featureId", "frame"]) || !stableId(entry.featureId) || !validSketchPlaneFrame(entry.frame))) return invalidOperation("The plane-following request is invalid: it lists sketches with the unit, perpendicular frame of the plane each is placed on.");
+      break;
+    case "adopt-legacy-references":
+      if (!keys(input, common)) return invalidOperation("Adding construction items to the timeline takes no fields.");
       break;
     case "add-design-solid":
     case "update-design-solid":
@@ -839,7 +860,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       );
     }
     case "set-sketch-plane": {
-      const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, planeConvention: _previousConvention, ...rest } = project.sketch;
+      const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, planeConvention: _previousConvention, planeRef: _previousRef, ...rest } = project.sketch;
       const offset = operation.offsetMm ?? 0;
       return changed(
         { ...project, sketch: { ...rest, plane: operation.plane, ...conventionFields(operation.plane, operation.convention, operation.frame !== undefined, project.sketch), ...(offset === 0 ? {} : { planeOffsetMm: offset }), ...(operation.tilt === undefined ? {} : { planeTilt: operation.tilt }), ...(operation.frame === undefined ? {} : { planeFrame: operation.frame }), ...(operation.face === undefined ? {} : { planeFace: operation.face }) } },
@@ -851,7 +872,10 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     }
     case "commit-design-sketch": return commitDesignSketch(project, operation.featureId, operation.name);
     case "edit-design-sketch": return editDesignSketch(project, operation.featureId);
-    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt, operation.frame, operation.face, operation.convention);
+    case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt, operation.frame, operation.face, operation.convention, operation.planeRef);
+    case "update-design-reference": return updateDesignReference(project, operation.feature);
+    case "follow-design-planes": return followDesignPlanes(project, operation.frames);
+    case "adopt-legacy-references": return adoptLegacyReferences(project);
     case "add-design-solid": return addDesignSolid(project, operation.feature, operation.body);
     case "update-design-solid": return updateDesignSolid(project, operation.feature, operation.body);
     case "regenerate-design": return regenerateDesign(project, operation.results, operation.sketchCurves);

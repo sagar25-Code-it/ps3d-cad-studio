@@ -23,6 +23,7 @@ import { FEATURE_REF_KEYS, validFeatureRefs } from "./feature-refs.js";
 import { conventionFields, type SketchPlaneConventionRequest } from "./plane-convention.js";
 import { applyProjectedCurves } from "./projection-follow.js";
 import { isDeletedReferenceMessage, isMarkedBroken, usesSketchGeometry } from "./design-references.js";
+import { isReferenceFeature, isReferenceKind, referenceNeeds, referenceStepOf, validReferenceFeatureShape } from "./reference-feature.js";
 
 /**
  * The parametric history ("timeline"): an ordered list of sketch and solid features with a rollback marker. A sketch
@@ -73,7 +74,7 @@ export function isSketchFeature(feature: DesignFeature): feature is DesignSketch
 }
 
 export function isSolidFeature(feature: DesignFeature): feature is DesignSolidFeature {
-  return feature.kind !== "sketch";
+  return feature.kind !== "sketch" && !isReferenceKind(feature.kind);
 }
 
 /** A join, cut, intersect, direct-edit, or face-modifying feature changes a body that an earlier step made; every other solid step makes a body of its own. */
@@ -115,7 +116,13 @@ export function dependentsOf(history: DesignHistory, featureId: string): readonl
   while (grew) {
     grew = false;
     for (const feature of history.features) {
-      if (closure.has(feature.id) || feature.kind === "sketch") continue;
+      if (closure.has(feature.id)) continue;
+      // A sketch placed on a construction plane goes with the plane; a plane, axis or point goes with the axis or body it is built on.
+      const usesClosure = referenceNeeds(history, feature, (bodyId) => baseFeatureOf(history, bodyId)).some((need) => closure.has(need.id));
+      if (feature.kind === "sketch" || isReferenceFeature(feature)) {
+        if (usesClosure) { closure.add(feature.id); grew = true; }
+        continue;
+      }
       // A sweep also follows the path of another sketch, and a loft takes its second profile from another sketch.
       const builtOnClosure = closure.has(feature.sketchFeatureId) || (feature.sweepPath !== undefined && closure.has(feature.sweepPath.sketchFeatureId))
         || (feature.loftSecondarySketchFeatureId !== undefined && closure.has(feature.loftSecondarySketchFeatureId));
@@ -125,7 +132,7 @@ export function dependentsOf(history: DesignHistory, featureId: string): readonl
       const consumesClosureBody = (feature.indentToolBodyId !== undefined || feature.combineToolBodyIds !== undefined)
         && history.features.some((other) => closure.has(other.id) && other.kind !== "sketch" && !modifiesBody(other)
           && (feature.indentToolBodyId === other.bodyId || (feature.combineToolBodyIds ?? []).includes(other.bodyId)));
-      if (builtOnClosure || modifiesClosureBody || copiesClosureBody || consumesClosureBody) { closure.add(feature.id); grew = true; }
+      if (usesClosure || builtOnClosure || modifiesClosureBody || copiesClosureBody || consumesClosureBody) { closure.add(feature.id); grew = true; }
     }
   }
   return history.features.filter((feature) => feature.id !== featureId && closure.has(feature.id));
@@ -136,10 +143,13 @@ export function isFeatureActive(history: DesignHistory, featureId: string): bool
   const index = history.features.findIndex((feature) => feature.id === featureId);
   const feature = history.features[index];
   if (feature === undefined || index >= history.rollbackIndex || feature.suppressed) return false;
-  if (feature.kind === "sketch") return true;
+  // A sketch placed on a construction plane, a plane, axis or point built on others, and a pattern about a construction axis or plane are on only while what they use is.
+  const usesLive = referenceNeeds(history, feature, (bodyId) => baseFeatureOf(history, bodyId)).every((need) => history.features.findIndex((candidate) => candidate.id === need.id) < index && isFeatureActive(history, need.id));
+  if (!usesLive) return false;
+  if (feature.kind === "sketch" || isReferenceFeature(feature)) return true;
   const sketch = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
-  // A step whose sketch was deleted stays live (it shows as needing attention and its solid stays as it was); only a suppressed sketch turns it off.
-  if (sketch !== undefined && sketch.suppressed) return false;
+  // A step whose sketch was deleted stays live (it shows as needing attention and its solid stays as it was); a sketch that is not live (suppressed, or built on a suppressed plane) turns it off.
+  if (sketch !== undefined && !isFeatureActive(history, sketch.id)) return false;
   // A copy made by a pattern is only on while the step that made its source body is.
   if (feature.kind === "pattern" && feature.pattern?.result === "new-bodies") {
     const source = baseFeatureOf(history, feature.pattern.sourceBodyId);
@@ -158,7 +168,7 @@ export function pruneOrphanedSolidFeatures(project: WorkbenchProject): { readonl
   const history = project.design;
   if (history === undefined) return { project, removed: [] };
   const bodies = new Set((project.part.generalBodies ?? []).map((body) => body.id));
-  const orphans = history.features.filter((feature) => feature.kind !== "sketch" && !bodies.has(feature.bodyId));
+  const orphans = history.features.filter((feature) => feature.kind !== "sketch" && !isReferenceFeature(feature) && !bodies.has(feature.bodyId));
   if (orphans.length === 0) return { project, removed: [] };
   const gone = new Set(orphans.map((feature) => feature.id));
   const removedBeforeMarker = history.features.filter((feature, index) => gone.has(feature.id) && index < history.rollbackIndex).length;
@@ -245,12 +255,20 @@ export function editDesignSketch(project: WorkbenchProject, featureId: string): 
   return changed({ ...project, sketch: feature.sketch, activeWorkspace: "sketch", design: next }, [featureId], `Reopened ${feature.name} for editing.`);
 }
 
-export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef, convention?: SketchPlaneConventionRequest): DesignChange {
+export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPlane, offsetMm = 0, tilt?: SketchPlaneTilt, frame?: SketchPlaneFrame, face?: SketchPlaneFaceRef, convention?: SketchPlaneConventionRequest, planeRef?: string): DesignChange {
   const history = designOf(project);
-  const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, planeConvention: _previousConvention, ...rest } = project.sketch;
+  // A sketch is inserted at the rollback marker, so a plane it follows has to be a live step before it.
+  const followed = planeRef === undefined ? undefined : referenceStepOf(history, planeRef);
+  if (planeRef !== undefined && followed !== undefined) {
+    if (followed.reference.kind !== "plane") return fail("INVALID_OPERATION", `${followed.name} is not a construction plane, so a sketch cannot follow it.`, [followed.id], "Pick a construction plane.");
+    if (history.features.indexOf(followed) >= history.rollbackIndex || !isFeatureActive(history, followed.id)) {
+      return fail("INVALID_OPERATION", `${followed.name} is rolled back or suppressed at this point of the timeline, so a sketch cannot be placed on it.`, [followed.id], `Roll the marker forward past ${followed.name} (or unsuppress it) and start the sketch again.`);
+    }
+  }
+  const { planeOffsetMm: _previousOffset, planeTilt: _previousTilt, planeFrame: _previousFrame, planeFace: _previousFace, planeConvention: _previousConvention, planeRef: _previousRef, ...rest } = project.sketch;
   const { texts: _texts, patterns: _patterns, underlay: _underlay, ...fresh } = rest;
   // A new sketch on the Right plane gets the Z-up mapping unless the caller restores an older sketch with "legacy".
-  const sketch = { ...fresh, name: "Sketch", plane, ...conventionFields(plane, convention ?? "z-up", frame !== undefined, undefined), ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), ...(frame === undefined ? {} : { planeFrame: frame }), ...(face === undefined ? {} : { planeFace: face }), entities: [], constraints: [] };
+  const sketch = { ...fresh, name: "Sketch", plane, ...conventionFields(plane, convention ?? "z-up", frame !== undefined, undefined), ...(offsetMm === 0 ? {} : { planeOffsetMm: offsetMm }), ...(tilt === undefined ? {} : { planeTilt: tilt }), ...(frame === undefined ? {} : { planeFrame: frame }), ...(face === undefined ? {} : { planeFace: face }), ...(planeRef === undefined ? {} : { planeRef }), entities: [], constraints: [] };
   const where = frame !== undefined ? "a plane through three points"
     : `the ${plane.replace("datum:", "").toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
   return changed({ ...project, sketch, activeWorkspace: "sketch", design: { ...history, editingSketchId: null } }, [project.sketch.id], `Started a new sketch on ${where}.`);
@@ -587,6 +605,8 @@ function validHolePlacement(value: unknown): boolean {
 }
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
+  // A construction plane, axis, point or primitive step has its own shape (no sketch, profiles or size); its item is checked with the part's lists.
+  if (isRecord(value) && typeof value.kind === "string" && isReferenceKind(value.kind)) return validReferenceFeatureShape(value);
   if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "combineToolBodyIds", "combineMode", "combineKeepTools", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "holePlacement", "flangeReliefShape", ...FEATURE_REF_KEYS, ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "intersect", "direct-edit"].includes(String(value.operation))) return false;
   if (!validExtent(value) || !validFeatureRefs(value)) return false;
@@ -852,6 +872,9 @@ export function validateDesignHistory(value: unknown, validSketch: (sketch: unkn
       if (!hasOnly(feature, ["id", "name", "kind", "suppressed", "sketch"], ["health", "visible"]) || !shortText(feature.name, 120) || typeof feature.suppressed !== "boolean" || !validSketch(feature.sketch)) return false;
       if (Object.hasOwn(feature, "visible") && typeof feature.visible !== "boolean") return false;
       sketchIds.add(feature.id);
+    } else if (typeof feature.kind === "string" && isReferenceKind(feature.kind)) {
+      // A construction plane, axis, point or primitive step has no sketch and no body of its own; its item is checked with the part's lists.
+      if (!validReferenceFeatureShape(feature)) return false;
     } else {
       if (!validSolidFeaturePayload(feature)) return false;
       // A step kept after something it was built on was deleted carries a health mark saying so, and may point at what is gone.

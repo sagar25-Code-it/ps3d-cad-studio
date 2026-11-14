@@ -3,6 +3,7 @@ import type { BodyEditSpec } from "./body-edit.js";
 import type { SheetBendTable } from "./sheet-features.js";
 import type { SketchObjectsEdit, SketchPatternObject, SketchProjectionObject, SketchTextObject, SketchUnderlay } from "./sketch-objects.js";
 import type { SketchPlaneConvention, SketchPlaneConventionRequest } from "./plane-convention.js";
+import type { ReferenceSpec } from "./reference-feature.js";
 
 export const WORKBENCH_FORMAT = "ps3d-workbench-project" as const;
 export const WORKBENCH_SCHEMA_VERSION = 1 as const;
@@ -336,6 +337,8 @@ export interface WorkbenchSketch {
   readonly planeFrame?: SketchPlaneFrame;
   /** Absent: the legacy Right (YZ) mapping (sketch X along world -Z, Y along +Y). "z-up": X along world +Y, Y along +Z (see plane-convention.ts). */
   readonly planeConvention?: SketchPlaneConvention;
+  /** Set when the sketch was placed on a construction plane of the part: `planeFrame` follows that plane when its step is edited. Absent means a fixed plane. */
+  readonly planeRef?: string;
   readonly gridMm: number;
   readonly snapToleranceMm: number;
   readonly entities: readonly SketchEntity[];
@@ -1287,7 +1290,13 @@ export interface HolePlacement {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "combine" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "pattern" | "edge-blend" | "offset-region" | "replace-face" | "web" | "wrap" | "flex" | "sheet-jog" | "sheet-lofted-bend";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "combine" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "pattern" | "edge-blend" | "offset-region" | "replace-face" | "web" | "wrap" | "flex" | "sheet-jog" | "sheet-lofted-bend" | "construction-plane" | "construction-axis" | "construction-point" | "primitive";
+  /**
+   * A construction plane, axis, point or primitive step (kinds "construction-plane", "construction-axis", "construction-point" and
+   * "primitive"): what it is built from. The step owns the definition; the plane, axis, point or preview body of the part that has the id
+   * `bodyId` is derived from it (see reference-feature.ts). Such a step has no sketch, no profiles and no size of its own.
+   */
+  readonly reference?: ReferenceSpec;
   /**
    * A step that reshapes an existing body by picked faces or a transform (a general shell or draft, offset region, replace face,
    * a rib / web, wrap or flex). Always paired with `operation: "direct-edit"`; see `BodyEditSpec`.
@@ -1646,7 +1655,7 @@ export type WorkbenchOperation = OperationEnvelope & (
   /** Reopens a sketch feature as the working sketch. */
   | { readonly kind: "edit-design-sketch"; readonly featureId: string }
   /** Starts a new, empty working sketch on a plane (the previous one should be finished first), optionally offset along its normal. */
-  | { readonly kind: "new-design-sketch"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame; readonly face?: SketchPlaneFaceRef; readonly convention?: SketchPlaneConventionRequest }
+  | { readonly kind: "new-design-sketch"; readonly plane: SketchDatumPlane; readonly offsetMm?: number; readonly tilt?: SketchPlaneTilt; readonly frame?: SketchPlaneFrame; readonly face?: SketchPlaneFaceRef; readonly convention?: SketchPlaneConventionRequest; /** The construction plane the sketch is placed on and follows (its step id is the plane id). */ readonly planeRef?: string }
   /** Adds an extrude or revolve feature together with the solid the kernel built for it. */
   | { readonly kind: "add-design-solid"; readonly feature: DesignSolidFeature; readonly body: GeneralSolidBody }
   /** Changes a solid feature's parameters and replaces its solid. */
@@ -1674,6 +1683,12 @@ export type WorkbenchOperation = OperationEnvelope & (
    */
   | { readonly kind: "delete-design-feature"; readonly featureId: string; readonly keepDependents?: boolean }
   | { readonly kind: "set-design-rollback"; readonly index: number }
+  /** Replaces a construction plane, axis, point or primitive step (its definition, name or expressions) and, with it, the item of the part it describes. */
+  | { readonly kind: "update-design-reference"; readonly feature: DesignSolidFeature }
+  /** Moves the sketches that were placed on construction planes onto the planes as they are now (the app evaluates the frames). */
+  | { readonly kind: "follow-design-planes"; readonly frames: readonly { readonly featureId: string; readonly frame: SketchPlaneFrame }[] }
+  /** Puts the construction planes, axes, points and primitives that predate the timeline into it, as steps in the order of the lists. */
+  | { readonly kind: "adopt-legacy-references" }
   /** Moves one timeline step to another place (its final index, from 0); refused, with the step it would break, when something built on it or that it is built on would change places with it. */
   | { readonly kind: "move-design-feature"; readonly featureId: string; readonly toIndex: number }
   /** Shows or hides the curves of a timeline sketch in the model (the eye on its row in the Sketches folder). */
@@ -1831,6 +1846,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "add-construction-binder", "delete-construction-binder", "toggle-construction-binder-visibility",
   "add-construction-axis", "delete-construction-axis", "toggle-construction-axis-visibility", "rename-construction-axis",
   "add-construction-point", "delete-construction-point", "toggle-construction-point-visibility", "rename-construction-point",
+  "update-design-reference", "follow-design-planes", "adopt-legacy-references",
   "add-construction-ucs", "delete-construction-ucs", "toggle-construction-ucs-visibility", "rename-construction-ucs",
   "set-part-preview-body-transform", "set-part-preview-body-size", "set-part-preview-body-color", "toggle-part-preview-body-visibility",
   "isolate-part-preview-body", "set-part-preview-bodies-visibility", "create-part-revolve", "pattern-part-feature", "mirror-part-feature",

@@ -1,6 +1,7 @@
-import { dependentsOf, isSplitPieceOf, modifiesBody } from "./design.js";
+import { baseFeatureOf, dependentsOf, isSplitPieceOf, modifiesBody } from "./design.js";
 import { isHealthNote } from "./design-labels.js";
 import { keepImpact, type KeepImpact } from "./design-keep-delete.js";
+import { referenceReason } from "./reference-feature.js";
 import type { DesignFeature, DesignHistory, DesignSolidFeature, WorkbenchProject } from "./types.js";
 
 /**
@@ -65,7 +66,7 @@ export function deleteImpact(project: WorkbenchProject, featureId: string): Dele
     id: dependent.id,
     name: dependent.name,
     kind: dependent.kind,
-    reason: dependent.kind === "sketch" ? "depends on it" : reasonFor(history, dependent, closure)
+    reason: referenceReason(history, dependent, closure, (bodyId) => baseFeatureOf(history, bodyId)) ?? (dependent.kind === "sketch" ? "depends on it" : reasonFor(history, dependent as DesignSolidFeature, closure))
   }));
   // Only a body's own (new-body) step takes the body with it; a join or cut that goes leaves the body in place.
   const goneBodies = new Set(history.features

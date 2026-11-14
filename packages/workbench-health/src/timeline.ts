@@ -1,4 +1,4 @@
-import { designOf, isHealthNote, isMarkedBroken, usesSketchGeometry, type DesignFeature, type WorkbenchProject } from "../../workbench-core/src/index.js";
+import { designOf, isHealthNote, isMarkedBroken, isReferenceFeature, usesSketchGeometry, type DesignFeature, type WorkbenchProject } from "../../workbench-core/src/index.js";
 
 /**
  * What the design timeline says about the health of a project: steps whose last rebuild failed, steps that point at a sketch or a solid
@@ -30,7 +30,7 @@ export function timelineMetrics(project: WorkbenchProject): TimelineMetrics {
   return {
     timelineSteps: features.length,
     timelineSketches: features.filter((feature) => feature.kind === "sketch").length,
-    timelineSolids: features.filter((feature) => feature.kind !== "sketch").length,
+    timelineSolids: features.filter((feature) => feature.kind !== "sketch" && !isReferenceFeature(feature)).length,
     timelineFailedSteps: features.filter((feature) => feature.health !== undefined && !isHealthNote(feature.health.message)).length
   };
 }
@@ -54,14 +54,16 @@ export function timelineFindings(project: WorkbenchProject): readonly TimelineFi
           ? `Reopen the sketch with edit-design-sketch (featureId ${feature.id}), repair it and commit it again.`
           : isMarkedBroken(feature)
             ? `What this step was built on was deleted. Edit the step and choose another sketch (update-design-solid with a sketchFeatureId that comes before it), delete the step, or undo the delete.`
-          : `Reopen its sketch (${feature.sketchFeatureId}) with edit-design-sketch and repair what the step refers to, or change the step with update-design-solid; then run regenerate-design.`,
-        relatedIds: feature.kind === "sketch" ? [feature.id] : [feature.id, feature.sketchFeatureId],
+          : isReferenceFeature(feature)
+            ? `Change the step with update-design-reference (it is a construction plane, axis, point or primitive) so what it refers to exists.`
+            : `Reopen its sketch (${feature.sketchFeatureId}) with edit-design-sketch and repair what the step refers to, or change the step with update-design-solid; then run regenerate-design.`,
+        relatedIds: feature.kind === "sketch" || isReferenceFeature(feature) ? [feature.id] : [feature.id, feature.sketchFeatureId],
         evidence: `${KIND_LABEL(feature)} step ${feature.id}`
       });
     }
-    if (feature.kind !== "sketch") {
+    if (feature.kind !== "sketch" && !isReferenceFeature(feature)) {
       if (!sketchIds.has(feature.sketchFeatureId) && usesSketchGeometry(feature)) {
-        findings.push({ id: `health:timeline-orphan:${feature.id}`, workspace: "part", severity: "error", title: `${feature.name} has lost its sketch`, message: `The ${feature.kind} step ${feature.id} is built on ${feature.sketchFeatureId}, which is no longer in the timeline.`, recovery: "Restore the sketch (undo), point the step at another sketch with update-design-solid, or delete the step.", relatedIds: [feature.id, feature.sketchFeatureId], evidence: `${feature.kind} step ${feature.id}` });
+        findings.push({ id: `health:timeline-orphan:${feature.id}`, workspace: "part", severity: "error", title: `${feature.name} has lost its sketch`, message: `The ${feature.kind} step ${feature.id} is built on ${feature.sketchFeatureId}, which is no longer in the timeline.`, recovery: "Restore the sketch (undo) or delete the step.", relatedIds: [feature.id, feature.sketchFeatureId], evidence: `${feature.kind} step ${feature.id}` });
       }
       if (!feature.suppressed && feature.operation === undefined && !bodyIds.has(feature.bodyId)) {
         findings.push({ id: `health:timeline-no-body:${feature.id}`, workspace: "part", severity: "warning", title: `${feature.name} has no solid`, message: `The step ${feature.id} owns the body ${feature.bodyId}, which the part does not hold.`, recovery: "Run regenerate-design to rebuild the solids from the timeline.", relatedIds: [feature.id, feature.bodyId], evidence: `${feature.kind} step ${feature.id}` });

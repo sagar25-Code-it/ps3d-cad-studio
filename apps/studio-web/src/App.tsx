@@ -247,6 +247,9 @@ import { AutomateWorkspace } from "./workspaces/AutomateWorkspace.js";
 import { ElectricalWorkspace } from "./workspaces/ElectricalWorkspace.js";
 import { VehicleWorkspace } from "./workspaces/VehicleWorkspace.js";
 import { PS3D_BRAND } from "./brand.js";
+import { inactiveReferenceIds, isReferenceKind, referenceStepOf } from "../../../packages/workbench-core/src/index.js";
+import { applyReferenceEdit } from "./reference-edit.js";
+import { planeFollowFrames, planeIdOfFrame, planeSketchFrame } from "./reference-follow.js";
 
 type WithoutEnvelope<T> = T extends unknown ? Omit<T, "operationId" | "expectedRevision"> : never;
 type OperationIntent = WithoutEnvelope<WorkbenchOperation>;
@@ -550,17 +553,14 @@ export function App(): React.JSX.Element {
     const bodies = project.part.generalBodies ?? [];
     const axes = project.part.constructionAxes ?? [];
     const binders = project.part.constructionBinders ?? [];
+    // Every plane but an angle plane (offered as a tilt below) is as good a sketch plane as a three-point one: the frame of its step is the sketch frame, and a sketch started on it follows it.
+    const inactive = inactiveReferenceIds(project);
     const fromPlanes = (project.part.construction ?? []).flatMap((plane) => {
-      if (plane.definition.kind === "three-points") {
-        const frame = frameThroughPoints(plane.definition.points);
-        return "error" in frame ? [] : [{ frame, label: plane.name }];
-      }
-      // A plane through two edges or along a path is as good a sketch plane as a three-point one: its frame is the sketch frame.
-      if (plane.definition.kind === "through-two-edges" || plane.definition.kind === "along-path") {
-        const frame = evaluateConstructionPlane(plane, bodies, axes, binders);
-        return "error" in frame ? [] : [{ frame: { originMm: frame.origin, uAxis: frame.uAxis, normal: frame.normal }, label: plane.name, hint: frame.description }];
-      }
-      return [];
+      if (inactive.has(plane.id) || plane.definition.kind === "angle") return [];
+      const frame = planeSketchFrame(project, plane.id);
+      if (frame === undefined) return [];
+      const evaluated = plane.definition.kind === "three-points" ? undefined : evaluateConstructionPlane(plane, bodies, axes, binders);
+      return [{ frame, label: plane.name, planeId: plane.id, ...(evaluated === undefined || "error" in evaluated ? {} : { hint: evaluated.description }) }];
     });
     // A face binder offers the face it follows right now.
     const fromBinders = binders.flatMap((binder) => {
@@ -570,7 +570,7 @@ export function App(): React.JSX.Element {
       return frame === undefined ? [] : [{ frame, label: binder.name, hint: "Face binder · the sketch starts at the face's centre, facing out of the solid" }];
     });
     return [...fromPlanes, ...fromBinders];
-  }, [project.part.construction, project.part.generalBodies, project.part.constructionAxes, project.part.constructionBinders]);
+  }, [project.part.construction, project.part.generalBodies, project.part.constructionAxes, project.part.constructionBinders, project.design]);
   const sketchFaceOptions = useMemo(() => {
     const options: SketchFaceOption[] = [];
     for (const body of project.part.generalBodies ?? []) {
@@ -1209,7 +1209,8 @@ export function App(): React.JSX.Element {
       // The unrecorded sketch goes into the timeline and the new sketch starts in the same project: one Undo step for the command (HS-25).
       void (async () => {
         lastSketchCommitRef.current = undefined;
-        await commitWorkingSketch([{ kind: "new-design-sketch", plane: datum, ...placement }]);
+        const followedPlane = planeIdOfFrame(framePlaneOptions, frame);
+        await commitWorkingSketch([{ kind: "new-design-sketch", plane: datum, ...placement, ...(followedPlane === undefined ? {} : { planeRef: followedPlane }) }]);
         const outcome = lastSketchCommit();
         if (outcome === undefined || outcome.failed.length > 0) return;
         setSelectedId(null);
@@ -1576,7 +1577,13 @@ export function App(): React.JSX.Element {
   const handleConstructionReference = (id: string, action: "toggle" | "delete" | "sketch"): void => {
     const isBinder = id.startsWith("binder:");
     if (action === "toggle") { applyProjectOperation(isBinder ? { kind: "toggle-construction-binder-visibility", binderId: id } : { kind: "toggle-construction-plane-visibility", planeId: id }); return; }
-    if (action === "delete") { if (applyProjectOperation(isBinder ? { kind: "delete-construction-binder", binderId: id } : { kind: "delete-construction-plane", planeId: id })) setSelectedId(null); return; }
+    if (action === "delete") {
+      // A plane that is a timeline step is deleted as one: what is built on it (sketches placed on it, axes and points made from it) is named first.
+      const step = isBinder ? undefined : referenceStepOf(designOf(projectRef.current), id);
+      if (step !== undefined) { requestStepDelete(step); return; }
+      if (applyProjectOperation(isBinder ? { kind: "delete-construction-binder", binderId: id } : { kind: "delete-construction-plane", planeId: id })) setSelectedId(null);
+      return;
+    }
     // Sketch on it: the reference's current frame becomes the new sketch's plane (a snapshot, like a three-point plane).
     const part = projectRef.current.part;
     const bodies = part.generalBodies ?? [];
@@ -1586,20 +1593,18 @@ export function App(): React.JSX.Element {
       const resolved = binder === undefined ? undefined : resolveBinder(binder, bodies);
       frame = resolved === undefined || "error" in resolved ? undefined : planeFrameOfFace(resolved);
     } else {
-      const plane = (part.construction ?? []).find((candidate) => candidate.id === id);
-      if (plane?.definition.kind === "three-points") { const through = frameThroughPoints(plane.definition.points); frame = "error" in through ? undefined : through; }
-      else if (plane !== undefined) { const evaluated = evaluateConstructionPlane(plane, bodies, part.constructionAxes ?? [], part.constructionBinders ?? []); frame = "error" in evaluated ? undefined : { originMm: evaluated.origin, uAxis: evaluated.uAxis, normal: evaluated.normal }; }
+      frame = planeSketchFrame(projectRef.current, id);
     }
     if (frame === undefined) { setStatus("ready"); setStatusText("A sketch needs a flat, resolvable plane or face; this reference is not one right now."); return; }
     const sketchFrame = frame;
     void (async () => {
       lastSketchCommitRef.current = undefined;
-      await commitWorkingSketch([{ kind: "new-design-sketch", plane: "datum:xy", frame: sketchFrame }]);
+      await commitWorkingSketch([{ kind: "new-design-sketch", plane: "datum:xy", frame: sketchFrame, ...(isBinder ? {} : { planeRef: id }) }]);
       const outcome = lastSketchCommit();
       if (outcome === undefined || outcome.failed.length > 0) return;
       if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
       setStatus("ready");
-      setStatusText("New sketch on the selected plane. It keeps the plane as it is now; later changes to the plane do not move it.");
+      setStatusText(isBinder ? "New sketch on the selected face. It keeps the face as it is now; later changes to the binder do not move it." : "New sketch on the selected plane. It follows the plane: edit the plane's step and the sketch, and what is built on it, move with it.");
     })();
   };
 
@@ -3359,9 +3364,13 @@ export function App(): React.JSX.Element {
     if (status === "working") return;
     setStatus("working");
     setStatusText("Computing all steps of the timeline…");
-    const results = await replayAllBodies(before);
+    // Sketches placed on construction planes first move onto the planes as they are now.
+    const planeFrames = planeFollowFrames(before);
+    const followedPlanes = planeFrames.length === 0 ? undefined : applyWorkbenchOperation(before, { kind: "follow-design-planes", frames: planeFrames, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: before.revision } as WorkbenchOperation);
+    const start = followedPlanes?.ok === true ? followedPlanes.value.project : before;
+    const results = await replayAllBodies(start);
     if (projectRef.current !== before) { setStatus("ready"); setStatusText("The design changed while it was rebuilding, so Compute All was not applied. Run it again."); return; }
-    let next = before;
+    let next = start;
     if (results.length > 0) {
       const applied = applyWorkbenchOperation(next, { kind: "regenerate-design", results, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: next.revision } as WorkbenchOperation);
       if (applied.ok) next = applied.value.project;
@@ -3389,6 +3398,13 @@ export function App(): React.JSX.Element {
 
   /** Applies an edited timeline solid: rebuilds it from its sketch with the new parameters. */
   const updateTimelineSolid = async (next: DesignSolidFeature): Promise<void> => {
+    // A construction plane, axis, point or primitive has no sketch to rebuild from: the step is replaced and the sketches placed on planes follow.
+    if (isReferenceKind(next.kind)) {
+      setStatus("working");
+      const applied = await applyReferenceEdit({ project: () => projectRef.current, commit: commitWithReplay, refuse: (message) => { setStatus("error"); setStatusText(message); } }, next);
+      if (applied) setFeatureEdit(undefined);
+      return;
+    }
     const history = designOf(projectRef.current);
     const sketchFeature = history.features.find((feature) => feature.id === next.sketchFeatureId);
     if (sketchFeature?.kind !== "sketch") { setStatus("error"); setStatusText(`${next.name}: the sketch it was built on was deleted. Choose another sketch in the Edit panel, or delete the step.`); return; }
@@ -4573,7 +4589,7 @@ export function App(): React.JSX.Element {
   const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({
     workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo,
     ...(contextStep === undefined ? {} : {
-      featureKind: contextStep.kind === "sketch" ? "sketch" as const : "solid" as const,
+      featureKind: contextStep.kind === "sketch" ? "sketch" as const : isReferenceKind(contextStep.kind) ? "reference" as const : "solid" as const,
       featureState: {
         suppressed: contextStep.suppressed,
         markerAfter: designOf(project).rollbackIndex === designOf(project).features.indexOf(contextStep) + 1,
@@ -4907,7 +4923,7 @@ export function App(): React.JSX.Element {
     />}
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
-      {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} selectedStepId={selectedTimelineFeature?.id ?? null} onSelectStep={toggleStep} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openTreeContextMenu} onOpenItem={openTreeItem} renameRequest={treeRenameRequest} onRenameStep={(feature, name) => { applyProjectOperation({ kind: "rename-design-feature", featureId: feature.id, name }); }} onRenameBody={(bodyId, name) => { applyProjectOperation({ kind: "rename-general-body", bodyId, name }); }} onToggleSketch={(feature, shown) => { applyProjectOperation({ kind: "set-design-sketch-visibility", featureId: feature.id, visible: shown }); }} displayUnit={unitToShow(project, document.displayUnit)} onUnit={(unit) => { void guard(changeUnit(unit), "Changing the unit"); }} {...(isThreeDimensional ? { onView: (view: NamedViewId) => { const named = namedViewById(view); if (named !== undefined) setViewportOrientation(named.orientation); } } : {})} onToggleBody={(bodyId, kind) => { applyProjectOperation(kind === "general" ? { kind: "toggle-general-body-visibility", bodyId } : { kind: "toggle-part-preview-body-visibility", bodyId }); }} />}
+      {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} selectedStepId={selectedTimelineFeature?.id ?? null} onSelectStep={toggleStep} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openTreeContextMenu} onOpenItem={openTreeItem} renameRequest={treeRenameRequest} onRenameStep={(feature, name) => { applyProjectOperation({ kind: "rename-design-feature", featureId: feature.id, name }); }} onRenameBody={(bodyId, name) => { applyProjectOperation({ kind: "rename-general-body", bodyId, name }); }} onToggleSketch={(feature, shown) => { applyProjectOperation({ kind: "set-design-sketch-visibility", featureId: feature.id, visible: shown }); }} onAdoptLegacy={() => { applyProjectOperation({ kind: "adopt-legacy-references" }); }} displayUnit={unitToShow(project, document.displayUnit)} onUnit={(unit) => { void guard(changeUnit(unit), "Changing the unit"); }} {...(isThreeDimensional ? { onView: (view: NamedViewId) => { const named = namedViewById(view); if (named !== undefined) setViewportOrientation(named.orientation); } } : {})} onToggleBody={(bodyId, kind) => { applyProjectOperation(kind === "general" ? { kind: "toggle-general-body-visibility", bodyId } : { kind: "toggle-part-preview-body-visibility", bodyId }); }} />}
       {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace displayUnit={unitToShow(project, document.displayUnit)} finishedSketches={finishedSketches} reference={sketchReference} workingTimelineId={designOf(project).editingSketchId} projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={(text) => setStatusText(friendlySketchText(text, [projectRef.current.sketch]))} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => guard(createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams), "Creating the solid")} previewSolidValue={previewSolidValue} onChangePlane={() => openSketchPlaneDialog("set")} onDisplayUnit={(unit) => guard(changeUnit(unit), "Changing the unit")} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onConstraintToolChange={setSketchConstraintTool} onProjectBody={() => runSketchCommand("project-body", "with the Project key")} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onPlaceDimensionLabel={(constraintId, offsetPx) => applyProjectOperation({ kind: "set-sketch-dimension-label", constraintId, offsetPx })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => guard(finishSketch(), "Finishing the sketch")} onCancelSketch={cancelSketch} onSelectionCount={setSketchSelectionCount} evaluateText={(text) => evaluateTextInDesign(designOf(project), text, project.sketch)} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />
