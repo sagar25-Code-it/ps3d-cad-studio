@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/index.js";
-import { dependentsOf, describeBodyFailure, describeFeature, designOf, failedBodies, featureOfBody, featureStatus, featureStatusText, isHealthNote, vehicleHardPoints, type DesignFeature, type WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
+import { dependentsOf, describeBodyFailure, describeFeature, designOf, failedBodies, featureOfBody, featureStatus, featureStatusText, isHealthNote, isSketchShown, sketchEyeShown, vehicleHardPoints, type DesignFeature, type DesignSketchFeature, type WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { DesignHealthReport } from "../../../../packages/workbench-health/src/index.js";
 import { analyzeWorkbenchSketch, detectSketchProfiles } from "../../../../packages/workbench-sketch/src/index.js";
 import { friendlySketchText, sketchConstraintNames, sketchEntityNames, type WorkbenchSketch } from "../../../../packages/workbench-core/src/index.js";
@@ -33,13 +33,15 @@ interface ProjectTreeProps {
   readonly onRenameBody?: (bodyId: string, name: string) => void;
   /** The eye on a body row: show or hide that body. */
   readonly onToggleBody?: (bodyId: string, kind: "general" | "preview") => void;
+  /** The eye on a row of the Sketches folder: show or hide that sketch's curves in the model (HS-24). */
+  readonly onToggleSketch?: (feature: DesignSketchFeature, shown: boolean) => void;
   /** Starts the inline rename of a row (a step ID or a body ID); a new `serial` is a new request. */
   readonly renameRequest?: { readonly id: string; readonly serial: number } | null;
 }
 
 type TreeKind = "project" | "health" | "datum" | "sketch" | "feature" | "body" | "component" | "mate" | "surface" | "drawing" | "electrical" | "vehicle" | "route" | "tool" | "history";
 
-export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep, revealSelectionRequest, designHealth, onSelect, onContextMenu, onOpenItem, onRenameStep, onRenameBody, onToggleBody, renameRequest }: ProjectTreeProps): React.JSX.Element {
+export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep, revealSelectionRequest, designHealth, onSelect, onContextMenu, onOpenItem, onRenameStep, onRenameBody, onToggleBody, onToggleSketch, renameRequest }: ProjectTreeProps): React.JSX.Element {
   const treeRef = useRef<HTMLElement>(null);
   const handledRevealRequest = useRef(0);
   /** The row being renamed inline (a step ID or a body ID). */
@@ -91,6 +93,9 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
   const linkedBore = project.sketch.entities.find((entity) => entity.kind === "circle" && !entity.construction && Math.hypot(entity.center[0] - (linkedOutline?.kind === "rectangle" ? linkedOutline.center[0] : 0), entity.center[1] - (linkedOutline?.kind === "rectangle" ? linkedOutline.center[1] : 0)) < 0.01 && Math.abs(entity.radiusMm * 2 - project.part.holeDiameterMm) < 1e-6);
   const relationships = selectionRelationships(project, selectedId, selectedStepId);
   const history = designOf(project);
+  // HS-24: every finished sketch is listed under Sketches with its own eye. The working sketch is listed too while it is a sketch of its own (not yet finished) or is open.
+  const timelineSketches = history.features.filter((feature): feature is DesignSketchFeature => feature.kind === "sketch");
+  const workingSketchListed = history.editingSketchId === null && (project.sketch.entities.length > 0 || project.activeWorkspace === "sketch");
   // HS-21: a solid whose rebuild failed says so on its row, with the step and the reason.
   const failures = failedBodies(history);
   return <aside ref={treeRef} className="project-tree" aria-label="Model browser and feature history" onContextMenu={(event) => {
@@ -128,7 +133,27 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
       })}
       {(project.part.constructionPoints ?? []).map((point) => <TreeItem key={point.id} kind="datum" id={point.id} label={point.name} meta={`point · ${point.definition.kind.replaceAll("-", " ")}${point.visible ? "" : " · hidden"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
     </TreeSection>}
-    {showSketch && <TreeSection title={`Sketches · ${project.sketch.entities.length} entities · ${sketchProfiles.length} profiles`} badge="preview">
+    {showSketch && <TreeSection title={`Sketches · ${timelineSketches.length + (workingSketchListed ? 1 : 0)}`} badge="preview">
+      {timelineSketches.map((feature) => {
+        const eyeOn = sketchEyeShown(history, feature);
+        const inModel = isSketchShown(history, feature);
+        const curves = feature.sketch.entities.length;
+        return <TreeItem
+          key={`sketch-folder:${feature.id}`}
+          kind="sketch"
+          icon="sketch"
+          id={timelineRowSelectionId(feature)}
+          featureId={timelineRowOpenId(feature)}
+          label={feature.name}
+          meta={`${curves} curve${curves === 1 ? "" : "s"} · ${inModel ? "shown in the model" : eyeOn ? (feature.suppressed ? "suppressed" : "not in the model at this point") : "hidden"}`}
+          {...(feature.health !== undefined && !isHealthNote(feature.health.message) ? { failed: true } : {})}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          {...(onSelectStep === undefined ? {} : { selected: selectedStepId === feature.id, onPick: (wasSelected: boolean) => onSelectStep(feature, wasSelected) })}
+          {...(onOpenItem === undefined ? {} : { onOpen: onOpenItem, openHint: "Double-click to edit this sketch" })}
+          {...(onToggleSketch === undefined ? {} : { eye: { shown: eyeOn, what: "sketch", onToggle: () => onToggleSketch(feature, !eyeOn) } })}
+        />;
+      })}
       <TreeItem kind="sketch" id={project.sketch.id} label={project.sketch.name} meta={`${project.sketch.constraints.length} constraints${workingSketchFullyConstrained ? " · fully constrained" : ""}`} selectedId={selectedId} onSelect={onSelect} {...(onOpenItem === undefined || project.activeWorkspace === "sketch" ? {} : { onOpen: onOpenItem, openHint: "Double-click to edit this sketch" })} {...(workingSketchFullyConstrained ? { trailingIcon: "lock" as const } : {})} />
       {project.activeWorkspace === "sketch"
         ? <SketchNavigator project={project} sketchProfiles={sketchProfiles} selectedId={selectedId} onSelect={onSelect} />
@@ -318,7 +343,7 @@ function TreeSection({ title, badge, children, initiallyOpen = true }: { readonl
   return <details className="tree-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}><summary><span className="tree-chevron" aria-hidden="true">›</span><strong>{title}</strong><CapabilityBadge level={badge} /></summary><div>{children}</div></details>;
 }
 
-export function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean; readonly icon?: string; readonly trailingIcon?: string; readonly onOpen?: (id: string) => void; readonly openHint?: string; /** The timeline step this row shows. Double-click opens it, whatever the row selects. */ readonly featureId?: string; /** A row that stands for one step says itself whether it is selected, and what a click does. */ readonly selected?: boolean; readonly onPick?: (wasSelected: boolean) => void; /** Inline rename: F2 on the row starts it, Enter commits, Esc cancels. */ readonly rename?: { readonly editing: boolean; readonly onStart: () => void; readonly onCommit: (name: string) => void; readonly onCancel: () => void }; /** The eye of a body row. */ readonly eye?: { readonly shown: boolean; readonly onToggle: () => void }; /** The row's step or solid could not be rebuilt: it is drawn in the error colour and says so to a screen reader. */ readonly failed?: boolean }): React.JSX.Element {
+export function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean; readonly icon?: string; readonly trailingIcon?: string; readonly onOpen?: (id: string) => void; readonly openHint?: string; /** The timeline step this row shows. Double-click opens it, whatever the row selects. */ readonly featureId?: string; /** A row that stands for one step says itself whether it is selected, and what a click does. */ readonly selected?: boolean; readonly onPick?: (wasSelected: boolean) => void; /** Inline rename: F2 on the row starts it, Enter commits, Esc cancels. */ readonly rename?: { readonly editing: boolean; readonly onStart: () => void; readonly onCommit: (name: string) => void; readonly onCancel: () => void }; /** The eye of a body or sketch row. */ readonly eye?: { readonly shown: boolean; readonly onToggle: () => void; /** What the eye shows or hides, for its tooltip ("body" when absent). */ readonly what?: string }; /** The row's step or solid could not be rebuilt: it is drawn in the error colour and says so to a screen reader. */ readonly failed?: boolean }): React.JSX.Element {
   const selected = props.selected ?? props.selectedId === props.id;
   // A double-click is two clicks first (select, then deselect); opening selects the row again so it reads as the thing being edited.
   const open = props.onOpen;
@@ -348,7 +373,7 @@ export function TreeItem(props: { readonly kind: TreeKind; readonly id: string; 
       className="tree-eye"
       aria-pressed={props.eye.shown}
       aria-label={`${props.eye.shown ? "Hide" : "Show"} ${props.label}`}
-      title={props.eye.shown ? "Hide this body" : "Show this body"}
+      title={props.eye.shown ? `Hide this ${props.eye.what ?? "body"}` : `Show this ${props.eye.what ?? "body"}`}
       onClick={props.eye.onToggle}
     ><CommandIcon name={props.eye.shown ? "eye" : "eye-off"} /></button>}
   </div>;

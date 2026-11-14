@@ -1223,6 +1223,11 @@ export interface DesignSketchFeature extends DesignFeatureBase {
   readonly kind: "sketch";
   /** The sketch as it was when it was finished, including its plane. Editing a sketch replaces this snapshot. */
   readonly sketch: WorkbenchSketch;
+  /**
+   * Whether the sketch's curves are drawn in the model (the eye on its browser row). Absent means the default: shown while no step
+   * is built on the sketch, hidden once one is (see `isSketchShown`). Set only when the person picks one or the other.
+   */
+  readonly visible?: boolean;
 }
 
 /**
@@ -1645,6 +1650,8 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "set-design-rollback"; readonly index: number }
   /** Moves one timeline step to another place (its final index, from 0); refused, with the step it would break, when something built on it or that it is built on would change places with it. */
   | { readonly kind: "move-design-feature"; readonly featureId: string; readonly toIndex: number }
+  /** Shows or hides the curves of a timeline sketch in the model (the eye on its row in the Sketches folder). */
+  | { readonly kind: "set-design-sketch-visibility"; readonly featureId: string; readonly visible: boolean }
   | { readonly kind: "rename-design-feature"; readonly featureId: string; readonly name: string }
   | {
       readonly kind: "set-part-parameter";
@@ -1792,7 +1799,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
   "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-sketch-dimension-label", "set-sketch-plane",
   "commit-design-sketch", "edit-design-sketch", "new-design-sketch", "add-design-solid", "update-design-solid", "regenerate-design", "set-design-parameters",
-  "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "move-design-feature", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
+  "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "move-design-feature", "set-design-sketch-visibility", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
   "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility", "rename-general-body", "modify-general-body",
   "add-construction-plane", "delete-construction-plane", "toggle-construction-plane-visibility", "rename-construction-plane",
   "add-construction-binder", "delete-construction-binder", "toggle-construction-binder-visibility",

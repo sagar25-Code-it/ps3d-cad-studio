@@ -828,7 +828,8 @@ export function validateDesignHistory(value: unknown, validSketch: (sketch: unkn
     if (!isRecord(feature) || !stable(feature.id) || ids.has(feature.id)) return false;
     ids.add(feature.id);
     if (feature.kind === "sketch") {
-      if (!hasOnly(feature, ["id", "name", "kind", "suppressed", "sketch"], ["health"]) || !shortText(feature.name, 120) || typeof feature.suppressed !== "boolean" || !validSketch(feature.sketch)) return false;
+      if (!hasOnly(feature, ["id", "name", "kind", "suppressed", "sketch"], ["health", "visible"]) || !shortText(feature.name, 120) || typeof feature.suppressed !== "boolean" || !validSketch(feature.sketch)) return false;
+      if (Object.hasOwn(feature, "visible") && typeof feature.visible !== "boolean") return false;
       sketchIds.add(feature.id);
     } else {
       if (!validSolidFeaturePayload(feature) || !sketchIds.has(feature.sketchFeatureId)) return false;

@@ -20,6 +20,7 @@ export * from "./design.js";
 export * from "./design-impact.js";
 export * from "./design-reorder.js";
 export * from "./model-values.js";
+export * from "./sketch-visibility.js";
 export * from "./body-names.js";
 export * from "./pattern.js";
 export * from "./expressions.js";

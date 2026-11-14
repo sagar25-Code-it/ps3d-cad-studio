@@ -1,4 +1,5 @@
 import { moveDesignFeature } from "./design-reorder.js";
+import { setDesignSketchVisible } from "./sketch-visibility.js";
 import { isNewPrimitiveShape, NEW_PRIMITIVE_SHAPES, normalizePrimitiveSize, validPrimitiveBody } from "./primitive-bodies.js";
 import { nameSketchDimensions, unbindLostDimensionNames } from "./dimension-names.js";
 import { hasDimensionLabel, MAX_LABEL_OFFSET_PX, MIN_LABEL_OFFSET_PX, storedLabelOffsetPx, validLabelOffsetPx } from "./dimension-label.js";
@@ -432,6 +433,9 @@ function validateWorkbenchOperationShape(rawInput: unknown): WorkbenchResult<Wor
     case "move-design-feature":
       if (!keys(input, [...common, "featureId", "toIndex"]) || !stableId(input.featureId) || typeof input.toIndex !== "number" || !Number.isInteger(input.toIndex) || input.toIndex < 0 || input.toIndex > 1_000) return invalidOperation("The move request is invalid: name the step and the place (a whole number from 0) it should end up in.");
       break;
+    case "set-design-sketch-visibility":
+      if (!keys(input, [...common, "featureId", "visible"]) || !stableId(input.featureId) || typeof input.visible !== "boolean") return invalidOperation("The sketch visibility request is invalid: name the sketch and say whether it is shown.");
+      break;
     case "rename-design-feature":
       if (!keys(input, [...common, "featureId", "name"]) || !stableId(input.featureId) || !shortText(input.name, 1, 120)) return invalidOperation("The rename request is invalid.");
       if (input.name.trim() === "") return invalidOperation("The feature name cannot be blank. Type at least one character.");
@@ -852,6 +856,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     case "delete-design-feature": return deleteDesignFeature(project, operation.featureId);
     case "set-design-rollback": return setDesignRollback(project, operation.index);
     case "move-design-feature": return moveDesignFeature(project, operation.featureId, operation.toIndex);
+    case "set-design-sketch-visibility": return setDesignSketchVisible(project, operation.featureId, operation.visible);
     case "rename-design-feature": return renameDesignFeature(project, operation.featureId, operation.name);
     case "toggle-sketch-construction": {
       const target = project.sketch.entities.find((entity) => entity.id === operation.entityId);
