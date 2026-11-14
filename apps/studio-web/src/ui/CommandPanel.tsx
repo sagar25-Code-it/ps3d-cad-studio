@@ -15,9 +15,11 @@ interface CommandPanelProps {
   readonly onClearSelection: () => void;
   readonly onCommit: () => void;
   readonly onCancel: () => void;
+  /** Live preview (optional): the one line about the ghost the 3D view shows for the current values. */
+  readonly previewNote?: string | undefined;
 }
 
-export function CommandPanel({ state, busy, onValue, onClearSelection, onCommit, onCancel }: CommandPanelProps): React.JSX.Element {
+export function CommandPanel({ state, busy, onValue, onClearSelection, onCommit, onCancel, previewNote }: CommandPanelProps): React.JSX.Element {
   const firstField = useRef<HTMLInputElement | null>(null);
   // The first value field takes the keyboard when the panel opens, like a Fusion dialog; the canvas stays live for picks.
   useEffect(() => { firstField.current?.focus(); firstField.current?.select(); }, [state.command, state.editFeatureId]);
@@ -58,6 +60,7 @@ export function CommandPanel({ state, busy, onValue, onClearSelection, onCommit,
             onChange={(event) => onValue(field.id, event.target.value)}
           />}
     </label>)}
+    {previewNote !== undefined && <p className="command-panel-preview" role="status">{previewNote}</p>}
     {state.error !== undefined && <p className="command-panel-error" role="alert">{state.error}</p>}
     <footer>
       <button type="button" className="command-panel-ok" onClick={onCommit} disabled={busy}>OK</button>

@@ -6,10 +6,14 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { cloneExchangeObject, disposeExchangeObject, inspectExchangeObject, type ExchangeBounds, type ViewportJpeg } from "../../exchange-3d/src/index.js";
 import type { ModelSuccessResponse } from "../../worker-protocol/src/index.js";
 import type { PreviewBounds, PreviewPrimitive, PreviewScene } from "../../workbench-geometry/src/index.js";
+import { buildGhostGroup, buildHandleGroup, disposePreviewGroup, layoutHandleGroup, type ViewportGhost, type ViewportHandle, type ViewportHandleDrag } from "./preview-layer.js";
+import { deltaMmFromDrag, hitHandle, projectHandleAxis, type HandleScreenAxis } from "./handle-drag.js";
 import { chainsInBox, classifyHover, edgePickToleranceMm, sameHoverTarget, type HoverCandidateBody, type HoverFilter, type HoverRayHit, type HoverTarget, type ProjectedSegment } from "./hover-pick.js";
 
 export { buildAnalysisGroup, disposeAnalysisGroup, EMPTY_ANALYSIS_OVERLAY, type OverlayRgb, type ViewportAnalysisLines, type ViewportAnalysisMesh, type ViewportAnalysisOverlay } from "./analysis-overlay.js";
 export { chainsInBox, classifyHover, edgePickToleranceMm, nearestChainWithin, sameHoverTarget, type HoverCandidateBody, type HoverFilter, type HoverRayHit, type HoverTarget, type PickSegmentMm, type ProjectedSegment, type SelectionBox } from "./hover-pick.js";
+export { buildGhostGroup, buildHandleGroup, layoutHandleGroup, disposePreviewGroup, type ViewportGhost, type ViewportHandle, type ViewportHandleDrag } from "./preview-layer.js";
+export { END_ON_RATIO, deltaMmFromDrag, hitHandle, pointToSegmentPx, projectHandleAxis, valueFromDrag, type HandleHitOptions, type HandleScreenAxis, type HandleValueRule, type Mm3, type Pixel } from "./handle-drag.js";
 export { applyZebraToObject } from "./zebra-materials.js";
 export { ZEBRA_AXES, ZEBRA_DEFAULT, ZEBRA_MAX_FREQUENCY, ZEBRA_MIN_FREQUENCY, clampZebraFrequency, zebraBandAt, zebraReflection, type ZebraAxis, type ZebraOptions } from "./zebra.js";
 
@@ -188,6 +192,14 @@ export class ThreeViewportAdapter {
   readonly #bodyGroup = new THREE.Group();
   readonly #measurementGroup = new THREE.Group();
   readonly #guideGroup = new THREE.Group();
+  /** Live feature preview: the translucent result ghost and the draggable arrow (see setPreviewGhost / setPreviewHandle). */
+  readonly #ghostGroup = new THREE.Group();
+  readonly #handleGroup = buildHandleGroup();
+  #handle: ViewportHandle | undefined;
+  #handleHot = false;
+  #handleDrag: { readonly pointerId: number; readonly startX: number; readonly startY: number; readonly axis: HandleScreenAxis } | undefined;
+  #ghostHiddenBodyId: string | undefined;
+  readonly #ghostHidden = new Set<THREE.Object3D>();
   #analysisGroup: THREE.Group | undefined;
   readonly #grid = new THREE.GridHelper(0.24, 24, "#9aa3aa", "#545d64");
   readonly #axes = new THREE.AxesHelper(0.035);
@@ -258,6 +270,9 @@ export class ThreeViewportAdapter {
     this.#scene.add(this.#bodyGroup);
     this.#scene.add(this.#measurementGroup);
     this.#scene.add(this.#guideGroup);
+    this.#scene.add(this.#ghostGroup);
+    this.#handleGroup.visible = false;
+    this.#scene.add(this.#handleGroup);
     this.#scene.add(this.#hoverGroup);
     this.#scene.add(this.#selectedEdgeGroup);
     this.#scene.add(this.#hemisphereLight);
@@ -579,6 +594,7 @@ export class ThreeViewportAdapter {
     this.#clearBody();
     for (const primitive of scene.primitives) this.#addPrimitive(primitive);
     this.#bodyId = undefined;
+    this.#applyGhostHide();
     this.setSelectedId(previousSelectedId ?? null);
     const changed = scene.id !== this.#lastSceneId;
     this.#lastSceneId = scene.id;
@@ -715,6 +731,9 @@ export class ThreeViewportAdapter {
     this.#canvas.removeEventListener("pointercancel", this.#onPointerUp);
     this.#canvas.removeEventListener("pointerleave", this.#onPointerLeave);
     this.#removeSelectionBox();
+    this.setPreviewGhost(null);
+    this.setPreviewHandle(null);
+    disposePreviewGroup(this.#handleGroup);
     this.setSelectedEdges([]);
     this.#canvas.removeEventListener("wheel", this.#onWheel);
     this.#canvas.removeEventListener("contextmenu", this.#onContextMenu);
@@ -735,6 +754,8 @@ export class ThreeViewportAdapter {
 
   readonly #onPointerDown = (event: PointerEvent): void => {
     if (event.button === 2) return;
+    // A press on the preview arrow drags the arrow (never the camera); middle-button and every other press go on as before.
+    if (event.button === 0 && this.#beginHandleDrag(event)) return;
     this.#canvas.setPointerCapture(event.pointerId);
     if (event.pointerType === "touch") {
       event.preventDefault();
@@ -759,6 +780,8 @@ export class ThreeViewportAdapter {
   };
 
   readonly #onPointerMove = (event: PointerEvent): void => {
+    if (this.#handleDrag !== undefined) { if (this.#handleDrag.pointerId === event.pointerId) this.#moveHandleDrag(event); return; }
+    if (this.#handle !== undefined && this.#drag === undefined && event.pointerType !== "touch" && this.#hoverHandle(event)) return;
     if (event.pointerType === "touch" && this.#touchPointers.has(event.pointerId)) {
       event.preventDefault();
       this.#touchPointers.set(event.pointerId, { pointerId: event.pointerId, x: event.clientX, y: event.clientY });
@@ -815,6 +838,7 @@ export class ThreeViewportAdapter {
   };
 
   readonly #onPointerUp = (event: PointerEvent): void => {
+    if (this.#handleDrag !== undefined) { if (this.#handleDrag.pointerId === event.pointerId) this.#endHandleDrag(event, event.type === "pointercancel" ? "cancel" : "end"); return; }
     if (event.pointerType === "touch") {
       this.#touchPointers.delete(event.pointerId);
       if (this.#assemblyTouchGesture !== undefined && this.#touchPointers.size < 2) {
@@ -1001,6 +1025,7 @@ export class ThreeViewportAdapter {
       this.#scene.fog.far = Math.max(this.#radius * 5, 0.75);
     }
     this.#updateProjection();
+    this.#layoutHandle();
     this.#emitViewState();
   }
 
@@ -1083,7 +1108,10 @@ export class ThreeViewportAdapter {
     return highlight;
   }
 
-  readonly #onPointerLeave = (): void => { this.#setHover(null); };
+  readonly #onPointerLeave = (): void => {
+    this.#setHover(null);
+    if (this.#handleHot && this.#handleDrag === undefined) { this.#handleHot = false; this.#layoutHandle(); }
+  };
 
   /** Raycasts the cursor and pre-highlights the face, edge or body a click would pick (PT-08). */
   #updateHover(clientX: number, clientY: number): void {
@@ -1144,6 +1172,125 @@ export class ThreeViewportAdapter {
       }
     }
     if (this.#navigationMode === "select") this.#canvas.style.cursor = "pointer";
+  }
+
+  /**
+   * Live preview (see apps/studio-web/src/part-preview.ts): shows the result of a command's current inputs as a translucent ghost,
+   * or removes it with null. A ghost that carries `replacesBodyId` hides that body while it shows (the ghost is the changed solid).
+   * The ghost is never pickable, so clicks still reach the real solid underneath.
+   */
+  setPreviewGhost(ghost: ViewportGhost | null): void {
+    for (const object of [...this.#ghostGroup.children]) {
+      this.#ghostGroup.remove(object);
+      if (object instanceof THREE.Group) disposePreviewGroup(object);
+    }
+    this.#ghostHiddenBodyId = ghost?.replacesBodyId;
+    if (ghost !== null && ghost.positionsMm.length >= 9 && ghost.indices.length >= 3) this.#ghostGroup.add(buildGhostGroup(ghost));
+    else this.#ghostHiddenBodyId = undefined;
+    this.#applyGhostHide();
+  }
+
+  /** Hides the body a ghost stands in for (and its edge lines), and shows again whatever an earlier ghost hid. */
+  #applyGhostHide(): void {
+    for (const object of this.#ghostHidden) object.visible = true;
+    this.#ghostHidden.clear();
+    const id = this.#ghostHiddenBodyId;
+    if (id === undefined) return;
+    this.#objects.forEach((object, index) => {
+      if (object.userData["semanticId"] !== id) return;
+      object.visible = false;
+      this.#ghostHidden.add(object);
+      // A mesh primitive's edge lines follow it in the list without an id of their own.
+      const next = this.#objects[index + 1];
+      if (next !== undefined && next.userData["semanticId"] === undefined && next.userData["ps3dExchangeHelper"] === true) { next.visible = false; this.#ghostHidden.add(next); }
+    });
+  }
+
+  /**
+   * The draggable arrow of a command (null removes it). A press on its knob or shaft starts a drag that reports how far the knob
+   * travelled along the arrow through `onDrag`; it never moves the camera, Escape during the drag cancels it (phase "cancel"), and
+   * every press elsewhere behaves exactly as before. The caller moves the arrow by passing a new handle.
+   */
+  setPreviewHandle(handle: ViewportHandle | null): void {
+    if (handle === null && this.#handleDrag !== undefined) this.#endHandleDrag(undefined, "cancel");
+    this.#handle = handle ?? undefined;
+    if (handle === null) { this.#handleGroup.visible = false; this.#handleHot = false; return; }
+    this.#layoutHandle();
+  }
+
+  #layoutHandle(): void {
+    if (this.#handle === undefined) { this.#handleGroup.visible = false; return; }
+    layoutHandleGroup(this.#handleGroup, this.#handle, THREE.MathUtils.clamp(this.#radius * 0.004, 0.0003, 0.003), this.#handleHot || this.#handleDrag !== undefined);
+  }
+
+  /** The arrow as the screen sees it now, in client pixels; undefined when there is no arrow or the canvas has no size. */
+  #handleAxis(): HandleScreenAxis | undefined {
+    const handle = this.#handle;
+    const rect = this.#canvas.getBoundingClientRect();
+    if (handle === undefined || rect.width <= 0 || rect.height <= 0) return undefined;
+    const camera = this.#activeCamera();
+    camera.updateMatrixWorld();
+    const vector = new THREE.Vector3();
+    const project = (point: readonly [number, number, number]): readonly [number, number] => {
+      vector.set(point[0] / 1000, point[1] / 1000, point[2] / 1000).project(camera);
+      return [rect.left + (vector.x + 1) / 2 * rect.width, rect.top + (1 - vector.y) / 2 * rect.height];
+    };
+    const unit = new THREE.Vector3(handle.directionMm[0], handle.directionMm[1], handle.directionMm[2]).normalize();
+    const tip = new THREE.Vector3(handle.anchorMm[0], handle.anchorMm[1], handle.anchorMm[2]).addScaledVector(unit, handle.tipDistanceMm);
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    const flatA = project([tip.x, tip.y, tip.z]);
+    const flatB = project([tip.x + right.x, tip.y + right.y, tip.z + right.z]);
+    return projectHandleAxis(project, handle.anchorMm, handle.directionMm, handle.tipDistanceMm, Math.hypot(flatB[0] - flatA[0], flatB[1] - flatA[1]));
+  }
+
+  #beginHandleDrag(event: PointerEvent): boolean {
+    if (this.#handle === undefined || this.#handleDrag !== undefined) return false;
+    const axis = this.#handleAxis();
+    if (axis === undefined || !hitHandle(axis, [event.clientX, event.clientY])) return false;
+    event.preventDefault();
+    this.#canvas.setPointerCapture(event.pointerId);
+    this.#handleDrag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, axis };
+    this.#setHover(null);
+    this.#canvas.style.cursor = "grabbing";
+    this.#canvas.ownerDocument.defaultView?.addEventListener("keydown", this.#onHandleKey, true);
+    this.#layoutHandle();
+    this.#handle.onDrag({ phase: "start", deltaMm: 0, shiftKey: event.shiftKey });
+    return true;
+  }
+
+  #moveHandleDrag(event: PointerEvent): void {
+    const drag = this.#handleDrag;
+    if (drag === undefined || this.#handle === undefined) return;
+    this.#handle.onDrag({ phase: "move", deltaMm: deltaMmFromDrag(drag.axis, [event.clientX - drag.startX, event.clientY - drag.startY]), shiftKey: event.shiftKey });
+  }
+
+  #endHandleDrag(event: PointerEvent | undefined, phase: "end" | "cancel"): void {
+    const drag = this.#handleDrag;
+    if (drag === undefined) return;
+    this.#handleDrag = undefined;
+    this.#canvas.ownerDocument.defaultView?.removeEventListener("keydown", this.#onHandleKey, true);
+    if (this.#canvas.hasPointerCapture(drag.pointerId)) this.#canvas.releasePointerCapture(drag.pointerId);
+    this.#canvas.style.cursor = "";
+    const delta = phase === "cancel" || event === undefined ? 0 : deltaMmFromDrag(drag.axis, [event.clientX - drag.startX, event.clientY - drag.startY]);
+    this.#handle?.onDrag({ phase, deltaMm: delta, shiftKey: event?.shiftKey ?? false });
+    this.#layoutHandle();
+  }
+
+  /** Escape while the arrow is held drops the drag, not the command: the panel keeps its value from before the press. */
+  readonly #onHandleKey = (event: KeyboardEvent): void => {
+    if (event.key !== "Escape" || this.#handleDrag === undefined) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.#endHandleDrag(undefined, "cancel");
+  };
+
+  /** Hover over the arrow: it brightens and the cursor offers a grab. Returns true while the pointer is over it (the model's own hover then stays off). */
+  #hoverHandle(event: PointerEvent): boolean {
+    const axis = this.#handleAxis();
+    const over = axis !== undefined && hitHandle(axis, [event.clientX, event.clientY]);
+    if (over !== this.#handleHot) { this.#handleHot = over; this.#layoutHandle(); this.#canvas.style.cursor = over ? "grab" : ""; }
+    if (over) this.#setHover(null);
+    return over;
   }
 
   /**
