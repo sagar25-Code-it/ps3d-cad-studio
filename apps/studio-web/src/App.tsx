@@ -128,6 +128,8 @@ import { PartCreatePanel } from "./ui/PartCreatePanel.js";
 import { usePartCreateSession } from "./ui/use-part-create.js";
 import { createSketchChoices, openPartCreate, parseCreateValue, partCreateReduce, partCreateReopenPlan, partCreateTitle, partCreateWithError, planPartCreate, probeTouchingIds, type PartCreateKind, type PartCreateState } from "./part-create-panel.js";
 import { anotherSurfaceOpen, type EscapeAppFlags } from "./esc-order.js";
+import { usePartPreview } from "./usePartPreview.js";
+import { createValueBridge, dockPreviewFor, type DockPreview } from "./part-preview-bridge.js";
 import { explicitBody, matchingSketches, profilesByAnswer, sketchByAnswer } from "./explicit-pick.js";
 import { shouldRefit } from "./view-fit.js";
 import { defaultCreateOperation, touchingBodies } from "./operation-default.js";
@@ -439,6 +441,8 @@ export function App(): React.JSX.Element {
   const [aboutOpen, setAboutOpen] = useState(false);
   const buildUpdate = useBuildUpdate();
   const [featureEdit, setFeatureEdit] = useState<DesignSolidFeature | undefined>(undefined);
+  const [dockPreview, setDockPreview] = useState<DockPreview | undefined>(undefined);
+  const dockBridge = useMemo(createValueBridge, []);
   const [parametersOpen, setParametersOpen] = useState(false);
   const [bendTableBodyId, setBendTableBodyId] = useState<string | undefined>(undefined);
   const [sketchFitSerial, setSketchFitSerial] = useState(0);
@@ -1049,6 +1053,11 @@ export function App(): React.JSX.Element {
     }
     viewport.setGuideSegments([]);
   }, [commandPanel, partPickCandidates]);
+  // Live preview: the open command panel or Edit Feature dock shows the result of its current values as a ghost, with a drag arrow (usePartPreview.ts).
+  const partPreview = usePartPreview({
+    viewportRef, project, commandPanel, dock: dockPreviewFor(featureEdit, dockPreview), dockBridge,
+    onPanelValue: (fieldId, text) => setCommandPanel((current) => current === null ? current : panelWithValue(current, fieldId, text))
+  });
   useEffect(() => { setSelectedEdges((current) => current.length === 0 ? current : []); }, [project.part.generalBodies]);
   useEffect(() => { setSelectedEdges((current) => (current.length === 0 || current[0]!.bodyId === selectedId ? current : [])); }, [selectedId]);
   // Escape ends a viewport pick that is waiting for a click.
@@ -4946,6 +4955,7 @@ export function App(): React.JSX.Element {
           onClearSelection={() => setCommandPanel((current) => current === null ? current : panelClearSelection(current))}
           onCommit={() => void commitCommandPanel()}
           onCancel={() => { setCommandPanel(null); setStatus("ready"); setStatusText("Command cancelled; nothing changed."); }}
+          previewNote={partPreview.note}
         />}
         {partCreate !== null && <PartCreatePanel
           state={partCreate}
@@ -5056,7 +5066,7 @@ export function App(): React.JSX.Element {
     <SketchPlaneDialog unit={unitToShow(project, document.displayUnit)} open={sketchPlaneDialogOpen} initialPlane={project.sketch.plane === "datum:xz" ? "xz" : project.sketch.plane === "datum:yz" ? "yz" : "xy"} initialOffsetMm={sketchPlaneDialogMode === "new" ? 0 : project.sketch.planeOffsetMm ?? 0} initialTilt={sketchPlaneDialogMode === "new" ? undefined : project.sketch.planeTilt} anglePlanes={anglePlaneOptions} framePlanes={framePlaneOptions} faces={sketchFaceOptions} existingPlanes={existingSketchPlanes(designOf(project).features, project.sketch)} mode={sketchPlaneDialogMode} {...(sketchPlaneDialogMode === "new" && (project.part.generalBodies ?? []).some((body) => body.visible) ? { onPickFace: () => guard(pickFaceForSketch(), "Picking a face for the sketch") } : {})} currentPlaneChip={describeSketchPlane(project.sketch).chip} {...(sketchPlaneOffered ? { onContinue: () => { setSketchPlaneDialogOpen(false); switchWorkspace("sketch"); } } : {})} onConfirm={confirmSketchPlane} onClose={() => setSketchPlaneDialogOpen(false)} />
     <AboutDialog open={aboutOpen} update={buildUpdate} onClose={() => setAboutOpen(false)} />
     <ChangeParametersDialog open={parametersOpen} project={project} busy={status === "working"} onApply={changeParameters} onClose={() => setParametersOpen(false)} />
-    <FeatureEditDialog feature={featureEdit} project={project} busy={status === "working"} escapeFlags={escapeFlags}onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} />
+    <FeatureEditDialog feature={featureEdit} project={project} busy={status === "working"} escapeFlags={escapeFlags} onApply={(next) => void updateTimelineSolid(next)} onClose={() => setFeatureEdit(undefined)} onPreview={setDockPreview} valueBridge={dockBridge} previewNote={partPreview.note} />
     <BendTableDialog
       open={bendTableBodyId !== undefined}
       bodyName={project.part.generalBodies?.find((body) => body.id === bendTableBodyId)?.name ?? "Sheet metal"}

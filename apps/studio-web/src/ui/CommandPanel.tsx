@@ -15,6 +15,8 @@ interface CommandPanelProps {
   readonly onClearSelection: () => void;
   readonly onCommit: () => void;
   readonly onCancel: () => void;
+  /** Live preview (optional): the one line about the ghost the 3D view shows for the current values. */
+  readonly previewNote?: string | undefined;
 }
 
 interface CommandPanelFrameProps {
@@ -23,6 +25,8 @@ interface CommandPanelFrameProps {
   readonly title: string;
   readonly busy: boolean;
   readonly error?: string | undefined;
+  /** Live preview (optional): one line about the ghost the 3D view shows. */
+  readonly previewNote?: string | undefined;
   readonly onCommit: () => void;
   readonly onCancel: () => void;
   readonly children: React.ReactNode;
@@ -33,7 +37,7 @@ interface CommandPanelFrameProps {
  * Cancel footer. Enter commits and Esc cancels from any control inside it. Fillet, Chamfer, Shell, Hole and the Extrude /
  * Revolve panel all draw their rows inside this one frame.
  */
-export function CommandPanelFrame({ kicker, title, busy, error, onCommit, onCancel, children }: CommandPanelFrameProps): React.JSX.Element {
+export function CommandPanelFrame({ kicker, title, busy, error, previewNote, onCommit, onCancel, children }: CommandPanelFrameProps): React.JSX.Element {
   return <aside
     className="command-panel"
     role="form"
@@ -48,6 +52,7 @@ export function CommandPanelFrame({ kicker, title, busy, error, onCommit, onCanc
       <button type="button" onClick={onCancel} aria-label={`Cancel ${title}`}><CommandIcon name="cancel" /></button>
     </header>
     {children}
+    {previewNote !== undefined && <p className="command-panel-preview" role="status">{previewNote}</p>}
     {error !== undefined && <p className="command-panel-error" role="alert">{error}</p>}
     <footer>
       <button type="button" className="command-panel-ok" onClick={onCommit} disabled={busy}>OK</button>
@@ -57,13 +62,13 @@ export function CommandPanelFrame({ kicker, title, busy, error, onCommit, onCanc
   </aside>;
 }
 
-export function CommandPanel({ state, busy, onValue, onClearSelection, onCommit, onCancel }: CommandPanelProps): React.JSX.Element {
+export function CommandPanel({ state, busy, onValue, onClearSelection, onCommit, onCancel, previewNote }: CommandPanelProps): React.JSX.Element {
   const firstField = useRef<HTMLInputElement | null>(null);
   // The first value field takes the keyboard when the panel opens, like a Fusion dialog; the canvas stays live for picks.
   useEffect(() => { firstField.current?.focus(); firstField.current?.select(); }, [state.command, state.editFeatureId]);
   const selection = panelSelectionRow(state);
   const fields = panelFields(state);
-  return <CommandPanelFrame kicker={state.mode === "edit" ? "EDIT FEATURE" : "COMMAND"} title={panelTitle(state)} busy={busy} error={state.error} onCommit={onCommit} onCancel={onCancel}>
+  return <CommandPanelFrame kicker={state.mode === "edit" ? "EDIT FEATURE" : "COMMAND"} title={panelTitle(state)} busy={busy} error={state.error} previewNote={previewNote} onCommit={onCommit} onCancel={onCancel}>
     <div className="command-panel-row command-panel-selection" data-active="true">
       <span className="command-panel-label">{selection.label}</span>
       <span className="command-panel-chip" data-empty={selection.count === 0}>{selection.status}</span>

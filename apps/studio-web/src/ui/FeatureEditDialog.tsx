@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import type { DesignSolidFeature, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import { canRepairSketch, designOf, isMarkedBroken, lostSketchOf, previewFieldExpression, repairCandidates, repairSketchReference } from "../../../../packages/workbench-core/src/index.js";
-import { applyParameterValues, applyPlainSize, fieldAcceptsExpression, parameterFieldsOf, parameterValuesOf } from "../feature-parameters.js";
+import { fieldAcceptsExpression, parameterFieldsOf, parameterValuesOf } from "../feature-parameters.js";
+import { dockCandidate } from "../edit-dock-candidate.js";
+import { dockPreviewOf, type DockPreview, type ValueBridge } from "../part-preview-bridge.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { useDockedPanel } from "./docked-panel.js";
 import type { EscapeAppFlags } from "../esc-order.js";
@@ -16,6 +18,15 @@ interface FeatureEditDialogProps {
   readonly busy: boolean;
   readonly onApply: (next: DesignSolidFeature) => void;
   readonly onClose: () => void;
+  /**
+   * Live preview (optional): told the step this form would apply as it changes (or undefined once the dock closes), so the 3D view can
+   * show its result as a ghost. It never applies anything; Update feature is still the one history step.
+   */
+  readonly onPreview?: (preview: DockPreview | undefined) => void;
+  /** Live preview (optional): the drag arrow in the 3D view writes the main number of the form through this channel. */
+  readonly valueBridge?: ValueBridge;
+  /** Live preview (optional): the one line about the ghost shown under the form. */
+  readonly previewNote?: string | undefined;
 }
 
 type Extent = NonNullable<DesignSolidFeature["extent"]>;
@@ -51,6 +62,8 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
   const [values, setValues] = useState<Readonly<Record<string, string>>>({});
   /** The sketch picked to replace one that was deleted (empty until the person chooses). */
   const [sketchChoice, setSketchChoice] = useState("");
+  /** The step the form fields were last filled from: the preview waits for it, so it never reads another step's leftovers. */
+  const [loadedFor, setLoadedFor] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (props.feature === undefined) return;
@@ -65,7 +78,30 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
     setValues(parameterValuesOf(props.feature));
     setProblem("");
     setSketchChoice("");
+    setLoadedFor(props.feature.id);
   }, [props.feature?.id]);
+
+  // Live preview: the step this form would apply, told to the 3D view on every change (and cleared when the dock closes).
+  const onPreview = props.onPreview;
+  useEffect(() => {
+    if (onPreview === undefined) return;
+    if (props.feature === undefined) { onPreview(undefined); return; }
+    if (loadedFor !== props.feature.id) return;
+    const result = dockCandidate(props.feature, { value, direction, second, extent, thin, thinWall, thinSide, operation, values }, props.project);
+    onPreview(result === undefined ? undefined : dockPreviewOf(props.feature, result));
+  }, [onPreview, props.feature, props.project, loadedFor, value, direction, second, extent, thin, thinWall, thinSide, operation, values]);
+
+  // The drag arrow writes the form's main number (an extrusion's distance, a revolve's angle, or a field of the list).
+  const bridge = props.valueBridge;
+  useEffect(() => {
+    if (bridge === undefined || props.feature === undefined) return;
+    const kind = props.feature.kind;
+    return bridge.subscribe((fieldId, text) => {
+      if (kind === "extrude" || kind === "revolve") { if (fieldId === (kind === "extrude" ? "distance" : "angle")) setValue(text); }
+      else setValues((previous) => ({ ...previous, [fieldId]: text }));
+      setProblem("");
+    });
+  }, [bridge, props.feature?.id]);
 
   if (props.feature === undefined) return null;
   const feature = props.feature;
@@ -107,18 +143,8 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
       if (!repair.ok) { setProblem(repair.message); return; }
       working = repair.feature;
     } else if (lostSketch) { setProblem(`${feature.name} cannot take another sketch here. Delete it and build it again from a sketch.`); return; }
-    if (fields !== undefined) {
-      const result = applyParameterValues(working, values, props.project);
-      if (!result.ok) { setProblem(result.message); return; }
-      props.onApply(result.feature);
-      return;
-    }
-    if (!plainForm) { props.onClose(); return; }
-    const result = applyPlainSize(working, {
-      text: value, direction, throughAll, reaching, secondText: second,
-      ...(switchable && operation !== feature.operation ? { operation } : {}),
-      ...(!isExtrude && thin ? { thin: { wallText: thinWall, side: thinSide } } : {})
-    }, props.project);
+    const result = dockCandidate(working, { value, direction, second, extent, thin, thinWall, thinSide, operation, values }, props.project);
+    if (result === undefined) { props.onClose(); return; }
     if (!result.ok) { setProblem(result.message); return; }
     props.onApply(result.feature);
   };
@@ -234,6 +260,7 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
         </label>}
         {(fields !== undefined || plainForm) && <p className="feature-edit-expression-hint">Type a number, or an expression such as <code>2 * pin_r</code> or <code>Extrude1.distance / 2</code>{names.length === 0 ? "." : `. Parameters: ${names.slice(0, 8).join(", ")}${names.length > 8 ? ", …" : ""}.`}</p>}
         {problem !== "" && <div className="inline-warning" role="alert">{problem}</div>}
+        {props.previewNote !== undefined && <p className="feature-edit-preview" role="status">{props.previewNote}</p>}
         <div className="save-project-note"><CommandIcon name="shield" /><span>The solid is rebuilt from the sketch it was made from. Steps built on this one rebuild with it, and Undo restores the previous solid.</span></div>
       </div>
       <footer><button onClick={props.onClose}>Cancel</button><button className="primary" disabled={props.busy} onClick={apply}><CommandIcon name={feature.kind} />Update feature</button></footer>

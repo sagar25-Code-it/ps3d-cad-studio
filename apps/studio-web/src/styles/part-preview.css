@@ -1,0 +1,13 @@
+/* Live preview: the one line under a command panel or the Edit Feature dock that says what the ghost in the view shows. */
+.studio-app .command-panel-preview,
+.studio-app .feature-edit-preview {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #7fd0ff;
+  overflow-wrap: anywhere;
+}
+
+.studio-app .feature-edit-preview {
+  color: #1f6fb6;
+}
