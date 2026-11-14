@@ -396,6 +396,7 @@ export function App(): React.JSX.Element {
   const [partCreate, setPartCreate] = useState<PartCreateState | null>(null);
   const partCreatePanelRef = useRef<PartCreateState | null>(null);
   partCreatePanelRef.current = partCreate;
+  const partCreateCommittingRef = useRef(false);
   const [treeRevealRequest, setTreeRevealRequest] = useState(0);
   const [sketchOptionsRevealRequest, setSketchOptionsRevealRequest] = useState(0);
   const [undoDepth, setUndoDepth] = useState(0);
@@ -3171,23 +3172,29 @@ export function App(): React.JSX.Element {
   /** OK or Enter on the Extrude / Revolve panel: the typed values become one request (or a message under the rows), and the solid is built like the palette's. */
   const commitPartCreate = async (): Promise<void> => {
     const state = partCreatePanelRef.current;
-    if (state === null) return;
-    const before = projectRef.current;
-    // An operation left on its default is settled by a fresh touch test, so a quick Enter never builds a separate body beside a solid the result meets.
-    const touchingIds = state.operation === undefined ? await probeTouchingIds(state, before) : state.touchingIds;
-    const planned = planPartCreate(state, { project: projectRef.current, selectedId, touchingIds });
-    if (!planned.ok) { setPartCreate((current) => (current === null ? current : partCreateWithError(current, planned.message))); return; }
-    const request = planned.request;
-    const advanced = { ...(request.valueExpression === undefined ? {} : { valueExpression: request.valueExpression }), ...(request.secondValueMm === undefined ? {} : { secondValueMm: request.secondValueMm }) };
+    // A second Enter or click while the first is still building is ignored, so one press makes one step.
+    if (state === null || partCreateCommittingRef.current) return;
+    partCreateCommittingRef.current = true;
     try {
-      await createGeneralSolid(request.profileIds, "xy", request.kind, request.value, undefined, request.direction, request.target, Object.keys(advanced).length === 0 ? undefined : advanced, request.sketchId);
-    } catch (error) {
-      setStatus("error");
-      setStatusText(describeFailure(error, "Creating the solid"));
+      const before = projectRef.current;
+      // An operation left on its default is settled by a fresh touch test, so a quick Enter never builds a separate body beside a solid the result meets.
+      const touchingIds = state.operation === undefined ? await probeTouchingIds(state, before) : state.touchingIds;
+      const planned = planPartCreate(state, { project: projectRef.current, selectedId, touchingIds });
+      if (!planned.ok) { setPartCreate((current) => (current === null ? current : partCreateWithError(current, planned.message))); return; }
+      const request = planned.request;
+      const advanced = { ...(request.valueExpression === undefined ? {} : { valueExpression: request.valueExpression }), ...(request.secondValueMm === undefined ? {} : { secondValueMm: request.secondValueMm }) };
+      try {
+        await createGeneralSolid(request.profileIds, "xy", request.kind, request.value, undefined, request.direction, request.target, Object.keys(advanced).length === 0 ? undefined : advanced, request.sketchId);
+      } catch (error) {
+        setStatus("error");
+        setStatusText(describeFailure(error, "Creating the solid"));
+      }
+      // A solid that was not built leaves the panel open with its values, so the numbers are not lost; the status bar says why.
+      if (projectRef.current.revision === before.revision) setPartCreate((current) => (current === null ? current : partCreateWithError(current, "Nothing was added. The status bar below says why; change a value and press OK again.")));
+      else { partCreatePanelRef.current = null; setPartCreate(null); }
+    } finally {
+      partCreateCommittingRef.current = false;
     }
-    // A solid that was not built leaves the panel open with its values, so the numbers are not lost; the status bar says why.
-    if (projectRef.current.revision === before.revision) setPartCreate((current) => (current === null ? current : partCreateWithError(current, "Nothing was added. The status bar below says why; change a value and press OK again.")));
-    else { partCreatePanelRef.current = null; setPartCreate(null); }
   };
 
   /** What else is running when Esc is pressed, so a panel closes only when it is the innermost thing open (esc-order.ts). */
@@ -3196,7 +3203,7 @@ export function App(): React.JSX.Element {
     toolRunning: projectRef.current.activeWorkspace === "sketch",
     commandPanelOpen: commandPanelRef.current !== null,
     partCreateOpen: partCreatePanelRef.current !== null,
-    busy: panelBusyRef.current
+    busy: panelBusyRef.current || partCreateCommittingRef.current
   });
   usePartCreateSession({ state: partCreate, setState: setPartCreate, projectRef, bodies: project.part.generalBodies, workspace: project.activeWorkspace, projectId: project.id, flags: escapeFlags, onCommit: () => void commitPartCreate(), onCancel: cancelPartCreate });
   const partCreateSketches = useMemo(() => (partCreate === null ? [] : createSketchChoices(designOf(project))), [partCreate === null, project]);
