@@ -191,6 +191,7 @@ import { partHotkeyTests } from "./part-hotkeys.test.js";
 import { combineStepTests } from "./combine-step.test.js";
 import { ribbonHonestyTests } from "./ribbon-honesty.test.js";
 import { hoverPickTests } from "./hover-pick.test.js";
+import { commandPanelTests } from "./command-panel.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -404,6 +405,7 @@ const tests: readonly TestCase[] = [
   ...combineStepTests,
   ...ribbonHonestyTests,
   ...hoverPickTests,
+  ...commandPanelTests,
 ];
 let failures = 0;
 

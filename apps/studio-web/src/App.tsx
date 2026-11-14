@@ -80,7 +80,7 @@ import {
 } from "../../../packages/workbench-core/src/index.js";
 import { newPrimitiveMesh } from "../../../packages/workbench-geometry/src/primitive-bodies.js";
 import { evaluateConstructionPlane, planeFrameOfFace, resolveBinder } from "../../../packages/workbench-geometry/src/index.js";
-import { bendTableRowsCsv, describePickedEdge, flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, nearestPickableEdge, pickableEdges, sharedFlangeEnds, sheetFrameOf, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
+import { analyzeFaces, applyEdgeBlend, bendTableRowsCsv, describePickedEdge, faceOutlineSegments, flangeReliefs, frameThroughPoints, flatLayoutDxf, flatLayoutSvg, nearestFrameEdge, nearestPickableEdge, pickableEdges, resolveFace, sharedFlangeEnds, sheetFrameOf, shellBody, snapToAxis } from "../../../packages/workbench-geometry/src/index.js";
 import { assemblyExplodeLimitMm, buildAssemblyPreview, buildPartPreview, buildSurfacePreview, findAssemblyInterference, meshChamfer, meshCounterbore, meshCountersink, meshFillet, meshHole, meshTappedHole, METRIC_FASTENERS, COARSE_PITCH_MM, tapDrillDiameterMm } from "../../../packages/workbench-geometry/src/index.js";
 import { listPierceHits, pierceRefreshEdit, refreshPierceConstraints } from "../../../packages/workbench-geometry/src/sketch-pierce.js";
 import { buildVehiclePreview } from "../../../packages/workbench-vehicle/src/index.js";
@@ -108,8 +108,11 @@ import { edgesToPick, isSketchProjectCommand, needsPick, pickedEdgeRun, sourceBo
 import { planSketchProjectForSession, refreshLooseSketchProjections } from "./sketch-projection-refresh.js";
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
-import { facesOfBody } from "./edge-blend-step.js";
+import { blendSpecOf, facesOfBody } from "./edge-blend-step.js";
 import { blendAllFeature, centroidHoleFeature } from "./one-shot-steps.js";
+import { applyParameterValues } from "./feature-parameters.js";
+import { openCommandPanel, openCommandPanelForEdit, panelAddFace, panelClearSelection, panelDraft, panelEdgeGroups, panelSetHolePoint, panelTitle, panelToggleEdge, panelWithError, panelWithValue, type CommandPanelState, type PanelCommand, type PanelEdgeSet } from "./command-panel.js";
+import { CommandPanel } from "./ui/CommandPanel.js";
 import { explicitBody, matchingSketches, profilesByAnswer, sketchByAnswer } from "./explicit-pick.js";
 import { shouldRefit } from "./view-fit.js";
 import { partHotkeyCommand, type PartHotkeyCommand } from "./part-hotkeys.js";
@@ -358,6 +361,10 @@ export function App(): React.JSX.Element {
   const [selectedFace, setSelectedFace] = useState<{ readonly bodyId: string; readonly faceIndex: number } | null>(null);
   /** Edge chains picked in the 3D view with the Edge intent (PT-08); Ctrl / Shift adds chains of the same body. */
   const [selectedEdges, setSelectedEdges] = useState<readonly { readonly bodyId: string; readonly chain: number; readonly segments: readonly ViewportGuideSegment[] }[]>([]);
+  /** PT-06: the shared modeless command panel (Fillet, Chamfer, Shell, Hole), for creation and for Edit Feature. */
+  const [commandPanel, setCommandPanel] = useState<CommandPanelState | null>(null);
+  const commandPanelRef = useRef<CommandPanelState | null>(null);
+  commandPanelRef.current = commandPanel;
   const [treeRevealRequest, setTreeRevealRequest] = useState(0);
   const [sketchOptionsRevealRequest, setSketchOptionsRevealRequest] = useState(0);
   const [undoDepth, setUndoDepth] = useState(0);
@@ -913,6 +920,50 @@ export function App(): React.JSX.Element {
   useEffect(() => viewportRef.current?.setSelectedId(selectedId), [selectedId]);
   // The picked edge chains stay lit until the selection changes; a change to the bodies invalidates the chains.
   useEffect(() => { viewportRef.current?.setSelectedEdges(selectedEdges.flatMap((entry) => entry.segments)); }, [selectedEdges]);
+  // While the command panel is open, viewport clicks feed its active selection row and Esc cancels the command.
+  const panelPickRef = useRef<(picked: ViewportMeasurePoint) => void>(() => undefined);
+  useEffect(() => {
+    if (commandPanel === null) return;
+    const viewport = viewportRef.current;
+    if (viewport === undefined) return;
+    const handler = (point: ViewportMeasurePoint | null): void => {
+      if (point === null) { setCommandPanel(null); setStatus("ready"); setStatusText("Command cancelled; nothing changed."); return; }
+      panelPickRef.current(point);
+    };
+    pickRef.current?.(null);
+    pickRef.current = handler;
+    viewport.setNavigationMode("measure");
+    return () => {
+      if (pickRef.current === handler) pickRef.current = null;
+      const live = viewportRef.current;
+      live?.setNavigationMode("select");
+      live?.setGuideSegments([]);
+    };
+  }, [commandPanel !== null, commandPanel?.command, commandPanel?.editFeatureId]);
+  // The panel's pickable things are outlined: every sharp edge (picked runs in amber), or the picked shell faces.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (viewport === undefined || commandPanel === null) return;
+    if (commandPanel.command === "fillet" || commandPanel.command === "chamfer") {
+      const targetIds = commandPanel.bodyId !== undefined ? [commandPanel.bodyId] : [...partPickCandidates.keys()];
+      const segments: ViewportGuideSegment[] = [];
+      const active: number[] = [];
+      for (const id of targetIds) {
+        for (const edge of partPickCandidates.get(id)?.edges ?? []) {
+          const index = segments.push([edge.a, edge.b]) - 1;
+          if (commandPanel.edges.some((entry) => entry.bodyId === id && entry.chain === edge.chain)) active.push(index);
+        }
+      }
+      viewport.setGuideSegments(segments, active);
+      return;
+    }
+    if (commandPanel.command === "shell") {
+      const body = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === commandPanel.bodyId);
+      if (body !== undefined) viewport.setGuideSegments(faceOutlineSegments({ positionsMm: body.positionsMm, indices: body.indices }, commandPanel.faces.map((entry) => entry.ref)));
+      return;
+    }
+    viewport.setGuideSegments([]);
+  }, [commandPanel, partPickCandidates]);
   useEffect(() => { setSelectedEdges((current) => current.length === 0 ? current : []); }, [project.part.generalBodies]);
   useEffect(() => { setSelectedEdges((current) => (current.length === 0 || current[0]!.bodyId === selectedId ? current : [])); }, [selectedId]);
   // Escape ends a viewport pick that is waiting for a click.
@@ -1190,57 +1241,15 @@ export function App(): React.JSX.Element {
   );
 
   /**
-   * Hole Wizard: click the face where the hole should start, choose its type and fastener, and the hole is recorded as a timeline
-   * step at that point, drilled straight into the face. A body that is not in the timeline gets the older whole-body version.
+   * Hole: the shared command panel (PT-06 / PT-12) — click the face where the hole should start, choose simple, counterbore
+   * or countersink with a free diameter, and the hole is recorded as a timeline step drilled straight into the face. A body
+   * that is not in the timeline gets the older whole-body prompt version (tapped fastener holes live there too).
    */
-  const handleHoleWizard = async (): Promise<void> => {
+  const handleHoleWizard = (): void => {
     const current = projectRef.current;
-    const bodies = current.part.generalBodies ?? [];
-    const body = bodies.find((candidate) => candidate.id === selectedId);
-    if (body === undefined) { setStatus("ready"); setStatusText("Hole Wizard needs a general solid body selected first."); return; }
-    const history = designOf(current);
-    const base = baseFeatureOf(history, body.id);
-    if (base === undefined) { holeWizardOnMesh(); return; }
-    const picked = await requestViewportPick(`Hole Wizard: click the face of ${body.name} where the hole should start`);
-    if (picked === null) return;
-    if (picked.semanticId !== body.id) { setStatus("ready"); setStatusText(`Hole Wizard: click on ${body.name}.`); return; }
-    if (picked.normalMm === undefined) { setStatus("ready"); setStatusText("Hole Wizard: the clicked surface has no direction to drill along."); return; }
-    const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
-    const typeRaw = (ask("Hole type (simple, counterbore, countersink, tapped):", "counterbore") ?? "").trim().toLowerCase();
-    if (typeRaw === "" ) return;
-    if (!["simple", "counterbore", "countersink", "tapped"].includes(typeRaw)) { setStatus("ready"); setStatusText("Hole Wizard: enter simple, counterbore, countersink or tapped."); return; }
-    const fastenerRaw = (ask("Fastener size (M3, M4, M5, M6, M8, M10):", "M6") ?? "").trim().toUpperCase();
-    const spec = METRIC_FASTENERS[fastenerRaw];
-    if (spec === undefined) { setStatus("ready"); setStatusText("Hole Wizard: enter M3, M4, M5, M6, M8 or M10."); return; }
-    const depthRaw = ask("Hole depth from the face in mm (0 drills through everything):", "0");
-    if (depthRaw === null) return;
-    const depth = Number.parseFloat(depthRaw);
-    if (!Number.isFinite(depth) || depth < 0) { setStatus("ready"); setStatusText("Hole Wizard: depth must be 0 (through) or a positive number."); return; }
-    const round = (value: number): number => Number(value.toFixed(3));
-    const normal = snapToAxis(picked.normalMm);
-    // A tapped hole is drilled at the tap-drill (minor) diameter and carries a real thread: cosmetic (annotated) or modelled (a helix cut into the wall).
-    const pitch = COARSE_PITCH_MM[spec.nominalDiameterMm];
-    let threadMode: "cosmetic" | "modelled" | undefined;
-    if (typeRaw === "tapped") {
-      const modeRaw = (ask("Thread (cosmetic = annotated only, modelled = helix cut into the hole):", "cosmetic") ?? "").trim().toLowerCase();
-      if (modeRaw === "") return;
-      if (modeRaw !== "cosmetic" && modeRaw !== "modelled") { setStatus("ready"); setStatusText("Hole Wizard: enter cosmetic or modelled."); return; }
-      threadMode = modeRaw;
-    }
-    const diameter = typeRaw === "tapped" ? (pitch === undefined ? spec.nominalDiameterMm * 0.85 : tapDrillDiameterMm(spec.nominalDiameterMm, pitch)) : spec.clearanceDiameterMm;
-    const style = typeRaw === "counterbore" ? "counterbore" : typeRaw === "countersink" ? "countersink" : "simple";
-    const label = typeRaw === "tapped" ? `${fastenerRaw} tapped hole (${threadMode}) Ø${diameter.toFixed(2)}` : `${fastenerRaw} ${typeRaw} hole Ø${diameter.toFixed(2)}`;
-    const feature: DesignSolidFeature = {
-      id: `feature:hole-${crypto.randomUUID()}`, name: label, kind: "hole", suppressed: false,
-      sketchFeatureId: base.sketchFeatureId, profileIds: [], valueMm: Math.max(0.01, diameter),
-      bodyId: body.id, operation: "direct-edit",
-      holeStyle: style, holePositionMm: [round(picked.pointMm[0]), round(picked.pointMm[1]), round(picked.pointMm[2])], holeNormal: normal,
-      holeDiameterMm: diameter, holeDepthMm: depth,
-      ...(style === "counterbore" ? { holeCounterDiameterMm: spec.counterboreDiameterMm, holeCounterDepthMm: spec.counterboreDepthMm } : {}),
-      ...(style === "countersink" ? { holeSinkDiameterMm: spec.countersinkDiameterMm, holeSinkAngleDeg: 90 } : {}),
-      ...(threadMode !== undefined && pitch !== undefined ? { holeThread: { mode: threadMode, pitchMm: pitch, majorDiameterMm: spec.nominalDiameterMm, handedness: "right" as const } } : {})
-    };
-    void commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id).then((ok) => { if (ok) { setSelectedId(body.id); setStatusText(`Added ${label} to ${body.name}, drilled along (${normal.map((value) => -Number(value.toFixed(3)) || 0).join(", ")}) from (${feature.holePositionMm?.map((value) => value.toFixed(1)).join(", ")}) mm.`); } });
+    const body = (current.part.generalBodies ?? []).find((candidate) => candidate.id === selectedId);
+    if (body !== undefined && baseFeatureOf(designOf(current), body.id) === undefined) { holeWizardOnMesh(); return; }
+    openPanelFor("hole");
   };
 
   const holeWizardOnMesh = (): void => {
@@ -1907,71 +1916,149 @@ export function App(): React.JSX.Element {
   };
 
   /**
-   * Fillet or chamfer one picked edge: the sharp convex edges of the solid are drawn over it, and a click on any of them (flat,
-   * slanted or round) picks that edge, with the rest of its smooth run, such as a whole circular rim. The click decides the solid
-   * too, so an edge of another solid can be picked without selecting it first.
+   * PT-06 / PT-11: the shared modeless command panel. Fillet and Chamfer take any number of edge runs in one feature,
+   * Shell takes its open faces and thickness, Hole its face, type and sizes; the canvas stays live for picking while the
+   * panel is open, Enter commits, Esc cancels, and Edit Feature reopens the same panel filled.
    */
-  const handleEdgeTreatment = async (modifier: "fillet" | "chamfer"): Promise<void> => {
-    const bodies = projectRef.current.part.generalBodies ?? [];
+  const openPanelFor = (command: PanelCommand): void => {
+    const current = projectRef.current;
+    const bodies = current.part.generalBodies ?? [];
+    let state = openCommandPanel(command);
     const selected = bodies.find((candidate) => candidate.id === selectedId);
-    const name = modifierLabelOf(modifier);
-    if (selected === undefined) { setStatus("ready"); setStatusText(`${name} needs a general solid body selected first.`); return; }
-    const edgesOf = (target: GeneralSolidBody): ReturnType<typeof pickableEdges> => pickableEdges({ positionsMm: target.positionsMm, indices: target.indices }, 5, { includeConcave: true });
-    const edges = edgesOf(selected);
-    if (typeof edges === "string") { setStatus("ready"); setStatusText(`${name}: ${edges}`); return; }
-    if (edges.length === 0) { setStatus("ready"); setStatusText(`${name}: ${selected.name} has no sharp edge to pick.`); return; }
-    const guides: ViewportGuideSegment[] = edges.map((edge) => [edge.a, edge.b]);
-    const runs = new Set(edges.map((edge) => edge.chain)).size;
-    const picked = await requestViewportPick(`${name}: click an edge of ${selected.name} (${runs} ${runs === 1 ? "edge" : "edges"} outlined)`, guides);
-    if (picked === null) return;
-    const body = bodies.find((candidate) => candidate.id === picked.semanticId) ?? selected;
-    const bodyEdges = body === selected ? edges : edgesOf(body);
-    if (typeof bodyEdges === "string") { setStatus("ready"); setStatusText(`${name}: ${bodyEdges}`); return; }
-    const nearest = nearestPickableEdge(bodyEdges, picked.pointMm);
-    if (nearest === undefined) { setStatus("ready"); setStatusText(`${name}: ${body.name} has no sharp edge to pick.`); return; }
-    const chainIndexes = bodyEdges.flatMap((edge, index) => edge.chain === nearest.edge.chain ? [index] : []);
-    const viewport = viewportRef.current;
-    viewport?.setGuideSegments(bodyEdges.map((edge) => [edge.a, edge.b] as ViewportGuideSegment), chainIndexes);
-    const clearHighlight = (): void => viewport?.setGuideSegments([]);
-    window.setTimeout(clearHighlight, 4000);
-    const pieces = nearest.chain.length;
-    const inside = nearest.edge.concave === true;
-    const where = `${inside ? "an inside corner, " : ""}${pieces === 1 ? `a ${Math.hypot(nearest.edge.b[0] - nearest.edge.a[0], nearest.edge.b[1] - nearest.edge.a[1], nearest.edge.b[2] - nearest.edge.a[2]).toFixed(1)} mm edge` : `a run of ${pieces} edges`} of ${body.name}, ${nearest.distanceMm.toFixed(1)} mm from your click`;
-    setStatusText(`${name}: picked ${where}.`);
-    const value = await onView.ask({ label: modifier === "fillet" ? "Fillet radius" : "Chamfer distance", quantity: "length", defaultValue: 2, min: 0, exclusiveMin: true, step: 0.5 });
-    if (value === null) { clearHighlight(); return; }
-    // The value is typed on the view while the project stays live, so make sure the body is still the one that was picked.
-    if ((projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === body.id) !== body) { clearHighlight(); setStatus("ready"); setStatusText(`${name}: ${body.name} changed while the value was being typed; pick the edge again.`); return; }
-    // The picked run is remembered with the faces beside it, so a timeline step can find the same edge again after the model is rebuilt.
-    const group = describePickedEdge(nearest.chain, facesOfBody(body));
-    const base = baseFeatureOf(designOf(projectRef.current), body.id);
-    if (base !== undefined) {
-      const draft: DesignSolidFeature = {
-        id: `feature:edge-blend-${crypto.randomUUID()}`, name: modifier === "fillet" ? "Fillet" : "Chamfer", kind: "edge-blend", suppressed: false,
-        sketchFeatureId: base.sketchFeatureId, profileIds: [], valueMm: value, bodyId: body.id, operation: "direct-edit",
-        blendType: modifier, blendEdges: [group]
+    if (selected !== undefined) state = { ...state, bodyId: selected.id, bodyName: selected.name };
+    // PT-09: edge chains picked with the Edge intent before the command fill its first selection row.
+    if ((command === "fillet" || command === "chamfer") && selectedEdges.length > 0) {
+      for (const entry of selectedEdges) {
+        const body = bodies.find((candidate) => candidate.id === entry.bodyId);
+        if (body === undefined) continue;
+        const edges = pickableEdges({ positionsMm: body.positionsMm, indices: body.indices }, 5, { includeConcave: true });
+        if (typeof edges === "string") continue;
+        const chainEdges = edges.filter((edge) => edge.chain === entry.chain);
+        if (chainEdges.length === 0) continue;
+        const group = describePickedEdge(chainEdges, facesOfBody(body));
+        state = panelToggleEdge(state, { bodyId: body.id, chain: entry.chain, group, segments: chainEdges.map((edge) => [edge.a, edge.b] as ViewportGuideSegment), summary: chainEdges.length === 1 ? "an edge" : `a run of ${chainEdges.length}` }, body.name);
+      }
+    }
+    setFeatureEdit(undefined);
+    setCommandPanel(state);
+    setStatus("ready");
+    setStatusText(command === "hole"
+      ? "Hole: click the face where the hole should start, set the type and sizes, Enter commits (Esc cancels)."
+      : command === "shell"
+        ? "Shell: click the faces to leave open (or none for a closed shell), type the thickness, Enter commits (Esc cancels)."
+        : `${panelTitle(state)}: click edges in the view (Ctrl adds more runs), type the size, Enter commits (Esc cancels).`);
+  };
+
+  /** A click fed to the open command panel: an edge run, a shell face, or the hole's start point. */
+  const handlePanelPick = (picked: ViewportMeasurePoint): void => {
+    const state = commandPanelRef.current;
+    if (state === null) return;
+    const bodies = projectRef.current.part.generalBodies ?? [];
+    const body = bodies.find((candidate) => candidate.id === picked.semanticId);
+    if (body === undefined) { setStatusText(`${panelTitle(state)}: click on a solid body.`); return; }
+    const round3 = (value: number): number => Number(value.toFixed(3));
+    if (state.command === "fillet" || state.command === "chamfer") {
+      const edges = pickableEdges({ positionsMm: body.positionsMm, indices: body.indices }, 5, { includeConcave: true });
+      if (typeof edges === "string") { setStatusText(`${panelTitle(state)}: ${edges}`); return; }
+      const nearest = nearestPickableEdge(edges, picked.pointMm);
+      if (nearest === undefined) { setStatusText(`${panelTitle(state)}: ${body.name} has no sharp edge to pick.`); return; }
+      const group = describePickedEdge(nearest.chain, facesOfBody(body));
+      const pick: PanelEdgeSet = {
+        bodyId: body.id, chain: nearest.edge.chain, group,
+        segments: nearest.chain.map((edge) => [edge.a, edge.b] as ViewportGuideSegment),
+        summary: nearest.chain.length === 1 ? "an edge" : `a run of ${nearest.chain.length}`
       };
-      const feature: DesignSolidFeature = { ...draft, name: edgeBlendTitle(draft) };
-      clearHighlight();
-      const added = await commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id);
-      if (added) { setSelectedId(body.id); setStatusText(`Added ${feature.name} to ${body.name}: ${where}. It is a timeline step, so you can edit it, suppress it or roll back past it.`); }
+      setCommandPanel(panelToggleEdge(state, pick, body.name));
       return;
     }
-    // A body with no timeline step of its own (for example one made by Combine) is treated in one go, as before.
+    if (picked.normalMm === undefined) { setStatusText(`${panelTitle(state)}: the clicked surface has no direction to work from.`); return; }
+    if (state.command === "shell") {
+      if (state.bodyId !== undefined && state.bodyId !== body.id && state.faces.length > 0) { setStatusText(`Shell: click a face of ${state.bodyName ?? "the chosen solid"}.`); return; }
+      const mesh = { positionsMm: body.positionsMm, indices: body.indices };
+      const analysis = analyzeFaces(mesh);
+      if (typeof analysis === "string") { setStatusText(`Shell: ${analysis}`); return; }
+      const probe = { pointMm: [round3(picked.pointMm[0]), round3(picked.pointMm[1]), round3(picked.pointMm[2])] as const, normalMm: [round3(picked.normalMm[0]), round3(picked.normalMm[1]), round3(picked.normalMm[2])] as const };
+      const found = resolveFace(mesh, analysis, probe);
+      if (!found.ok) { setStatusText(`Shell: ${found.message}`); return; }
+      if (found.region.curved) { setStatusText("Shell: that is a curved face (one facet of a cylinder or dome); pick a flat face."); return; }
+      const ref = { pointMm: probe.pointMm, normalMm: [round3(found.region.normal[0]), round3(found.region.normal[1]), round3(found.region.normal[2])] as const };
+      setCommandPanel({ ...panelAddFace(state, { ref, summary: "face" }), bodyId: body.id, bodyName: body.name });
+      return;
+    }
+    const point: readonly [number, number, number] = [round3(picked.pointMm[0]), round3(picked.pointMm[1]), round3(picked.pointMm[2])];
+    setCommandPanel(panelSetHolePoint(state, point, snapToAxis(picked.normalMm), body.id, body.name));
+  };
+  panelPickRef.current = handlePanelPick;
+
+  /** A body that is not in the timeline cannot record a step: the fillet, chamfer or shell is applied to its mesh in one go. */
+  const commitPanelOnMesh = (state: CommandPanelState, body: GeneralSolidBody): string | undefined => {
     const input = { positionsMm: body.positionsMm, indices: body.indices };
-    const onlyEdges = group.segments;
-    const result = modifier === "fillet"
-      ? meshFillet(input, { sizeMm: value, onlyEdges, ...(inside ? { concave: true } : {}) })
-      : meshChamfer(input, { sizeMm: value, onlyEdges, ...(inside ? { concave: true } : {}) });
-    clearHighlight();
-    if (!result.ok) { setStatus("ready"); setStatusText(`${name} failed: ${result.message}`); return; }
-    const label = modifier === "fillet" ? `Fillet R ${value} mm (picked edge)` : `Chamfer ${value} mm (picked edge)`;
-    const { feature: _feature, brep: _brep, ...keep } = body;
-    void _feature; void _brep;
-    const nextBody: GeneralSolidBody = { ...keep, positionsMm: Array.from(result.positionsMm), indices: Array.from(result.indices) };
-    if (!applyProjectOperation({ kind: "modify-general-body", targetBodyId: body.id, modifier, label, body: nextBody })) { setStatus("ready"); setStatusText(`The project rejected the ${name} result.`); return; }
-    setSelectedId(body.id);
-    setStatusText(`Applied ${label} to ${body.name}: ${where}.`);
+    const plain = (text: string | undefined): number => Number((text ?? "").trim().replace(",", "."));
+    const apply = (label: string, modifier: "fillet" | "chamfer" | "shell", result: { readonly positionsMm: readonly number[]; readonly indices: readonly number[] }): string | undefined => {
+      const { feature: _feature, brep: _brep, ...keep } = body;
+      void _feature; void _brep;
+      if (!applyProjectOperation({ kind: "modify-general-body", targetBodyId: body.id, modifier, label, body: { ...keep, positionsMm: Array.from(result.positionsMm), indices: Array.from(result.indices) } })) return "The project rejected the result.";
+      setSelectedId(body.id);
+      setStatusText(`Applied ${label} to ${body.name}. This body has no timeline step of its own, so the change is applied in place.`);
+      return undefined;
+    };
+    if (state.command === "fillet" || state.command === "chamfer") {
+      const groups = panelEdgeGroups(state);
+      if (groups.length === 0) return "Click at least one edge in the view (Ctrl adds more runs).";
+      const size = plain(state.values["size"]);
+      if (!Number.isFinite(size) || size <= 0) return "Enter a positive size as a plain number (this body is not in the timeline, so parameter expressions are not available).";
+      const result = applyEdgeBlend(input, facesOfBody(body), groups, { type: state.command, sizeMm: size });
+      if (!result.ok) return result.message;
+      return apply(`${state.command === "fillet" ? `Fillet R ${size} mm` : `Chamfer ${size} mm`} (${groups.length} edge run${groups.length === 1 ? "" : "s"})`, state.command, result);
+    }
+    if (state.command === "shell") {
+      const wall = plain(state.values["wall"]);
+      if (!Number.isFinite(wall) || wall <= 0) return "Enter a positive wall thickness as a plain number (this body is not in the timeline, so parameter expressions are not available).";
+      const sideText = state.values["side"];
+      const side = sideText === "outside" || sideText === "both" ? sideText : "inside";
+      const result = shellBody(input, { thicknessMm: wall, side, openFaces: state.faces.map((entry) => entry.ref) });
+      if (!result.ok) return result.message;
+      return apply(`Shell ${wall} mm`, "shell", result);
+    }
+    return "This body is not in the timeline, so a hole step cannot be recorded on it; the ribbon Hole offers the one-shot version.";
+  };
+
+  /** OK or Enter on the command panel: build the step from the picks, run the typed values through the shared parser and validator, and commit. */
+  const commitCommandPanel = async (): Promise<void> => {
+    const state = commandPanelRef.current;
+    if (state === null) return;
+    const current = projectRef.current;
+    const bodies = current.part.generalBodies ?? [];
+    const body = bodies.find((candidate) => candidate.id === state.bodyId);
+    if (body === undefined) { setCommandPanel(panelWithError(state, state.command === "hole" ? "Click the face where the hole should start." : "Pick in the 3D view first.")); return; }
+    const history = designOf(current);
+    const base = baseFeatureOf(history, body.id);
+    const existing = state.editFeatureId === undefined ? undefined : history.features.find((candidate): candidate is DesignSolidFeature => candidate.id === state.editFeatureId && candidate.kind !== "sketch");
+    if (base === undefined && existing === undefined) {
+      const problem = commitPanelOnMesh(state, body);
+      if (problem !== undefined) { setCommandPanel(panelWithError(state, problem)); return; }
+      setCommandPanel(null);
+      return;
+    }
+    const draft = panelDraft(state, { sketchFeatureId: base?.sketchFeatureId ?? existing!.sketchFeatureId, ...(existing === undefined ? {} : { existing }) });
+    if (!draft.ok) { setCommandPanel(panelWithError(state, draft.message)); return; }
+    const applied = applyParameterValues(draft.feature, state.values, current);
+    if (!applied.ok) { setCommandPanel(panelWithError(state, applied.message)); return; }
+    let feature = applied.feature;
+    if (feature.kind === "edge-blend" && state.mode === "create") feature = { ...feature, name: edgeBlendTitle(feature) };
+    setCommandPanel(null);
+    if (state.mode === "edit") { await updateTimelineSolid(feature); return; }
+    const added = await commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id);
+    if (added) {
+      setSelectedId(body.id);
+      setStatus("ready");
+      setStatusText(`Added ${feature.name} to ${body.name} as a timeline step; double-click it in the timeline to edit it, suppress it or roll back past it.`);
+    }
+  };
+
+  /** Fillet or chamfer picked edges: opens the shared command panel (several edge runs go into one timeline step). */
+  const handleEdgeTreatment = (modifier: "fillet" | "chamfer"): void => {
+    openPanelFor(modifier);
   };
 
   const handleModifyGeneralBody = async (modifier: "hole" | "fillet" | "chamfer" | "shell", scope: "picked" | "all" = "picked"): Promise<void> => {
@@ -3008,7 +3095,11 @@ export function App(): React.JSX.Element {
       return applyProjectOperation({ kind: "modify-general-body", targetBodyId: body.id, modifier: "shell", label, body: { ...keep, positionsMm: Array.from(positionsMm), indices: Array.from(indices) } });
     }
   });
-  const handleBodyEdit = (mode: BodyEditMode): void => { void bodyEditHandlers.run(mode); };
+  const handleBodyEdit = (mode: BodyEditMode): void => {
+    // Shell runs through the shared command panel (PT-06); the other face-driven edits keep their pick-and-ask flow for now.
+    if (mode === "shell") { openPanelFor("shell"); return; }
+    void bodyEditHandlers.run(mode);
+  };
 
   /** A timeline change that only shows or hides solids is cheap; once a body has joins or cuts it is replayed with the change. */
   const timelineOperation = (intent: OperationIntent, then?: () => void): void => {
@@ -3078,6 +3169,10 @@ export function App(): React.JSX.Element {
       return;
     }
     if (feature.kind === "pattern") { openPatternEdit(feature); return; }
+    // Fillet / Chamfer, the general Shell and Hole reopen the same command panel they were created with (PT-06).
+    const bodyName = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === feature.bodyId)?.name;
+    const panelState = openCommandPanelForEdit(feature, bodyName);
+    if (panelState !== undefined) { setCommandPanel(panelState); return; }
     setFeatureEdit(feature);
   };
 
@@ -4435,6 +4530,14 @@ export function App(): React.JSX.Element {
           onHome={homeViewport}
           onClearMeasure={() => setMeasurePoints([])}
         />
+        {commandPanel !== null && <CommandPanel
+          state={commandPanel}
+          busy={status === "working"}
+          onValue={(fieldId, text) => setCommandPanel((current) => current === null ? current : panelWithValue(current, fieldId, text))}
+          onClearSelection={() => setCommandPanel((current) => current === null ? current : panelClearSelection(current))}
+          onCommit={() => void commitCommandPanel()}
+          onCancel={() => { setCommandPanel(null); setStatus("ready"); setStatusText("Command cancelled; nothing changed."); }}
+        />}
         <ViewportMetrics workspace={project.activeWorkspace} model={model} imported={activeImport} project={project} interferenceCount={interferences.length} surfaceTriangles={surfacePreview.metrics.triangles} vehicleAnalysis={vehiclePreview.analysis} vehiclePrimitiveCount={vehiclePreview.scene.primitives.length} />
         {project.activeWorkspace === "part" && analysisRequest !== null && activeImport === undefined && <AnalysisLayer part={project.part} viewportRef={viewportRef} mode={analysisRequest.mode} nonce={analysisRequest.nonce} onClose={() => setAnalysisRequest(null)} onMessage={setStatusText} />}
         {quickMeasure !== undefined && <div className="quick-measure-bar" role="status" aria-live="polite" aria-label="Quick measure"><span className="quick-measure-title">{quickMeasure.title}</span>{quickMeasure.metrics.map((metric, index) => <span key={index}>{metric}</span>)}</div>}
