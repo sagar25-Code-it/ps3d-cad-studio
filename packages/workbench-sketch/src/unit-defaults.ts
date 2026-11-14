@@ -75,6 +75,16 @@ export function lengthTextFromDisplay(text: string, unit: SketchLengthUnit): str
   return Number.isFinite(value) ? String(Number(unitToMm(value, unit).toPrecision(10))) : text;
 }
 
+/**
+ * What a length text field shows while it is typed into. The stored text is in millimetres, so showing it back converted would eat
+ * what is half typed in another unit ("0." is the number 0, stored as "0" and shown as "0": the point vanishes). While the stored text
+ * is still what the draft means, the draft is shown as typed; when the stored text has been changed from elsewhere, it is shown converted.
+ */
+export function lengthFieldText(draft: string | undefined, storedMm: string, unit: SketchLengthUnit): string {
+  if (draft !== undefined && lengthTextFromDisplay(draft, unit) === storedMm) return draft;
+  return lengthTextToDisplay(storedMm, unit);
+}
+
 export type PlaneOffsetRead = { readonly ok: true; readonly valueMm: number } | { readonly ok: false; readonly message: string };
 
 /** The offset of a sketch plane as the text the dialog starts with. */

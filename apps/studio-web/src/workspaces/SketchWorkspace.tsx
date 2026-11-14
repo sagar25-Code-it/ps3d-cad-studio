@@ -49,7 +49,7 @@ import { MEASURE_CONTEXT, effectiveSolidResult, modalModeEnded, type ModalContex
 import { circleDimensionFacts, fixesBlockingDimension } from "../../../../packages/workbench-sketch/src/dimension-edit-model.js";
 import { isEllipseRadiusConstraint, isPointDistanceConstraint, pointDistanceLayout } from "../../../../packages/workbench-sketch/src/point-distance-layout.js";
 import { convertLengthField, parseLengthField } from "../../../../packages/workbench-sketch/src/edit-fields.js";
-import { defaultLengthText, gridStepsForUnit, lengthTextFromDisplay, lengthTextToDisplay } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
+import { defaultLengthText, gridStepsForUnit, lengthFieldText, lengthTextFromDisplay, lengthTextToDisplay } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
 import { WORKING_PATH_SKETCH, chainFromCurve, describePath, pathCurvesOf, pathSketchChoices, pathSketchOf } from "../sweep-path-ui.js";
 import { LINE_ARC_DRAG_PIXELS, buildLineTangentArc, lineArcDragStart, type LineArcDragStart } from "../../../../packages/workbench-sketch/src/line-arc-drag.js";
 import { SKETCH_STATE_COLOURS, fixedEntityIds } from "../../../../packages/workbench-sketch/src/state-colours.js";
@@ -482,6 +482,8 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
   const [selectOther, setSelectOther] = useState<{ readonly candidates: readonly SelectOtherCandidate[]; readonly at: readonly [number, number] } | undefined>(undefined);
   const [solidOp, setSolidOp] = useSketchPref<"extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "helix" | "thread" | "rib" | "dome" | "sheet-base" | "sheet-flange" | "sheet-hem">("solidOp", "extrude");
   const [solidValue, setSolidValue] = useSketchPref("solidValue", "10");
+  /** The height as typed in the document's unit while the field is being edited ("0." must stay "0." in an inch document). */
+  const [solidDraft, setSolidDraft] = useState<string | undefined>(undefined);
   const [sweepDx, setSweepDx] = useSketchPref("sweepDx", "0");
   const [sweepDy, setSweepDy] = useSketchPref("sweepDy", "0");
   const [sweepDz, setSweepDz] = useSketchPref("sweepDz", "1");
@@ -2572,7 +2574,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="sheet-flange">Sheet metal: flange</option>
               <option value="sheet-hem">Sheet metal: hem</option>
             </select>
-            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? `Sweep distance in ${unitWord(unit)}` : `Height in ${unitWord(unit)}`} type={solidOp === "extrude" || solidOp === "revolve" ? "text" : "number"} inputMode="decimal" title={solidOp === "extrude" || solidOp === "revolve" ? "A number, or a parameter name or formula such as plate_h / 2: the step then follows the parameter." : undefined} min={solidOp === "revolve" ? 1 : unit === "in" ? 0.005 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : unit === "in" ? 0.125 : 1} value={solidOp === "revolve" ? solidValue : lengthTextToDisplay(solidValue, unit)} disabled={cutThroughAll || reachesTarget} onChange={(event) => setSolidValue(solidOp === "revolve" ? event.target.value : lengthTextFromDisplay(event.target.value, unit))} />
+            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? `Sweep distance in ${unitWord(unit)}` : `Height in ${unitWord(unit)}`} type={solidOp === "extrude" || solidOp === "revolve" ? "text" : "number"} inputMode="decimal" title={solidOp === "extrude" || solidOp === "revolve" ? "A number, or a parameter name or formula such as plate_h / 2: the step then follows the parameter." : undefined} min={solidOp === "revolve" ? 1 : unit === "in" ? 0.005 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : unit === "in" ? 0.125 : 1} value={solidOp === "revolve" ? solidValue : lengthFieldText(solidDraft, solidValue, unit)} disabled={cutThroughAll || reachesTarget} onBlur={() => setSolidDraft(undefined)} onChange={(event) => { setSolidDraft(event.target.value); setSolidValue(solidOp === "revolve" ? event.target.value : lengthTextFromDisplay(event.target.value, unit)); }} />
             <small>{solidOp === "revolve" ? "°" : unit}</small>
           </div>
           <small className="make-solid-plane">On the {planePlacement}</small>
