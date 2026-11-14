@@ -397,3 +397,39 @@ The same build behaved differently in different windows. Five defects of this ki
 `scripts/layout-probe.js` is the measuring script and `docs/RELEASE_CHECKLIST.md` ("Window sizes and saved state") lists the window sizes every canvas, panel, dialog or view-command change is checked at.
 
 Limits: the probe is run by hand in a browser (no browser automation is a dependency of this repository), so it is a release step and not a CI gate. Windows under about 650 px tall still scroll the page to reach the bottom of the canvas. Other workspaces (Assembly, Drawing, Electrical, Vehicle, Render Studio) share the same workbench row and dialog frame but were not each walked through at every size.
+
+## Fusion 360 parity: sketch round (2026-11)
+
+A Fusion-360-expert audit of the sketch environment (29 gaps ranked by how often a working designer hits them) was followed by a build round of 29 commits on `wp/fusion-parity`, a read-only expert review (10 findings) and a fix round (8 findings closed; 2 cosmetic ones remain: a constraint tool started from command search outside the Sketch workspace only switches workspace, and the sketch marking menu does not stop or repeat a running constraint tool). 1,681 tests pass; key flows were exercised in the built app and the six-size window sweep is clean. User-visible changes:
+
+- Sketch: right-click Create Sketch always starts a new sketch on the picked plane (was moving the last finished sketch); with no plane it opens the plane dialog. (earlier pass, 01cbe1d)
+- Browser: double-click a sketch or solid row opens that step; right-click a finished sketch offers Edit Sketch. (earlier pass, 01cbe1d)
+- Sketch Circle (C): the typed value is the diameter and is stored as a diameter dimension. (earlier pass, 3273c88)
+- Sketch Rectangle and Centre rectangle: born with Horizontal, so size plus position dimensions make the rectangle fully constrained.
+- Sketch constraints: Horizontal and Vertical between two points (origin included), from Point relations (Level points, Stack points) or the ribbon tools; the origin is a pickable point for Coincident and Midpoint too.
+- Sketch selection: double-click a curve selects its connected chain; Shift adds the chain.
+- Sketch Dimension: a new dimension that would over-constrain the sketch prompts to add it as a reference dimension instead of adding a redundant one or refusing.
+- Sketch prompts on the canvas (Relax the Fix, reference dimension) take the pointer, use 12 px text and scroll inside the canvas height.
+- Sketch Trim: each new end is tied to the curve it was cut against (joint or point on curve); a lens trimmed from two circles stays one profile when dragged. Not for cuts against a spline or a rectangle entity.
+- Sketch Dimension (D): second pick gives distance between parallel lines, angle between lines, point-to-line distance, or a point-to-point distance placed as straight, horizontal or vertical; value is typed on the canvas. docs/PDF_SPEC_AUDIT.md line 80 (unified D tool) can now say two-pick distance and angle are on the canvas; single-pick placement and tangent distances remain open.
+- Sketch ribbon: new Constraints group with 12 pick-then-apply tools that stay on until Esc; active tool shown pressed and named on the canvas.
+- Shortcut editor: new Constrain group with 12 commands (no default keys) and a Project command (P). Command search finds '<Relation> constraint' entries. Sketch keymap command count grew by 13; the workbench-core command catalog count is unchanged.
+- Sketch keys: X toggles the selection's construction state, or what is drawn next when nothing is selected or a drawing tool is on; P is Project; Pan has no default key in the sketch (middle button and Space-drag pan); Q unchanged.
+- Sketch canvas mode banners (Sketch Dimension, constraint tool, Measure, Zoom window): text at least 12 px, wraps inside the canvas width.
+- README / help text to check by the lead: any sentence that names P as Pan in the sketch, or X as acting on the selection only.
+- Sketch Offset: a copy of a circle or arc keeps an editable offset dimension to its source (the gap between the two curves) and follows the source when it is resized; inside and outside copies keep their side.
+- Sketch Offset: the distances of one Offset are one dimension. The canvas shows one, editing it moves the whole copy and leaves the source where it is. Offsets with added round or chamfer corners, and offsets of ellipses, splines and one-piece rectangles, stay plain copies (stated in the Offset hint).
+- Sketch dimensions: the position a dimension's text is dragged to is saved with the sketch (one Undo step, kept on reload and when the value changes). New operation set-sketch-dimension-label; operation kinds 109 to 110.
+- Sketch Project / Intersect / Silhouette of a whole solid: the curves stay linked to the solid, are drawn in their own colour (new row 'Projected from a solid' in the colour key), cannot be dragged, and follow the solid when the features built on the sketch are rebuilt, carrying geometry dimensioned from them.
+- Sketch Project: a solid that no longer gives the same curves, or that was deleted, leaves the projected curves as they were and the reason is shown on the feature.
+- Sketch: Break link on selected projected curves makes them ordinary curves; deleting, trimming or moving a projected curve unlinks that curve. Project edge and Convert face remain snapshots.
+- Saved projects: new optional fields only (constraint offsetGroup, inside, labelOffsetPx, dimension name 'offset'; sketch projections; regenerate-design result sketchEntities). Projects without them load and behave as before.
+- Sketch dimensions by name: changing a named dimension (d1) in an open sketch no longer changes finished sketches or steps until Finish; Cancel puts the sketch back exactly as it was.
+- Finish Sketch rebuilds the bodies of every sketch and step that uses a changed dimension by name, in the same Undo step, not only the bodies built on the finished sketch.
+- Browser: double-click on a timeline step (cut, fillet, hole) opens that step's dialog instead of the first step of its body; right-click on a solid step's row offers Edit Feature Parameters for that step.
+- Sketch Offset: the Chain option starts on Everything connected (listed first) and is remembered for the session, so a click on one side of a rectangle or projected outline gives one closed offset with one editable distance; a branching selection falls back instead of being refused.
+- Linked projections: after any rebuild the working copy of a sketch shows its projected curves where the body is now and is not reported as unfinished work.
+- Project, Intersect and Silhouette inside a reopened sketch read the solid as it is before that sketch's own step (the status line says so), so Finish leaves no warning on the feature; a solid made from the sketch being edited is refused with the reason.
+- A sketch with projected curves and no feature yet follows its solid after Finish and after parameter or feature edits, and is brought up to date when it is opened; a projection that cannot follow is marked on the sketch as a note with the reason.
+- regenerate-design operation: new optional field sketchCurves (refreshed projected curves by timeline sketch, with an optional message); absent keeps the old meaning.
+- Sketch Dimension: a point picked first and a line (or centreline, or circle) second gives the distance between them, the same as the other pick order; the banner says a point is picked and what to click next.
