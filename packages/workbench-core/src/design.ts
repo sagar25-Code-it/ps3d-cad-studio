@@ -22,6 +22,7 @@ import { BODY_EDIT_KINDS, BODY_EDIT_ONLY_KINDS, validBodyEdit } from "./body-edi
 import { FEATURE_REF_KEYS, validFeatureRefs } from "./feature-refs.js";
 import { conventionFields, type SketchPlaneConventionRequest } from "./plane-convention.js";
 import { applyProjectedCurves } from "./projection-follow.js";
+import { isDeletedReferenceMessage, isMarkedBroken, usesSketchGeometry } from "./design-references.js";
 
 /**
  * The parametric history ("timeline"): an ordered list of sketch and solid features with a rollback marker. A sketch
@@ -137,7 +138,8 @@ export function isFeatureActive(history: DesignHistory, featureId: string): bool
   if (feature === undefined || index >= history.rollbackIndex || feature.suppressed) return false;
   if (feature.kind === "sketch") return true;
   const sketch = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
-  if (sketch === undefined || sketch.suppressed) return false;
+  // A step whose sketch was deleted stays live (it shows as needing attention and its solid stays as it was); only a suppressed sketch turns it off.
+  if (sketch !== undefined && sketch.suppressed) return false;
   // A copy made by a pattern is only on while the step that made its source body is.
   if (feature.kind === "pattern" && feature.pattern?.result === "new-bodies") {
     const source = baseFeatureOf(history, feature.pattern.sourceBodyId);
@@ -275,7 +277,8 @@ export function sketchOrderProblem(history: DesignHistory, referencedIds: readon
 function checkSolidFeature(history: DesignHistory, feature: DesignSolidFeature, body: GeneralSolidBody, replacing: boolean): DesignChange | undefined {
   if (feature.bodyId !== body.id) return fail("INVALID_OPERATION", "The solid's ID must match the feature's body ID.", [feature.id, body.id], "Build the solid with the feature's body ID.");
   const sketch = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
-  if (sketch === undefined || sketch.kind !== "sketch") return missing(feature.sketchFeatureId, "The feature must be built on a sketch feature in the timeline.");
+  // A hole, blend, pattern or body edit only carries the sketch ID of its body: if that sketch was deleted (the step was kept), the step can still be edited.
+  if ((sketch === undefined || sketch.kind !== "sketch") && (usesSketchGeometry(feature) || sketch !== undefined)) return missing(feature.sketchFeatureId, "The feature must be built on a sketch feature in the timeline.");
   for (const referenced of [feature.sweepPath?.sketchFeatureId, feature.loftSecondarySketchFeatureId]) {
     if (referenced !== undefined && !history.features.some((candidate) => candidate.id === referenced && candidate.kind === "sketch")) return missing(referenced, "The sketch this sweep or loft takes its path or second profile from is not in the timeline.");
   }
@@ -428,6 +431,8 @@ export function regenerateDesign(
     }
     const result = byId.get(feature.id);
     if (result === undefined) return feature;
+    // A step kept after something it was built on was deleted keeps saying so while it still cannot be rebuilt: that reason names what was deleted.
+    if (result.message !== undefined && !result.message.startsWith("Note: ") && isDeletedReferenceMessage(feature.health?.message)) return feature;
     const { health: _previous, ...rest } = feature;
     return result.message === undefined ? rest as DesignFeature : { ...rest, health: { message: result.message } } as DesignFeature;
   });
@@ -848,16 +853,19 @@ export function validateDesignHistory(value: unknown, validSketch: (sketch: unkn
       if (Object.hasOwn(feature, "visible") && typeof feature.visible !== "boolean") return false;
       sketchIds.add(feature.id);
     } else {
-      if (!validSolidFeaturePayload(feature) || !sketchIds.has(feature.sketchFeatureId)) return false;
+      if (!validSolidFeaturePayload(feature)) return false;
+      // A step kept after something it was built on was deleted carries a health mark saying so, and may point at what is gone.
+      const keptBroken = isMarkedBroken(feature as unknown as DesignFeature);
+      if (!sketchIds.has(feature.sketchFeatureId) && !keptBroken && usesSketchGeometry(feature as unknown as DesignFeature)) return false;
       if (feature.kind === "pattern") {
         // A pattern copies a body an earlier step made, and repeats only earlier steps of that body.
         const pattern = (feature as unknown as DesignSolidFeature).pattern!;
-        if (!bodyIds.has(pattern.sourceBodyId)) return false;
-        if (pattern.featureIds !== undefined && pattern.featureIds.some((id) => !solidsOfBody.get(pattern.sourceBodyId)?.has(id))) return false;
+        if (!bodyIds.has(pattern.sourceBodyId) && !keptBroken) return false;
+        if (!keptBroken && pattern.featureIds !== undefined && pattern.featureIds.some((id) => !solidsOfBody.get(pattern.sourceBodyId)?.has(id))) return false;
       }
       if (modifiesBody(feature)) {
         // A join or cut modifies a body an earlier step made.
-        if (!bodyIds.has(feature.bodyId)) return false;
+        if (!bodyIds.has(feature.bodyId) && !keptBroken) return false;
       } else {
         if (bodyIds.has(feature.bodyId)) return false;
         bodyIds.add(feature.bodyId);

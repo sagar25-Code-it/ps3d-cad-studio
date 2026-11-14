@@ -74,10 +74,11 @@ export const deleteImpactTests: readonly TestCase[] = [
     }
   },
   {
-    name: "The confirmation names each step with its reason and the removed solids, defaults to Cancel, and counts the steps on its button",
+    name: "The confirmation names each step with its reason and the removed solids once the cascade is chosen, defaults to Cancel, and counts the steps on its button",
     run: () => {
       const impact = deleteImpact(withBossAndCopies(), "feature:extrude-1")!;
-      const html = renderToStaticMarkup(createElement(DeleteStepDialog, { impact, onConfirm: () => undefined, onCancel: () => undefined }));
+      // Delete only this step is the default now (see delete-keep.test.ts); the list below is what the other choice removes.
+      const html = renderToStaticMarkup(createElement(DeleteStepDialog, { impact, initialMode: "all", onConfirm: () => undefined, onCancel: () => undefined }));
       for (const item of impact.dependents) assert(html.includes(item.name) && html.includes(item.reason), `${item.name} and its reason are listed`);
       assert(html.includes('role="dialog"') && html.includes("Delete Extrude 1?"), "it is a dialog titled with the step");
       assert(html.includes("is removed from the model") || html.includes("are removed from the model"), "the removed solids are said");

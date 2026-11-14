@@ -181,6 +181,7 @@ import { sketchDimensionFollowTests } from "./sketch-dimension-follow.test.js";
 import { browserStepOpenTests } from "./browser-step-open.test.js";
 import { timelineSelectionTests } from "./timeline-selection.test.js";
 import { deleteImpactTests } from "./delete-impact.test.js";
+import { deleteKeepTests } from "./delete-keep.test.js";
 import { rollbackInsertTests } from "./rollback-insert.test.js";
 import { timelineMenuTests } from "./timeline-menu.test.js";
 import { oneUndoStepTests } from "./one-undo-step.test.js";
@@ -449,6 +450,7 @@ const tests: readonly TestCase[] = [
   ...solidContextMenuTests,
   ...timelineSelectionTests,
   ...deleteImpactTests,
+  ...deleteKeepTests,
   ...rollbackInsertTests,
   ...timelineMenuTests,
   ...oneUndoStepTests,
