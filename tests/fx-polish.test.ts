@@ -1,8 +1,17 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 import { applyIntent } from "../apps/studio-web/src/sketch-session.js";
 import { chooseBodyFor } from "../apps/studio-web/src/body-choice.js";
+import { TreeItem } from "../apps/studio-web/src/ui/ProjectTree.js";
+import { createRenameGuard } from "../apps/studio-web/src/ui/inline-rename.js";
+import { isGlobalRenameKey, renameTargetFor } from "../apps/studio-web/src/rename-target.js";
+import { TimelineGroupMenu } from "../apps/studio-web/src/ui/TimelineBar.js";
+import { chainAllButLast, groupDeleteHeadline, groupDeleteImpact, groupDeleteIntents, groupMenuModel, groupSuppressIntents } from "../apps/studio-web/src/ui/timeline-group-actions.js";
+import { timelineGroups } from "../apps/studio-web/src/ui/timeline-groups.js";
 import { blendLimitMm, blendSizeProblem, resizeBlendNext, trimKeptProblem } from "../apps/studio-web/src/part-limits.js";
-import { designOf, validateWorkbenchProject, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
-import { PLATE_BODY, plateHoleFillet, tetra } from "./history-kit.js";
+import { applyWorkbenchOperation, designOf, validateWorkbenchProject, type DesignSolidFeature, type WorkbenchOperation, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { PLATE_BODY, plateHoleFillet, stepOf, tetra } from "./history-kit.js";
 import { assert, equal, type TestCase } from "./test-kit.js";
 
 /** Cosmetic-review polish round (fx-polish): Combine as one project, refusals that name limits and candidates, rename and group menus, layout. */
@@ -12,6 +21,19 @@ function stepless(): WorkbenchProject {
   const history = designOf(plate);
   const sketches = history.features.filter((feature) => feature.kind === "sketch");
   return { ...plate, part: { ...plate.part, generalBodies: [tetra("general-body:a"), tetra("general-body:b")] }, design: { ...history, features: sketches, rollbackIndex: sketches.length } };
+}
+
+const copyStep = (index: number, of: number): DesignSolidFeature => stepOf(`feature:a-${index}`, `Rectangular pattern (${index} of ${of})`, "pattern", {
+  bodyId: `general-body:a-${index}`, operation: "new-body",
+  pattern: { type: "rectangular", result: "new-bodies", groupId: "pattern:a", sourceBodyId: PLATE_BODY, copyIndex: index, countA: of, spacingAMm: 20, directionA: [1, 0, 0], countB: 1, spacingBMm: 0, directionB: [0, 1, 0], sizing: "spacing" }
+});
+
+/** The plate steps, three copies of one pattern, then a join onto the second copy's body. */
+function withGroup(): WorkbenchProject {
+  const project = plateHoleFillet();
+  const history = designOf(project);
+  const features = [...history.features, copyStep(1, 3), copyStep(2, 3), copyStep(3, 3), stepOf("feature:join-on-copy", "Join on copy", "extrude", { operation: "join", bodyId: "general-body:a-2" })];
+  return { ...project, design: { ...history, features, rollbackIndex: features.length } };
 }
 
 export const fxPolishTests: readonly TestCase[] = [
@@ -81,6 +103,140 @@ export const fxPolishTests: readonly TestCase[] = [
       assert(!none.ok && none.message.includes("none yet"), "no candidates: says to create one");
       const many = chooseBodyFor("Hole", Array.from({ length: 9 }, (_, index) => ({ id: String(index), name: `Body ${index + 1}` })), null, "a solid");
       assert(!many.ok && many.message.includes("and 3 more"), "a long list is shortened");
+    }
+  },
+  {
+    name: "F2 renames the picked step, else the selected solid, else a sketch selected by its own id; nothing selected means no target",
+    run: () => {
+      const plate = plateHoleFillet();
+      const history = designOf(plate);
+      const bodies = [{ id: PLATE_BODY, name: "Body 1" }];
+      const cut = history.features.find((feature) => feature.id === "feature:cut-1")!;
+      equal(renameTargetFor(history, null, null, bodies), undefined, "nothing selected");
+      const body = renameTargetFor(history, PLATE_BODY, null, bodies);
+      assert(body !== undefined && body.kind === "body" && body.id === PLATE_BODY && body.name === "Body 1", "a selected solid is renamed as a body, not as the step that made it");
+      const picked = renameTargetFor(history, PLATE_BODY, { featureId: cut.id, selectionId: PLATE_BODY }, bodies);
+      assert(picked !== undefined && picked.kind === "step" && picked.id === "feature:cut-1", "a step the user picked wins over its body");
+      const stale = renameTargetFor(history, PLATE_BODY, { featureId: cut.id, selectionId: "something else" }, bodies);
+      assert(stale !== undefined && stale.kind === "body", "a pick that is no longer the selection does not count");
+      const sketch = history.features.find((feature) => feature.kind === "sketch")!;
+      const bySketch = renameTargetFor(history, sketch.id, null, bodies);
+      assert(bySketch !== undefined && bySketch.kind === "step" && bySketch.id === sketch.id, "a sketch selected by its own id");
+      equal(renameTargetFor(history, "datum:xy", null, bodies), undefined, "a plane is not renamable here");
+    }
+  },
+  {
+    name: "F2 is global only in the Part workspace, never while typing in a field, under a dialog, or with a modifier",
+    run: () => {
+      const plain = { key: "F2", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false };
+      assert(isGlobalRenameKey(plain, "part", false, false), "F2 in Part renames");
+      assert(!isGlobalRenameKey(plain, "sketch", false, false), "the sketch workspace keeps its own keys");
+      assert(!isGlobalRenameKey(plain, "part", true, false), "typing in a field is left alone");
+      assert(!isGlobalRenameKey(plain, "part", false, true), "a dialog owns the keyboard");
+      assert(!isGlobalRenameKey({ ...plain, shiftKey: true }, "part", false, false), "Shift+F2 is not rename");
+      assert(!isGlobalRenameKey({ ...plain, key: "F3" }, "part", false, false), "other keys are ignored");
+    }
+  },
+  {
+    name: "Inline rename: clicking away keeps the typed name, Escape cancels, and the blur after Enter or Escape does nothing",
+    run: () => {
+      const away = createRenameGuard("Body 1");
+      const kept = away.end("blur", "  Housing ");
+      assert(kept !== undefined && kept.action === "commit" && kept.name === "Housing", "blur commits the trimmed name");
+      equal(away.end("blur", "Other"), undefined, "a second ending is ignored");
+      const escaped = createRenameGuard("Body 1");
+      const cancelled = escaped.end("escape", "Housing");
+      assert(cancelled !== undefined && cancelled.action === "cancel", "Escape cancels");
+      equal(escaped.end("blur", "Housing"), undefined, "the blur that follows Escape must not commit");
+      const entered = createRenameGuard("Body 1");
+      assert(entered.end("enter", "Housing")?.action === "commit", "Enter commits");
+      equal(entered.end("blur", "Housing"), undefined, "the blur that follows Enter must not commit twice");
+      assert(createRenameGuard("Body 1").end("blur", "   ")?.action === "cancel", "an empty name is a cancel");
+      assert(createRenameGuard("Body 1").end("blur", "Body 1")?.action === "cancel", "an unchanged name is a cancel (no empty undo step)");
+    }
+  },
+  {
+    name: "A Sketches-folder style row (with an eye) shows the rename field beside its eye while renaming",
+    run: () => {
+      const noop = (): void => undefined;
+      const html = renderToStaticMarkup(createElement(TreeItem, { kind: "sketch", id: "feature:s1", featureId: "feature:s1", label: "Sketch 1", meta: "4 curves", selectedId: null, onSelect: noop, onOpen: noop, eye: { shown: true, what: "sketch", onToggle: noop }, rename: { editing: true, onStart: noop, onCommit: noop, onCancel: noop } }));
+      assert(html.includes('aria-label="Rename Sketch 1"') && html.includes("tree-eye"), `field and eye share the row: ${html}`);
+    }
+  },
+  {
+    name: "A folded group's menu names the whole group in every entry and offers no single-step Rename or Move",
+    run: () => {
+      const project = withGroup();
+      const history = designOf(project);
+      const group = timelineGroups(history)[0]!;
+      const model = groupMenuModel(history, group);
+      equal(model.count, 3, "three copies");
+      equal(model.editLabel, "Edit pattern (3 copies)", "edit names the pattern");
+      equal(model.suppressLabel, "Suppress all 3 copies", "suppress names the group");
+      equal(model.deleteLabel, "Delete all 3 copies", "delete names the group");
+      equal(model.rollbackIndex, group.lastIndex + 1, "the marker goes after the last copy");
+      const allSuppressed = { ...history, features: history.features.map((feature) => feature.kind !== "sketch" && feature.pattern?.groupId === "pattern:a" ? { ...feature, suppressed: true } : feature) };
+      equal(groupMenuModel(allSuppressed, group).suppressLabel, "Unsuppress all 3 copies", "all suppressed offers to bring them back");
+      const html = renderToStaticMarkup(createElement(TimelineGroupMenu, { menuRef: { current: null }, group, history, placement: { left: 0, top: 0, maxHeight: 300 }, onClose: () => undefined, onEdit: () => undefined, onShow: () => undefined, onRollback: () => undefined, onSuppressGroup: () => undefined, onDeleteGroup: () => undefined }));
+      for (const text of ["Edit pattern (3 copies)", "Show the 3 copies", "Suppress all 3 copies", "Delete all 3 copies", "Roll marker after the group"]) assert(html.includes(text), `${text} is in the menu`);
+      assert(!html.includes(">Rename<") && !html.includes("Move earlier"), "no entry that would act on one copy only");
+      const bare = renderToStaticMarkup(createElement(TimelineGroupMenu, { menuRef: { current: null }, group, history, placement: undefined, onClose: () => undefined, onEdit: () => undefined, onShow: () => undefined, onRollback: () => undefined }));
+      assert(!bare.includes("Suppress all") && !bare.includes("Delete all"), "a host that cannot act on the whole group shows no dead Suppress or Delete");
+    }
+  },
+  {
+    name: "Right-clicking a folded group does not open it: only a single step's menu counts as in use",
+    run: () => {
+      const source = readFileSync("apps/studio-web/src/ui/TimelineBar.tsx", "utf8");
+      assert(source.includes("menu?.group === undefined ? menu?.feature.id : undefined"), "a group-scoped menu is left out of the ids that force a group open");
+      assert(source.includes("setMenu({ feature, group, x: event.clientX, y: event.clientY })"), "the folded chip opens a group-scoped menu");
+      assert(/menu\.group === undefined && createPortal\(<TimelineMenu/u.test(source), "a single step's menu is not used for a group");
+    }
+  },
+  {
+    name: "Suppress on a group acts on every copy as one project, and the project before it is untouched",
+    run: () => {
+      const project = withGroup();
+      const history = designOf(project);
+      const group = timelineGroups(history)[0]!;
+      const members = groupMenuModel(history, group).members;
+      const intents = groupSuppressIntents(members, true);
+      equal(intents.length, 3, "one operation per copy");
+      const chained = chainAllButLast(project, intents);
+      assert(chained.ok, "the first two apply on a scratch project");
+      if (!chained.ok) return;
+      const mid = designOf(chained.project).features.filter((feature) => feature.id.startsWith("feature:a-") && feature.suppressed);
+      equal(mid.length, 2, "two copies suppressed before the last is committed");
+      const done = applyWorkbenchOperation(chained.project, { ...chained.last, operationId: "operation:test-last", expectedRevision: chained.project.revision } as unknown as WorkbenchOperation);
+      assert(done.ok, "the last applies");
+      if (!done.ok) return;
+      equal(designOf(done.value.project).features.filter((feature) => feature.id.startsWith("feature:a-") && feature.suppressed).length, 3, "every copy is suppressed in the one resulting project");
+      equal(designOf(project).features.filter((feature) => feature.suppressed).length, 0, "the project before the command has nothing suppressed, so one Undo restores all");
+      equal(groupSuppressIntents(members, false).length, 0, "copies already in the wanted state need no operation");
+    }
+  },
+  {
+    name: "Delete on a group confirms with every copy and what else goes, and deletes each copy once",
+    run: () => {
+      const project = withGroup();
+      const history = designOf(project);
+      const group = timelineGroups(history)[0]!;
+      const impact = groupDeleteImpact(project, group)!;
+      equal(impact.featureName, "Rectangular pattern ×3", "the confirmation is about the group");
+      const names = impact.dependents.map((item) => item.name);
+      assert(names.includes("Rectangular pattern (2 of 3)") && names.includes("Rectangular pattern (3 of 3)") && names.includes("Join on copy"), `lists the other copies and the join built on a copy: ${names.join(", ")}`);
+      const headline = groupDeleteHeadline(impact, group);
+      assert(headline.includes("all 3 copies") && headline.includes("1 other step"), `headline counts copies and outsiders: ${headline}`);
+      equal(groupDeleteIntents(history, group).length, 3, "one delete per copy");
+      const chained = chainAllButLast(project, groupDeleteIntents(history, group));
+      assert(chained.ok, "the deletes chain");
+      if (!chained.ok) return;
+      const done = applyWorkbenchOperation(chained.project, { ...chained.last, operationId: "operation:test-del", expectedRevision: chained.project.revision } as unknown as WorkbenchOperation);
+      assert(done.ok, "the last delete applies");
+      if (!done.ok) return;
+      const left = designOf(done.value.project).features.map((feature) => feature.id);
+      assert(!left.some((id) => id.startsWith("feature:a-")) && !left.includes("feature:join-on-copy"), "copies and the dependent join are gone");
+      assert(left.includes("feature:join-1"), "unrelated steps stay");
     }
   },
 ];

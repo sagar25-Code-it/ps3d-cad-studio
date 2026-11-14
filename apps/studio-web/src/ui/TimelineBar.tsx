@@ -3,9 +3,11 @@ import { createPortal } from "react-dom";
 import type { DesignFeature, DesignHistory } from "../../../../packages/workbench-core/src/index.js";
 import { isFeatureActive, isHealthNote, reorderProblem } from "../../../../packages/workbench-core/src/index.js";
 import { CommandIcon } from "./CommandIcon.js";
+import { InlineRename } from "./InlineRename.js";
 import { nearestSlot, placeMenu, type MenuPlacement } from "./menu-placement.js";
 import { dragHasStarted, dropIndexFor, edgeScroll, keyboardMoveTarget, markerKeyTarget } from "./timeline-drag.js";
 import { groupIsOpen, timelineGroups, type TimelineGroup } from "./timeline-groups.js";
+import { groupMenuModel } from "./timeline-group-actions.js";
 
 interface TimelineBarProps {
   readonly history: DesignHistory;
@@ -22,6 +24,10 @@ interface TimelineBarProps {
   readonly onReveal?: (feature: DesignFeature) => void;
   /** Move a step to another place (its final index). The step is refused with a reason when the move would put it before what it is built on. */
   readonly onMove?: (feature: DesignFeature, toIndex: number) => void;
+  /** Suppress or unsuppress every copy of a folded pattern group as one change. Without it the group menu has no Suppress entry. */
+  readonly onSuppressGroup?: (members: readonly DesignFeature[], suppressed: boolean) => void;
+  /** Delete every copy of a folded pattern group (after the confirmation the host shows). Without it the group menu has no Delete entry. */
+  readonly onDeleteGroup?: (group: TimelineGroup) => void;
 }
 
 /** The glyph of each step kind (HS-26): kinds that share one are the same operation in two forms (a fillet and an edge blend), not a borrowed icon. */
@@ -36,9 +42,8 @@ const ICONS = TIMELINE_ICONS;
  */
 export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
   const { history } = props;
-  const [menu, setMenu] = useState<{ readonly feature: DesignFeature; readonly x: number; readonly y: number } | undefined>(undefined);
+  const [menu, setMenu] = useState<{ readonly feature: DesignFeature; readonly x: number; readonly y: number; /** Set when the menu belongs to a folded group: it then acts on every copy and does not unfold the group. */ readonly group?: TimelineGroup } | undefined>(undefined);
   const [renaming, setRenaming] = useState<string | undefined>(undefined);
-  const [draft, setDraft] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   /** Where the context menu sits once it has been measured; it is kept whole inside the window. */
@@ -215,7 +220,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
   const groups = timelineGroups(history);
   const groupOf = new Map<string, TimelineGroup>();
   for (const group of groups) for (const id of group.ids) groupOf.set(id, group);
-  const groupOpenNow = (group: TimelineGroup): boolean => groupIsOpen(history, group, openGroups, [renaming, chipDrag?.id, press?.id, menu?.feature.id]);
+  const groupOpenNow = (group: TimelineGroup): boolean => groupIsOpen(history, group, openGroups, [renaming, chipDrag?.id, press?.id, menu?.group === undefined ? menu?.feature.id : undefined]);
   /** The step whose slot shows a step: itself, or the first step of the folded group it is inside. */
   const anchorOf = (id: string): string => { const group = groupOf.get(id); return group !== undefined && !groupOpenNow(group) ? group.ids[0]! : id; };
 
@@ -264,7 +269,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
                   title={`${group.label}: ${members.length} copies made by one pattern. Click to show the steps, double-click to edit the pattern, right-click for more.`}
                   onClick={() => toggleGroup(group.groupId)}
                   onDoubleClick={() => props.onEdit(feature)}
-                  onContextMenu={(event) => { event.preventDefault(); setMenu({ feature, x: event.clientX, y: event.clientY }); }}
+                  onContextMenu={(event) => { event.preventDefault(); setMenu({ feature, group, x: event.clientX, y: event.clientY }); }}
                 >
                   <CommandIcon name={ICONS[feature.kind]} />
                   <span className="timeline-label">{group.label}</span>
@@ -277,18 +282,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
               {marker(index)}
               {group !== undefined && group.ids[0] === feature.id && <button className="timeline-group-toggle" aria-expanded={true} title={`Fold ${group.label} back into one item`} aria-label={`Fold ${group.label}`} onClick={() => toggleGroup(group.groupId)}>‹</button>}
               {renaming === feature.id
-                ? <input
-                  className="timeline-rename"
-                  aria-label={`Rename ${feature.name}`}
-                  autoFocus
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onBlur={() => setRenaming(undefined)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") { event.preventDefault(); if (draft.trim().length > 0) props.onRename(feature, draft.trim()); setRenaming(undefined); }
-                    else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setRenaming(undefined); }
-                  }}
-                />
+                ? <InlineRename className="timeline-rename" ariaLabel={`Rename ${feature.name}`} initial={feature.name} onCommit={(name) => { props.onRename(feature, name); setRenaming(undefined); }} onCancel={() => setRenaming(undefined)} />
                 : <button
                   className={classes}
                   disabled={props.busy}
@@ -302,7 +296,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
                   onDoubleClick={() => props.onEdit(feature)}
                   onContextMenu={(event) => { event.preventDefault(); setMenu({ feature, x: event.clientX, y: event.clientY }); }}
                   onKeyDown={(event) => {
-                    if (event.key === "F2") { event.preventDefault(); setDraft(feature.name); setRenaming(feature.id); }
+                    if (event.key === "F2") { event.preventDefault(); setRenaming(feature.id); }
                     else if (event.key === "Delete") { event.preventDefault(); props.onDelete(feature); }
                     else if (event.key === "Enter" && event.shiftKey) { event.preventDefault(); props.onEdit(feature); }
                     else if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight") && props.onMove !== undefined) {
@@ -321,7 +315,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
           {marker(features.length)}
         </>}
     </div>
-    {menu !== undefined && createPortal(<TimelineMenu
+    {menu !== undefined && menu.group === undefined && createPortal(<TimelineMenu
       menuRef={menuRef}
       feature={menu.feature}
       history={history}
@@ -329,11 +323,24 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
       onClose={() => setMenu(undefined)}
       onEdit={props.onEdit}
       onSuppress={props.onSuppress}
-      onRename={(feature) => { setDraft(feature.name); setRenaming(feature.id); }}
+      onRename={(feature) => { setRenaming(feature.id); }}
       onRollback={props.onRollback}
       onDelete={props.onDelete}
       {...(props.onReveal === undefined ? {} : { onReveal: props.onReveal })}
       {...(props.onMove === undefined ? {} : { onMove: props.onMove })}
+    />, menuHost(trackRef.current))}
+    {menu?.group !== undefined && createPortal(<TimelineGroupMenu
+      menuRef={menuRef}
+      group={menu.group}
+      history={history}
+      placement={placement}
+      onClose={() => setMenu(undefined)}
+      onEdit={props.onEdit}
+      onShow={(group) => setOpenGroups((current) => new Set(current).add(group.groupId))}
+      onRollback={props.onRollback}
+      {...(props.onSuppressGroup === undefined ? {} : { onSuppressGroup: props.onSuppressGroup })}
+      {...(props.onDeleteGroup === undefined ? {} : { onDeleteGroup: props.onDeleteGroup })}
+      {...(props.onReveal === undefined ? {} : { onReveal: props.onReveal })}
     />, menuHost(trackRef.current))}
   </section>;
 }
@@ -390,6 +397,52 @@ export function TimelineMenu({ menuRef, feature, history, placement, onClose, on
     {onReveal !== undefined && <button role="menuitem" onClick={run(() => onReveal(feature))}>Find in browser</button>}
     {onMove !== undefined && <MoveItems feature={feature} index={index} history={history} onMove={(to) => run(() => onMove(feature, to))()} />}
     <button role="menuitem" className="danger" onClick={run(() => onDelete(feature))}>Delete</button>
+  </div>;
+}
+
+interface TimelineGroupMenuProps {
+  readonly menuRef: React.RefObject<HTMLDivElement | null>;
+  readonly group: TimelineGroup;
+  readonly history: DesignHistory;
+  readonly placement: MenuPlacement | undefined;
+  readonly onClose: () => void;
+  readonly onEdit: (feature: DesignFeature) => void;
+  readonly onShow: (group: TimelineGroup) => void;
+  readonly onRollback: (index: number) => void;
+  readonly onSuppressGroup?: (members: readonly DesignFeature[], suppressed: boolean) => void;
+  readonly onDeleteGroup?: (group: TimelineGroup) => void;
+  readonly onReveal?: (feature: DesignFeature) => void;
+}
+
+/**
+ * The right-click menu of a folded pattern group. The chip stands for every copy, so every entry acts on the whole group and says so;
+ * a single copy is reached by showing the copies first. Opening this menu does not unfold the group.
+ */
+export function TimelineGroupMenu({ menuRef, group, history, placement, onClose, onEdit, onShow, onRollback, onSuppressGroup, onDeleteGroup, onReveal }: TimelineGroupMenuProps): React.JSX.Element {
+  const model = groupMenuModel(history, group);
+  const first = model.members[0];
+  const run = (action: () => void): (() => void) => () => { action(); onClose(); };
+  const markerHere = history.rollbackIndex === model.rollbackIndex;
+  return <div
+    ref={menuRef}
+    className="timeline-menu"
+    role="menu"
+    aria-label={model.menuLabel}
+    style={placement === undefined ? { left: 0, top: 0, visibility: "hidden" } : { left: placement.left, top: placement.top, maxHeight: placement.maxHeight }}
+    onKeyDown={(event) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      event.preventDefault();
+      const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      items[(at + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+    }}
+  >
+    {first !== undefined && <button role="menuitem" onClick={run(() => onEdit(first))}>{model.editLabel}</button>}
+    <button role="menuitem" onClick={run(() => onShow(group))}>{model.showLabel}</button>
+    {onSuppressGroup !== undefined && <button role="menuitem" onClick={run(() => onSuppressGroup(model.members, model.suppressTo))}>{model.suppressLabel}</button>}
+    <button role="menuitem" disabled={markerHere} title={markerHere ? "The rollback marker is already right after this group." : "Roll the model back to just after the last copy"} onClick={run(() => onRollback(model.rollbackIndex))}>Roll marker after the group</button>
+    {onReveal !== undefined && first !== undefined && <button role="menuitem" onClick={run(() => onReveal(first))}>Find in browser</button>}
+    {onDeleteGroup !== undefined && <button role="menuitem" className="danger" onClick={run(() => onDeleteGroup(group))}>{model.deleteLabel}</button>}
   </div>;
 }
 

@@ -108,6 +108,7 @@ import {
 import { detectSketchProfiles, explainNoProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 import { chooseBodyFor } from "./body-choice.js";
+import { isGlobalRenameKey, renameTargetFor } from "./rename-target.js";
 import { blendLimitMm, blendSizeProblem, resizeBlendNext, trimKeptProblem } from "./part-limits.js";
 import type { ConstraintToolKind } from "../../../packages/workbench-sketch/src/constraint-tool.js";
 import { EMPTY_REFERENCE_LAYER, sketchReferenceLayer } from "./sketch-reference.js";
@@ -128,6 +129,8 @@ import { hotkeyCancelsPanel, partHotkeyCommand, type PartHotkeyCommand } from ".
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
 import { flatPatternForBody, isRebuildFailure, isRebuildNote, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
+import { chainAllButLast, groupDeleteHeadline, groupDeleteImpact, groupDeleteIntents, groupSuppressIntents } from "./ui/timeline-group-actions.js";
+import type { TimelineGroup } from "./ui/timeline-groups.js";
 import { FeatureEditDialog } from "./ui/FeatureEditDialog.js";
 import { ChangeParametersDialog } from "./ui/ChangeParametersDialog.js";
 import { BendTableDialog } from "./ui/BendTableDialog.js";
@@ -379,6 +382,8 @@ export function App(): React.JSX.Element {
   const [treeRenameRequest, setTreeRenameRequest] = useState<{ readonly id: string; readonly serial: number } | null>(null);
   /** HS-02: a delete that would take other steps with it waits here for the person to confirm (see DeleteStepDialog). */
   const [deleteRequest, setDeleteRequest] = useState<DeleteImpact | null>(null);
+  /** Deleting a whole folded pattern group: the confirmation names every copy and what else goes with them. */
+  const [groupDeleteRequest, setGroupDeleteRequest] = useState<{ readonly impact: DeleteImpact; readonly group: TimelineGroup } | null>(null);
   const [selectedFace, setSelectedFace] = useState<{ readonly bodyId: string; readonly faceIndex: number } | null>(null);
   /** Edge chains picked in the 3D view with the Edge intent (PT-08); Ctrl / Shift adds chains of the same body. */
   const [selectedEdges, setSelectedEdges] = useState<readonly { readonly bodyId: string; readonly chain: number; readonly segments: readonly ViewportGuideSegment[] }[]>([]);
@@ -4015,6 +4020,22 @@ export function App(): React.JSX.Element {
     }
   };
   partHotkeyRef.current = runPartHotkey;
+  // F2 renames the selected step or solid from anywhere in the Part workspace (a focused row or chip handles F2 itself and marks the event handled).
+  const renameHotkeyRef = useRef<() => void>(() => undefined);
+  renameHotkeyRef.current = (): void => {
+    const target = renameTargetFor(designOf(projectRef.current), selectedId, stepPick, projectRef.current.part.generalBodies ?? []);
+    if (target === undefined) { setStatus("ready"); setStatusText("Rename: select a solid body or a timeline step first, then press F2."); return; }
+    setTreeRenameRequest((request) => ({ id: target.id, serial: (request?.serial ?? 0) + 1 }));
+  };
+  useEffect(() => {
+    const listener = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || !isGlobalRenameKey(event, projectRef.current.activeWorkspace, isEditableTarget(event.target), globalThis.document.querySelector('[role="dialog"]') !== null)) return;
+      event.preventDefault();
+      renameHotkeyRef.current();
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
 
   const setViewportNavigation = (mode: NavigationMode): void => {
     // PT-15: while the command panel runs, the canvas keeps its picking mode. The nav switches (bar buttons, V / O / P,
@@ -4323,8 +4344,7 @@ export function App(): React.JSX.Element {
       return;
     }
     if (commandId === "selection.rename" && selectionId !== null) {
-      if (contextMenu?.fromBrowser === true && (projectRef.current.part.generalBodies ?? []).some((body) => body.id === selectionId)) { setTreeRenameRequest((request) => ({ id: selectionId, serial: (request?.serial ?? 0) + 1 })); return; }
-      renameBodyWithPrompt(selectionId);
+      renameBodyInBrowser(selectionId);
       return;
     }
     if (commandId === "selection.toggle-visibility" && selectionId !== null) {
@@ -4528,13 +4548,21 @@ export function App(): React.JSX.Element {
     setStepPick(pick);
     setSelectedId(pick.selectionId);
   };
-  /** Rename Body (context menu): asks for the new name and records it as one undo step; the project refuses a name another body has. */
-  const renameBodyWithPrompt = (bodyId: string): void => {
+  /** Rename Body (context menu, F2): the name is typed in place on the body's row in the browser; the project refuses a name another body has. */
+  const renameBodyInBrowser = (bodyId: string): void => {
     const body = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === bodyId);
     if (body === undefined) { setStatus("ready"); setStatusText("Rename Body: select a solid body made with Extrude or Revolve."); return; }
-    const raw = typeof window === "undefined" ? null : window.prompt("Body name", body.name);
-    if (raw === null || raw.trim() === "" || raw.trim() === body.name) return;
-    applyProjectOperation({ kind: "rename-general-body", bodyId, name: raw.trim() });
+    setTreeRenameRequest((request) => ({ id: bodyId, serial: (request?.serial ?? 0) + 1 }));
+  };
+  /** A command that is several operations (every copy of a pattern group) is recorded as one project, so one Undo takes all of it back. */
+  const runGroupOperations = (intents: readonly OperationIntent[], then?: () => void): void => {
+    const chained = chainAllButLast(projectRef.current, intents);
+    if (!chained.ok) { setStatus("error"); setStatusText(chained.message); return; }
+    void commitWithReplay(chained.last, undefined, true, { from: chained.project }).then((ok) => { if (ok) then?.(); });
+  };
+  const requestGroupDelete = (group: TimelineGroup): void => {
+    const impact = groupDeleteImpact(projectRef.current, group);
+    if (impact !== undefined) setGroupDeleteRequest({ impact, group });
   };
   /** Deletes a step and what is built on it, as one undo step. */
   const performStepDelete = (featureId: string): void => {
@@ -4891,6 +4919,7 @@ export function App(): React.JSX.Element {
     />}
     {onView.element}
     {contextMenu !== undefined && contextMenu.radial !== true && <WorkbenchContextMenu x={contextMenu.x} y={contextMenu.y} selectionLabel={contextMenu.selectionId ?? `${project.activeWorkspace} canvas`} commands={contextCommands} onRun={runContextCommand} onClose={() => setContextMenu(undefined)} />}
+    {groupDeleteRequest !== null && <DeleteStepDialog impact={groupDeleteRequest.impact} headline={groupDeleteHeadline(groupDeleteRequest.impact, groupDeleteRequest.group)} onCancel={() => setGroupDeleteRequest(null)} onConfirm={() => { const request = groupDeleteRequest; setGroupDeleteRequest(null); runGroupOperations(groupDeleteIntents(designOf(projectRef.current), request.group), () => { setStepPick(null); setSelectedId(null); }); }} />}
     {deleteRequest !== null && <DeleteStepDialog impact={deleteRequest} onCancel={() => setDeleteRequest(null)} onConfirm={() => { const featureId = deleteRequest.featureId; setDeleteRequest(null); performStepDelete(featureId); }} />}
     {showTimeline && <TimelineBar
       history={designOf(project)}
@@ -4901,6 +4930,8 @@ export function App(): React.JSX.Element {
       onRollback={(index) => timelineOperation({ kind: "set-design-rollback", index })}
       onSuppress={(feature, suppressed) => timelineOperation({ kind: "set-design-feature-suppressed", featureId: feature.id, suppressed })}
       onDelete={requestStepDelete}
+      onSuppressGroup={(members, suppressed) => runGroupOperations(groupSuppressIntents(members, suppressed))}
+      onDeleteGroup={requestGroupDelete}
       onMove={(feature, toIndex) => { void commitWithReplay({ kind: "move-design-feature", featureId: feature.id, toIndex }, undefined, true); }}
       onReveal={(feature) => { selectStep(feature); setTreeRevealRequest((request) => request + 1); }}
       onRename={(feature, name) => { applyProjectOperation({ kind: "rename-design-feature", featureId: feature.id, name }); }}

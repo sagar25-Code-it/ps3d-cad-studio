@@ -11,6 +11,7 @@ import { timelineRowOpenId, timelineRowSelectionId } from "../sketch-plane-ui.js
 import { useSketchKeymap } from "../workspaces/sketch/useSketchKeymap.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, inferCommandIcon } from "./CommandIcon.js";
+import { InlineRename } from "./InlineRename.js";
 import { NAMED_VIEWS, type NamedViewId } from "./named-views.js";
 import { baseGridLabel } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
 
@@ -153,7 +154,7 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
       })}
       {(project.part.constructionPoints ?? []).map((point) => <TreeItem key={point.id} kind="datum" id={point.id} label={point.name} meta={`point · ${point.definition.kind.replaceAll("-", " ")}${point.visible ? "" : " · hidden"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
     </TreeSection>}
-    {showSketch && <TreeSection title={`Sketches · ${timelineSketches.length + (workingSketchListed ? 1 : 0)}`} badge="preview">
+    {showSketch && <TreeSection title={`Sketches · ${timelineSketches.length + (workingSketchListed ? 1 : 0)}`} badge="preview" forceOpen={renaming !== null && renaming.startsWith("sketch-folder:")}>
       {timelineSketches.map((feature) => {
         const eyeOn = sketchEyeShown(history, feature);
         const inModel = isSketchShown(history, feature);
@@ -172,6 +173,7 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
           {...(onSelectStep === undefined ? {} : { selected: selectedStepId === feature.id, onPick: (wasSelected: boolean) => onSelectStep(feature, wasSelected) })}
           {...(onOpenItem === undefined ? {} : { onOpen: onOpenItem, openHint: "Double-click to edit this sketch" })}
           {...(onToggleSketch === undefined ? {} : { eye: { shown: eyeOn, what: "sketch", onToggle: () => onToggleSketch(feature, !eyeOn) } })}
+          {...renameFor(`sketch-folder:${feature.id}`, onRenameStep === undefined ? undefined : (name) => onRenameStep(feature, name))}
         />;
       })}
       <TreeItem kind="sketch" id={project.sketch.id} label={project.sketch.name} meta={`${project.sketch.constraints.length} constraints${workingSketchFullyConstrained ? " · fully constrained" : ""}`} selectedId={selectedId} onSelect={onSelect} {...(onOpenItem === undefined || project.activeWorkspace === "sketch" ? {} : { onOpen: onOpenItem, openHint: "Double-click to edit this sketch" })} {...(workingSketchFullyConstrained ? { trailingIcon: "lock" as const } : {})} />
@@ -182,7 +184,7 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
           {sketchProfiles.map((profile, index) => <TreeItem key={profile.id} kind="sketch" id={profile.id} label={`Profile P${index + 1}`} meta={`${profile.boundary.kind.replaceAll("-", " ")} · ${formatArea(profile.areaMm2)} mm²`} selectedId={selectedId} onSelect={onSelect} indent />)}
         </>}
     </TreeSection>}
-    {history.features.length > 0 && <TreeSection title={`Timeline · ${history.features.length} step${history.features.length === 1 ? "" : "s"}`} badge="preview">
+    {history.features.length > 0 && <TreeSection title={`Timeline · ${history.features.length} step${history.features.length === 1 ? "" : "s"}`} badge="preview" forceOpen={renaming !== null && history.features.some((feature) => feature.id === renaming)}>
       {history.features.map((feature) => {
         const status = featureStatusText(featureStatus(history, feature));
         // A sketch feature in the timeline is a snapshot, so we read its classification from that snapshot directly.
@@ -212,7 +214,7 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
       <TreeItem kind="feature" id="feature:linear-pattern" label="Linear pattern" meta={`${project.part.patternCount} instances · preview`} selectedId={selectedId} onSelect={onSelect} />
       <TreeItem kind="feature" id="feature:revolve-study" label="Revolve study" meta={`${project.part.revolveAngleDeg}° · preview`} selectedId={selectedId} onSelect={onSelect} />
     </TreeSection>}
-    {showBodies && <TreeSection title="Bodies" badge={project.activeWorkspace === "part" ? "qualified" : "preview"}>
+    {showBodies && <TreeSection title="Bodies" badge={project.activeWorkspace === "part" ? "qualified" : "preview"} forceOpen={renaming !== null && (project.part.generalBodies ?? []).some((body) => body.id === renaming)}>
       {hasPlate && <TreeItem kind="body" id="body:bracket" label="Mounting plate" meta="closed manifold mesh" selectedId={selectedId} onSelect={onSelect} />}
       {(project.part.previewBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.shape} · ${body.visible ? "shown" : "hidden"} · preview`} selectedId={selectedId} onSelect={onSelect} indent {...(onToggleBody === undefined ? {} : { eye: { shown: body.visible, onToggle: () => onToggleBody(body.id, "preview") } })} />)}
       {(project.part.generalBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} {...(failures.has(body.id) ? { failed: true } : {})} {...(onToggleBody === undefined ? {} : { eye: { shown: body.visible, onToggle: () => onToggleBody(body.id, "general") } })} {...renameFor(body.id, onRenameBody === undefined ? undefined : (name) => onRenameBody(body.id, name))} meta={`${body.feature?.operation === "surface" ? "surface" : body.subd !== undefined ? "SubD form" : `${body.feature?.operation ?? "mesh"} solid`} · ${body.visible ? "shown" : "hidden"} · ${body.brep !== undefined ? `${body.brep.topology.faces} faces · ${body.brep.origin === "mesh-boolean" ? "Boolean mesh" : "B-rep"}` : `${body.positionsMm.length / 3} verts`}${failures.has(body.id) ? ` · ${describeBodyFailure(failures.get(body.id)!)}` : ""}`} selectedId={selectedId} onSelect={onSelect} indent />)}
@@ -358,8 +360,9 @@ function SketchNavigator({ project, sketchProfiles, selectedId, onSelect }: {
   </>;
 }
 
-function TreeSection({ title, badge, children, initiallyOpen = true }: { readonly title: string; readonly badge: "qualified" | "preview"; readonly children: React.ReactNode; readonly initiallyOpen?: boolean }): React.JSX.Element {
+function TreeSection({ title, badge, children, initiallyOpen = true, forceOpen = false }: { readonly title: string; readonly badge: "qualified" | "preview"; readonly children: React.ReactNode; readonly initiallyOpen?: boolean; /** A row inside is being renamed: the section opens so the field is visible. */ readonly forceOpen?: boolean }): React.JSX.Element {
   const [open, setOpen] = useState(initiallyOpen);
+  useEffect(() => { if (forceOpen) setOpen(true); }, [forceOpen]);
   return <details className="tree-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}><summary><span className="tree-chevron" aria-hidden="true">›</span><strong>{title}</strong><CapabilityBadge level={badge} /></summary><div>{children}</div></details>;
 }
 
@@ -369,21 +372,17 @@ export function TreeItem(props: { readonly kind: TreeKind; readonly id: string; 
   const open = props.onOpen;
   const openId = props.featureId ?? props.id;
   const rename = props.rename;
+  // After Enter or Escape the field is gone and focus would fall to the page: put it back on the row. After clicking another control focus is left where the click put it.
+  const rowRef = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
+  const editingNow = rename?.editing === true;
+  useEffect(() => {
+    if (wasEditing.current && !editingNow && (globalThis.document.activeElement === null || globalThis.document.activeElement === globalThis.document.body)) rowRef.current?.focus();
+    wasEditing.current = editingNow;
+  }, [editingNow]);
   const main = rename?.editing === true
-    ? <input
-      className="tree-rename"
-      aria-label={`Rename ${props.label}`}
-      defaultValue={props.label}
-      maxLength={120}
-      autoFocus
-      onFocus={(event) => event.currentTarget.select()}
-      onBlur={() => rename.onCancel()}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") { event.preventDefault(); const name = event.currentTarget.value.trim(); if (name.length > 0 && name !== props.label) rename.onCommit(name); else rename.onCancel(); }
-        else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); rename.onCancel(); }
-      }}
-    />
-    : <button data-tree-id={props.id} {...(props.featureId === undefined ? {} : { "data-tree-feature-id": props.featureId })} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""} ${props.failed === true ? "failed" : ""}`.trimEnd()} aria-pressed={selected} {...(props.failed === true ? { "data-health": "failed" } : {})} onClick={() => { if (props.onPick !== undefined) props.onPick(selected); else props.onSelect(selected ? null : props.id); }} {...(rename === undefined ? {} : { onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => { if (event.key === "F2") { event.preventDefault(); rename.onStart(); } } })} {...(open === undefined ? {} : { onDoubleClick: () => { if (props.onPick !== undefined) props.onPick(false); else props.onSelect(props.id); open(openId); }, "data-opens": "true", "data-tree-open-id": openId, title: props.openHint ?? "Double-click to open" })}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={props.icon ?? treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span>{props.trailingIcon !== undefined && <span className="tree-trailing" aria-label="Fully constrained" title="Fully constrained"><CommandIcon name={props.trailingIcon} /></span>}</button>;
+    ? <InlineRename className="tree-rename" ariaLabel={`Rename ${props.label}`} initial={props.label} onCommit={rename.onCommit} onCancel={rename.onCancel} />
+    : <button ref={rowRef} data-tree-id={props.id} {...(props.featureId === undefined ? {} : { "data-tree-feature-id": props.featureId })} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""} ${props.failed === true ? "failed" : ""}`.trimEnd()} aria-pressed={selected} {...(props.failed === true ? { "data-health": "failed" } : {})} onClick={() => { if (props.onPick !== undefined) props.onPick(selected); else props.onSelect(selected ? null : props.id); }} {...(rename === undefined ? {} : { onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => { if (event.key === "F2") { event.preventDefault(); rename.onStart(); } } })} {...(open === undefined ? {} : { onDoubleClick: () => { if (props.onPick !== undefined) props.onPick(false); else props.onSelect(props.id); open(openId); }, "data-opens": "true", "data-tree-open-id": openId, title: props.openHint ?? "Double-click to open" })}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={props.icon ?? treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span>{props.trailingIcon !== undefined && <span className="tree-trailing" aria-label="Fully constrained" title="Fully constrained"><CommandIcon name={props.trailingIcon} /></span>}</button>;
   if (props.eye === undefined && rename?.editing !== true) return main;
   return <div className="tree-row">
     {main}

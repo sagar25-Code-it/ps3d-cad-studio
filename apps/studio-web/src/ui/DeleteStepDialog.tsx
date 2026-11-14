@@ -3,6 +3,8 @@ import { deleteImpactHeadline, type DeleteImpact } from "../../../../packages/wo
 
 interface DeleteStepDialogProps {
   readonly impact: DeleteImpact;
+  /** Replaces the opening sentence (a whole pattern group is deleted: its copies are not dependants of the first one). */
+  readonly headline?: string;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
 }
@@ -11,7 +13,7 @@ interface DeleteStepDialogProps {
  * HS-02: asked before a timeline step is deleted when other steps are built on it. It names every step that would go and why,
  * and the solids that disappear; Cancel changes nothing, and the delete itself is one Undo step.
  */
-export function DeleteStepDialog({ impact, onConfirm, onCancel }: DeleteStepDialogProps): React.JSX.Element {
+export function DeleteStepDialog({ impact, headline, onConfirm, onCancel }: DeleteStepDialogProps): React.JSX.Element {
   const dialogRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -29,7 +31,7 @@ export function DeleteStepDialog({ impact, onConfirm, onCancel }: DeleteStepDial
     <section ref={dialogRef} tabIndex={-1} className="engineering-confirmation-dialog compact delete-step-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-step-title" aria-describedby="delete-step-description">
       <header><div><h2 id="delete-step-title">Delete {impact.featureName}?</h2></div><button onClick={onCancel} aria-label="Close without deleting">×</button></header>
       <div className="engineering-review-copy" id="delete-step-description">
-        <p>{deleteImpactHeadline(impact)}</p>
+        <p>{headline ?? deleteImpactHeadline(impact)}</p>
         <ul className="delete-step-list" aria-label="Steps that go with it">
           {impact.dependents.map((item) => <li key={item.id}><strong>{item.name}</strong><span>{item.reason}</span></li>)}
         </ul>
