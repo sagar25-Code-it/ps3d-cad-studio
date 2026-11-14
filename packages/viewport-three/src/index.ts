@@ -6,8 +6,10 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { cloneExchangeObject, disposeExchangeObject, inspectExchangeObject, type ExchangeBounds, type ViewportJpeg } from "../../exchange-3d/src/index.js";
 import type { ModelSuccessResponse } from "../../worker-protocol/src/index.js";
 import type { PreviewBounds, PreviewPrimitive, PreviewScene } from "../../workbench-geometry/src/index.js";
+import { classifyHover, edgePickToleranceMm, sameHoverTarget, type HoverCandidateBody, type HoverFilter, type HoverRayHit, type HoverTarget } from "./hover-pick.js";
 
 export { buildAnalysisGroup, disposeAnalysisGroup, EMPTY_ANALYSIS_OVERLAY, type OverlayRgb, type ViewportAnalysisLines, type ViewportAnalysisMesh, type ViewportAnalysisOverlay } from "./analysis-overlay.js";
+export { classifyHover, edgePickToleranceMm, nearestChainWithin, sameHoverTarget, type HoverCandidateBody, type HoverFilter, type HoverRayHit, type HoverTarget, type PickSegmentMm } from "./hover-pick.js";
 export { applyZebraToObject } from "./zebra-materials.js";
 export { ZEBRA_AXES, ZEBRA_DEFAULT, ZEBRA_MAX_FREQUENCY, ZEBRA_MIN_FREQUENCY, clampZebraFrequency, zebraBandAt, zebraReflection, type ZebraAxis, type ZebraOptions } from "./zebra.js";
 
@@ -16,6 +18,11 @@ export interface ViewportOptions {
   readonly onViewChange?: (state: ViewportViewState) => void;
   readonly onMeasurePoint?: (point: ViewportMeasurePoint) => void;
   readonly onContextMenu?: (request: ViewportContextMenuRequest) => void;
+  /**
+   * A click in select mode with the Face or Edge intent active: the picked face or edge chain (or null for empty space).
+   * `modifiers` carries Ctrl / Shift so the host can add to a selection instead of replacing it.
+   */
+  readonly onPickEntity?: (target: HoverTarget | null, modifiers: { readonly ctrl: boolean; readonly shift: boolean }) => void;
   readonly assemblyTouchGestures?: ViewportAssemblyTouchGestures;
 }
 
@@ -35,7 +42,7 @@ export interface ViewportTouchPoint {
 export type ViewOrientation = "custom" | "front" | "back" | "left" | "right" | "top" | "bottom" | "isometric";
 export type ViewProjection = "perspective" | "orthographic";
 export type NavigationMode = "select" | "orbit" | "pan" | "measure";
-export type SelectionFilter = "auto" | "body" | "component" | "sketch-curve" | "profile" | "connected" | "tangent";
+export type SelectionFilter = "auto" | "body" | "component" | "face" | "edge" | "sketch-curve" | "profile" | "connected" | "tangent";
 export type ViewportShadingMode = "shaded" | "shaded-edges" | "wireframe";
 export type ViewportBackgroundTone = "charcoal" | "dark-gray" | "light-gray" | "white";
 export type ViewportStudioEnvironment = "softbox" | "daylight" | "graphite" | "white-cyclorama" | "warm-studio";
@@ -211,6 +218,13 @@ export class ThreeViewportAdapter {
   #qualifiedBody: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
   #qualifiedEdges: THREE.LineSegments<THREE.EdgesGeometry, THREE.LineBasicMaterial> | undefined;
   #faceHighlight: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
+  /** Hover pre-highlight (PT-08): what the cursor is over, its overlay meshes, and the per-body pick candidates. */
+  #pickCandidates: ReadonlyMap<string, HoverCandidateBody> = new Map();
+  #hover: HoverTarget | null = null;
+  #hoverFace: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
+  readonly #hoverGroup = new THREE.Group();
+  #hoverBodyMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
+  readonly #selectedEdgeGroup = new THREE.Group();
   #drag: { pointerId: number; x: number; y: number; startX: number; startY: number; moved: boolean; mode: NavigationMode } | undefined;
   readonly #touchPointers = new Map<number, ViewportTouchPoint>();
   #assemblyTouchGesture: { startCentroidY: number; startExplodeMm: number; latestExplodeMm: number } | undefined;
@@ -236,6 +250,8 @@ export class ThreeViewportAdapter {
     this.#scene.add(this.#bodyGroup);
     this.#scene.add(this.#measurementGroup);
     this.#scene.add(this.#guideGroup);
+    this.#scene.add(this.#hoverGroup);
+    this.#scene.add(this.#selectedEdgeGroup);
     this.#scene.add(this.#hemisphereLight);
     this.#keyLight.position.set(0.12, -0.08, 0.2);
     this.#keyLight.castShadow = true;
@@ -258,6 +274,7 @@ export class ThreeViewportAdapter {
     canvas.addEventListener("pointermove", this.#onPointerMove);
     canvas.addEventListener("pointerup", this.#onPointerUp);
     canvas.addEventListener("pointercancel", this.#onPointerUp);
+    canvas.addEventListener("pointerleave", this.#onPointerLeave);
     canvas.addEventListener("wheel", this.#onWheel, { passive: false });
     canvas.addEventListener("contextmenu", this.#onContextMenu);
     this.fit();
@@ -333,13 +350,27 @@ export class ThreeViewportAdapter {
 
   setNavigationMode(mode: NavigationMode): void {
     this.#navigationMode = mode;
+    if (mode !== "select") this.#setHover(null);
     this.#canvas.style.cursor = mode === "orbit" ? "grab" : mode === "pan" ? "move" : mode === "measure" ? "crosshair" : "default";
     this.#emitViewState();
   }
 
   setSelectionFilter(filter: SelectionFilter): void {
     this.#selectionFilter = filter;
+    this.#setHover(null);
     this.#emitViewState();
+  }
+
+  /** The faces and sharp edges each body offers to the hover picker (PT-08), keyed by body id. */
+  setPickCandidates(candidates: ReadonlyMap<string, HoverCandidateBody>): void {
+    this.#pickCandidates = candidates;
+    this.#setHover(null);
+  }
+
+  /** Draws the selected edge chains over the model (amber, persistent until replaced); an empty list clears them. */
+  setSelectedEdges(segmentsMm: readonly ViewportGuideSegment[]): void {
+    this.#clearRodGroup(this.#selectedEdgeGroup);
+    this.#addRods(this.#selectedEdgeGroup, segmentsMm, "#ffb347", 1.4, 17);
   }
 
   /** Draws colour-mapped analysis meshes and highlight lines over the model (or clears them with null). */
@@ -674,6 +705,8 @@ export class ThreeViewportAdapter {
     this.#canvas.removeEventListener("pointermove", this.#onPointerMove);
     this.#canvas.removeEventListener("pointerup", this.#onPointerUp);
     this.#canvas.removeEventListener("pointercancel", this.#onPointerUp);
+    this.#canvas.removeEventListener("pointerleave", this.#onPointerLeave);
+    this.setSelectedEdges([]);
     this.#canvas.removeEventListener("wheel", this.#onWheel);
     this.#canvas.removeEventListener("contextmenu", this.#onContextMenu);
     this.setAnalysisOverlay(null);
@@ -734,7 +767,9 @@ export class ThreeViewportAdapter {
         return;
       }
     }
+    if (this.#drag === undefined && event.pointerType !== "touch" && this.#navigationMode === "select") this.#updateHover(event.clientX, event.clientY);
     if (this.#drag === undefined || this.#drag.pointerId !== event.pointerId) return;
+    if (this.#drag.moved) this.#setHover(null);
     const dx = event.clientX - this.#drag.x;
     const dy = event.clientY - this.#drag.y;
     if (Math.hypot(event.clientX - this.#drag.startX, event.clientY - this.#drag.startY) > 3) this.#drag.moved = true;
@@ -824,6 +859,14 @@ export class ThreeViewportAdapter {
   };
 
   #pick(event: PointerEvent): void {
+    const filter = this.#hoverFilter();
+    // Face / Edge intent: the click picks what the hover pre-highlight shows and the host decides what to do with it.
+    if (filter === "face" || filter === "edge") {
+      const hit = this.#hitForHover(event.clientX, event.clientY);
+      const target = classifyHover(hit, hit === undefined ? undefined : this.#pickCandidates.get(hit.bodyId), filter, edgePickToleranceMm(this.#radius, this.#canvas.clientHeight));
+      this.#options.onPickEntity?.(target, { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey });
+      return;
+    }
     if (this.#pickable.length === 0) return;
     const hit = this.#hitObject(event.clientX, event.clientY);
     const id = typeof hit?.userData["semanticId"] === "string" ? hit.userData["semanticId"] as string : null;
@@ -856,6 +899,8 @@ export class ThreeViewportAdapter {
 
   #selectionAllows(object: THREE.Object3D): boolean {
     if (this.#selectionFilter === "auto") return true;
+    // The Face and Edge intents pick into bodies, so any body surface may be hit.
+    if (this.#selectionFilter === "face" || this.#selectionFilter === "edge") return object.userData["selectionKind"] === "body";
     return object.userData["selectionKind"] === this.#selectionFilter;
   }
 
@@ -895,6 +940,7 @@ export class ThreeViewportAdapter {
   };
 
   #clearBody(): void {
+    this.#setHover(null);
     for (const object of this.#objects) {
       this.#bodyGroup.remove(object);
       disposeZebraOriginals(object);
@@ -920,6 +966,11 @@ export class ThreeViewportAdapter {
   setHighlightedFace(bodyId: string | null, faceIndex: number | null): void {
     this.#clearFaceHighlight();
     if (bodyId === null || faceIndex === null || faceIndex < 0) return;
+    this.#faceHighlight = this.#buildFaceOverlay(bodyId, faceIndex, { color: "#ffd24a", emissive: "#6a4a00", renderOrder: 3 });
+  }
+
+  /** A translucent copy of one named face, placed over its body; undefined when the body or face is not drawn. */
+  #buildFaceOverlay(bodyId: string, faceIndex: number, style: { readonly color: string; readonly emissive: string; readonly renderOrder: number }): THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined {
     let source: THREE.Mesh | undefined;
     for (const object of this.#objects) {
       object.traverse((child) => {
@@ -927,7 +978,7 @@ export class ThreeViewportAdapter {
       });
       if (source !== undefined) break;
     }
-    if (source === undefined) return;
+    if (source === undefined) return undefined;
     const faceOfTriangle = source.userData["faceTriangles"] as number[];
     const position = source.geometry.getAttribute("position");
     const index = source.geometry.getIndex();
@@ -939,18 +990,81 @@ export class ThreeViewportAdapter {
         highlightPositions.push(position.getX(vertex), position.getY(vertex), position.getZ(vertex));
       }
     }
-    if (highlightPositions.length === 0) return;
+    if (highlightPositions.length === 0) return undefined;
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(Float32Array.from(highlightPositions), 3));
     geometry.computeVertexNormals();
-    const material = new THREE.MeshStandardMaterial({ color: "#ffd24a", emissive: "#6a4a00", roughness: 0.35, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, depthWrite: false });
+    const material = new THREE.MeshStandardMaterial({ color: style.color, emissive: style.emissive, roughness: 0.35, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, depthWrite: false });
     const highlight = new THREE.Mesh(geometry, material);
-    highlight.renderOrder = 3;
+    highlight.renderOrder = style.renderOrder;
     highlight.userData["ps3dExchangeHelper"] = true;
     highlight.position.copy(source.position);
     highlight.rotation.copy(source.rotation);
     this.#bodyGroup.add(highlight);
-    this.#faceHighlight = highlight;
+    return highlight;
+  }
+
+  readonly #onPointerLeave = (): void => { this.#setHover(null); };
+
+  /** Raycasts the cursor and pre-highlights the face, edge or body a click would pick (PT-08). */
+  #updateHover(clientX: number, clientY: number): void {
+    const hit = this.#hitForHover(clientX, clientY);
+    const filter = this.#hoverFilter();
+    const tolerance = edgePickToleranceMm(this.#radius, this.#canvas.clientHeight);
+    const target = classifyHover(hit, hit === undefined ? undefined : this.#pickCandidates.get(hit.bodyId), filter, tolerance);
+    this.#setHover(target);
+  }
+
+  #hoverFilter(): HoverFilter {
+    const filter = this.#selectionFilter;
+    return filter === "body" || filter === "component" || filter === "face" || filter === "edge" ? filter : "auto";
+  }
+
+  #hitForHover(clientX: number, clientY: number): HoverRayHit | undefined {
+    if (this.#pickable.length === 0) return undefined;
+    const rect = this.#canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return undefined;
+    this.#pointer.set((clientX - rect.left) / rect.width * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.#raycaster.setFromCamera(this.#pointer, this.#activeCamera());
+    const hit = this.#raycaster.intersectObjects(this.#pickable, false).find((entry) => this.#selectionAllows(entry.object));
+    if (hit === undefined) return undefined;
+    const bodyId = typeof hit.object.userData["semanticId"] === "string" ? hit.object.userData["semanticId"] as string : undefined;
+    if (bodyId === undefined) return undefined;
+    const faceTriangles = hit.object.userData["faceTriangles"];
+    const faceIndex = Array.isArray(faceTriangles) && hit.faceIndex !== undefined && hit.faceIndex !== null ? (faceTriangles[hit.faceIndex] as number | undefined) ?? null : null;
+    return { bodyId, pointMm: [hit.point.x * 1000, hit.point.y * 1000, hit.point.z * 1000], faceIndex };
+  }
+
+  #setHover(target: HoverTarget | null): void {
+    if (sameHoverTarget(this.#hover, target)) return;
+    // Clear the previous tint.
+    if (this.#hoverFace !== undefined) {
+      this.#bodyGroup.remove(this.#hoverFace);
+      this.#hoverFace.geometry.dispose();
+      this.#hoverFace.material.dispose();
+      this.#hoverFace = undefined;
+    }
+    this.#clearRodGroup(this.#hoverGroup);
+    if (this.#hoverBodyMesh !== undefined) {
+      if (this.#hoverBodyMesh.userData["semanticId"] !== this.#selectedId) this.#hoverBodyMesh.material.emissive.set("#08090a");
+      this.#hoverBodyMesh = undefined;
+    }
+    this.#hover = target;
+    if (target === null) { this.#canvas.style.cursor = this.#navigationMode === "select" ? "default" : this.#canvas.style.cursor; return; }
+    if (target.kind === "face") {
+      this.#hoverFace = this.#buildFaceOverlay(target.bodyId, target.faceIndex, { color: "#8fd0f2", emissive: "#17405a", renderOrder: 2 });
+    } else if (target.kind === "edge") {
+      this.#addRods(this.#hoverGroup, target.segments.map((segment) => [segment.a, segment.b] as ViewportGuideSegment), "#5fd4ff", 1.3, 16);
+    } else {
+      for (const object of this.#pickable) {
+        if (!(object instanceof THREE.Mesh) || !(object.material instanceof THREE.MeshStandardMaterial)) continue;
+        if (object.userData["semanticId"] !== target.bodyId) continue;
+        if (object.userData["semanticId"] !== this.#selectedId) object.material.emissive.set("#1c333d");
+        this.#hoverBodyMesh = object as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+        break;
+      }
+    }
+    if (this.#navigationMode === "select") this.#canvas.style.cursor = "pointer";
   }
 
   /**
@@ -959,29 +1073,39 @@ export class ThreeViewportAdapter {
    */
   setGuideSegments(segmentsMm: readonly ViewportGuideSegment[], activeIndex: number | readonly number[] | null = null): void {
     const activeSet = new Set<number>(activeIndex === null ? [] : typeof activeIndex === "number" ? [activeIndex] : activeIndex);
-    for (const object of [...this.#guideGroup.children]) {
-      this.#guideGroup.remove(object);
+    this.#clearRodGroup(this.#guideGroup);
+    const active = segmentsMm.filter((_, index) => activeSet.has(index));
+    const idle = segmentsMm.filter((_, index) => !activeSet.has(index));
+    this.#addRods(this.#guideGroup, idle, "#3fd0ff", 1, 18, 0.85);
+    this.#addRods(this.#guideGroup, active, "#ffb347", 1.6, 18, 1);
+  }
+
+  #clearRodGroup(group: THREE.Group): void {
+    for (const object of [...group.children]) {
+      group.remove(object);
       if ("geometry" in object && object.geometry instanceof THREE.BufferGeometry) object.geometry.dispose();
       if ("material" in object) (object.material as THREE.Material).dispose();
     }
-    // A line is one pixel wide whatever the zoom, so each guide is a thin rod that always draws on top of the model.
-    const rodRadius = THREE.MathUtils.clamp(this.#radius * 0.004, 0.0003, 0.003);
+  }
+
+  /** A line is one pixel wide whatever the zoom, so each guide or highlight is a thin rod that always draws on top of the model. */
+  #addRods(group: THREE.Group, segmentsMm: readonly ViewportGuideSegment[], color: string, radiusScale: number, renderOrder: number, opacity = 1): void {
+    const rodRadius = THREE.MathUtils.clamp(this.#radius * 0.004, 0.0003, 0.003) * radiusScale;
     const up = new THREE.Vector3(0, 1, 0);
-    segmentsMm.forEach(([from, to], index) => {
+    for (const [from, to] of segmentsMm) {
       const start = new THREE.Vector3(from[0] / 1000, from[1] / 1000, from[2] / 1000);
       const end = new THREE.Vector3(to[0] / 1000, to[1] / 1000, to[2] / 1000);
       const direction = new THREE.Vector3().subVectors(end, start);
       const length = direction.length();
-      if (length < 1e-9) return;
-      const active = activeSet.has(index);
-      const geometry = new THREE.CylinderGeometry(active ? rodRadius * 1.6 : rodRadius, active ? rodRadius * 1.6 : rodRadius, length, 8, 1, false);
-      const rod = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: active ? "#ffb347" : "#3fd0ff", depthTest: false, transparent: true, opacity: active ? 1 : 0.85 }));
+      if (length < 1e-9) continue;
+      const geometry = new THREE.CylinderGeometry(rodRadius, rodRadius, length, 8, 1, false);
+      const rod = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity }));
       rod.quaternion.setFromUnitVectors(up, direction.normalize());
       rod.position.copy(start).add(end).multiplyScalar(0.5);
-      rod.renderOrder = 18;
+      rod.renderOrder = renderOrder;
       rod.userData["ps3dExchangeHelper"] = true;
-      this.#guideGroup.add(rod);
-    });
+      group.add(rod);
+    }
   }
 
   #clearMeasurements(): void {

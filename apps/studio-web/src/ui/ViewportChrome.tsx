@@ -102,8 +102,8 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
           <SelectionButton id="auto" label="Auto" icon="select" state={props.state} onSelect={props.onSelectionFilter} />
           <SelectionButton id="body" label="Body" icon="part" state={props.state} onSelect={props.onSelectionFilter} disabled={props.workspace === "assembly"} />
           <SelectionButton id="component" label="Component" icon="assembly" state={props.state} onSelect={props.onSelectionFilter} disabled={props.workspace !== "assembly"} />
-          <button disabled aria-label="Face" title="Persistent face topology is not available in this bounded mesh kernel."><CommandIcon name="surface" /><span className="control-label">Face</span></button>
-          <button disabled aria-label="Edge" title="Persistent edge topology is not available in this bounded mesh kernel."><CommandIcon name="edge" /><span className="control-label">Edge</span></button>
+          <SelectionButton id="face" label="Face" icon="surface" state={props.state} onSelect={props.onSelectionFilter} disabled={props.workspace !== "part"} />
+          <SelectionButton id="edge" label="Edge" icon="edge" state={props.state} onSelect={props.onSelectionFilter} disabled={props.workspace !== "part"} />
         </>}
       </div>
       {!sketch && <>

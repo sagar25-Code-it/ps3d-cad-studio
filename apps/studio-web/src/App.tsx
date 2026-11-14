@@ -127,6 +127,8 @@ import type { BooleanMode } from "../../../packages/workbench-geometry/src/index
 import {
   ThreeViewportAdapter,
   viewAnglesForOrientation,
+  type HoverCandidateBody,
+  type HoverTarget,
   type NavigationMode,
   type SelectionFilter,
   type ViewOrientation,
@@ -354,6 +356,8 @@ export function App(): React.JSX.Element {
   const [diagnostic, setDiagnostic] = useState<UiDiagnostic>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedFace, setSelectedFace] = useState<{ readonly bodyId: string; readonly faceIndex: number } | null>(null);
+  /** Edge chains picked in the 3D view with the Edge intent (PT-08); Ctrl / Shift adds chains of the same body. */
+  const [selectedEdges, setSelectedEdges] = useState<readonly { readonly bodyId: string; readonly chain: number; readonly segments: readonly ViewportGuideSegment[] }[]>([]);
   const [treeRevealRequest, setTreeRevealRequest] = useState(0);
   const [sketchOptionsRevealRequest, setSketchOptionsRevealRequest] = useState(0);
   const [undoDepth, setUndoDepth] = useState(0);
@@ -820,6 +824,40 @@ export function App(): React.JSX.Element {
     if (pickRef.current !== null) { pickRef.current(point); return; }
     setMeasurePoints((current) => current.length >= 2 ? [point] : [...current, point]);
   }, []);
+  /** A click with the Face or Edge intent (PT-08): faces select one at a time, edge chains collect with Ctrl / Shift. */
+  const acceptEntityPick = useCallback((target: HoverTarget | null, modifiers: { readonly ctrl: boolean; readonly shift: boolean }): void => {
+    if (target === null) { setSelectedFace(null); setSelectedEdges((current) => current.length === 0 ? current : []); return; }
+    if (target.kind === "face") {
+      setSelectedId(target.bodyId);
+      setSelectedFace({ bodyId: target.bodyId, faceIndex: target.faceIndex });
+      setSelectedEdges((current) => current.length === 0 ? current : []);
+      return;
+    }
+    if (target.kind === "edge") {
+      setSelectedId(target.bodyId);
+      setSelectedFace(null);
+      const pick = { bodyId: target.bodyId, chain: target.chain, segments: target.segments.map((segment) => [segment.a, segment.b] as ViewportGuideSegment) };
+      setSelectedEdges((current) => {
+        const existing = current.findIndex((entry) => entry.bodyId === pick.bodyId && entry.chain === pick.chain);
+        if (!(modifiers.ctrl || modifiers.shift)) return existing >= 0 && current.length === 1 ? [] : [pick];
+        if (existing >= 0) return current.filter((_, index) => index !== existing);
+        // One fillet or chamfer works on one solid, so chains collect within one body; a pick on another body restarts the set.
+        return current.every((entry) => entry.bodyId === pick.bodyId) ? [...current, pick] : [pick];
+      });
+      return;
+    }
+    setSelectedId(target.bodyId);
+  }, []);
+  /** What each body offers the hover picker: its sharp edge chains (faces come from the mesh's own face names). */
+  const partPickCandidates = useMemo((): ReadonlyMap<string, HoverCandidateBody> => {
+    const map = new Map<string, HoverCandidateBody>();
+    if (project.activeWorkspace !== "part") return map;
+    for (const body of project.part.generalBodies ?? []) {
+      const edges = pickableEdges({ positionsMm: body.positionsMm, indices: body.indices }, 5, { includeConcave: true });
+      map.set(body.id, { edges: typeof edges === "string" ? [] : edges });
+    }
+    return map;
+  }, [project.activeWorkspace, project.part.generalBodies]);
   const openContextMenu = useCallback((clientX: number, clientY: number, selectionId: string | null, selectionKind?: WorkbenchSelectionKind, radial = false): void => {
     if (selectionId !== null) setSelectedId(selectionId);
     setContextMenu({ x: clientX, y: clientY, selectionId, selectionKind: selectionKind ?? classifyWorkbenchSelection(selectionId), ...(radial ? { radial: true } : {}) });
@@ -836,6 +874,7 @@ export function App(): React.JSX.Element {
       onSelectBody: setSelectedId,
       onViewChange: setViewportState,
       onMeasurePoint: acceptMeasurePoint,
+      onPickEntity: acceptEntityPick,
       onContextMenu: (request) => openContextMenu(request.clientX, request.clientY, request.semanticId, (request.selectionKind === "body" || request.selectionKind === "component") && request.selectionKind === classifyWorkbenchSelection(request.semanticId) ? request.selectionKind : undefined, true),
       ...(project.activeWorkspace === "assembly" ? { assemblyTouchGestures: {
         getExplodeMm: () => assemblyExplodeRef.current,
@@ -848,7 +887,7 @@ export function App(): React.JSX.Element {
     viewportRef.current = viewport;
     if (zebraRef.current !== null) viewport.setZebra(zebraRef.current);
     return () => { viewport.dispose(); viewportRef.current = undefined; };
-  }, [acceptMeasurePoint, assemblyExplodeMaxMm, commitAssemblyExplode, isThreeDimensional, masterCartOpen, openContextMenu, previewAssemblyExplode, project.activeWorkspace]);
+  }, [acceptEntityPick, acceptMeasurePoint, assemblyExplodeMaxMm, commitAssemblyExplode, isThreeDimensional, masterCartOpen, openContextMenu, previewAssemblyExplode, project.activeWorkspace]);
 
   useEffect(() => {
     setMeasurePoints((current) => current.length === 0 ? current : []);
@@ -869,8 +908,13 @@ export function App(): React.JSX.Element {
     if (project.activeWorkspace === "assembly") viewport.setScene(assemblyScene);
     if (project.activeWorkspace === "surface") viewport.setScene(surfacePreview.scene);
     if (project.activeWorkspace === "vehicle") viewport.setScene(vehiclePreview.scene);
-  }, [activeImport, assemblyScene, model, partScene, project.activeWorkspace, project.id, project.part.templateVisible, surfacePreview.scene, vehiclePreview.scene]);
+    viewport.setPickCandidates(partPickCandidates);
+  }, [activeImport, assemblyScene, model, partScene, partPickCandidates, project.activeWorkspace, project.id, project.part.templateVisible, surfacePreview.scene, vehiclePreview.scene]);
   useEffect(() => viewportRef.current?.setSelectedId(selectedId), [selectedId]);
+  // The picked edge chains stay lit until the selection changes; a change to the bodies invalidates the chains.
+  useEffect(() => { viewportRef.current?.setSelectedEdges(selectedEdges.flatMap((entry) => entry.segments)); }, [selectedEdges]);
+  useEffect(() => { setSelectedEdges((current) => current.length === 0 ? current : []); }, [project.part.generalBodies]);
+  useEffect(() => { setSelectedEdges((current) => (current.length === 0 || current[0]!.bodyId === selectedId ? current : [])); }, [selectedId]);
   // Escape ends a viewport pick that is waiting for a click.
   useEffect(() => {
     const listener = (event: KeyboardEvent): void => {
@@ -956,7 +1000,8 @@ export function App(): React.JSX.Element {
       const sketchFilterInvalid = workspace !== "sketch" && (filter === "sketch-curve" || filter === "profile" || filter === "connected" || filter === "tangent");
       const componentFilterInvalid = workspace === "part" && filter === "component";
       const bodyFilterInvalid = (workspace === "assembly" || workspace === "surface" || workspace === "vehicle") && filter === "body";
-      return sketchFilterInvalid || componentFilterInvalid || bodyFilterInvalid ? { ...currentState, selectionFilter: "auto" } : currentState;
+      const faceEdgeFilterInvalid = workspace !== "part" && (filter === "face" || filter === "edge");
+      return sketchFilterInvalid || componentFilterInvalid || bodyFilterInvalid || faceEdgeFilterInvalid ? { ...currentState, selectionFilter: "auto" } : currentState;
     });
     const next = { ...current, activeWorkspace: workspace };
     projectRef.current = next;
@@ -3950,6 +3995,8 @@ export function App(): React.JSX.Element {
       if (sketch || masterCartOpen || !isThreeDimensional || isEditableTarget(event.target) || globalThis.document.querySelector('[role="dialog"]') !== null) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const key = event.key.toLowerCase();
+      // Esc clears the face / edge selection (a pending viewport pick is cancelled by its own listener).
+      if (key === "escape" && pickRef.current === null) { setSelectedFace(null); setSelectedEdges((current) => current.length === 0 ? current : []); return; }
       const command = partHotkeyCommand(key, projectRef.current.activeWorkspace);
       if (command !== undefined) { partHotkeyRef.current(command); return; }
       // Outside the Part workspace the Fusion letters stand aside and the older view keys keep working.
