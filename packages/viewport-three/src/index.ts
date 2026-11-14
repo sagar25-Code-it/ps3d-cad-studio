@@ -422,6 +422,9 @@ export class ThreeViewportAdapter {
 
   getEdgePickSettings(): EdgePickSettings { return this.#edgePick; }
 
+  /** Half the length, in millimetres, of the cross drawn at a picked vertex: about six pixels at the current zoom. */
+  edgeCrossArmMm(): number { return this.#mmPerPixel() * 6; }
+
   /**
    * While a command waits for a click on an edge or a vertex (navigation mode "measure"), the hover shows what that click
    * would pick and the click reports it as `edgeTarget` / `vertexTarget`. null: clicks report only the surface point.

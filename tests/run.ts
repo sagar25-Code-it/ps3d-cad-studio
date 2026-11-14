@@ -231,6 +231,8 @@ import { creaseEdgeTests } from "./crease-edges.test.js";
 import { curvedBlendTests } from "./blend-curved.test.js";
 
 import { edgePickTests } from "./edge-pick.test.js";
+import { edgePickWiringTests } from "./edge-pick-wiring.test.js";
+import { edgePickThreeTests } from "./edge-pick-three.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -482,6 +484,8 @@ const tests: readonly TestCase[] = [
   ...creaseEdgeTests,
   ...curvedBlendTests,
   ...edgePickTests,
+  ...edgePickWiringTests,
+  ...edgePickThreeTests,
 ];
 let failures = 0;
 
