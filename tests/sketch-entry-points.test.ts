@@ -95,9 +95,9 @@ export const sketchEntryPointTests: readonly TestCase[] = [
   {
     name: "Double-click in the browser: a timeline sketch or solid row opens that step, the working sketch row opens the sketcher, other rows do nothing",
     run: () => {
-      const timeline = [{ id: "feature:s1", selectionId: "feature:s1" }, { id: "feature:extrude-1", selectionId: "general-body:extrude-1" }];
+      const timeline = [{ id: "feature:s1" }, { id: "feature:extrude-1" }];
       equal(JSON.stringify(browserOpenAction("feature:s1", timeline, "sketch:main")), JSON.stringify({ kind: "edit-feature", featureId: "feature:s1" }), "the sketch row");
-      equal(JSON.stringify(browserOpenAction("general-body:extrude-1", timeline, "sketch:main")), JSON.stringify({ kind: "edit-feature", featureId: "feature:extrude-1" }), "a solid row is selected through its body");
+      equal(JSON.stringify(browserOpenAction("feature:extrude-1", timeline, "sketch:main")), JSON.stringify({ kind: "edit-feature", featureId: "feature:extrude-1" }), "a solid row hands over its own step");
       equal(browserOpenAction("sketch:main", timeline, "sketch:main").kind, "open-working", "the working sketch row");
       equal(browserOpenAction("datum:xy", timeline, "sketch:main").kind, "none", "a plane row only selects");
     }

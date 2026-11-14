@@ -102,6 +102,9 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
     command("inspect.properties", "Properties", "inspect", "inspect", false, PROPERTIES_REASON)
   );
 
+  // A solid step right-clicked on its browser row arrives as its body (that is what the row selects): the step's own Edit comes first.
+  if (kind === "body" && request.featureKind === "solid") commands.push(command("feature.edit", "Edit Feature Parameters", "edit", "edit"));
+
   if (kind === "body") {
     const analyticBody = request.selectionId?.startsWith("part-body:") === true;
     const generalBody = request.selectionId?.startsWith("general-body:") === true;

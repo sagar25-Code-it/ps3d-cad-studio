@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { WORKBENCH_MCP_TOOLS } from "../../../../packages/workbench-mcp/src/index.js";
-import { dependentsOf, describeFeature, designOf, featureOfBody, featureStatus, featureStatusText, vehicleHardPoints, type DesignFeature, type WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
+import { dependentsOf, describeFeature, designOf, featureOfBody, featureStatus, featureStatusText, vehicleHardPoints, type WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { DesignHealthReport } from "../../../../packages/workbench-health/src/index.js";
 import { analyzeWorkbenchSketch, detectSketchProfiles } from "../../../../packages/workbench-sketch/src/index.js";
 import { friendlySketchText, sketchConstraintNames, sketchEntityNames, type WorkbenchSketch } from "../../../../packages/workbench-core/src/index.js";
 import { evaluateConstructionPlane, resolveBinder } from "../../../../packages/workbench-geometry/src/index.js";
 import { describeBinderKind } from "../construction-ui.js";
 import { relationsEmptyHelp } from "../sketch-help-text.js";
+import { timelineRowOpenId, timelineRowSelectionId } from "../sketch-plane-ui.js";
 import { useSketchKeymap } from "../workspaces/sketch/useSketchKeymap.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, inferCommandIcon } from "./CommandIcon.js";
@@ -18,7 +19,8 @@ interface ProjectTreeProps {
   readonly revealSelectionRequest: number;
   readonly designHealth: DesignHealthReport;
   readonly onSelect: (id: string | null) => void;
-  readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null) => void;
+  /** `featureId` is the timeline step of the row that was right-clicked, when it is a timeline row (its `selectionId` is the step's body). */
+  readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null, featureId?: string) => void;
   /** Double-click on a row that can be opened: a timeline step (by the row's ID) or the working sketch. */
   readonly onOpenItem?: (id: string) => void;
 }
@@ -63,9 +65,12 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
   const history = designOf(project);
   return <aside ref={treeRef} className="project-tree" aria-label="Model browser and feature history" onContextMenu={(event) => {
     event.preventDefault();
-    const id = (event.target as Element).closest<HTMLElement>("[data-tree-id]")?.dataset["treeId"] ?? null;
+    const row = (event.target as Element).closest<HTMLElement>("[data-tree-id]");
+    const id = row?.dataset["treeId"] ?? null;
+    const featureId = row?.dataset["treeFeatureId"];
     if (id !== null) onSelect(id);
-    onContextMenu(event.clientX, event.clientY, id);
+    if (featureId === undefined) onContextMenu(event.clientX, event.clientY, id);
+    else onContextMenu(event.clientX, event.clientY, id, featureId);
   }}>
     <div className="panel-title model-browser-title"><p>Model browser</p><h2>{project.name}</h2><div><span>Revision {project.revision}</span><strong>{project.activeWorkspace}</strong></div></div>
     <TreeSection title="Document" badge="preview" initiallyOpen={false}>
@@ -111,7 +116,8 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
           key={feature.id}
           kind={feature.kind === "sketch" ? "sketch" : "feature"}
           icon={feature.kind}
-          id={timelineSelectionId(feature)}
+          id={timelineRowSelectionId(feature)}
+          featureId={timelineRowOpenId(feature)}
           label={feature.name}
           meta={`${describeFeature(history, feature)}${locked ? " · fully constrained" : ""}${status === "" ? "" : ` · ${status}`}${feature.health === undefined ? "" : ` · ${feature.health.message}`}`}
           selectedId={selectedId}
@@ -279,22 +285,18 @@ function TreeSection({ title, badge, children, initiallyOpen = true }: { readonl
   return <details className="tree-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}><summary><span className="tree-chevron" aria-hidden="true">›</span><strong>{title}</strong><CapabilityBadge level={badge} /></summary><div>{children}</div></details>;
 }
 
-function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean; readonly icon?: string; readonly trailingIcon?: string; readonly onOpen?: (id: string) => void; readonly openHint?: string }): React.JSX.Element {
+function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean; readonly icon?: string; readonly trailingIcon?: string; readonly onOpen?: (id: string) => void; readonly openHint?: string; /** The timeline step this row shows. Double-click opens it, whatever the row selects. */ readonly featureId?: string }): React.JSX.Element {
   const selected = props.selectedId === props.id;
   // A double-click is two clicks first (select, then deselect); opening selects the row again so it reads as the thing being edited.
   const open = props.onOpen;
-  return <button data-tree-id={props.id} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => props.onSelect(selected ? null : props.id)} {...(open === undefined ? {} : { onDoubleClick: () => { props.onSelect(props.id); open(props.id); }, "data-opens": "true", title: props.openHint ?? "Double-click to open" })}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={props.icon ?? treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span>{props.trailingIcon !== undefined && <span className="tree-trailing" aria-label="Fully constrained" title="Fully constrained"><CommandIcon name={props.trailingIcon} /></span>}</button>;
+  const openId = props.featureId ?? props.id;
+  return <button data-tree-id={props.id} {...(props.featureId === undefined ? {} : { "data-tree-feature-id": props.featureId })} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => props.onSelect(selected ? null : props.id)} {...(open === undefined ? {} : { onDoubleClick: () => { props.onSelect(props.id); open(openId); }, "data-opens": "true", "data-tree-open-id": openId, title: props.openHint ?? "Double-click to open" })}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={props.icon ?? treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span>{props.trailingIcon !== undefined && <span className="tree-trailing" aria-label="Fully constrained" title="Fully constrained"><CommandIcon name={props.trailingIcon} /></span>}</button>;
 }
 
 /** A sketch is fully constrained when every drawn primitive has a determined pose: the solver reports zero degrees of freedom. An empty sketch is not called "fully constrained" because there is nothing to constrain yet. */
 function isSketchFullyConstrained(sketch: WorkbenchSketch): boolean {
   if (sketch.entities.every((entity) => entity.construction)) return false;
   return analyzeWorkbenchSketch(sketch).classification === "fully-constrained";
-}
-
-/** A timeline solid is selected through its body (so the viewport highlights it); a sketch step is selected by its own ID. */
-function timelineSelectionId(feature: DesignFeature): string {
-  return feature.kind === "sketch" ? feature.id : feature.bodyId;
 }
 
 function treeIcon(kind: TreeKind, label: string, id: string): string {
@@ -343,7 +345,7 @@ function selectionRelationships(project: WorkbenchProject, selectedId: string | 
   const history = designOf(project);
   const ownStep = history.features.find((feature) => feature.id === selectedId) ?? (selectedId.startsWith("general-body:") ? featureOfBody(history, selectedId) : undefined);
   if (ownStep !== undefined) {
-    if (ownStep.kind === "sketch") return dependentsOf(history, ownStep.id).map((step) => ({ role: "Built on it", id: timelineSelectionId(step), label: step.name, meta: describeFeature(history, step), kind: "feature" as const }));
+    if (ownStep.kind === "sketch") return dependentsOf(history, ownStep.id).map((step) => ({ role: "Built on it", id: timelineRowSelectionId(step), label: step.name, meta: describeFeature(history, step), kind: "feature" as const }));
     const source = history.features.find((feature) => feature.id === ownStep.sketchFeatureId);
     return source === undefined ? [] : [{ role: "Made from", id: source.id, label: source.name, meta: describeFeature(history, source), kind: "sketch" as const }];
   }

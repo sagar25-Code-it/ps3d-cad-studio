@@ -203,11 +203,31 @@ export type BrowserOpenAction =
   | { readonly kind: "none" };
 
 /**
- * Double-click in the browser opens the thing for editing, as the timeline strip does: a timeline step by the ID its row selects
- * (a sketch by its own ID, a solid through its body), or the working sketch's own row. Any other row only selects.
+ * Double-click in the browser opens the thing for editing, as the timeline strip does. A timeline row opens the step it shows, so
+ * the row hands over the step's own ID (`timelineRowOpenId`), never the ID it selects: the rows of a body's steps (its extrude, a
+ * cut, a fillet) all select the same body, and that ID would open the body's first step whichever row was double-clicked.
+ * The working sketch's own row opens the sketcher. Any other row only selects.
  */
-export function browserOpenAction(rowId: string, timeline: readonly { readonly id: string; readonly selectionId: string }[], workingSketchId: string): BrowserOpenAction {
-  const feature = timeline.find((candidate) => candidate.id === rowId) ?? timeline.find((candidate) => candidate.selectionId === rowId);
+export function browserOpenAction(rowOpenId: string, timeline: readonly { readonly id: string }[], workingSketchId: string): BrowserOpenAction {
+  const feature = timeline.find((candidate) => candidate.id === rowOpenId);
   if (feature !== undefined) return { kind: "edit-feature", featureId: feature.id };
-  return rowId === workingSketchId ? { kind: "open-working" } : { kind: "none" };
+  return rowOpenId === workingSketchId ? { kind: "open-working" } : { kind: "none" };
+}
+
+/** A timeline row of the browser is selected through its body (so the viewport highlights the solid); a sketch row by its own ID. */
+export function timelineRowSelectionId(feature: { readonly id: string; readonly kind: string; readonly bodyId?: string }): string {
+  return feature.kind === "sketch" || feature.bodyId === undefined ? feature.id : feature.bodyId;
+}
+
+/** What a timeline row of the browser opens (double-click) and edits (right-click): always the step the row shows. */
+export function timelineRowOpenId(feature: { readonly id: string }): string {
+  return feature.id;
+}
+
+/**
+ * The timeline step a right-click command acts on: the step of the browser row that was right-clicked when the menu was opened
+ * there, otherwise the selection itself (a step selected by its own ID, as a sketch row or the timeline strip does).
+ */
+export function contextStepId(rowFeatureId: string | undefined, selectionId: string | null): string | null {
+  return rowFeatureId ?? selectionId;
 }
