@@ -180,6 +180,7 @@ import { sketchProjectLinkedTests } from "./sketch-project-linked.test.js";
 import { sketchDimensionFollowTests } from "./sketch-dimension-follow.test.js";
 import { browserStepOpenTests } from "./browser-step-open.test.js";
 import { sketchOffsetChainDefaultTests } from "./sketch-offset-chain-default.test.js";
+import { sketchProjectionCurrentTests } from "./sketch-projection-current.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -382,6 +383,7 @@ const tests: readonly TestCase[] = [
   ...sketchDimensionFollowTests,
   ...browserStepOpenTests,
   ...sketchOffsetChainDefaultTests,
+  ...sketchProjectionCurrentTests,
 ];
 let failures = 0;
 

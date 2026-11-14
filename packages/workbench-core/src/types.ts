@@ -1614,7 +1614,13 @@ export type WorkbenchOperation = OperationEnvelope & (
    */
   | { readonly kind: "set-design-parameters"; readonly parameters: readonly DesignParameter[]; readonly renames?: readonly { readonly from: string; readonly to: string }[] }
   /** Applies the result of rebuilding features after a sketch changed: new solids, or the reason a feature failed. */
-  | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number; /** The linked (projected) curves of the sketch this feature is built on, where their solid puts them now; each keeps its id. */ readonly sketchEntities?: readonly SketchEntity[] }[] }
+  | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number; /** The linked (projected) curves of the sketch this feature is built on, where their solid puts them now; each keeps its id. */ readonly sketchEntities?: readonly SketchEntity[] }[];
+      /**
+       * Linked (projected) curves of timeline sketches worked out again without a step: a sketch nothing is built on yet, or one that
+       * is being opened. Each curve keeps its id. `message` says why a projection could not follow and is shown on the sketch as a
+       * note; an entry without one clears that note. Absent means no sketch is refreshed this way.
+       */
+      readonly sketchCurves?: readonly { readonly sketchFeatureId: string; readonly entities: readonly SketchEntity[]; readonly message?: string }[] }
   | { readonly kind: "set-design-feature-suppressed"; readonly featureId: string; readonly suppressed: boolean }
   | { readonly kind: "delete-design-feature"; readonly featureId: string }
   | { readonly kind: "set-design-rollback"; readonly index: number }

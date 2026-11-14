@@ -307,8 +307,23 @@ export function updateDesignSolid(project: WorkbenchProject, feature: DesignSoli
   return changed(withHistory({ ...project, part: { ...project.part, generalBodies: bodies } }, next), [feature.id, body.id], `Updated ${feature.name}.`);
 }
 
-export function regenerateDesign(project: WorkbenchProject, results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number; readonly sketchEntities?: readonly SketchEntity[] }[]): DesignChange {
+/**
+ * Begins the note a timeline sketch carries while curves it projected from a solid could not follow that solid. It starts with the
+ * note prefix of design-labels.ts ("Note: "), written out here because that module imports this one.
+ */
+export const PROJECTION_NOTE_PREFIX = "Note: Projected curves: ";
+
+export function regenerateDesign(
+  project: WorkbenchProject,
+  results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number; readonly sketchEntities?: readonly SketchEntity[] }[],
+  sketchCurves: readonly { readonly sketchFeatureId: string; readonly entities: readonly SketchEntity[]; readonly message?: string }[] = []
+): DesignChange {
   const history = designOf(project);
+  if (new Set(sketchCurves.map((entry) => entry.sketchFeatureId)).size !== sketchCurves.length) return fail("INVALID_OPERATION", "A sketch appears twice in the refreshed sketch curves.", [], "Send one entry per sketch.");
+  for (const entry of sketchCurves) {
+    const sketchFeature = history.features.find((candidate) => candidate.id === entry.sketchFeatureId);
+    if (sketchFeature === undefined || sketchFeature.kind !== "sketch") return missing(entry.sketchFeatureId, "A sketch whose projected curves were refreshed is not a sketch of the timeline.");
+  }
   const byId = new Map(results.map((result) => [result.featureId, result] as const));
   if (byId.size !== results.length) return fail("INVALID_OPERATION", "A feature appears twice in the rebuild results.", [], "Send one result per feature.");
   for (const result of results) {
@@ -350,13 +365,34 @@ export function regenerateDesign(project: WorkbenchProject, results: readonly { 
     for (const entity of result.sketchEntities) curves.set(entity.id, entity);
     followedCurves.set(feature.sketchFeatureId, curves);
   }
+  // ... and so do the curves of a sketch that no step is built on, or that is being opened: those arrive by sketch, not by step.
+  const sketchNotes = new Map<string, string | undefined>();
+  for (const entry of sketchCurves) {
+    const curves = followedCurves.get(entry.sketchFeatureId) ?? new Map<string, SketchEntity>();
+    for (const entity of entry.entities) curves.set(entity.id, entity);
+    if (curves.size > 0) followedCurves.set(entry.sketchFeatureId, curves);
+    sketchNotes.set(entry.sketchFeatureId, entry.message);
+  }
   const relinked = applyProjectedCurves;
   const features = history.features.map((feature): DesignFeature => {
     const followed = followedOffsets.get(feature.id);
     const curves = followedCurves.get(feature.id);
-    if (feature.kind === "sketch" && (curves !== undefined || (followed !== undefined && feature.sketch.planeFace !== undefined))) {
-      const moved = followed !== undefined && feature.sketch.planeFace !== undefined ? retargeted(feature.sketch, followed) : feature.sketch;
-      return { ...feature, sketch: curves === undefined ? moved : relinked(moved, curves) };
+    if (feature.kind === "sketch") {
+      let next: DesignSketchFeature = feature;
+      if (curves !== undefined || (followed !== undefined && feature.sketch.planeFace !== undefined)) {
+        const moved = followed !== undefined && feature.sketch.planeFace !== undefined ? retargeted(feature.sketch, followed) : feature.sketch;
+        const sketch = curves === undefined ? moved : relinked(moved, curves);
+        if (sketch !== feature.sketch) next = { ...next, sketch };
+      }
+      // A refresh by sketch says how it went: its note replaces the last one, and a clean refresh clears it. Any other mark on the
+      // sketch (an expression that does not evaluate) belongs to something else and is left alone.
+      if (sketchNotes.has(feature.id) && (next.health === undefined || next.health.message.startsWith(PROJECTION_NOTE_PREFIX))) {
+        const note = sketchNotes.get(feature.id);
+        const { health: _projectionNote, ...rest } = next;
+        if (note !== undefined) next = { ...rest, health: { message: `${PROJECTION_NOTE_PREFIX}${note}`.slice(0, 400) } };
+        else if (next.health !== undefined) next = rest;
+      }
+      return next;
     }
     const result = byId.get(feature.id);
     if (result === undefined) return feature;
@@ -365,10 +401,22 @@ export function regenerateDesign(project: WorkbenchProject, results: readonly { 
   });
   const workingFollowed = history.editingSketchId === null ? undefined : followedOffsets.get(history.editingSketchId);
   const failed = results.filter((result) => result.message !== undefined).length;
-  const workingSketch = workingFollowed !== undefined && project.sketch.planeFace !== undefined ? retargeted(project.sketch, workingFollowed) : project.sketch;
+  const workingOnFace = workingFollowed !== undefined && project.sketch.planeFace !== undefined ? retargeted(project.sketch, workingFollowed) : project.sketch;
+  // The working sketch is a copy of the timeline sketch it was opened from, so its linked curves follow the solid in the same step:
+  // otherwise the sketcher would show them where the body used to be, and the copy would read as an unfinished edit of its sketch.
+  const workingCurves = history.editingSketchId === null ? undefined : followedCurves.get(history.editingSketchId);
+  const workingSketch = workingCurves === undefined ? workingOnFace : relinked(workingOnFace, workingCurves);
+  if (results.length === 0 && sketchCurves.length > 0) {
+    const noted = sketchCurves.filter((entry) => entry.message !== undefined).length;
+    return changed(
+      withHistory({ ...project, sketch: workingSketch, part: { ...project.part, generalBodies: bodies } }, { ...history, features }),
+      sketchCurves.map((entry) => entry.sketchFeatureId),
+      `Brought the projected curves of ${sketchCurves.length} sketch${sketchCurves.length === 1 ? "" : "es"} up to date with their solids${noted === 0 ? "" : `; ${noted} could not follow`}.`
+    );
+  }
   return changed(
     withHistory({ ...project, sketch: workingSketch, part: { ...project.part, generalBodies: bodies } }, { ...history, features }),
-    results.map((result) => result.featureId),
+    [...results.map((result) => result.featureId), ...sketchCurves.map((entry) => entry.sketchFeatureId)],
     `Rebuilt ${results.length - failed} feature${results.length - failed === 1 ? "" : "s"}${failed === 0 ? "" : `; ${failed} could not be rebuilt`}.${newPieces.length === 0 ? "" : ` The solid was cut into ${newPieces.length + results.filter((result) => result.pieces !== undefined && result.body !== undefined).length} separate bodies (${newPieces.map((piece) => piece.name).join(", ")} split off).`}`
   );
 }

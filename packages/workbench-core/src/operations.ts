@@ -396,7 +396,11 @@ function validateWorkbenchOperationShape(rawInput: unknown): WorkbenchResult<Wor
       }
       break;
     case "regenerate-design":
-      if (!keys(input, [...common, "results"]) || !boundedList(input.results, 200, isRecord)
+      if (Object.hasOwn(input, "sketchCurves") && (!boundedList(input.sketchCurves, 200, isRecord)
+        || input.sketchCurves.some((entry) => !stableId(entry.sketchFeatureId) || Object.keys(entry).some((key) => !["sketchFeatureId", "entities", "message"].includes(key))
+          || !boundedList(entry.entities, WORKBENCH_LIMITS.maxEntities, isRecord) || entry.entities.some((entity) => sketchEntityProblem(entity) !== undefined)
+          || (Object.hasOwn(entry, "message") && !shortText(entry.message, 1, 400))))) return invalidOperation("The refreshed sketch curves are invalid: each entry names a timeline sketch, lists sketch curves, and may carry a message of up to 400 characters.");
+      if (!keys(input, [...common, "results", ...(Object.hasOwn(input, "sketchCurves") ? ["sketchCurves"] : [])]) || !boundedList(input.results, 200, isRecord)
         || input.results.some((result) => !stableId(result.featureId) || Object.keys(result).some((key) => !["featureId", "body", "pieces", "message", "sketchPlaneOffsetMm", "sketchEntities"].includes(key))
           || (Object.hasOwn(result, "sketchEntities") && (!boundedList(result.sketchEntities, WORKBENCH_LIMITS.maxEntities, isRecord) || result.sketchEntities.some((entity) => sketchEntityProblem(entity) !== undefined)))
           || (Object.hasOwn(result, "sketchPlaneOffsetMm") && !finiteRange(result.sketchPlaneOffsetMm, -MODEL_ENVELOPE.maxPlaneOffsetMm, MODEL_ENVELOPE.maxPlaneOffsetMm))
@@ -830,7 +834,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     case "new-design-sketch": return newDesignSketch(project, operation.plane, operation.offsetMm ?? 0, operation.tilt, operation.frame, operation.face, operation.convention);
     case "add-design-solid": return addDesignSolid(project, operation.feature, operation.body);
     case "update-design-solid": return updateDesignSolid(project, operation.feature, operation.body);
-    case "regenerate-design": return regenerateDesign(project, operation.results);
+    case "regenerate-design": return regenerateDesign(project, operation.results, operation.sketchCurves);
     case "set-design-parameters": return setDesignParameters(project, operation.parameters, operation.renames ?? [], resizeSketchEntity);
     case "set-design-feature-suppressed": return setDesignFeatureSuppressed(project, operation.featureId, operation.suppressed);
     case "delete-design-feature": return deleteDesignFeature(project, operation.featureId);

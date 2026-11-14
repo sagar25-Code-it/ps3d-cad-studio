@@ -103,7 +103,8 @@ import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "
 import type { ConstraintToolKind } from "../../../packages/workbench-sketch/src/constraint-tool.js";
 import { EMPTY_REFERENCE_LAYER, sketchReferenceLayer } from "./sketch-reference.js";
 import { placementOfPickedPlane, sketchPlaneOfFace, type FacePick } from "./sketch-face-pick.js";
-import { edgesToPick, isSketchProjectCommand, needsPick, pickedEdgeRun, planSketchProject, sourceBodyOf, type SketchProjectCommand, type SketchProjectPick } from "./sketch-project-command.js";
+import { edgesToPick, isSketchProjectCommand, needsPick, pickedEdgeRun, sourceBodyOf, type SketchProjectCommand, type SketchProjectPick } from "./sketch-project-command.js";
+import { planSketchProjectForSession, refreshLooseSketchProjections } from "./sketch-projection-refresh.js";
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
 import { facesOfBody } from "./edge-blend-step.js";
@@ -2751,6 +2752,13 @@ export function App(): React.JSX.Element {
         const second = applyWorkbenchOperation(next, { kind: "regenerate-design", results, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: next.revision } as WorkbenchOperation);
         if (second.ok) {
           next = second.value.project;
+          // A sketch that projected one of the rebuilt solids but has no step yet is not replayed by any of them: refresh its curves by sketch.
+          const loose = await refreshLooseSketchProjections(next);
+          if (projectRef.current !== before) { setStatus("ready"); setStatusText("The design changed while it was rebuilding, so that edit was not applied. Try it again."); return false; }
+          if (loose.length > 0) {
+            const third = applyWorkbenchOperation(next, { kind: "regenerate-design", results: [], sketchCurves: loose, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: next.revision } as WorkbenchOperation);
+            if (third.ok) next = third.value.project;
+          }
           const failed = results.filter(isRebuildFailure);
           if (failed.length > 0) summary = `${summary} ${failed.length} step${failed.length === 1 ? "" : "s"} could not be applied: ${failed[0]!.message}`;
           const noted = results.find((result) => isRebuildNote(result.message));
@@ -3468,7 +3476,10 @@ export function App(): React.JSX.Element {
         pick = { pointMm: picked.pointMm, edges: run.segments };
       } else pick = { pointMm: picked.pointMm, faceIndex: picked.faceIndex ?? null };
     }
-    const planned = planSketchProject(projectRef.current, body, command, { construction: sketchProjectReference, ...(pick === undefined ? {} : { pick }), newId: () => `entity:proj-${crypto.randomUUID()}` });
+    // A linked projection reads the solid as the sketch being edited sees it: before the step this sketch already has on that solid.
+    const planFrom = projectRef.current;
+    const planned = await planSketchProjectForSession(planFrom, body, command, { construction: sketchProjectReference, ...(pick === undefined ? {} : { pick }), newId: () => `entity:proj-${crypto.randomUUID()}` });
+    if (projectRef.current !== planFrom) { setStatus("ready"); setStatusText(`${name}: the design changed while the body was being read. Choose ${name} again.`); return; }
     if (!planned.ok) { setStatus("ready"); setStatusText(`${name}: ${planned.message}`); return; }
     if (!applyProjectOperation(planned.operation)) return;
     setStatusText(`${planned.summary} (${source})`);

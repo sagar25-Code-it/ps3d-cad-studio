@@ -2,6 +2,7 @@ import type { WorkbenchOperation, WorkbenchProject, WorkbenchSketch } from "../.
 import { applyWorkbenchOperation, designOf } from "../../../packages/workbench-core/src/index.js";
 import { isRebuildFailure, isRebuildNote, rebuildDependentsOfAll, type RebuildResult } from "./design-regeneration.js";
 import { upgradeLegacyProfileRefs } from "./legacy-profile-refs.js";
+import { refreshLooseSketchProjections, refreshSketchProjections } from "./sketch-projection-refresh.js";
 
 /**
  * The life of a working sketch against the timeline: finishing it, cancelling it, and reopening another sketch while this one has
@@ -109,6 +110,13 @@ export async function commitWorkingSketchAtomically(
         const regenerated = applyIntent(current, { kind: "regenerate-design", results: rebuilt });
         if (!regenerated.ok) return regenerated;
         current = regenerated.value.project;
+        // A sketch that projected one of the rebuilt solids but has no step yet is not replayed by any of them: its curves are refreshed by sketch.
+        const loose = await refreshLooseSketchProjections(current);
+        if (loose.length > 0) {
+          const refreshed = applyIntent(current, { kind: "regenerate-design", results: [], sketchCurves: loose });
+          if (!refreshed.ok) return refreshed;
+          current = refreshed.value.project;
+        }
       }
     }
   }
@@ -118,6 +126,15 @@ export async function commitWorkingSketchAtomically(
     current = applied.value.project;
     summary = applied.value.summary;
     changed = true;
+    // A sketch that is opened shows its projected curves where their solids are now, whatever rebuilt (or did not) since it was finished.
+    if (next.kind === "edit-design-sketch") {
+      const refresh = await refreshSketchProjections(current, next.featureId);
+      if (refresh !== undefined) {
+        const refreshed = applyIntent(current, { kind: "regenerate-design", results: [], sketchCurves: [refresh] });
+        if (!refreshed.ok) return refreshed;
+        current = refreshed.value.project;
+      }
+    }
   }
   const failed = rebuilt.filter(isRebuildFailure);
   const notes = rebuilt.flatMap((result) => (isRebuildNote(result.message) ? [result.message!] : []));
