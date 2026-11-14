@@ -184,6 +184,7 @@ import { deleteImpactTests } from "./delete-impact.test.js";
 import { rollbackInsertTests } from "./rollback-insert.test.js";
 import { timelineMenuTests } from "./timeline-menu.test.js";
 import { oneUndoStepTests } from "./one-undo-step.test.js";
+import { fxPolishTests } from "./fx-polish.test.js";
 import { computeAllTests } from "./compute-all.test.js";
 import { bodyRenameTests } from "./body-rename.test.js";
 import { browserRowTests } from "./browser-rows.test.js";
@@ -474,6 +475,7 @@ const tests: readonly TestCase[] = [
   ...holeReferenceFaceTests,
   ...timelineMarkerKeyTests,
   ...partSceneTests,
+  ...fxPolishTests,
 ];
 let failures = 0;
 

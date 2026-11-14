@@ -107,6 +107,8 @@ import {
 } from "../../../packages/exchange-3d/src/index.js";
 import { detectSketchProfiles, explainNoProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
+import { chooseBodyFor } from "./body-choice.js";
+import { blendLimitMm, blendSizeProblem, resizeBlendNext, trimKeptProblem } from "./part-limits.js";
 import type { ConstraintToolKind } from "../../../packages/workbench-sketch/src/constraint-tool.js";
 import { EMPTY_REFERENCE_LAYER, sketchReferenceLayer } from "./sketch-reference.js";
 import { placementOfPickedPlane, sketchPlaneOfFace, type FacePick } from "./sketch-face-pick.js";
@@ -2171,15 +2173,16 @@ export function App(): React.JSX.Element {
     if (modifier === "shell") { handleBodyEdit("shell"); return; }
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
-    const body = bodies.find((candidate) => candidate.id === selectedId);
-    if (body === undefined) { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)} needs a general solid body selected first.`); return; }
+    const choice = chooseBodyFor(modifierLabelOf(modifier), bodies, selectedId, "a solid made with Extrude or Revolve", (current.part.previewBodies ?? []).find((candidate) => candidate.id === selectedId)?.name);
+    if (!choice.ok) { setStatus("ready"); setStatusText(choice.message); return; }
+    const body = choice.body;
     const defaults = { hole: 6, fillet: 2, chamfer: 2 } as const;
     const prompt: Record<typeof modifier, string> = {
       hole: "Hole diameter",
       fillet: "Fillet radius",
       chamfer: "Chamfer distance"
     };
-    const value = await onView.ask({ label: prompt[modifier], quantity: "length", defaultValue: defaults[modifier], min: 0, exclusiveMin: true, step: 0.5 });
+    const value = await onView.ask({ label: `${prompt[modifier]} on ${body.name}`, quantity: "length", defaultValue: defaults[modifier], min: 0, exclusiveMin: true, step: 0.5 });
     if (value === null) return;
     if ((projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === body.id) !== body) { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)}: ${body.name} changed while the value was being typed; run the command again.`); return; }
     // A body built by the timeline gets a timeline step, so the hole or blend survives every rebuild and can be edited,
@@ -2251,12 +2254,13 @@ export function App(): React.JSX.Element {
       })) setSelectedId(bodyId);
       return;
     }
-    const body = bodies.find((candidate) => candidate.id === bodyIdOverride);
-    if (body === undefined) {
+    const bodyChoice = chooseBodyFor(commandName, bodies, bodyIdOverride, "an analytic body", (current.part.generalBodies ?? []).find((candidate) => candidate.id === bodyIdOverride)?.name);
+    if (!bodyChoice.ok) {
       setStatus("ready");
-      setStatusText(`Select an analytic body in the viewport or Bodies tree before running ${commandName}.`);
+      setStatusText(bodyChoice.message);
       return;
     }
+    const body = bodyChoice.body;
     if (operation === "pattern-feature") {
       const count = Math.max(2, current.part.patternCount);
       const instanceIds = Array.from({ length: count - 1 }, () => `part-body:pattern-${crypto.randomUUID()}`);
@@ -2290,16 +2294,21 @@ export function App(): React.JSX.Element {
       void (async () => {
         const kept = await onView.ask({ label: `Kept length of ${body.name} from its base (mm)`, quantity: "length", defaultValue: Number((body.sizeMm[2] * 0.7).toFixed(2)), min: 0, exclusiveMin: true, step: 0.5 });
         if (kept === null) return;
-        applyProjectOperation({ kind: "trim-part-body", bodyId: body.id, keptLengthMm: Math.max(0.5, kept), side: "negative" });
+        const trimProblem = trimKeptProblem(body.name, kept, body.sizeMm[2]);
+        if (trimProblem !== undefined) { setStatus("ready"); setStatusText(trimProblem); return; }
+        applyProjectOperation({ kind: "trim-part-body", bodyId: body.id, keptLengthMm: kept, side: "negative" });
       })();
       return;
     }
     if (operation === "edge-blend" || operation === "chamfer") {
       void (async () => {
-        const maximum = Math.max(0.25, Math.min(body.sizeMm[0], body.sizeMm[1]) / 2 - 0.5);
-        const size = await onView.ask({ label: operation === "edge-blend" ? "Blend radius" : "Chamfer distance", quantity: "length", defaultValue: Math.min(Math.max(0.5, current.part.edgeTreatmentMm), maximum), min: 0, exclusiveMin: true, step: 0.25 });
+        const maximum = Math.max(0.25, blendLimitMm(body.sizeMm));
+        const sizeLabel = operation === "edge-blend" ? "Blend radius" : "Chamfer distance";
+        const size = await onView.ask({ label: `${sizeLabel} (at most ${Number(maximum.toFixed(2))} mm)`, quantity: "length", defaultValue: Math.min(Math.max(0.5, current.part.edgeTreatmentMm), maximum), min: 0, exclusiveMin: true, step: 0.25 });
         if (size === null) return;
-        applyProjectOperation({ kind: "set-part-body-edge-treatment", bodyId: body.id, treatment: operation === "edge-blend" ? "blend" : "chamfer", sizeMm: Math.min(Math.max(0.25, size), maximum) });
+        const blendProblem = blendSizeProblem(body.name, sizeLabel, size, body.sizeMm);
+        if (blendProblem !== undefined) { setStatus("ready"); setStatusText(blendProblem); return; }
+        applyProjectOperation({ kind: "set-part-body-edge-treatment", bodyId: body.id, treatment: operation === "edge-blend" ? "blend" : "chamfer", sizeMm: size });
       })();
       return;
     }
@@ -2343,8 +2352,9 @@ export function App(): React.JSX.Element {
         setStatusText("Resize Blend needs a recognized analytic blend. Run Edge Blend on a plain block first.");
         return;
       }
-      const maximum = Math.min(body.sizeMm[0], body.sizeMm[1]) / 2 - 0.5;
-      applyProjectOperation({ kind: "set-part-body-edge-treatment", bodyId: body.id, treatment: "blend", sizeMm: Math.min(maximum, body.edgeTreatment.sizeMm + 0.5) });
+      const grown = resizeBlendNext(body.name, body.edgeTreatment.sizeMm, body.sizeMm);
+      if (!grown.ok) { setStatus("ready"); setStatusText(grown.message); return; }
+      applyProjectOperation({ kind: "set-part-body-edge-treatment", bodyId: body.id, treatment: "blend", sizeMm: grown.sizeMm });
       return;
     }
     const feature = body.boreDiameterMm !== undefined ? "bore"
