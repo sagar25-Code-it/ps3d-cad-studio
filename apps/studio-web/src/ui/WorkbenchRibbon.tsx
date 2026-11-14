@@ -582,7 +582,9 @@ function RibbonPanel({ label, children, more }: { readonly label: string; readon
     const rect = summary.getBoundingClientRect();
     const width = Math.min(320, window.innerWidth - 24);
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    const top = rect.bottom + 2;
+    // Start below the ribbon itself: its sideways scrollbar sits in the ribbon's last pixels and is painted over anything that starts there.
+    const ribbonBottom = detailsRef.current?.closest(".command-ribbon")?.getBoundingClientRect().bottom ?? 0;
+    const top = Math.max(rect.bottom, ribbonBottom) + 2;
     setPlaced({ left, top, maxHeight: Math.max(120, Math.min(480, window.innerHeight - top - 12)) });
   };
 

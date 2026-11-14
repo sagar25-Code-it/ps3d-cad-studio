@@ -54,6 +54,19 @@ export const ribbonPanelTests: readonly TestCase[] = [
     }
   },
   {
+    name: "An open ribbon drop-down is painted above the timeline strip and the docked Edit Feature panel (the ribbon's own stacking level is lower than both)",
+    run: () => {
+      const css = readFileSync(CSS, "utf8");
+      const lifted = /\.command-ribbon:has\(\.ribbon-panel-menu\[open\]\)\s*\{\s*z-index:\s*(\d+)/.exec(css)?.[1];
+      assert(lifted !== undefined, "the ribbon is lifted while a drop-down is open");
+      const timelineCss = readFileSync("apps/studio-web/src/styles/timeline.css", "utf8");
+      const timeline = Number(/\.timeline-bar\s*\{[^}]*z-index:\s*(\d+)/.exec(timelineCss)?.[1]);
+      const dock = Number(/\.save-project-backdrop\s*\{\s*z-index:\s*(\d+)/.exec(readFileSync("apps/studio-web/src/styles/file-studio.css", "utf8"))?.[1]);
+      assert(Number(lifted) > timeline, `above the timeline strip (${lifted} > ${timeline})`);
+      assert(Number(lifted) > dock, `above the docked Edit Feature panel (${lifted} > ${dock})`);
+    }
+  },
+  {
     name: "The panel drop-down is bounded by the window height and scrolls inside",
     run: () => {
       const css = readFileSync(CSS, "utf8");

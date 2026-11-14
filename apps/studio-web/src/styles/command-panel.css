@@ -152,6 +152,11 @@
   background: rgb(63 160 255 / 14%);
 }
 
+/* The ribbon is a stacking context at z-index 9, under the timeline strip (30) and the docked Edit Feature panel (160): a drop-down inside it was painted over by both, so its lower rows could not be reached. While a drop-down is open the whole ribbon is lifted above them. */
+.studio-app .command-ribbon:has(.ribbon-panel-menu[open]) {
+  z-index: 170;
+}
+
 /* Fixed to the window (left, top and max-height are set from the panel name's position): an absolute drop-down inside the scrolling, clipping ribbon was cut off at the ribbon's bottom edge. */
 .ribbon-panel-drop {
   position: fixed;

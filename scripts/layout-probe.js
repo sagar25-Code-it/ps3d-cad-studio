@@ -92,7 +92,18 @@ window.__layoutProbe = (options = {}) => {
     const m = menu.getBoundingClientRect();
     const label = (menu.getAttribute("aria-label") ?? menu.className ?? "").toString().slice(0, 60);
     if (m.top < 0 || m.bottom > vh || m.left < 0 || m.right > vw) problems.push(`menu "${label}" runs outside the window (top ${r0(m.top)}, bottom ${r0(m.bottom)} of ${vh}; left ${r0(m.left)}, right ${r0(m.right)} of ${vw})`);
-    return { label, ...box(m), scrollsInside: menu.scrollHeight > menu.clientHeight + 1 };
+    // Covered: something else (the timeline strip, a docked panel, another stacking context) paints over part of the menu. Sample the four
+    // corners (inset 16 px) and the middle of each side that lie inside the window; every sample must hit the menu itself.
+    const inset = 16;
+    const samples = [[m.left + inset, m.top + inset], [m.right - inset, m.top + inset], [m.left + inset, m.bottom - inset], [m.right - inset, m.bottom - inset], [m.left + m.width / 2, m.bottom - inset], [m.left + m.width / 2, m.top + inset]]
+      .filter(([x, y]) => x > 0 && y > 0 && x < vw && y < vh);
+    const covers = [];
+    for (const [x, y] of samples) {
+      const hit = document.elementFromPoint(x, y);
+      if (hit !== null && !menu.contains(hit)) covers.push(`${(hit.getAttribute("class") ?? hit.tagName).toString().slice(0, 30)} at ${r0(x)},${r0(y)}`);
+    }
+    if (covers.length > 0) problems.push(`menu "${label}" is covered by ${[...new Set(covers)].slice(0, 3).join("; ")}`);
+    return { label, ...box(m), scrollsInside: menu.scrollHeight > menu.clientHeight + 1, covered: covers.length };
   });
   return report;
 };
