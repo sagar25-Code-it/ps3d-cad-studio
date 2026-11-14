@@ -82,6 +82,8 @@ interface WorkbenchRibbonProps {
   readonly onAddConstructionAxis: (mode: "two-points" | "point-and-direction" | "plane-intersection" | "perpendicular-to-plane" | "cylinder-axis") => void;
   readonly onAddConstructionPoint: (mode: "xyz" | "midpoint" | "axis-plane-intersection") => void;
   readonly onEdgeFlange: () => void;
+  /** Start the Part-environment Extrude or Revolve on a finished sketch (the E command). */
+  readonly onPartCreate: (kind: "extrude" | "revolve") => void;
   /** Extrude or revolve the newest sketch up to a face, a solid or a vertex picked in the 3D view. */
   readonly onReachTo: (mode: "face" | "body" | "vertex" | "revolve-face") => void;
   readonly onSheetMetal: (command: "miter-flange" | "jog" | "lofted-bend" | "bend-table" | "bend-table-csv") => void;
@@ -178,8 +180,8 @@ const CURVE_TOOLS: readonly { readonly id: SketchTool; readonly icon: string; re
 ];
 
 const PART_FEATURES = [
-  { id: "feature:plate-extrusion", icon: "extrude", label: "Extrude", level: "qualified" },
-  { id: "feature:centered-through-hole", icon: "bore", label: "Bore", level: "qualified" }
+  { id: "feature:plate-extrusion", icon: "extrude", label: "Plate extrusion", level: "template plate" },
+  { id: "feature:centered-through-hole", icon: "bore", label: "Plate bore", level: "template plate" }
 ] as const;
 
 export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element {
@@ -288,9 +290,12 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="sketch" label="New Sketch" hint="plane or face" onClick={props.onNewSketch} />
         <RibbonButton icon="dimension" label="Parameters" hint="fx · named values" onClick={props.onChangeParameters} />
       </RibbonGroup>
+      <RibbonGroup label="Create">
+        <RibbonButton icon="extrude" label="Extrude" hint="E · finished sketch" onClick={() => props.onPartCreate("extrude")} />
+        <RibbonButton icon="revolve" label="Revolve" hint="finished sketch" onClick={() => props.onPartCreate("revolve")} />
+      </RibbonGroup>
       <RibbonGroup label="Feature tools">
-        {PART_FEATURES.map((feature) => <RibbonButton key={feature.id} icon={feature.icon} label={feature.label} hint={feature.level} active={props.selectedId === feature.id} onClick={() => props.onSelect(feature.id)} />)}
-        <RibbonButton icon="revolve" label="Revolve" hint="closed profile" onClick={() => props.onPartFeatureAction("revolve", "Revolve")} />
+        {props.project.part.templateVisible !== false && PART_FEATURES.map((feature) => <RibbonButton key={feature.id} icon={feature.icon} label={feature.label} hint={feature.level} active={props.selectedId === feature.id} onClick={() => props.onSelect(feature.id)} />)}
         <RibbonButton icon="pattern" label="Pattern Feature" hint={`${props.project.part.patternCount} × X · analytic body`} disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("pattern-feature", "Pattern Feature")} />
         <RibbonButton icon="mirror" label="Mirror Feature" hint="YZ plane · analytic body" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("mirror-feature", "Mirror Feature")} />
       </RibbonGroup>
@@ -305,6 +310,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="wedge" label="Wedge" hint="sloped" onClick={() => props.onCreatePartPreviewBody("wedge")} />
         <RibbonButton icon="spiral" label="Spiral" hint="flat ribbon" onClick={() => props.onCreatePartPreviewBody("spiral")} />
         <RibbonButton icon="tube" label="Tube" hint="hollow" onClick={() => props.onCreatePartPreviewBody("tube")} />
+        <RibbonButton icon="revolve" label="Ring primitive" hint="Ø30 · Ø16 · 12 mm" onClick={() => props.onPartFeatureAction("revolve", "Ring primitive")} />
       </RibbonGroup>
       <RibbonGroup label="Direct body edit">
         <RibbonButton icon="move" label="Move" hint="XYZ / rotate" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-transform", "Move Body")} />

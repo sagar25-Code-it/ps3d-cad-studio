@@ -41,6 +41,26 @@ export function sketchByAnswer(candidates: readonly DesignSketchFeature[], answe
     ?? candidates.find((candidate) => candidate.name.toLowerCase() === trimmed.toLowerCase());
 }
 
+/**
+ * The profiles a typed answer means, for a sketch with several closed regions: "all" (or an empty answer) is every
+ * profile (stored as an empty list, the existing meaning), and numbers such as "1 3" pick those profiles in the
+ * detector's order. Anything else is undefined: refused, never a silent first profile.
+ */
+export function profilesByAnswer(profiles: readonly { readonly id: string }[], answer: string): readonly string[] | undefined {
+  const trimmed = answer.trim().toLowerCase();
+  if (trimmed === "" || trimmed === "all") return [];
+  const parts = trimmed.split(/[\s,]+/u).filter((part) => part.length > 0);
+  const ids: string[] = [];
+  for (const part of parts) {
+    const ordinal = /^p?(\d+)$/u.exec(part);
+    if (ordinal === null) return undefined;
+    const profile = profiles[Number.parseInt(ordinal[1]!, 10) - 1];
+    if (profile === undefined) return undefined;
+    if (!ids.includes(profile.id)) ids.push(profile.id);
+  }
+  return ids.length === 0 ? undefined : ids;
+}
+
 /** What the Combine dialog opens with: the body the user had selected as the target, and no tool until one is chosen. */
 export function combineInitialChoice(
   bodies: readonly { readonly id: string }[],

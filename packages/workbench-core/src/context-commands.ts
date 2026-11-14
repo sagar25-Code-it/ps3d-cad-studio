@@ -62,11 +62,18 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
       command("sketch.select-tangent", "Selection: Tangent", "tangent", "select"),
       command("sketch.finish", "Finish Sketch", "finish", "edit")
     );
-    else if (["part", "assembly", "surface", "vehicle"].includes(request.workspace)) commands.push(
-      command("sketch.create", "Create Sketch", "sketch", "create"),
-      command("inspect.measure", "Measure", "measure", "inspect"),
-      command("clipboard.paste", "Paste", "copy", "edit", false, "Clipboard geometry import is not exposed in this preview.")
-    );
+    else if (["part", "assembly", "surface", "vehicle"].includes(request.workspace)) {
+      commands.push(command("sketch.create", "Create Sketch", "sketch", "create"));
+      // The Part environment starts Extrude and Revolve on a finished sketch from here too (ribbon, E, right-click).
+      if (request.workspace === "part") commands.push(
+        command("feature.extrude", "Extrude", "extrude", "create", true, undefined, false, "E"),
+        command("feature.revolve", "Revolve", "revolve", "create")
+      );
+      commands.push(
+        command("inspect.measure", "Measure", "measure", "inspect"),
+        command("clipboard.paste", "Paste", "copy", "edit", false, "Clipboard geometry import is not exposed in this preview.")
+      );
+    }
   }
 
   if (kind === "sketch") {
@@ -93,6 +100,10 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
   // A finished sketch in the timeline is opened with Edit Sketch, like a sketch anywhere else; a solid step edits its parameters.
   if (kind === "feature" && request.featureKind === "sketch") commands.push(
     command("sketch.edit", "Edit Sketch", "sketch", "edit"),
+    ...(request.workspace === "part" ? [
+      command("feature.extrude", "Extrude", "extrude", "create", true, undefined, false, "E"),
+      command("feature.revolve", "Revolve", "revolve", "create")
+    ] : []),
     command("inspect.properties", "Properties", "inspect", "inspect", false, PROPERTIES_REASON)
   );
   else if (kind === "feature") commands.push(

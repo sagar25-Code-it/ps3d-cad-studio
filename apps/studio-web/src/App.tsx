@@ -110,7 +110,7 @@ import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
 import { facesOfBody } from "./edge-blend-step.js";
 import { blendAllFeature, centroidHoleFeature } from "./one-shot-steps.js";
-import { explicitBody, matchingSketches, sketchByAnswer } from "./explicit-pick.js";
+import { explicitBody, matchingSketches, profilesByAnswer, sketchByAnswer } from "./explicit-pick.js";
 import { shouldRefit } from "./view-fit.js";
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
 import { flatPatternForBody, isRebuildFailure, isRebuildNote, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
@@ -431,6 +431,8 @@ export function App(): React.JSX.Element {
   const fitViewportRef = useRef<() => void>(() => undefined);
   /** The design the Part viewport was last fitted for: the camera is fitted once per design, then left alone (PT-03). */
   const lastFittedProjectRef = useRef<string | undefined>(undefined);
+  /** Starts the Part-environment Extrude or Revolve (E key, ribbon, right-click); assigned after startPartCreate is defined. */
+  const partCreateRef = useRef<(kind: "extrude" | "revolve", preferredSketchFeatureId?: string) => void>(() => undefined);
   const viewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
   /** Set while a command waits for the user to click something in the viewport; called with the click, or null when cancelled. */
   const pickRef = useRef<((point: ViewportMeasurePoint | null) => void) | null>(null);
@@ -2630,7 +2632,9 @@ export function App(): React.JSX.Element {
       readonly shellOpenFace?: "top" | "bottom" | "none";
       readonly draftAngleDeg?: number;
       readonly draftNeutralFace?: "top" | "bottom";
-    }
+    },
+    /** A finished sketch in the timeline to build from (the Part-environment Extrude / Revolve); absent commits the working sketch. */
+    sourceSketchFeatureId?: string
   ): Promise<void> => {
     if (!Number.isFinite(valueMm) || valueMm <= 0) { setStatus("error"); setStatusText(operation === "revolve" ? "Enter a revolve angle between 1 and 360 degrees." : operation === "sweep" ? "Enter a positive sweep distance." : operation === "loft" ? "Enter a positive loft height." : "Enter a positive extrusion distance."); return; }
     if (operation === "sweep") {
@@ -2660,10 +2664,13 @@ export function App(): React.JSX.Element {
     if ((operation === "edge-fillet" || operation === "edge-chamfer") && (edge === undefined || edge.sizeMm <= 0)) {
       setStatus("error"); setStatusText(`Enter a positive ${operation === "edge-fillet" ? "fillet radius" : "chamfer distance"}.`); return;
     }
-    if (detectSketchProfiles(projectRef.current.sketch).length === 0) { setStatus("error"); setStatusText(`There is no closed region to build a solid from. ${explainNoProfiles(projectRef.current.sketch).join(" ")}`.trim()); return; }
+    const sourceSketch = sourceSketchFeatureId === undefined ? undefined : designOf(projectRef.current).features.find((candidate) => candidate.id === sourceSketchFeatureId);
+    if (sourceSketchFeatureId !== undefined && sourceSketch?.kind !== "sketch") { setStatus("error"); setStatusText("That sketch is not in the timeline any more."); return; }
+    const profileSource = sourceSketch?.kind === "sketch" ? sourceSketch.sketch : projectRef.current.sketch;
+    if (detectSketchProfiles(profileSource).length === 0) { setStatus("error"); setStatusText(`There is no closed region to build a solid from. ${explainNoProfiles(profileSource).join(" ")}`.trim()); return; }
     setStatus("working");
     setStatusText(`Building ${operation === "extrude" ? "extruded" : operation === "revolve" ? "revolved" : operation === "sweep" ? "swept" : operation === "loft" ? "lofted" : operation === "edge-fillet" ? "filleted" : operation === "edge-chamfer" ? "chamfered" : operation === "shell" ? "shelled" : operation === "helix" ? "helical" : operation === "thread" ? "threaded" : operation === "rib" ? "ribbed" : operation === "dome" ? "domed" : operation === "sheet-base" ? "sheet-metal base" : operation === "sheet-flange" ? "sheet-metal flange" : operation === "sheet-hem" ? "hemmed" : "drafted"} solid…`);
-    const sketchId = await commitWorkingSketch();
+    const sketchId = sourceSketchFeatureId ?? await commitWorkingSketch();
     const sketchFeature = designOf(projectRef.current).features.find((feature) => feature.id === sketchId);
     // A refused commit has already reported why (status and diagnostic); keep that message.
     if (sketchId === undefined) return;
@@ -2773,6 +2780,59 @@ export function App(): React.JSX.Element {
         : `Added ${feature.name} to the timeline: ${target.mode === "cut" ? "cut from" : "joined to"} ${targetBody?.name ?? "the solid"} (${detail}). Edit the step or its sketch and the solid is rebuilt in order.`);
     }
   };
+
+  /**
+   * PT-05: start Extrude or Revolve in the Part environment (ribbon, E, right-click) on a finished sketch. The sketch
+   * is the selected timeline sketch, else the only finished one with a closed profile, else a choice by name; with
+   * several profiles the user says which (all, or numbers). The distance or angle is typed in the on-view field
+   * (numbers, units and arithmetic), and the result can join or cut the selected solid. The step and its body go
+   * through the same feature record and builder as the sketch palette, so editing and replay are identical.
+   */
+  const startPartCreate = async (kind: "extrude" | "revolve", preferredSketchFeatureId?: string): Promise<void> => {
+    const lead = kind === "extrude" ? "Extrude" : "Revolve";
+    const history = designOf(projectRef.current);
+    const prompt = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
+    const preferred = preferredSketchFeatureId === undefined ? undefined : history.features.find((candidate) => candidate.id === preferredSketchFeatureId);
+    let sketchFeature = preferred?.kind === "sketch" ? preferred : selectedTimelineFeature?.kind === "sketch" ? selectedTimelineFeature : undefined;
+    if (sketchFeature !== undefined && detectSketchProfiles(sketchFeature.sketch).length === 0) sketchFeature = undefined;
+    if (sketchFeature === undefined) {
+      const candidates = matchingSketches(history, (candidate) => detectSketchProfiles(candidate.sketch).length > 0);
+      if (candidates.length === 0) { setStatus("ready"); setStatusText(`${lead}: finish a sketch with a closed profile first (Create Sketch, draw, Finish Sketch).`); return; }
+      if (candidates.length === 1) sketchFeature = candidates[0]!;
+      else {
+        const raw = prompt(`${lead}: which sketch gives the profile? (${candidates.map((candidate) => candidate.name).join(", ")}; Enter keeps the newest)`, candidates[0]!.name);
+        if (raw === null) return;
+        sketchFeature = sketchByAnswer(candidates, raw);
+        if (sketchFeature === undefined) { setStatus("ready"); setStatusText(`${lead}: no finished sketch matched that name.`); return; }
+      }
+    }
+    const profiles = detectSketchProfiles(sketchFeature.sketch);
+    let profileIds: readonly string[] = [];
+    if (profiles.length > 1) {
+      const raw = prompt(`${lead}: which profiles of ${sketchFeature.name}? (all, or numbers such as "1 3": ${profiles.map((profile, index) => `P${index + 1} ${Math.round(profile.areaMm2)} mm²`).join(", ")})`, "all");
+      if (raw === null) return;
+      const chosen = profilesByAnswer(profiles, raw);
+      if (chosen === undefined) { setStatus("ready"); setStatusText(`${lead}: enter all, or profile numbers between 1 and ${profiles.length}.`); return; }
+      profileIds = chosen;
+    }
+    const value = await onView.ask(kind === "extrude"
+      ? { label: "Extrude distance", quantity: "length", defaultValue: 10, min: 0, exclusiveMin: true, step: 0.5 }
+      : { label: "Revolve angle", quantity: "angle", defaultValue: 360, min: 0, exclusiveMin: true, step: 15 });
+    if (value === null) return;
+    if (kind === "revolve" && value > 360) { setStatus("ready"); setStatusText("Revolve: enter an angle between 1 and 360 degrees."); return; }
+    // The result: a new body, or join / cut on the selected solid. Nothing is combined with a body the user did not pick.
+    const modifiable = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === selectedId);
+    let target: { readonly mode: "join" | "cut"; readonly bodyId: string } | undefined;
+    if (modifiable !== undefined) {
+      const answer = prompt(`Result: "new" body, "join" to ${modifiable.name} or "cut" from it`, "new");
+      if (answer === null) return;
+      const mode = answer.trim().toLowerCase();
+      if (mode === "join" || mode === "cut") target = { mode, bodyId: modifiable.id };
+      else if (mode !== "" && mode !== "new") { setStatus("ready"); setStatusText(`${lead}: enter new, join or cut.`); return; }
+    }
+    await createGeneralSolid(profileIds, "xy", kind, value, undefined, "one-side", target, undefined, sketchFeature.id);
+  };
+  partCreateRef.current = (kind, preferredSketchFeatureId) => { void startPartCreate(kind, preferredSketchFeatureId); };
 
   /**
    * Applies an operation and then replays the timeline, as one undo step. Used when the design has joins or cuts, because
@@ -3700,7 +3760,21 @@ export function App(): React.JSX.Element {
       if (selectionId !== null) setSelectedId(selectionId);
       return;
     }
-    if (commandId === "feature.extrude") { switchWorkspace("sketch"); if (selectionId !== null) setSelectedId(selectionId); setStatusText("Extrude ready: review the selected closed profile and operation in the right inspector."); return; }
+    if (commandId === "feature.extrude" || commandId === "feature.revolve") {
+      // In a 3D environment the command starts the Part Extrude / Revolve on a finished sketch (PT-05); in the sketch
+      // environment a profile's Extrude keeps opening the palette beside the drawing.
+      if (projectRef.current.activeWorkspace !== "sketch") {
+        if (selectionId !== null) setSelectedId(selectionId);
+        const stepId = contextStepId(contextMenu?.featureId, selectionId);
+        const step = designOf(projectRef.current).features.find((feature) => feature.id === stepId);
+        partCreateRef.current(commandId === "feature.extrude" ? "extrude" : "revolve", step?.kind === "sketch" ? step.id : undefined);
+        return;
+      }
+      switchWorkspace("sketch");
+      if (selectionId !== null) setSelectedId(selectionId);
+      setStatusText("Extrude ready: review the selected closed profile and operation in the right inspector.");
+      return;
+    }
     if (commandId === "body.boolean-join") { runPartFeatureAction("unite", "Unite", selectionId); return; }
     if (commandId === "body.boolean-cut") { runPartFeatureAction("subtract", "Subtract", selectionId); return; }
     if (commandId === "body.move-face") { runPartFeatureAction("move-face", "Move Face", selectionId); return; }
@@ -3781,6 +3855,7 @@ export function App(): React.JSX.Element {
       if (sketch || masterCartOpen || !isThreeDimensional || isEditableTarget(event.target) || globalThis.document.querySelector('[role="dialog"]') !== null) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const key = event.key.toLowerCase();
+      if (key === "e" && projectRef.current.activeWorkspace === "part") { partCreateRef.current("extrude"); return; }
       if (key === "f") { fitViewportRef.current(); return; }
       if (key === "1") setViewportOrientation("front");
       if (key === "2") setViewportOrientation("top");
@@ -4122,6 +4197,7 @@ export function App(): React.JSX.Element {
         setStatusText(next === null ? "Zebra stripes off." : `Zebra stripes on (${next.axis.toUpperCase()} axis, ×${next.frequency}). Orbit the model: stripes that run straight across a seam mean tangent (G1) continuity; stripes that kink there mean a tangent break.`);
       }}
       onEdgeFlange={() => void handleEdgeFlange()}
+      onPartCreate={(kind) => void startPartCreate(kind)}
       onReachTo={(mode) => void handleReachTo(mode)}
       onSheetMetal={handleSheetMetal}
       onIndent={handleIndent}

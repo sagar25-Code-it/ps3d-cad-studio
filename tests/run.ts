@@ -186,6 +186,7 @@ import { oneShotModifierTests } from "./one-shot-modifiers.test.js";
 import { blankProjectTests } from "./blank-project.test.js";
 import { explicitPickTests } from "./explicit-pick.test.js";
 import { viewFitTests } from "./view-fit.test.js";
+import { partCreateTests } from "./part-create.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -394,6 +395,7 @@ const tests: readonly TestCase[] = [
   ...blankProjectTests,
   ...explicitPickTests,
   ...viewFitTests,
+  ...partCreateTests,
 ];
 let failures = 0;
 
