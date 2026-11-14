@@ -130,6 +130,8 @@
 .new-project-types button > .command-icon { width: 20px; height: 20px; color: #247db4; }
 .new-project-types button strong { font-size: 0.64rem; }
 .new-project-types button small { color: #6b7880; font-size: 0.46rem; line-height: 1.25; }
+.new-project-sample { display: flex; gap: 0.5rem; align-items: flex-start; padding: 0.55rem 0.6rem; border: 1px solid #c4cdd2; border-radius: 4px; color: #35424a; background: #fff; font-size: 12px; line-height: 1.45; cursor: pointer; }
+.new-project-sample input { margin-top: 2px; flex: 0 0 auto; }
 .save-file-preview { display: flex; align-items: center; gap: 0.65rem; padding: 0.7rem; border: 1px solid #c4cdd2; border-radius: 5px; background: #eef3f5; }
 .save-file-preview > .command-icon { width: 26px; height: 26px; color: #247db4; }
 .save-file-preview strong, .save-file-preview small { display: block; }

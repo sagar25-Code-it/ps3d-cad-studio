@@ -52,6 +52,8 @@ interface PartInspectorProps {
 export function PartInspector(props: PartInspectorProps): React.JSX.Element {
   const [drafts, setDrafts] = useState<Record<PartParameter, string>>(() => values(props.part));
   useEffect(() => setDrafts(values(props.part)), [props.part]);
+  // A blank design has no template plate: its parameter card, metrics and assembly insert do not apply.
+  const hasPlate = props.part.templateVisible !== false;
   const measurements = props.model?.render.measurements;
   const previewBodies = props.part.previewBodies ?? [];
   const selectedPreviewBody = previewBodies.find((body) => body.id === props.selectedId);
@@ -68,7 +70,7 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
       onVisibility={props.onGeneralBodyVisibility}
       onDelete={props.onGeneralBodyDelete}
     />}
-    <details className="plate-parameters" key={selectedGeneralBody === undefined ? "plate-open" : "plate-closed"} open={selectedGeneralBody === undefined}>
+    {hasPlate && <details className="plate-parameters" key={selectedGeneralBody === undefined ? "plate-open" : "plate-closed"} open={selectedGeneralBody === undefined}>
       <summary><strong>Mounting plate</strong><span>template part · qualified</span></summary>
       <section className="parameter-stack">
         {PARAMETERS.map((parameter) => <div className="parameter-control" key={parameter.key}>
@@ -76,7 +78,7 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
           <div><input id={`part-${parameter.key}`} type="number" min={parameter.minimum} max={parameter.maximum} step={parameter.step} value={drafts[parameter.key]} onChange={(event) => setDrafts((current) => ({ ...current, [parameter.key]: event.target.value }))} /><span>{parameter.unit}</span><button disabled={props.working} onClick={() => props.onCommit(parameter.key, Number(drafts[parameter.key]))}>Apply</button></div>
         </div>)}
       </section>
-    </details>
+    </details>}
     <section className="inspector-section part-appearance-card"><header><strong>Body appearance</strong><span>display only</span></header>
       <PartAppearanceControls bodyColor={props.bodyColor} shadingMode={props.shadingMode} onBodyColor={props.onBodyColor} onShadingMode={props.onShadingMode} />
     </section>
@@ -116,19 +118,19 @@ export function PartInspector(props: PartInspectorProps): React.JSX.Element {
         ><span className="named-face-role"><CommandIcon name="surface" />{face.role.replace("face.", "")}</span><small>{face.areaMm2.toFixed(1)} mm²</small></button>)}
       </div>
     </section>}
-    <section className="inspector-section metrics-section"><header><strong>Validated body</strong><span>{props.model?.render.topology.triangles ?? "—"} triangles</span></header>
+    {hasPlate && <section className="inspector-section metrics-section"><header><strong>Validated body</strong><span>{props.model?.render.topology.triangles ?? "—"} triangles</span></header>
       <dl className="metric-grid">
         <div><dt>Topology</dt><dd>{props.model === undefined ? "pending" : `closed · genus ${props.model.render.topology.genus}`}</dd></div>
         <div><dt>Volume</dt><dd>{measurements === undefined ? "—" : `${(measurements.volumeCubicMeters * 1e9).toFixed(1)} mm³`}</dd></div>
         <div><dt>Semantic hash</dt><dd title={props.model?.evidence.semanticHash}>{shortHash(props.model?.evidence.semanticHash)}</dd></div>
         <div><dt>Mesh hash</dt><dd title={props.model?.evidence.body.canonicalMeshHash}>{shortHash(props.model?.evidence.body.canonicalMeshHash)}</dd></div>
       </dl>
-    </section>
-    <section className="inspector-section part-downstream-card"><header><strong>Downstream assembly</strong><span>editable snapshot</span></header>
+    </section>}
+    {hasPlate && <section className="inspector-section part-downstream-card"><header><strong>Downstream assembly</strong><span>editable snapshot</span></header>
       <p>Insert this qualified envelope as a selectable plate component. The inserted component records the current revision; later part edits do not update it automatically.</p>
       <button disabled={props.working || props.model === undefined} onClick={props.onInsertIntoAssembly}><CommandIcon name="assemble" />Insert current part into assembly</button>
-    </section>
-    <div className="scope-note qualified"><strong>Qualified path</strong><p>Width, height, thickness, and bore regenerate in the isolated f64 worker and must pass independent closed-mesh and evidence checks.</p></div>
+    </section>}
+    {hasPlate && <div className="scope-note qualified"><strong>Qualified path</strong><p>Width, height, thickness, and bore regenerate in the isolated f64 worker and must pass independent closed-mesh and evidence checks.</p></div>}
   </aside>;
 }
 

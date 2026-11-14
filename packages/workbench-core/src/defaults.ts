@@ -115,6 +115,21 @@ export function createWorkbenchProject(projectId: string): WorkbenchProject {
   };
 }
 
+/**
+ * A new, empty design: no sketch curves, no committed sketch, no body, and no template plate in the Part view
+ * (`part.templateVisible` false). The fixture project above stays as the boot default and as a sample, so nothing an
+ * existing user saved changes meaning.
+ */
+export function createBlankWorkbenchProject(projectId: string, name = "Untitled design"): WorkbenchProject {
+  const fixture = createWorkbenchProject(projectId);
+  return {
+    ...fixture,
+    name,
+    sketch: { ...fixture.sketch, name: "Sketch", entities: [], constraints: [] },
+    part: { ...fixture.part, name, templateVisible: false }
+  };
+}
+
 function component(
   id: string,
   name: string,

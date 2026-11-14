@@ -26,7 +26,8 @@ export function buildPartPreview(part: PartIntent): PreviewScene {
   const halfWidth = part.widthMm / 2;
   const halfHeight = part.heightMm / 2;
   const halfThickness = part.thicknessMm / 2;
-  const points: Vec3[] = [
+  // A design without the template plate does not reserve room for it: its bounds come from what is actually there.
+  const points: Vec3[] = part.templateVisible === false ? [] : [
     [-halfWidth, -halfHeight, -halfThickness],
     [halfWidth, halfHeight, halfThickness]
   ];

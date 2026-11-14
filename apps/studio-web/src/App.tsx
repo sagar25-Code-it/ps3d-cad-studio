@@ -17,6 +17,7 @@ import {
   classifyWorkbenchSelection,
   createElectricalComponentInstance,
   createElectromechanicalAssembly,
+  createBlankWorkbenchProject,
   createWorkbenchProject,
   defaultElectromechanicalMappings,
   ELECTROMECHANICAL_CATALOG_REVISION,
@@ -834,11 +835,13 @@ export function App(): React.JSX.Element {
     const viewport = viewportRef.current;
     if (viewport === undefined) return;
     if (project.activeWorkspace === "part" && activeImport !== undefined) viewport.setExternalObject(activeImport.object);
+    // A design without the template plate shows only the scene's own bodies; one with it shows the qualified plate too.
+    else if (project.activeWorkspace === "part" && project.part.templateVisible === false) viewport.setScene(partScene);
     else if (project.activeWorkspace === "part" && model !== undefined) { viewport.setArtifactWithScene(model.render, partScene); viewport.fitPreview(partScene.boundsMm); }
     if (project.activeWorkspace === "assembly") viewport.setScene(assemblyScene);
     if (project.activeWorkspace === "surface") viewport.setScene(surfacePreview.scene);
     if (project.activeWorkspace === "vehicle") viewport.setScene(vehiclePreview.scene);
-  }, [activeImport, assemblyScene, model, partScene, project.activeWorkspace, surfacePreview.scene, vehiclePreview.scene]);
+  }, [activeImport, assemblyScene, model, partScene, project.activeWorkspace, project.part.templateVisible, surfacePreview.scene, vehiclePreview.scene]);
   useEffect(() => viewportRef.current?.setSelectedId(selectedId), [selectedId]);
   // Escape ends a viewport pick that is waiting for a click.
   useEffect(() => {
@@ -876,12 +879,13 @@ export function App(): React.JSX.Element {
     const viewport = renderViewportRef.current;
     if (viewport === undefined) return;
     if (renderSettings.source === "part" && activeImport !== undefined) viewport.setExternalObject(activeImport.object);
+    else if (renderSettings.source === "part" && project.part.templateVisible === false) { viewport.setScene(partScene); viewport.fitPreview(partScene.boundsMm); }
     else if (renderSettings.source === "part" && model !== undefined) { viewport.setArtifactWithScene(model.render, partScene); viewport.fitPreview(partScene.boundsMm); }
     else if (renderSettings.source === "part") viewport.setScene(partScene);
     if (renderSettings.source === "assembly") viewport.setScene(assemblyScene);
     if (renderSettings.source === "surface") viewport.setScene(surfacePreview.scene);
     if (renderSettings.source === "vehicle") viewport.setScene(vehiclePreview.scene);
-  }, [activeImport, assemblyScene, model, partScene, renderSettings.source, renderStudioOpen, surfacePreview.scene, vehiclePreview.scene]);
+  }, [activeImport, assemblyScene, model, partScene, project.part.templateVisible, renderSettings.source, renderStudioOpen, surfacePreview.scene, vehiclePreview.scene]);
 
   useEffect(() => {
     const viewport = renderViewportRef.current;
@@ -3107,11 +3111,17 @@ export function App(): React.JSX.Element {
     }
   };
 
-  const createNewProject = async (name = "Untitled design", startWorkspace: WorkspaceId = "part"): Promise<void> => {
+  const createNewProject = async (name = "Untitled design", startWorkspace: WorkspaceId = "part", sample = false): Promise<void> => {
     setStatus("working");
     try {
       await queueProjectTransition(async () => {
-        const nextProject = { ...createWorkbenchProject(`project:${crypto.randomUUID()}`), name: name.trim().length === 0 ? "Untitled design" : name.trim(), activeWorkspace: startWorkspace };
+        // File > New gives an empty design: no sketch curves, no committed sketch, no body and no template plate.
+        // The sample mounting plate (the fixture every design used to start from) stays available as an explicit choice.
+        const trimmedName = name.trim().length === 0 ? "Untitled design" : name.trim();
+        const nextProject = {
+          ...(sample ? { ...createWorkbenchProject(`project:${crypto.randomUUID()}`), name: trimmedName } : createBlankWorkbenchProject(`project:${crypto.randomUUID()}`, trimmedName)),
+          activeWorkspace: startWorkspace
+        };
         const previous = projectRef.current;
         const prepared = await prepareQualifiedWorker(nextProject);
         if (prepared === undefined) return;
@@ -4256,12 +4266,12 @@ export function App(): React.JSX.Element {
     <NewProjectDialog
       open={newDialogOpen}
       dirty={projectDirty}
-      onConfirm={(name, workspace) => { setNewDialogOpen(false); void createNewProject(name, workspace); }}
-      onSaveAndCreate={(name, workspace) => {
+      onConfirm={(name, workspace, sample) => { setNewDialogOpen(false); void createNewProject(name, workspace, sample); }}
+      onSaveAndCreate={(name, workspace, sample) => {
         setNewDialogOpen(false);
         void (async () => {
           await saveAll();
-          if (projectRef.current.revision === savedRevisionRef.current) await createNewProject(name, workspace);
+          if (projectRef.current.revision === savedRevisionRef.current) await createNewProject(name, workspace, sample);
           else setStatusText("The project was not saved, so the new design was not created. Save it, then use File > New again.");
         })();
       }}

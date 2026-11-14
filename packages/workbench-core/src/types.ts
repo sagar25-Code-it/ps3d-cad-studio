@@ -361,6 +361,12 @@ export interface PartIntent {
   readonly patternCount: number;
   readonly revolveAngleDeg: number;
   /**
+   * Whether the analytic template plate (the qualified centered-bore body driven by the fields above) is part of this
+   * design. Absent means true, the original meaning, so every saved project keeps the plate it was built around; a new
+   * blank design sets false and starts with nothing but the origin.
+   */
+  readonly templateVisible?: boolean;
+  /**
    * Monotonic user-requested rebuild counter for the bounded analytic feature
    * layer. Geometry is generated deterministically from the records below;
    * incrementing this value provides an explicit, auditable Update Model step.

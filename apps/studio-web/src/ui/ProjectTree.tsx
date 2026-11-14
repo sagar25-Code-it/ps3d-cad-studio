@@ -44,7 +44,9 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
   }, [project.activeWorkspace, revealSelectionRequest, selectedId]);
   const showOrigin = true;
   const showSketch = true;
-  const showPartHistory = true;
+  // A blank design has no template plate, so its canned feature rows and its body row are not listed.
+  const hasPlate = project.part.templateVisible !== false;
+  const showPartHistory = hasPlate;
   const showBodies = true;
   const drawingPreset = project.drawing.viewPreset ?? "automatic-4-view";
   const drawingViews = drawingPreset === "front-only"
@@ -135,7 +137,7 @@ export function ProjectTree({ project, selectedId, revealSelectionRequest, desig
       <TreeItem kind="feature" id="feature:revolve-study" label="Revolve study" meta={`${project.part.revolveAngleDeg}° · preview`} selectedId={selectedId} onSelect={onSelect} />
     </TreeSection>}
     {showBodies && <TreeSection title="Bodies" badge={project.activeWorkspace === "part" ? "qualified" : "preview"}>
-      <TreeItem kind="body" id="body:bracket" label="Mounting plate" meta="closed manifold mesh" selectedId={selectedId} onSelect={onSelect} />
+      {hasPlate && <TreeItem kind="body" id="body:bracket" label="Mounting plate" meta="closed manifold mesh" selectedId={selectedId} onSelect={onSelect} />}
       {(project.part.previewBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.shape} · ${body.visible ? "shown" : "hidden"} · preview`} selectedId={selectedId} onSelect={onSelect} indent />)}
       {(project.part.generalBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.feature?.operation === "surface" ? "surface" : body.subd !== undefined ? "SubD form" : `${body.feature?.operation ?? "mesh"} solid`} · ${body.visible ? "shown" : "hidden"} · ${body.brep !== undefined ? `${body.brep.topology.faces} faces · ${body.brep.origin === "mesh-boolean" ? "Boolean mesh" : "B-rep"}` : `${body.positionsMm.length / 3} verts`}`} selectedId={selectedId} onSelect={onSelect} indent />)}
       <TreeItem kind="surface" id={project.surface.id} label={project.surface.name} meta={`${project.surface.mode} · open surface preview`} selectedId={selectedId} onSelect={onSelect} />

@@ -377,7 +377,7 @@ function validateConstraint(value: unknown, entityIds: ReadonlySet<string>): val
 
 function validatePart(value: unknown): WorkbenchResult<PartIntent> {
   const required = ["id", "name", "widthMm", "heightMm", "thicknessMm", "holeDiameterMm", "edgeTreatmentMm", "patternCount", "revolveAngleDeg"];
-  const optional = ["previewBodies", "modelUpdateSerial", "generalBodies", "construction", "constructionAxes", "constructionPoints", "constructionUcses", "constructionBinders"];
+  const optional = ["previewBodies", "modelUpdateSerial", "generalBodies", "construction", "constructionAxes", "constructionPoints", "constructionUcses", "constructionBinders", "templateVisible"];
   if (!isRecord(value) || !required.every((key) => Object.hasOwn(value, key))
     || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))
     || value.id !== "part:mounting-plate" || !shortText(value.name, 1, 120)
@@ -385,7 +385,8 @@ function validatePart(value: unknown): WorkbenchResult<PartIntent> {
     || !finiteRange(value.thicknessMm, 1, 100) || !finiteRange(value.holeDiameterMm, 1, 250)
     || !finiteRange(value.edgeTreatmentMm, 0, 25) || !integerRange(value.patternCount, 1, 24)
     || !finiteRange(value.revolveAngleDeg, 1, 360)
-    || (Object.hasOwn(value, "modelUpdateSerial") && !integerRange(value.modelUpdateSerial, 0, 1_000_000))) return invalid("The part intent is outside its supported envelope.");
+    || (Object.hasOwn(value, "modelUpdateSerial") && !integerRange(value.modelUpdateSerial, 0, 1_000_000))
+    || (Object.hasOwn(value, "templateVisible") && typeof value.templateVisible !== "boolean")) return invalid("The part intent is outside its supported envelope.");
   if (Object.hasOwn(value, "previewBodies") && (!Array.isArray(value.previewBodies) || value.previewBodies.length > 64)) return invalid("The part preview-body collection is invalid.");
   if (Array.isArray(value.previewBodies)) {
     const ids = new Set<string>();

@@ -183,6 +183,7 @@ import { sketchOffsetChainDefaultTests } from "./sketch-offset-chain-default.tes
 import { sketchProjectionCurrentTests } from "./sketch-projection-current.test.js";
 import { sketchDimensionPointFirstTests } from "./sketch-dimension-point-first.test.js";
 import { oneShotModifierTests } from "./one-shot-modifiers.test.js";
+import { blankProjectTests } from "./blank-project.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -388,6 +389,7 @@ const tests: readonly TestCase[] = [
   ...sketchProjectionCurrentTests,
   ...sketchDimensionPointFirstTests,
   ...oneShotModifierTests,
+  ...blankProjectTests,
 ];
 let failures = 0;
 
