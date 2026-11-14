@@ -261,8 +261,8 @@ deployment, release, or legal clearance.
   self-referential record.
   Symbolic links are rejected.
 - Canonical source-set hash:
-`806a5678f1334efba8f586fa1a8bf5651417dab5b62d3dea16b92605f48dd90e`
-- Canonical source-set file count: 1041
+`4143bf6c29ffababd0efbefe818c290b2d23046853c703537ee986d3d856af95`
+- Canonical source-set file count: 1084
 - Automated verification: `node scripts/verify-generated-source-set.mjs`
 - Qualified worker evaluator closure: the 14 ordinally listed files in
   `provenance/BUILD_IDENTITY.json`, SHA-256
