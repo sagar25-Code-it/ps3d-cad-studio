@@ -195,6 +195,7 @@ import { modelParameterTests } from "./model-parameters.test.js";
 import { sketchesFolderTests } from "./sketches-folder.test.js";
 import { timelineIconTests } from "./timeline-icons.test.js";
 import { timelineGroupTests } from "./timeline-groups.test.js";
+import { browserDocumentTests } from "./browser-document.test.js";
 import { sketchOffsetChainDefaultTests } from "./sketch-offset-chain-default.test.js";
 import { sketchProjectionCurrentTests } from "./sketch-projection-current.test.js";
 import { sketchDimensionPointFirstTests } from "./sketch-dimension-point-first.test.js";
@@ -452,6 +453,7 @@ const tests: readonly TestCase[] = [
   ...sketchesFolderTests,
   ...timelineIconTests,
   ...timelineGroupTests,
+  ...browserDocumentTests,
 ];
 let failures = 0;
 

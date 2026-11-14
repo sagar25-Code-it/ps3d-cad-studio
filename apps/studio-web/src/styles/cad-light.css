@@ -757,3 +757,8 @@
   .studio-app .display-popover { bottom: 13rem; }
   .studio-app .appearance-modes button { grid-template-columns: 1fr; justify-items: center; text-align: center; }
 }
+
+/* Document settings: the Units row of the model browser, and the named view rows (HS-23). */
+.studio-app .tree-setting { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.35rem 0.65rem; color: #3c4349; font-size: 12.5px; }
+.studio-app .tree-setting select { min-width: 0; padding: 0.3rem 0.4rem; border: 1px solid #aeb5bb; border-radius: 5px; color: #2c3237; background: #fff; font: inherit; font-size: 12.5px; }
+.studio-app .tree-setting strong { font-size: 12.5px; }

@@ -11,6 +11,7 @@ import { timelineRowOpenId, timelineRowSelectionId } from "../sketch-plane-ui.js
 import { useSketchKeymap } from "../workspaces/sketch/useSketchKeymap.js";
 import { CapabilityBadge } from "./CapabilityBadge.js";
 import { CommandIcon, inferCommandIcon } from "./CommandIcon.js";
+import { NAMED_VIEWS, type NamedViewId } from "./named-views.js";
 import { baseGridLabel } from "../../../../packages/workbench-sketch/src/unit-defaults.js";
 
 interface ProjectTreeProps {
@@ -33,6 +34,12 @@ interface ProjectTreeProps {
   readonly onRenameBody?: (bodyId: string, name: string) => void;
   /** The eye on a body row: show or hide that body. */
   readonly onToggleBody?: (bodyId: string, kind: "general" | "preview") => void;
+  /** HS-23: the unit lengths are shown and typed in, as the document has it. Absent reads the project's own (millimetres when it has none). */
+  readonly displayUnit?: "mm" | "in";
+  /** Changes the unit (the Units row of Document settings). Absent shows the unit as plain text. */
+  readonly onUnit?: (unit: "mm" | "in") => void;
+  /** Goes to a named view (Front, Top, Right, Home). Absent hides the Named views section, as in a 2D environment. */
+  readonly onView?: (view: NamedViewId) => void;
   /** The eye on a row of the Sketches folder: show or hide that sketch's curves in the model (HS-24). */
   readonly onToggleSketch?: (feature: DesignSketchFeature, shown: boolean) => void;
   /** Starts the inline rename of a row (a step ID or a body ID); a new `serial` is a new request. */
@@ -41,7 +48,7 @@ interface ProjectTreeProps {
 
 type TreeKind = "project" | "health" | "datum" | "sketch" | "feature" | "body" | "component" | "mate" | "surface" | "drawing" | "electrical" | "vehicle" | "route" | "tool" | "history";
 
-export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep, revealSelectionRequest, designHealth, onSelect, onContextMenu, onOpenItem, onRenameStep, onRenameBody, onToggleBody, onToggleSketch, renameRequest }: ProjectTreeProps): React.JSX.Element {
+export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep, revealSelectionRequest, designHealth, onSelect, onContextMenu, onOpenItem, onRenameStep, onRenameBody, onToggleBody, onToggleSketch, displayUnit, onUnit, onView, renameRequest }: ProjectTreeProps): React.JSX.Element {
   const treeRef = useRef<HTMLElement>(null);
   const handledRevealRequest = useRef(0);
   /** The row being renamed inline (a step ID or a body ID). */
@@ -70,6 +77,7 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
       selectedItem.focus({ preventScroll: true });
     }
   }, [project.activeWorkspace, revealSelectionRequest, selectedId]);
+  const unit = displayUnit ?? project.displayUnit ?? "mm";
   const showOrigin = true;
   const showSketch = true;
   // A blank design has no template plate, so its canned feature rows and its body row are not listed.
@@ -108,9 +116,21 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
     else onContextMenu(event.clientX, event.clientY, id, featureId);
   }}>
     <div className="panel-title model-browser-title"><p>Model browser</p><h2>{project.name}</h2><div><span>Revision {project.revision}</span><strong>{project.activeWorkspace}</strong></div></div>
-    <TreeSection title="Document" badge="preview" initiallyOpen={false}>
+    <TreeSection title="Document settings" badge="preview" initiallyOpen={false}>
       <TreeItem kind="project" id={project.id} label={project.name} meta="workbench / 1" selectedId={selectedId} onSelect={onSelect} />
+      <div className="tree-setting">
+        <label htmlFor="tree-document-unit">Units</label>
+        {onUnit === undefined
+          ? <strong id="tree-document-unit">{unit === "in" ? "Inches" : "Millimeters"}</strong>
+          : <select id="tree-document-unit" value={unit} aria-label="Document units" title="The unit lengths are shown and typed in. The model itself stays in millimetres." onChange={(event) => onUnit(event.target.value === "in" ? "in" : "mm")}>
+            <option value="mm">Millimeters</option>
+            <option value="in">Inches</option>
+          </select>}
+      </div>
     </TreeSection>
+    {onView !== undefined && <TreeSection title="Named views" badge="preview" initiallyOpen={false}>
+      {NAMED_VIEWS.map((view) => <button key={view.id} type="button" className="tree-item tree-view-row" title={view.hint} onClick={() => onView(view.id)}><span className="tree-glyph" aria-hidden="true"><CommandIcon name={view.id === "home" ? "home" : "view"} /></span><span><strong>{view.label}</strong><small>{view.id === "home" ? "isometric" : "standard view"}</small></span></button>)}
+    </TreeSection>}
     <TreeSection title={`Design health · ${designHealth.score}`} badge="preview" initiallyOpen={false}>
       {designHealth.workspaces.map((workspace) => <TreeItem key={workspace.workspace} kind="health" id={`design-health:${workspace.workspace}`} label={workspace.label} meta={`${workspace.status} · ${workspace.score}/100 · ${workspace.findingIds.length} finding${workspace.findingIds.length === 1 ? "" : "s"}`} selectedId={selectedId} onSelect={onSelect} />)}
     </TreeSection>
@@ -279,7 +299,7 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
     <TreeSection title={`Revision timeline · ${project.audit.length}`} badge="preview">
       {project.audit.length === 0 ? <p className="tree-empty">No broad-workbench edits yet.</p> : project.audit.slice(-8).reverse().map((entry) => <TreeItem key={`${entry.revision}:${entry.operationId}`} kind="history" id={`history:${entry.revision}`} label={entry.summary} meta={`R${entry.revision} · ${formatKind(entry.kind)}`} selectedId={selectedId} onSelect={onSelect} />)}
     </TreeSection>
-    <div className="tree-footer"><span>Schema</span><strong>workbench / 1</strong><span>Units</span><strong>{project.activeWorkspace === "vehicle" ? "SI native · mm display" : "millimeters"}</strong><span>Capabilities</span><strong>truth labeled</strong></div>
+    <div className="tree-footer"><span>Schema</span><strong>workbench / 1</strong><span>Units</span><strong>{project.activeWorkspace === "vehicle" ? "SI native · mm display" : unit === "in" ? "inches" : "millimeters"}</strong><span>Capabilities</span><strong>truth labeled</strong></div>
   </aside>;
 }
 
