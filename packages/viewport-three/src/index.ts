@@ -534,16 +534,16 @@ export class ThreeViewportAdapter {
     this.setSelectedId(this.#selectedId ?? null);
   }
 
-  setScene(scene: PreviewScene): void {
+  /** Draws a preview scene. `autoFit` false leaves the camera alone even on a scene change (the caller fits when it decides to). */
+  setScene(scene: PreviewScene, autoFit = true): void {
     const previousSelectedId = this.#selectedId;
     this.#clearBody();
     for (const primitive of scene.primitives) this.#addPrimitive(primitive);
     this.#bodyId = undefined;
     this.setSelectedId(previousSelectedId ?? null);
-    if (scene.id !== this.#lastSceneId) {
-      this.#lastSceneId = scene.id;
-      this.fitPreview(scene.boundsMm);
-    }
+    const changed = scene.id !== this.#lastSceneId;
+    this.#lastSceneId = scene.id;
+    if (autoFit && changed) this.fitPreview(scene.boundsMm);
   }
 
   setExternalObject(source: THREE.Object3D): void {

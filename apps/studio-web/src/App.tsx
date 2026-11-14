@@ -111,6 +111,7 @@ import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./re
 import { facesOfBody } from "./edge-blend-step.js";
 import { blendAllFeature, centroidHoleFeature } from "./one-shot-steps.js";
 import { explicitBody, matchingSketches, sketchByAnswer } from "./explicit-pick.js";
+import { shouldRefit } from "./view-fit.js";
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
 import { flatPatternForBody, isRebuildFailure, isRebuildNote, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
@@ -428,6 +429,8 @@ export function App(): React.JSX.Element {
   const cameraCursorRef = useRef<HTMLDivElement>(null);
   const historyActionRef = useRef<{ undo: () => void; redo: () => void }>({ undo: () => undefined, redo: () => undefined });
   const fitViewportRef = useRef<() => void>(() => undefined);
+  /** The design the Part viewport was last fitted for: the camera is fitted once per design, then left alone (PT-03). */
+  const lastFittedProjectRef = useRef<string | undefined>(undefined);
   const viewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
   /** Set while a command waits for the user to click something in the viewport; called with the click, or null when cancelled. */
   const pickRef = useRef<((point: ViewportMeasurePoint | null) => void) | null>(null);
@@ -837,12 +840,20 @@ export function App(): React.JSX.Element {
     if (viewport === undefined) return;
     if (project.activeWorkspace === "part" && activeImport !== undefined) viewport.setExternalObject(activeImport.object);
     // A design without the template plate shows only the scene's own bodies; one with it shows the qualified plate too.
-    else if (project.activeWorkspace === "part" && project.part.templateVisible === false) viewport.setScene(partScene);
-    else if (project.activeWorkspace === "part" && model !== undefined) { viewport.setArtifactWithScene(model.render, partScene); viewport.fitPreview(partScene.boundsMm); }
+    // The camera is fitted once per design (first show, new design, opened file): edits, rebuilds and timeline work
+    // leave the view where the user put it, and only F or the Fit button moves it (shouldRefit, view-fit.ts).
+    else if (project.activeWorkspace === "part" && project.part.templateVisible === false) {
+      viewport.setScene(partScene, false);
+      if (shouldRefit(lastFittedProjectRef.current, project.id)) { lastFittedProjectRef.current = project.id; viewport.fitPreview(partScene.boundsMm); }
+    }
+    else if (project.activeWorkspace === "part" && model !== undefined) {
+      viewport.setArtifactWithScene(model.render, partScene);
+      if (shouldRefit(lastFittedProjectRef.current, project.id)) { lastFittedProjectRef.current = project.id; viewport.fitPreview(partScene.boundsMm); }
+    }
     if (project.activeWorkspace === "assembly") viewport.setScene(assemblyScene);
     if (project.activeWorkspace === "surface") viewport.setScene(surfacePreview.scene);
     if (project.activeWorkspace === "vehicle") viewport.setScene(vehiclePreview.scene);
-  }, [activeImport, assemblyScene, model, partScene, project.activeWorkspace, project.part.templateVisible, surfacePreview.scene, vehiclePreview.scene]);
+  }, [activeImport, assemblyScene, model, partScene, project.activeWorkspace, project.id, project.part.templateVisible, surfacePreview.scene, vehiclePreview.scene]);
   useEffect(() => viewportRef.current?.setSelectedId(selectedId), [selectedId]);
   // Escape ends a viewport pick that is waiting for a click.
   useEffect(() => {
