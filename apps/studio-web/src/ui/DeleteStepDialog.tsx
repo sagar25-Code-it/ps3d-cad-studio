@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useDialogFocus } from "./useDialogFocus.js";
 import { deleteImpactHeadline, type DeleteImpact } from "../../../../packages/workbench-core/src/index.js";
 
 interface DeleteStepDialogProps {
@@ -14,21 +14,11 @@ interface DeleteStepDialogProps {
  * and the solids that disappear; Cancel changes nothing, and the delete itself is one Undo step.
  */
 export function DeleteStepDialog({ impact, headline, onConfirm, onCancel }: DeleteStepDialogProps): React.JSX.Element {
-  const dialogRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (dialog === null) return undefined;
-    const frame = window.requestAnimationFrame(() => dialog.querySelector<HTMLElement>("[data-dialog-initial-focus]")?.focus({ preventScroll: true }));
-    const onKey = (event: KeyboardEvent): void => {
-      event.stopPropagation();
-      if (event.key === "Escape") { event.preventDefault(); onCancel(); }
-    };
-    dialog.addEventListener("keydown", onKey);
-    return () => { window.cancelAnimationFrame(frame); dialog.removeEventListener("keydown", onKey); };
-  }, []);
+  // Esc closes, Tab stays inside the dialog (Cancel first, so Enter never deletes by accident), and focus returns to where the delete was asked.
+  const dialogRef = useDialogFocus<HTMLElement>(true, onCancel);
   const total = impact.dependents.length + 1;
   return <div className="engineering-confirmation-backdrop">
-    <section ref={dialogRef} tabIndex={-1} className="engineering-confirmation-dialog compact delete-step-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-step-title" aria-describedby="delete-step-description">
+    <section ref={dialogRef} tabIndex={-1} onKeyDown={(event) => event.stopPropagation()} className="engineering-confirmation-dialog compact delete-step-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-step-title" aria-describedby="delete-step-description">
       <header><div><h2 id="delete-step-title">Delete {impact.featureName}?</h2></div><button onClick={onCancel} aria-label="Close without deleting">×</button></header>
       <div className="engineering-review-copy" id="delete-step-description">
         <p>{headline ?? deleteImpactHeadline(impact)}</p>

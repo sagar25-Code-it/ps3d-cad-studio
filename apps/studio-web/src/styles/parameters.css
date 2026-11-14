@@ -41,7 +41,8 @@
 .studio-app .parameters-model-group { display: grid; gap: 0.25rem; }
 .studio-app .parameters-model-group h3 { display: flex; align-items: baseline; gap: 0.5rem; margin: 0.2rem 0 0; color: #2c3237; font-size: 12.5px; }
 .studio-app .parameters-model-group h3 small { color: #5d6a73; font-size: 12px; font-weight: 400; }
-.studio-app .parameters-model-row { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(9rem, 1.6fr) 7rem; align-items: center; gap: 0.35rem; }
+/* One row is as many columns as fit the width the dialog really has (at least 9rem each), so it wraps by itself at any window or dialog size: no window media query. */
+.studio-app .parameters-model-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); align-items: center; gap: 0.35rem; }
 .studio-app .parameters-model-row > input { min-width: 0; padding: 0.35rem 0.45rem; border: 1px solid #aeb5bb; border-radius: 5px; background: #fff; font: inherit; font-size: 12.5px; }
 .studio-app .parameters-model-row > input[aria-invalid="true"] { border-color: #c0392b; background: #fdeceb; }
 .studio-app .parameters-model-row > output { overflow: hidden; color: #2c3237; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
@@ -50,7 +51,3 @@
 .studio-app .parameters-model-name strong { font-size: 12.5px; }
 .studio-app .parameters-model-name small { color: #5d6a73; font-size: 12px; overflow-wrap: anywhere; }
 .studio-app .parameters-model-row .parameters-problem { grid-column: 1 / -1; margin: 0; }
-@media (max-width: 720px) {
-  .studio-app .parameters-model-row { grid-template-columns: 1fr 1fr; }
-  .studio-app .parameters-model-name { grid-column: 1 / -1; }
-}

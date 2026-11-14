@@ -9,6 +9,8 @@ import { isGlobalRenameKey, renameTargetFor } from "../apps/studio-web/src/renam
 import { TimelineGroupMenu } from "../apps/studio-web/src/ui/TimelineBar.js";
 import { chainAllButLast, groupDeleteHeadline, groupDeleteImpact, groupDeleteIntents, groupMenuModel, groupSuppressIntents } from "../apps/studio-web/src/ui/timeline-group-actions.js";
 import { timelineGroups } from "../apps/studio-web/src/ui/timeline-groups.js";
+import { DeleteStepDialog } from "../apps/studio-web/src/ui/DeleteStepDialog.js";
+import { DRAW_PROFILE_NEXT, FINISHED_SKETCH_NEXT, needsSecondSolid } from "../apps/studio-web/src/flow-text.js";
 import { blendLimitMm, blendSizeProblem, resizeBlendNext, trimKeptProblem } from "../apps/studio-web/src/part-limits.js";
 import { applyWorkbenchOperation, designOf, validateWorkbenchProject, type DesignSolidFeature, type WorkbenchOperation, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { PLATE_BODY, plateHoleFillet, stepOf, tetra } from "./history-kit.js";
@@ -237,6 +239,41 @@ export const fxPolishTests: readonly TestCase[] = [
       const left = designOf(done.value.project).features.map((feature) => feature.id);
       assert(!left.some((id) => id.startsWith("feature:a-")) && !left.includes("feature:join-on-copy"), "copies and the dependent join are gone");
       assert(left.includes("feature:join-1"), "unrelated steps stay");
+    }
+  },
+  {
+    name: "The model-parameters grid wraps by its own width: auto-fit columns, and no window media query for it",
+    run: () => {
+      const css = readFileSync("apps/studio-web/src/styles/parameters.css", "utf8");
+      const start = css.indexOf("/* Model parameters:");
+      assert(start >= 0, "the model-parameters block is in the sheet");
+      const block = css.slice(start);
+      assert(!block.includes("@media") && !block.includes("@container"), "no query of any kind for the model-parameters block");
+      const row = /\.studio-app \.parameters-model-row \{[^}]*\}/u.exec(block);
+      assert(row !== null && row[0].includes("repeat(auto-fit, minmax(min(100%, 9rem), 1fr))"), `the row is an auto-fit grid: ${row?.[0] ?? "missing"}`);
+      assert(!/max-width:\s*720px[^{]*\{[^}]*parameters-model/u.test(css), "the old 720 px rule for the model rows is gone");
+      assert(!/font-size:\s*(0\.[0-6]\d*rem|1[01](\.\d+)?px|[0-9](\.\d+)?px)/u.test(block), "text stays at 12 px or more");
+    }
+  },
+  {
+    name: "Status text after Finish Sketch and after choosing a plane names E (Part) as well as the Sketch palette",
+    run: () => {
+      assert(FINISHED_SKETCH_NEXT.includes("Press E in the Part workspace") && FINISHED_SKETCH_NEXT.includes("Create solid in the Sketch palette"), FINISHED_SKETCH_NEXT);
+      assert(DRAW_PROFILE_NEXT.includes("press E in Part"), DRAW_PROFILE_NEXT);
+      assert(needsSecondSolid("Combine").includes("Extrude (E)") && !needsSecondSolid("Combine").includes("Make solid"), needsSecondSolid("Combine"));
+      const app = readFileSync("apps/studio-web/src/App.tsx", "utf8");
+      assert(!app.includes("Make solid"), "no status text names a Make solid command that does not exist");
+      assert(!app.includes("Extrude it with Create solid in the Sketch palette"), "the old Finish message is gone");
+    }
+  },
+  {
+    name: "The delete confirmation uses the shared dialog focus: Esc closes, Tab stays inside, Cancel is first",
+    run: () => {
+      const source = readFileSync("apps/studio-web/src/ui/DeleteStepDialog.tsx", "utf8");
+      assert(source.includes("useDialogFocus"), "the shared hook handles Esc, the Tab trap and focus return");
+      const html = renderToStaticMarkup(createElement(DeleteStepDialog, { impact: { featureId: "f", featureName: "Group", featureKind: "pattern", dependents: [], removedBodyNames: [] }, headline: "Delete all 3 copies of Rectangular pattern.", onConfirm: () => undefined, onCancel: () => undefined }));
+      assert(html.includes("Delete all 3 copies of Rectangular pattern.") && html.includes("data-dialog-initial-focus"), "a custom headline is shown and Cancel takes the first focus");
+      assert(html.indexOf("data-dialog-initial-focus") < html.indexOf("primary danger"), "Cancel comes before the destructive button in focus order");
     }
   },
 ];

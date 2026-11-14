@@ -108,6 +108,7 @@ import {
 import { detectSketchProfiles, explainNoProfiles, resolveProfileRegion, sketchToolLabel, type SketchTool } from "../../../packages/workbench-sketch/src/index.js";
 import { combineGeneralBodies, createGeneralSolidBody, type SketchPlane } from "./general-modeling.js";
 import { chooseBodyFor } from "./body-choice.js";
+import { DRAW_PROFILE_NEXT, FINISHED_SKETCH_NEXT, needsSecondSolid } from "./flow-text.js";
 import { isGlobalRenameKey, renameTargetFor } from "./rename-target.js";
 import { blendLimitMm, blendSizeProblem, resizeBlendNext, trimKeptProblem } from "./part-limits.js";
 import type { ConstraintToolKind } from "../../../packages/workbench-sketch/src/constraint-tool.js";
@@ -1197,7 +1198,7 @@ export function App(): React.JSX.Element {
     if ((sketch.plane !== datum || !sameConvention || (sketch.planeOffsetMm ?? 0) !== offsetMm || !sameTilt || !sameFrame || !sameFace)
       && !applyProjectOperation({ kind: "set-sketch-plane", plane: datum, ...placement })) return;
     if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
-    setStatusText(`${describeSketchPlane(projectRef.current.sketch).status} Shown face-on. Draw a closed profile, then Create solid extrudes or revolves it from this plane.`);
+    setStatusText(`${describeSketchPlane(projectRef.current.sketch).status} Shown face-on. ${DRAW_PROFILE_NEXT}`);
   };
 
   const openMasterCart = (): void => {
@@ -2236,7 +2237,7 @@ export function App(): React.JSX.Element {
     const bodies = current.part.previewBodies ?? [];
     if ((operation === "unite" || operation === "subtract") && (current.part.generalBodies ?? []).some((body) => body.id === bodyIdOverride)) {
       // Solids from Extrude and Revolve combine through the mesh Boolean dialog, where the tool is chosen explicitly.
-      if ((current.part.generalBodies ?? []).length < 2) { setStatus("ready"); setStatusText(`${commandName} needs a second solid body. Create another with Make solid first.`); return; }
+      if ((current.part.generalBodies ?? []).length < 2) { setStatus("ready"); setStatusText(needsSecondSolid(commandName)); return; }
       setCombineRequest({ targetId: bodyIdOverride ?? undefined, mode: operation === "unite" ? "join" : "cut" });
       return;
     }
@@ -2892,7 +2893,7 @@ export function App(): React.JSX.Element {
       ? "Sketch session finished. There was no closed geometry to record yet."
       : lastSketchCommit()?.changed === false
         ? "Sketch session finished. The timeline already held this sketch."
-        : "Finished the sketch into the timeline. Extrude it with Create solid in the Sketch palette; editing it later rebuilds what is built on it.";
+        : FINISHED_SKETCH_NEXT;
     const regionNote = lastSketchCommit()?.notes[0];
     setStatusText(regionNote === undefined ? finished : `${finished} ${regionNote}`);
 
@@ -4317,7 +4318,7 @@ export function App(): React.JSX.Element {
     if (commandId === "body.update-model") { runPartFeatureAction("update-model", "Update Model"); return; }
     if (commandId === "body.appearance" || commandId === "body.move") { switchWorkspace("part"); if (selectionId !== null) setSelectedId(selectionId); return; }
     if (commandId === "feature.reveal-inputs") { switchWorkspace("sketch"); setSelectedId(projectRef.current.sketch.id); setTreeRevealRequest((request) => request + 1); return; }
-    if (commandId === "body.boolean-intersect" && selectionId?.startsWith("general-body:") === true) { if ((projectRef.current.part.generalBodies ?? []).length < 2) { setStatusText("Intersect needs a second solid body. Create another with Make solid first."); return; } setCombineRequest({ targetId: selectionId, mode: "intersect" }); return; }
+    if (commandId === "body.boolean-intersect" && selectionId?.startsWith("general-body:") === true) { if ((projectRef.current.part.generalBodies ?? []).length < 2) { setStatusText(needsSecondSolid("Intersect")); return; } setCombineRequest({ targetId: selectionId, mode: "intersect" }); return; }
     if (commandId === "body.create-component") {
       if (selectionId?.startsWith("general-body:") === true) { createComponentFromGeneralBody(selectionId); return; }
       if (selectionId?.startsWith("part-body:") === true) {
@@ -4584,7 +4585,7 @@ export function App(): React.JSX.Element {
   const selectedGeneralBody = (project.part.generalBodies ?? []).find((body) => body.id === selectedId);
   const openCombineDialog = (): void => {
     const bodies = projectRef.current.part.generalBodies ?? [];
-    if (bodies.length < 2) { setStatusText("Combine needs two solid bodies. Create them with Make solid in the Sketch workspace."); return; }
+    if (bodies.length < 2) { setStatusText("Combine needs two solid bodies. Create them with Extrude (E) or Revolve in the Part workspace."); return; }
     setCombineRequest({ targetId: bodies.some((body) => body.id === selectedId) ? selectedId ?? undefined : undefined, mode: "join" });
   };
   /** Opens the pattern dialog for the selected solid body. Patterns are timeline steps, so the body must have been built from a sketch. */
