@@ -74,7 +74,7 @@ export const ribbonPanelTests: readonly TestCase[] = [
       assert(/max-height:\s*min\(60vh/.test(drop), "the drop-down is bounded by a share of the viewport height");
       assert(/overflow-y:\s*auto/.test(drop), "a long family scrolls inside the drop-down");
       const panel = css.slice(css.indexOf(".command-panel {"), css.indexOf("}", css.indexOf(".command-panel {")));
-      assert(/max-height:\s*calc\(100% - 24px\)/.test(panel) && /overflow-y:\s*auto/.test(panel), "the command panel is bounded and scrolls inside too");
+      assert(/max-height:\s*min\(calc\(100% - 24px\),\s*calc\(100dvh - \d+px\)\)/.test(panel) && /overflow-y:\s*auto/.test(panel), "the command panel is bounded and scrolls inside too");
       assert(!/font-size:\s*(?:[0-9]|1[01])(?:\.\d+)?px/.test(css), "no text in these panels goes under 12 px");
     }
   }
