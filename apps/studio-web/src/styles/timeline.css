@@ -146,3 +146,9 @@
 .timeline-slot.land-after > .timeline-chip { box-shadow: 4px 0 0 0 #1f6fb6; }
 .timeline-slot.closed.land-before > .timeline-chip { box-shadow: -4px 0 0 0 #c0392b; }
 .timeline-slot.closed.land-after > .timeline-chip { box-shadow: 4px 0 0 0 #c0392b; }
+
+/* A run of pattern copies folded into one item (HS-19): the folded chip carries a plus, an open group has a small fold button before it. */
+.timeline-chip.group { border-style: dashed; }
+.timeline-chip .timeline-badge.group-count { color: #1f6fb6; background: #dcecfa; }
+.timeline-group-toggle { flex: none; width: 22px; height: 30px; margin-right: 0.25rem; padding: 0; border: 1px dashed #b9c1c8; border-radius: 5px; color: #1f6fb6; background: #fff; font: inherit; font-size: 1rem; line-height: 1; cursor: pointer; }
+.timeline-group-toggle:hover { border-color: #5a9fd4; background: #f0f7fd; }

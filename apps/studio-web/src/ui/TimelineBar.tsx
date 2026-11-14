@@ -4,6 +4,7 @@ import { isFeatureActive, isHealthNote, reorderProblem } from "../../../../packa
 import { CommandIcon } from "./CommandIcon.js";
 import { nearestSlot, placeMenu, type MenuPlacement } from "./menu-placement.js";
 import { dragHasStarted, dropIndexFor, edgeScroll, keyboardMoveTarget } from "./timeline-drag.js";
+import { groupIsOpen, timelineGroups, type TimelineGroup } from "./timeline-groups.js";
 
 interface TimelineBarProps {
   readonly history: DesignHistory;
@@ -48,6 +49,9 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
   /** A press on a step that may become a drag; it becomes one once the pointer has moved a few pixels. */
   const [press, setPress] = useState<{ readonly id: string; readonly x: number } | undefined>(undefined);
   const suppressClick = useRef(false);
+  /** The pattern groups the person opened (HS-19); a group that is not in here is folded into one item. */
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set());
+  const toggleGroup = (groupId: string): void => setOpenGroups((current) => { const next = new Set(current); if (next.has(groupId)) next.delete(groupId); else next.add(groupId); return next; });
   const features = history.features;
   // The status bar changes height with the responsive layout, so the strip sits on top of wherever it actually is.
   const [bottom, setBottom] = useState(34);
@@ -103,9 +107,10 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
   useEffect(() => {
     if (press === undefined) return undefined;
     let started = false;
+    // A folded group counts once for each step it holds, all at its own centre, so a drop lands before or after the whole group.
     const centersWithout = (id: string): readonly number[] => [...(trackRef.current?.querySelectorAll<HTMLElement>("[data-chip-id]") ?? [])]
       .filter((element) => element.dataset["chipId"] !== id)
-      .map((element) => { const box = element.getBoundingClientRect(); return box.left + box.width / 2; });
+      .flatMap((element) => { const box = element.getBoundingClientRect(); return Array.from({ length: Number(element.dataset["chipCount"] ?? 1) }, () => box.left + box.width / 2); });
     const landing = (x: number): { readonly toIndex: number; readonly refusal: string | undefined } => {
       const toIndex = dropIndexFor(centersWithout(press.id), x);
       const from = history.features.findIndex((feature) => feature.id === press.id);
@@ -190,6 +195,14 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
     />;
   };
 
+  // Pattern groups: a run of copies made by one command is one folded item until it is opened.
+  const groups = timelineGroups(history);
+  const groupOf = new Map<string, TimelineGroup>();
+  for (const group of groups) for (const id of group.ids) groupOf.set(id, group);
+  const groupOpenNow = (group: TimelineGroup): boolean => groupIsOpen(history, group, openGroups, [renaming, chipDrag?.id, press?.id, menu?.feature.id]);
+  /** The step whose slot shows a step: itself, or the first step of the folded group it is inside. */
+  const anchorOf = (id: string): string => { const group = groupOf.get(id); return group !== undefined && !groupOpenNow(group) ? group.ids[0]! : id; };
+
   const stepBy = (delta: number): void => props.onRollback(Math.min(features.length, Math.max(0, history.rollbackIndex + delta)));
 
   return <section className="timeline-bar" style={{ bottom }} aria-label="Design timeline">
@@ -204,6 +217,9 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
         ? <p className="timeline-empty">History starts when you finish a sketch. Extrude or revolve it and every step is recorded here; edit any step later and the steps after it rebuild.</p>
         : <>
           {features.map((feature, index) => {
+            const group = groupOf.get(feature.id);
+            const folded = group !== undefined && !groupOpenNow(group);
+            if (folded && group.ids[0] !== feature.id) return null;
             const active = isFeatureActive(history, feature.id);
             const selected = props.selectedFeatureId === feature.id;
             const rolledBack = index >= history.rollbackIndex;
@@ -211,12 +227,39 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
             const classes = ["timeline-chip", selected ? "selected" : "", dragged ? "dragging" : "", feature.suppressed ? "suppressed" : "", rolledBack ? "rolled-back" : "", feature.health !== undefined ? (isHealthNote(feature.health.message) ? "note" : "error") : "", !active && !rolledBack && !feature.suppressed ? "inactive" : ""].filter(Boolean).join(" ");
             // While a step is dragged, the slot it would land in shows a bar before it (or after the last one); a closed place shows it in red.
             const others = chipDrag === undefined ? [] : features.filter((candidate) => candidate.id !== chipDrag.id);
-            const landsBefore = chipDrag !== undefined && !dragged && others[chipDrag.toIndex]?.id === feature.id;
-            const landsAfter = chipDrag !== undefined && !dragged && chipDrag.toIndex >= others.length && others[others.length - 1]?.id === feature.id;
+            const landsBefore = chipDrag !== undefined && !dragged && others[chipDrag.toIndex] !== undefined && anchorOf(others[chipDrag.toIndex]!.id) === feature.id;
+            const landsAfter = chipDrag !== undefined && !dragged && chipDrag.toIndex >= others.length && others.length > 0 && anchorOf(others[others.length - 1]!.id) === feature.id;
             const closed = (landsBefore || landsAfter) && chipDrag?.refusal !== undefined;
             const slotClasses = ["timeline-slot", landsBefore ? "land-before" : "", landsAfter ? "land-after" : "", closed ? "closed" : ""].filter(Boolean).join(" ");
+            if (folded) {
+              const members = group.ids.map((id) => features.find((candidate) => candidate.id === id)!);
+              const worst = members.find((member) => member.health !== undefined && !isHealthNote(member.health.message));
+              const groupClasses = ["timeline-chip", "group", members.some((member) => member.id === props.selectedFeatureId) ? "selected" : "", members.every((member) => member.suppressed) ? "suppressed" : "", group.firstIndex >= history.rollbackIndex ? "rolled-back" : "", worst !== undefined ? "error" : ""].filter(Boolean).join(" ");
+              return <span key={`group:${group.groupId}`} className={slotClasses} role="listitem">
+                {marker(index)}
+                <button
+                  className={groupClasses}
+                  disabled={props.busy}
+                  data-chip-id={feature.id}
+                  data-chip-count={members.length}
+                  data-group-id={group.groupId}
+                  aria-expanded={false}
+                  aria-label={`${group.label}, folded: ${members.length} steps${worst === undefined ? "" : `, ${worst.name} needs attention: ${worst.health!.message}`}`}
+                  title={`${group.label}: ${members.length} copies made by one pattern. Click to show the steps, double-click to edit the pattern, right-click for more.`}
+                  onClick={() => toggleGroup(group.groupId)}
+                  onDoubleClick={() => props.onEdit(feature)}
+                  onContextMenu={(event) => { event.preventDefault(); setMenu({ feature, x: event.clientX, y: event.clientY }); }}
+                >
+                  <CommandIcon name={ICONS[feature.kind]} />
+                  <span className="timeline-label">{group.label}</span>
+                  <b className="timeline-badge group-count" aria-hidden="true">+</b>
+                  {worst !== undefined && <b className="timeline-badge" aria-hidden="true">!</b>}
+                </button>
+              </span>;
+            }
             return <span key={feature.id} className={slotClasses} role="listitem" {...(closed && chipDrag?.refusal !== undefined ? { title: chipDrag.refusal } : {})}>
               {marker(index)}
+              {group !== undefined && group.ids[0] === feature.id && <button className="timeline-group-toggle" aria-expanded={true} title={`Fold ${group.label} back into one item`} aria-label={`Fold ${group.label}`} onClick={() => toggleGroup(group.groupId)}>‹</button>}
               {renaming === feature.id
                 ? <input
                   className="timeline-rename"
