@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { DesignFeature, DesignHistory } from "../../../../packages/workbench-core/src/index.js";
 import { isFeatureActive, isHealthNote, reorderProblem } from "../../../../packages/workbench-core/src/index.js";
 import { CommandIcon } from "./CommandIcon.js";
@@ -305,7 +306,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
           {marker(features.length)}
         </>}
     </div>
-    {menu !== undefined && <TimelineMenu
+    {menu !== undefined && createPortal(<TimelineMenu
       menuRef={menuRef}
       feature={menu.feature}
       history={history}
@@ -318,8 +319,17 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
       onDelete={props.onDelete}
       {...(props.onReveal === undefined ? {} : { onReveal: props.onReveal })}
       {...(props.onMove === undefined ? {} : { onMove: props.onMove })}
-    />}
+    />, menuHost(trackRef.current))}
   </section>;
+}
+
+/**
+ * Where the step menu is mounted: the app root, outside the strip. The strip is `position: fixed` with its own z-index, which makes a
+ * stacking context, so a menu inside it could never paint above the docked Edit panel or the command panel however high its own z-index
+ * was. At the app root it competes with them directly (and still gets the `.studio-app` styles).
+ */
+export function menuHost(inside: Element | null): Element {
+  return inside?.closest(".studio-app") ?? globalThis.document.body;
 }
 
 interface TimelineMenuProps {

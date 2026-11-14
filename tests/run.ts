@@ -202,6 +202,7 @@ import { editFeatureDockTests } from "./edit-feature-dock.test.js";
 import { dockedPanelTests } from "./docked-panel.test.js";
 import { holePatternFollowTests } from "./hole-pattern-follows.test.js";
 import { lengthFieldDraftTests } from "./length-field-draft.test.js";
+import { timelineMenuLayerTests } from "./timeline-menu-layer.test.js";
 import { sketchOffsetChainDefaultTests } from "./sketch-offset-chain-default.test.js";
 import { sketchProjectionCurrentTests } from "./sketch-projection-current.test.js";
 import { sketchDimensionPointFirstTests } from "./sketch-dimension-point-first.test.js";
@@ -466,6 +467,7 @@ const tests: readonly TestCase[] = [
   ...dockedPanelTests,
   ...holePatternFollowTests,
   ...lengthFieldDraftTests,
+  ...timelineMenuLayerTests,
 ];
 let failures = 0;
 
