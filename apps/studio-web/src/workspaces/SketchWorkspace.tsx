@@ -64,7 +64,7 @@ import { dragSketchHandle, grabHandlesOf, type DragHandle, type SketchGrabHandle
 import { arrowHead, dimensionLayout } from "../../../../packages/workbench-sketch/src/dimension-layout.js";
 import { POLYGON_DEFAULT_SIDES, POLYGON_MAX_SIDES, POLYGON_MIN_SIDES, POLYGON_MODES, buildSlot, buildSlotOverall, type SketchShape } from "../../../../packages/workbench-sketch/src/shapes.js";
 import { ORIGIN_RELATION_POINT, relationPointsOf, type RelationPoint } from "../../../../packages/workbench-sketch/src/relation-points.js";
-import { DOUBLED_DISTANCE_LABEL, lineExtentPlacement, orientationForPlacement, placeLineExtent, placeAcrossDistance, placePointDistance, placementPreview, resolveDimensionPair, type AcrossLinePlacement, type DimensionPairResult, type DimensionPick, type PairDimension, type PointPairPlacement } from "../../../../packages/workbench-sketch/src/dimension-pick.js";
+import { DOUBLED_DISTANCE_LABEL, firstPickAfterPoint, firstPickPrompt, lineExtentPlacement, orientationForPlacement, pairForCurveClick, placeLineExtent, placeAcrossDistance, placePointDistance, placementPreview, resolveDimensionPair, type AcrossLinePlacement, type DimensionPairResult, type DimensionPick, type PairDimension, type PointPairPlacement } from "../../../../packages/workbench-sketch/src/dimension-pick.js";
 import { dimensionOverConstraint } from "../../../../packages/workbench-sketch/src/dimension-overconstraint.js";
 import { chainSelectionFor } from "../../../../packages/workbench-sketch/src/chain-select.js";
 import { CONSTRAINT_TOOL_INFO, constraintToolStep, isConstraintToolKind, type ConstraintToolKind, type ConstraintToolPick } from "../../../../packages/workbench-sketch/src/constraint-tool.js";
@@ -1556,8 +1556,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     if (props.dimensionMode && !additive) {
       // The click that places a two-point dimension may land on a curve.
       if (dimensionPlacement !== undefined) { placeDimensionAt(cursor); return; }
-      // A second curve after a first: the distance or the angle between the two.
-      if (dimensionFirst !== undefined && dimensionFirst.entityId !== id && takeDimensionPair(resolveDimensionPair(props.sketch, dimensionFirst, { entityId: id }), cursor)) return;
+      // A curve after a first pick, which is a curve or a point (the order of the picks does not matter): the distance or the angle between the two.
+      const pair = pairForCurveClick(props.sketch, dimensionFirst, id);
+      if (pair !== undefined && takeDimensionPair(pair, cursor)) return;
     }
     if (props.viewportState.selectionFilter === "profile") {
       const profile = profiles.find((candidate) => candidate.entityIds.includes(id));
@@ -1627,7 +1628,6 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     const pickedRef = solverPointRef(point);
     if (dimensionFirst !== undefined && dimensionFirst.ref === undefined && dimensionFirst.entityId !== point.entityId && pickedRef !== undefined
       && takeDimensionPair(resolveDimensionPair(props.sketch, dimensionFirst, { entityId: point.entityId, ref: pickedRef }), point.point)) return;
-    setDimensionFirst(undefined);
     if (!isSketchDatumEntityId(point.entityId)) {
       setSelectionIds([point.entityId]);
       setSelectedProfileIds([]);
@@ -1637,6 +1637,9 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       ? dimensionPoints.filter((candidate) => candidate.id !== point.id)
       : dimensionPoints.length < 2 ? [...dimensionPoints, point] : [point];
     setDimensionPoints(next);
+    // A single picked point is the first pick, so a curve clicked next is dimensioned from it (point then line, as line then point).
+    const only = next.length === 1 ? next[0]! : undefined;
+    setDimensionFirst(only === undefined ? undefined : firstPickAfterPoint({ entityId: only.entityId, ref: solverPointRef(only) }, next.length));
     const resolved = next.length === 2 ? resolveDirectSketchDimension(next) : undefined;
     // Two points of the solver's curves: the next click places the distance between them and opens its value on the canvas.
     if (resolved !== undefined && resolved.driving === undefined && resolved.between !== undefined) {
@@ -1656,7 +1659,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
     props.onMessage(next.length === 0
       ? "Definition point cleared. Pick a point to start a dimension."
       : next.length === 1
-        ? `${next[0]!.label} selected. Pick a second definition point.`
+        ? `${next[0]!.label} selected. Pick a line for the distance to it, or a second point.`
         : resolved === undefined
           ? "Point-to-point dimension selected."
           : `Reference distance ${formatLengthLabel(resolved.valueMm, dimensionDisplay)} (ΔX ${formatLengthLabel(resolved.delta[0], dimensionDisplay)}, ΔY ${formatLengthLabel(resolved.delta[1], dimensionDisplay)}). A driving distance between two different curves needs the two-curve dimension; this is measured only.`);
@@ -2478,7 +2481,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
       {props.dimensionMode && <div className="dimension-mode-banner"><CommandIcon name="dimension" /><span><strong>Sketch Dimension</strong>{dimensionPlacement !== undefined
         ? "axis" in dimensionPlacement ? "Click to place the dimension: beyond the centreline for a diameter across it, on this side for the distance to it." : "Click to place the dimension: above or below the two points for horizontal, beside them for vertical, elsewhere for straight."
         : dimensionFirst !== undefined
-          ? lineExtent !== undefined ? "Type the length, click above or beside the line for its horizontal or vertical extent, or click a second curve or point." : "Type the value, or click a second curve or point for the distance or angle between the two."
+          ? firstPickPrompt(dimensionFirst, lineExtent !== undefined)
           : "Click a curve for its size, then a second curve or point for a distance or an angle. Esc to finish."}</span></div>}
       {pickRelation !== null && <div className="dimension-mode-banner constraint-tool-banner" role="status"><CommandIcon name={pickRelation === "symmetry" ? "mirror" : pickRelation} /><span><strong>{CONSTRAINT_TOOL_INFO[pickRelation].label}</strong>{toolPicks.length === 0 ? CONSTRAINT_TOOL_INFO[pickRelation].prompt : `${toolPicks.map((pick) => pick.label).join(", ")} picked. Pick the next one.`} Esc to finish.</span></div>}
       {relaxPrompt !== undefined && <div className="dimension-mode-banner relax-fix-prompt" role="alert">

@@ -266,3 +266,32 @@ export function placeLineExtent(sketch: WorkbenchSketch, pick: DimensionPick | u
 export function placePointDistance(sketch: WorkbenchSketch, placement: PointPairPlacement, cursor: Vec2): PairDimension | string {
   return distanceBetween(sketch, placement.entityId, placement.secondEntityId, orientationForPlacement(placement.from, placement.to, cursor), placement.points);
 }
+
+/**
+ * What the Dimension tool keeps as its first pick after a click on a point (a blue dot): the point itself while it is the only point
+ * picked, so a curve clicked next is paired with it. Pick order does not matter in the tool: a point and then a line gives the same
+ * distance as the line and then the point. Two picked points are placed as a point pair, which needs no first pick.
+ */
+export function firstPickAfterPoint(point: { readonly entityId: string; readonly ref: SketchPointRef | undefined }, pickedPointCount: number): DimensionPick | undefined {
+  return pickedPointCount === 1 && point.ref !== undefined ? { entityId: point.entityId, ref: point.ref } : undefined;
+}
+
+/**
+ * What a click on a curve is dimensioned by when something was picked before it, or undefined when the click is for the curve alone
+ * (nothing picked before, the same curve again, or a point that already lies on the clicked line, such as the corner the two share:
+ * that point has no distance to give, so the click opens the line's own length).
+ */
+export function pairForCurveClick(sketch: WorkbenchSketch, first: DimensionPick | undefined, curveId: string): DimensionPairResult | undefined {
+  if (first === undefined || first.entityId === curveId) return undefined;
+  const pair = resolveDimensionPair(sketch, first, { entityId: curveId });
+  if (first.ref !== undefined && pair.status === "ready" && pair.dimension.dimension === "point-line" && pair.dimension.existing === undefined && Math.abs(pair.dimension.measured) < 1e-9) return undefined;
+  return pair;
+}
+
+/** The Dimension tool's banner while one thing is picked and nothing is being placed. */
+export function firstPickPrompt(first: DimensionPick, lineHasExtent: boolean): string {
+  if (first.ref !== undefined) return "Point picked. Click a line for the distance to it, or a second point or circle for the distance between the two.";
+  return lineHasExtent
+    ? "Type the length, click above or beside the line for its horizontal or vertical extent, or click a second curve or point."
+    : "Type the value, or click a second curve or point for the distance or angle between the two.";
+}
