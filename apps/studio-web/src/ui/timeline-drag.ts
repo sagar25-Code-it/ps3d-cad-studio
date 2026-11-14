@@ -38,3 +38,12 @@ export function keyboardMoveTarget(fromIndex: number, count: number, direction: 
   const to = direction === "left" ? fromIndex - 1 : fromIndex + 1;
   return to < 0 || to >= count ? undefined : to;
 }
+
+/**
+ * Where a key press moves the rollback marker: the arrow keys one step, Home to the start and End to after the last step. The marker
+ * sits in slot `index` of `count` steps (slots 0 to count). Undefined for another key or at either end, where nothing moves.
+ */
+export function markerKeyTarget(key: string, index: number, count: number): number | undefined {
+  const to = key === "ArrowLeft" ? index - 1 : key === "ArrowRight" ? index + 1 : key === "Home" ? 0 : key === "End" ? count : undefined;
+  return to === undefined || to < 0 || to > count || to === index ? undefined : to;
+}

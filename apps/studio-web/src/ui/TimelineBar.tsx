@@ -4,7 +4,7 @@ import type { DesignFeature, DesignHistory } from "../../../../packages/workbenc
 import { isFeatureActive, isHealthNote, reorderProblem } from "../../../../packages/workbench-core/src/index.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { nearestSlot, placeMenu, type MenuPlacement } from "./menu-placement.js";
-import { dragHasStarted, dropIndexFor, edgeScroll, keyboardMoveTarget } from "./timeline-drag.js";
+import { dragHasStarted, dropIndexFor, edgeScroll, keyboardMoveTarget, markerKeyTarget } from "./timeline-drag.js";
 import { groupIsOpen, timelineGroups, type TimelineGroup } from "./timeline-groups.js";
 
 interface TimelineBarProps {
@@ -50,6 +50,8 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
   /** A press on a step that may become a drag; it becomes one once the pointer has moved a few pixels. */
   const [press, setPress] = useState<{ readonly id: string; readonly x: number } | undefined>(undefined);
   const suppressClick = useRef(false);
+  /** Set while the rollback marker is being moved with the keyboard, so focus follows it to the next slot. */
+  const followMarkerFocus = useRef(false);
   /** The pattern groups the person opened (HS-19); a group that is not in here is folded into one item. */
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(new Set());
   const toggleGroup = (groupId: string): void => setOpenGroups((current) => { const next = new Set(current); if (next.has(groupId)) next.delete(groupId); else next.add(groupId); return next; });
@@ -150,6 +152,11 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
     };
   }, [press?.id, press?.x, history]);
 
+  /** Focus left a marker for something that is not a marker: the marker no longer pulls focus after it. */
+  const leaveMarkers = (event: React.FocusEvent<HTMLElement>): void => {
+    const next = event.relatedTarget;
+    if (!(next instanceof Element) || next.closest(".timeline-marker") === null) followMarkerFocus.current = false;
+  };
   const marker = (index: number): React.JSX.Element => {
     const current = history.rollbackIndex === index;
     const target = drag !== undefined && drag.slot === index && !current;
@@ -161,6 +168,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
       tabIndex={0}
       aria-label={`Roll back to after step ${index}`}
       title="Move the rollback marker here"
+      onBlur={leaveMarkers}
       onClick={() => props.onRollback(index)}
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); props.onRollback(index); } }}
     />;
@@ -189,9 +197,16 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
         if (landed !== undefined && landed !== index) props.onRollback(landed);
       }}
       onPointerCancel={() => setDrag(undefined)}
+      // Keyboard use: focus follows the marker. The marker is a different element in every slot, so the new one takes focus when it is
+      // mounted (the ref below) for as long as focus stays on the markers; leaving them for anything else stops the following.
+      ref={(element) => { if (element !== null && followMarkerFocus.current && globalThis.document.activeElement !== element) element.focus(); }}
+      onBlur={leaveMarkers}
       onKeyDown={(event) => {
-        if (event.key === "ArrowLeft" && index > 0) { event.preventDefault(); props.onRollback(index - 1); }
-        else if (event.key === "ArrowRight" && index < features.length) { event.preventDefault(); props.onRollback(index + 1); }
+        const to = markerKeyTarget(event.key, index, features.length);
+        if (to === undefined) return;
+        event.preventDefault();
+        followMarkerFocus.current = true;
+        props.onRollback(to);
       }}
     />;
   };
