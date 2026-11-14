@@ -1668,7 +1668,11 @@ export type WorkbenchOperation = OperationEnvelope & (
        */
       readonly sketchCurves?: readonly { readonly sketchFeatureId: string; readonly entities: readonly SketchEntity[]; readonly message?: string }[] }
   | { readonly kind: "set-design-feature-suppressed"; readonly featureId: string; readonly suppressed: boolean }
-  | { readonly kind: "delete-design-feature"; readonly featureId: string }
+  /**
+   * Deletes a timeline step. Absent `keepDependents` (or false) also deletes everything built on it. With `keepDependents: true` the steps built on
+   * it stay in the timeline marked as needing attention (health: "<step> was deleted, so ... "); the solid of a deleted new-body step leaves the model.
+   */
+  | { readonly kind: "delete-design-feature"; readonly featureId: string; readonly keepDependents?: boolean }
   | { readonly kind: "set-design-rollback"; readonly index: number }
   /** Moves one timeline step to another place (its final index, from 0); refused, with the step it would break, when something built on it or that it is built on would change places with it. */
   | { readonly kind: "move-design-feature"; readonly featureId: string; readonly toIndex: number }

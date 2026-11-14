@@ -271,7 +271,7 @@ export const fxPolishTests: readonly TestCase[] = [
     run: () => {
       const source = readFileSync("apps/studio-web/src/ui/DeleteStepDialog.tsx", "utf8");
       assert(source.includes("useDialogFocus"), "the shared hook handles Esc, the Tab trap and focus return");
-      const html = renderToStaticMarkup(createElement(DeleteStepDialog, { impact: { featureId: "f", featureName: "Group", featureKind: "pattern", dependents: [], removedBodyNames: [] }, headline: "Delete all 3 copies of Rectangular pattern.", onConfirm: () => undefined, onCancel: () => undefined }));
+      const html = renderToStaticMarkup(createElement(DeleteStepDialog, { impact: { featureId: "f", featureName: "Group", featureKind: "pattern", dependents: [], removedBodyNames: [], kept: { featureId: "f", featureName: "Group", marks: [], removedBodyNames: [] } }, headline: "Delete all 3 copies of Rectangular pattern.", onConfirm: () => undefined, onCancel: () => undefined }));
       assert(html.includes("Delete all 3 copies of Rectangular pattern.") && html.includes("data-dialog-initial-focus"), "a custom headline is shown and Cancel takes the first focus");
       assert(html.indexOf("data-dialog-initial-focus") < html.indexOf("primary danger"), "Cancel comes before the destructive button in focus order");
     }

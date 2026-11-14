@@ -1,5 +1,6 @@
 import { dependentsOf, isSplitPieceOf, modifiesBody } from "./design.js";
 import { isHealthNote } from "./design-labels.js";
+import { keepImpact, type KeepImpact } from "./design-keep-delete.js";
 import type { DesignFeature, DesignHistory, DesignSolidFeature, WorkbenchProject } from "./types.js";
 
 /**
@@ -23,6 +24,8 @@ export interface DeleteImpact {
   readonly dependents: readonly DeleteImpactItem[];
   /** The names of the solids that disappear from the model (the bodies of removed new-body steps and their split pieces). */
   readonly removedBodyNames: readonly string[];
+  /** What "Delete only this step" leaves behind: the steps that stay and turn red, and the solids that go. Everything above is what "and what is built on it" removes. */
+  readonly kept: KeepImpact;
 }
 
 const nameOf = (history: DesignHistory, id: string): string => history.features.find((feature) => feature.id === id)?.name ?? "a step";
@@ -71,7 +74,7 @@ export function deleteImpact(project: WorkbenchProject, featureId: string): Dele
   const removedBodyNames = (project.part.generalBodies ?? [])
     .filter((body) => goneBodies.has(body.id) || [...goneBodies].some((root) => isSplitPieceOf(root, body.id)))
     .map((body) => body.name);
-  return { featureId, featureName: feature.name, featureKind: feature.kind, dependents: items, removedBodyNames };
+  return { featureId, featureName: feature.name, featureKind: feature.kind, dependents: items, removedBodyNames, kept: keepImpact(project, featureId)! };
 }
 
 /** The sentence the confirmation opens with: what the person asked for and how much more goes. */
@@ -80,6 +83,12 @@ export function deleteImpactHeadline(impact: DeleteImpact): string {
   return count === 0
     ? `Delete ${impact.featureName}.`
     : `Deleting ${impact.featureName} also deletes ${count} other step${count === 1 ? "" : "s"} that ${count === 1 ? "depends" : "depend"} on it.`;
+}
+
+/** The sentence the confirmation opens with when the step has dependants and the person may keep them. */
+export function deleteChoiceHeadline(impact: DeleteImpact): string {
+  const count = impact.dependents.length;
+  return `${count} other step${count === 1 ? " is" : "s are"} built on ${impact.featureName}.`;
 }
 
 /** A solid whose last rebuild did not complete: the step that failed and the reason it gave. */

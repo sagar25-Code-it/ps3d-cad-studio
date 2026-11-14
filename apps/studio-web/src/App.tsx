@@ -3340,7 +3340,7 @@ export function App(): React.JSX.Element {
   const updateTimelineSolid = async (next: DesignSolidFeature): Promise<void> => {
     const history = designOf(projectRef.current);
     const sketchFeature = history.features.find((feature) => feature.id === next.sketchFeatureId);
-    if (sketchFeature?.kind !== "sketch") return;
+    if (sketchFeature?.kind !== "sketch") { setStatus("error"); setStatusText(`${next.name}: the sketch it was built on was deleted. Choose another sketch in the Edit panel, or delete the step.`); return; }
     setStatus("working");
     const existing = projectRef.current.part.generalBodies?.find((body) => body.id === next.bodyId);
     // With expressions in play, other steps may follow this edit (a hole depth that uses Extrude1.distance), so every body is replayed.
@@ -4566,8 +4566,8 @@ export function App(): React.JSX.Element {
     if (impact !== undefined) setGroupDeleteRequest({ impact, group });
   };
   /** Deletes a step and what is built on it, as one undo step. */
-  const performStepDelete = (featureId: string): void => {
-    timelineOperation({ kind: "delete-design-feature", featureId }, () => { setStepPick(null); setSelectedId(null); });
+  const performStepDelete = (featureId: string, keepDependents = false): void => {
+    timelineOperation({ kind: "delete-design-feature", featureId, ...(keepDependents ? { keepDependents: true } : {}) }, () => { setStepPick(null); setSelectedId(null); });
   };
   /** Delete from any entry point (strip, browser, menu, key): a step that stands alone goes at once, one with dependants asks first and names them. */
   const requestStepDelete = (feature: DesignFeature): void => {
@@ -4921,7 +4921,7 @@ export function App(): React.JSX.Element {
     {onView.element}
     {contextMenu !== undefined && contextMenu.radial !== true && <WorkbenchContextMenu x={contextMenu.x} y={contextMenu.y} selectionLabel={contextMenu.selectionId ?? `${project.activeWorkspace} canvas`} commands={contextCommands} onRun={runContextCommand} onClose={() => setContextMenu(undefined)} />}
     {groupDeleteRequest !== null && <DeleteStepDialog impact={groupDeleteRequest.impact} headline={groupDeleteHeadline(groupDeleteRequest.impact, groupDeleteRequest.group)} onCancel={() => setGroupDeleteRequest(null)} onConfirm={() => { const request = groupDeleteRequest; setGroupDeleteRequest(null); runGroupOperations(groupDeleteIntents(designOf(projectRef.current), request.group), () => { setStepPick(null); setSelectedId(null); }); }} />}
-    {deleteRequest !== null && <DeleteStepDialog impact={deleteRequest} onCancel={() => setDeleteRequest(null)} onConfirm={() => { const featureId = deleteRequest.featureId; setDeleteRequest(null); performStepDelete(featureId); }} />}
+    {deleteRequest !== null && <DeleteStepDialog impact={deleteRequest} onCancel={() => setDeleteRequest(null)} onConfirm={(mode) => { const featureId = deleteRequest.featureId; setDeleteRequest(null); performStepDelete(featureId, mode === "only"); }} />}
     {showTimeline && <TimelineBar
       history={designOf(project)}
       selectedFeatureId={selectedTimelineFeature?.id ?? null}

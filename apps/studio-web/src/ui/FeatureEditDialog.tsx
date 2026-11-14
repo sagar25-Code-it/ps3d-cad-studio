@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { DesignSolidFeature, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
-import { designOf, previewFieldExpression } from "../../../../packages/workbench-core/src/index.js";
+import { canRepairSketch, designOf, isMarkedBroken, lostSketchOf, previewFieldExpression, repairCandidates, repairSketchReference } from "../../../../packages/workbench-core/src/index.js";
 import { applyParameterValues, applyPlainSize, fieldAcceptsExpression, parameterFieldsOf, parameterValuesOf } from "../feature-parameters.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { useDockedPanel } from "./docked-panel.js";
@@ -46,6 +46,8 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
   const [problem, setProblem] = useState("");
   const [operation, setOperation] = useState<"join" | "cut" | "intersect">(() => props.feature?.operation === "cut" || props.feature?.operation === "intersect" ? props.feature.operation : "join");
   const [values, setValues] = useState<Readonly<Record<string, string>>>({});
+  /** The sketch picked to replace one that was deleted (empty until the person chooses). */
+  const [sketchChoice, setSketchChoice] = useState("");
 
   useEffect(() => {
     if (props.feature === undefined) return;
@@ -59,6 +61,7 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
     setOperation(props.feature.operation === "cut" || props.feature.operation === "intersect" ? props.feature.operation : "join");
     setValues(parameterValuesOf(props.feature));
     setProblem("");
+    setSketchChoice("");
   }, [props.feature?.id]);
 
   if (props.feature === undefined) return null;
@@ -86,15 +89,29 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
       : <small className="feature-edit-live failed" role="alert">{preview.message}{preview.position === undefined ? "" : ` (character ${preview.position + 1})`}</small>;
   };
 
+  // A step whose sketch was deleted (Delete only this step keeps it) offers the sketches before it to be built on instead.
+  const history = designOf(props.project);
+  const lostSketch = lostSketchOf(history, feature) !== undefined;
+  const repairable = lostSketch && canRepairSketch(feature);
+  const candidates = repairable ? repairCandidates(history, feature.id) : [];
+  const turnsAboutLostLine = repairable && feature.revolveAxis?.kind === "sketch-line";
+
   const apply = (): void => {
+    let working = feature;
+    if (repairable) {
+      if (sketchChoice === "") { setProblem("Choose the sketch this step should be built on, or cancel and delete the step."); return; }
+      const repair = repairSketchReference(history, feature, sketchChoice);
+      if (!repair.ok) { setProblem(repair.message); return; }
+      working = repair.feature;
+    } else if (lostSketch) { setProblem(`${feature.name} cannot take another sketch here. Delete it and build it again from a sketch.`); return; }
     if (fields !== undefined) {
-      const result = applyParameterValues(feature, values, props.project);
+      const result = applyParameterValues(working, values, props.project);
       if (!result.ok) { setProblem(result.message); return; }
       props.onApply(result.feature);
       return;
     }
     if (!plainForm) { props.onClose(); return; }
-    const result = applyPlainSize(feature, {
+    const result = applyPlainSize(working, {
       text: value, direction, throughAll, reaching, secondText: second,
       ...(switchable && operation !== feature.operation ? { operation } : {}),
       ...(!isExtrude && thin ? { thin: { wallText: thinWall, side: thinSide } } : {})
@@ -107,6 +124,18 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
     <section ref={dock.ref} tabIndex={-1} className="save-project-dialog feature-edit-dialog" role="region" aria-labelledby="feature-edit-title">
       <header><span><CommandIcon name={feature.kind} /></span><div><small>TIMELINE / EDIT FEATURE</small><h2 id="feature-edit-title">{feature.name}</h2></div><button onClick={props.onClose} aria-label="Cancel editing"><CommandIcon name="cancel" /></button></header>
       <div className="save-project-content feature-edit-form">
+        {isMarkedBroken(feature) && <div className="inline-warning feature-edit-broken" role="alert">{feature.health?.message}</div>}
+        {repairable && <label>
+          <span>Sketch</span>
+          {candidates.length === 0
+            ? <small className="feature-edit-hint">No sketch comes before this step. Cancel and draw one first, or delete the step.</small>
+            : <select aria-label="Replacement sketch" value={sketchChoice} onChange={(event) => { setSketchChoice(event.target.value); setProblem(""); }}>
+              <option value="">Choose the sketch to build on…</option>
+              {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+            </select>}
+          <small className="feature-edit-hint">The profile is picked again from the new sketch (its outer outline, with the shapes inside it as holes).{turnsAboutLostLine ? " The step turned about a line of the deleted sketch; it will turn about the sketch's Y axis." : ""}</small>
+        </label>}
+        {lostSketch && !repairable && <div className="save-project-note"><CommandIcon name="shield" /><span>The sketch this step was built on was deleted, and this kind of step cannot take another one here. Delete it and build it again.</span></div>}
         {fields !== undefined && fields.map((field, index) => <label key={field.id}>
           <span>{field.label}</span>
           {field.input === "select"

@@ -64,7 +64,7 @@ export function groupDeleteImpact(project: WorkbenchProject, group: TimelineGrou
   outside.sort((left, right) => history.features.findIndex((feature) => feature.id === left.id) - history.features.findIndex((feature) => feature.id === right.id));
   const copies: DeleteImpactItem[] = members.slice(1).map((member) => ({ id: member.id, name: member.name, kind: member.kind, reason: "a copy made by the same pattern" }));
   const removedBodyNames = (project.part.generalBodies ?? []).filter((body) => members.some((member) => member.kind !== "sketch" && member.bodyId === body.id)).map((body) => body.name);
-  return { featureId: members[0]!.id, featureName: group.label, featureKind: members[0]!.kind, dependents: [...copies, ...outside], removedBodyNames };
+  return { featureId: members[0]!.id, featureName: group.label, featureKind: members[0]!.kind, dependents: [...copies, ...outside], removedBodyNames, kept: { featureId: members[0]!.id, featureName: group.label, marks: [], removedBodyNames: [] } };
 }
 
 /** The headline of the group delete confirmation (the single-step headline would call the copies dependants of the first one). */

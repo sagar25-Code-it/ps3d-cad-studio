@@ -53,6 +53,7 @@ import {
   updateDesignSolid,
   validSolidFeaturePayload
 } from "./design.js";
+import { deleteKeepingDependents } from "./design-keep-delete.js";
 import {
   booleanPartBodies,
   createRevolvedPartBody,
@@ -382,8 +383,11 @@ function validateWorkbenchOperationShape(rawInput: unknown): WorkbenchResult<Wor
       if (input.name.trim() === "") return invalidOperation("The feature name cannot be blank. Type at least one character.");
       break;
     case "edit-design-sketch":
-    case "delete-design-feature":
       if (!keys(input, [...common, "featureId"]) || !stableId(input.featureId)) return invalidOperation("The timeline feature ID is invalid.");
+      break;
+    case "delete-design-feature":
+      if (!keys(input, [...common, "featureId", ...(Object.hasOwn(input, "keepDependents") ? ["keepDependents"] : [])]) || !stableId(input.featureId)) return invalidOperation("The timeline feature ID is invalid.");
+      if (Object.hasOwn(input, "keepDependents") && typeof input.keepDependents !== "boolean") return invalidOperation("keepDependents must be true or false.");
       break;
     case "new-design-sketch":
       if (!validSketchPlacementInput(input, common)) return invalidOperation(sketchPlacementProblem(input, common));
@@ -853,7 +857,7 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     case "regenerate-design": return regenerateDesign(project, operation.results, operation.sketchCurves);
     case "set-design-parameters": return setDesignParameters(project, operation.parameters, operation.renames ?? [], resizeSketchEntity, operation.modelValues ?? []);
     case "set-design-feature-suppressed": return setDesignFeatureSuppressed(project, operation.featureId, operation.suppressed);
-    case "delete-design-feature": return deleteDesignFeature(project, operation.featureId);
+    case "delete-design-feature": return operation.keepDependents === true ? deleteKeepingDependents(project, operation.featureId) : deleteDesignFeature(project, operation.featureId);
     case "set-design-rollback": return setDesignRollback(project, operation.index);
     case "move-design-feature": return moveDesignFeature(project, operation.featureId, operation.toIndex);
     case "set-design-sketch-visibility": return setDesignSketchVisible(project, operation.featureId, operation.visible);
