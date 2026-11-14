@@ -384,6 +384,26 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
     // Hole: drill at a recorded point on a face, straight into the material.
     if (step.kind === "hole") {
       if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this hole is drilled in could not be built." }); continue; }
+      // HS-13: a plain hole is cut by the same origin-tracking Boolean as a sketch cut, so the body keeps the names of its faces (the hole's wall
+      // is named after the step) and later fillets and chamfers find their faces by name instead of by position. A modelled thread reshapes the
+      // bore wall afterwards and still drops the names, as it always did.
+      const holeSpec = holeSpecOf(step, current);
+      if (holeSpec !== undefined && holeSpec.thread?.mode !== "modelled") {
+        const cutter = holeCutter(holeSpec);
+        if (!cutter.ok) { outcomes.set(step.id, { featureId: step.id, message: cutter.message }); continue; }
+        const wallRole = `${step.id}.wall`;
+        const tool: GeneralSolidBody = {
+          id: `${step.id}:tool`, name: "Hole", visible: false, color: current.color, positionsMm: [...cutter.positionsMm], indices: [...cutter.indices],
+          brep: { topology: { vertices: cutter.positionsMm.length / 3, edges: 0, faces: 1 }, faces: [{ role: wallRole, key: wallRole, areaMm2: 0 }], faceTriangles: new Array<number>(cutter.indices.length / 3).fill(0), origin: "mesh-boolean" }
+        };
+        const combined = await combineGeneralBodies({ target: current, tool, mode: "cut", bodyId, name: current.name, allowSplit: true });
+        if (!combined.ok) { outcomes.set(step.id, { featureId: step.id, message: `The hole could not be cut: ${combined.message}` }); continue; }
+        const parent = current;
+        current = { ...combined.body, color: parent.color };
+        for (const part of combined.pieces ?? []) keepPiece(renumberedPiece(part, bodyId, parent.name, pieces.length + 2));
+        outcomes.set(step.id, { featureId: step.id });
+        continue;
+      }
       const drilled = drillHole(step, current);
       if (!drilled.ok) { outcomes.set(step.id, { featureId: step.id, message: drilled.message }); continue; }
       const { brep: _faceNames, ...withoutFaces } = current;
