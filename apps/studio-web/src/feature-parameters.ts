@@ -341,15 +341,6 @@ export interface PlainSizeInput {
   readonly operation?: "join" | "cut" | "intersect";
 }
 
-/** The step's name after its operation changed: "Cut 1" becomes "Join 2" (the next free number for the new verb); a name the person chose is kept. */
-export function renamedForOperation(feature: DesignSolidFeature, operation: "join" | "cut" | "intersect", takenNames: readonly string[]): string {
-  if (!/^(?:Join|Cut|Intersect) [0-9]+$/u.test(feature.name)) return feature.name;
-  const verb = operation === "join" ? "Join" : operation === "cut" ? "Cut" : "Intersect";
-  let next = 1;
-  while (takenNames.some((name) => name.toLowerCase() === `${verb} ${next}`.toLowerCase())) next += 1;
-  return `${verb} ${next}`;
-}
-
 /**
  * The size of an extrude (distance) or a revolve (angle), which have their own form instead of a field list. `text` is a plain number
  * or an expression; `direction` is the step's side; `throughAll` keeps a cut's size out of it. A plain number unbinds the size. The
@@ -361,8 +352,9 @@ export function applyPlainSize(feature: DesignSolidFeature, input: PlainSizeInpu
   if (changed !== undefined) {
     // Through all only means something for a cut; the other operations measure a distance.
     if (input.throughAll && changed !== "cut") return { ok: false, message: "Through all only applies to a cut. Pick Distance for the extent first." };
-    const taken = designOf(project).features.filter((other) => other.id !== feature.id).map((other) => other.name);
-    const renamed = { ...feature, operation: changed, name: renamedForOperation(feature, changed, taken) };
+    // The step keeps its name: an expression names a step (`Cut1.distance`), so a rename would leave every reference to it dangling.
+    // The person renames it from the timeline (F2) when the old verb no longer fits.
+    const renamed = { ...feature, operation: changed };
     const { operation: _kept, ...withoutOperation } = input;
     void _kept;
     const result = applyPlainSize(renamed, withoutOperation, project);

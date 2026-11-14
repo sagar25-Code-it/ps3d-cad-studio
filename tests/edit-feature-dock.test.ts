@@ -1,9 +1,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { applyPlainSize, renamedForOperation } from "../apps/studio-web/src/feature-parameters.js";
+import { applyPlainSize } from "../apps/studio-web/src/feature-parameters.js";
 import { FeatureEditDialog } from "../apps/studio-web/src/ui/FeatureEditDialog.js";
 import { rebuildSolidFeature, replayAllBodies } from "../apps/studio-web/src/design-regeneration.js";
-import { applyWorkbenchOperation, createWorkbenchProject, designOf, type DesignSketchFeature, type DesignSolidFeature, type GeneralSolidBody, type SketchEntity, type WorkbenchOperation, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
+import { applyWorkbenchOperation, bindFeatureExpressions, createWorkbenchProject, designOf, type DesignSketchFeature, type DesignSolidFeature, type GeneralSolidBody, type SketchEntity, type WorkbenchOperation, type WorkbenchProject } from "../packages/workbench-core/src/index.js";
 import { solidMetrics } from "../packages/workbench-core/src/solid-metrics.js";
 import { assert, equal, near, type TestCase } from "./test-kit.js";
 
@@ -60,7 +60,7 @@ export const editFeatureDockTests: readonly TestCase[] = [
     }
   },
   {
-    name: "Switching a cut to a join renames it to the next free Join number, drops Through all, rebuilds the solid and keeps the rest of the step",
+    name: "Switching a cut to a join keeps its name, drops Through all, rebuilds the solid and keeps the rest of the step",
     run: async () => {
       const project = await blockWithCut();
       const cut = stepOf(project, "feature:cut-1");
@@ -71,7 +71,7 @@ export const editFeatureDockTests: readonly TestCase[] = [
       assert(switched.ok, `the switch is accepted: ${switched.ok ? "" : switched.message}`);
       if (!switched.ok) return;
       equal(switched.feature.operation, "join", "it is a join now");
-      equal(switched.feature.name, "Join 1", "named for what it does");
+      equal(switched.feature.name, "Cut 1", "the name is kept, so expressions that name the step still resolve");
       equal(switched.feature.direction, "flipped", "its direction is kept");
       equal(switched.feature.sketchFeatureId, "feature:sketch-2", "and its sketch");
       const updated = run(project, { kind: "update-design-solid", feature: switched.feature, body: bodyOf(project) });
@@ -81,16 +81,31 @@ export const editFeatureDockTests: readonly TestCase[] = [
       const refused = applyPlainSize({ ...cut, extent: "through-all" }, { text: "5", direction: "one-side", throughAll: true, operation: "join" }, project);
       assert(!refused.ok && refused.message.includes("Through all"), "Through all on a join is refused with the reason");
       const dropped = applyPlainSize({ ...cut, extent: "through-all" }, { text: "5", direction: "one-side", throughAll: false, operation: "intersect" }, project);
-      assert(dropped.ok && dropped.feature.extent === undefined && dropped.feature.operation === "intersect" && dropped.feature.name === "Intersect 1", "leaving a cut drops its through-all extent");
+      assert(dropped.ok && dropped.feature.extent === undefined && dropped.feature.operation === "intersect" && dropped.feature.name === "Cut 1", "leaving a cut drops its through-all extent");
     }
   },
   {
-    name: "The new name is the next free number for the verb, and a name the person chose is left alone",
-    run: () => {
-      const feature: DesignSolidFeature = { id: "feature:x", name: "Cut 3", kind: "extrude", suppressed: false, sketchFeatureId: "feature:s", profileIds: [], valueMm: 1, bodyId: BODY, operation: "cut" };
-      equal(renamedForOperation(feature, "join", ["Join 1", "Join 2"]), "Join 3", "Join 1 and Join 2 are taken");
-      equal(renamedForOperation(feature, "join", []), "Join 1", "the first one");
-      equal(renamedForOperation({ ...feature, name: "Pocket for the screw" }, "join", []), "Pocket for the screw", "a name the person chose stays");
+    name: "Switching the operation keeps the step's name, so an expression that names the step (Cut1.distance) still resolves and keeps following it",
+    run: async () => {
+      let project = await blockWithCut();
+      const cut2: DesignSolidFeature = { id: "feature:cut-2", name: "Cut 2", kind: "extrude", suppressed: false, sketchFeatureId: "feature:sketch-2", profileIds: [], valueMm: 3, bodyId: BODY, operation: "cut", direction: "flipped" };
+      const bound = bindFeatureExpressions(project, cut2, { distance: "Cut1.distance" });
+      assert(bound.ok, `Cut 2 binds to the first cut's distance: ${bound.ok ? "" : bound.message}`);
+      if (!bound.ok) return;
+      project = run(project, { kind: "add-design-solid", feature: bound.feature, body: bodyOf(project) });
+      project = run(project, { kind: "regenerate-design", results: await replayAllBodies(project) });
+      equal(stepOf(project, "feature:cut-2").valueMm, 5, "Cut 2 reads 5 mm from Cut 1");
+      const switched = applyPlainSize(stepOf(project, "feature:cut-1"), { text: "7", direction: "flipped", throughAll: false, operation: "join" }, project);
+      assert(switched.ok, `the switch is accepted: ${switched.ok ? "" : switched.message}`);
+      if (!switched.ok) return;
+      equal(switched.feature.name, "Cut 1", "the step is not renamed, whatever it does now");
+      equal(switched.feature.operation, "join", "and it is a join");
+      project = run(project, { kind: "update-design-solid", feature: switched.feature, body: bodyOf(project) });
+      project = run(project, { kind: "regenerate-design", results: await replayAllBodies(project) });
+      const follower = stepOf(project, "feature:cut-2");
+      assert(follower.health === undefined, `nothing says 'No feature is called Cut1': ${follower.health?.message}`);
+      equal(follower.expressions?.["distance"], "Cut1.distance", "the expression is untouched");
+      equal(follower.valueMm, 7, "and Cut 2 follows the edited step");
     }
   },
 ];
