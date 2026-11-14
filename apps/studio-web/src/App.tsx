@@ -28,6 +28,7 @@ import {
   type SketchPlaneFaceRef,
   type RevolveAxisRef,
   featureOfBody,
+  sketchOrderProblem,
   deleteImpact,
   type DeleteImpact,
   isElectricalSheetPositionAvailable,
@@ -2919,6 +2920,12 @@ export function App(): React.JSX.Element {
     if ((operation === "edge-fillet" || operation === "edge-chamfer") && (edge === undefined || edge.sizeMm <= 0)) {
       setStatus("error"); setStatusText(`Enter a positive ${operation === "edge-fillet" ? "fillet radius" : "chamfer distance"}.`); return;
     }
+    // HS-12: a new step goes in at the rollback marker, so it cannot be built on a sketch that sits after it. Say so before anything is committed.
+    {
+      const at = designOf(projectRef.current);
+      const order = sketchOrderProblem(at, [sourceSketchFeatureId ?? at.editingSketchId ?? undefined], at.rollbackIndex, "feature:new");
+      if (order !== undefined && !order.ok) { const problem = order.diagnostics[0]; setStatus("error"); setStatusText(`${problem?.message ?? "That sketch is after the rollback marker."} ${problem?.recovery ?? ""}`.trim()); return; }
+    }
     const sourceSketch = sourceSketchFeatureId === undefined ? undefined : designOf(projectRef.current).features.find((candidate) => candidate.id === sourceSketchFeatureId);
     if (sourceSketchFeatureId !== undefined && sourceSketch?.kind !== "sketch") { setStatus("error"); setStatusText("That sketch is not in the timeline any more."); return; }
     const profileSource = sourceSketch?.kind === "sketch" ? sourceSketch.sketch : projectRef.current.sketch;
@@ -3050,6 +3057,10 @@ export function App(): React.JSX.Element {
     const preferred = preferredSketchFeatureId === undefined ? undefined : history.features.find((candidate) => candidate.id === preferredSketchFeatureId);
     let sketchFeature = preferred?.kind === "sketch" ? preferred : selectedTimelineFeature?.kind === "sketch" ? selectedTimelineFeature : undefined;
     if (sketchFeature !== undefined && detectSketchProfiles(sketchFeature.sketch).length === 0) sketchFeature = undefined;
+    if (sketchFeature !== undefined) {
+      const order = sketchOrderProblem(history, [sketchFeature.id], history.rollbackIndex, "feature:new");
+      if (order !== undefined && !order.ok) { setStatus("ready"); setStatusText(`${lead}: ${order.diagnostics[0]?.message ?? "that sketch is after the rollback marker."} ${order.diagnostics[0]?.recovery ?? ""}`.trim()); return; }
+    }
     if (sketchFeature === undefined) {
       const candidates = matchingSketches(history, (candidate) => detectSketchProfiles(candidate.sketch).length > 0);
       if (candidates.length === 0) { setStatus("ready"); setStatusText(`${lead}: finish a sketch with a closed profile first (Create Sketch, draw, Finish Sketch).`); return; }

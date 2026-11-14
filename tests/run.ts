@@ -181,6 +181,7 @@ import { sketchDimensionFollowTests } from "./sketch-dimension-follow.test.js";
 import { browserStepOpenTests } from "./browser-step-open.test.js";
 import { timelineSelectionTests } from "./timeline-selection.test.js";
 import { deleteImpactTests } from "./delete-impact.test.js";
+import { rollbackInsertTests } from "./rollback-insert.test.js";
 import { sketchOffsetChainDefaultTests } from "./sketch-offset-chain-default.test.js";
 import { sketchProjectionCurrentTests } from "./sketch-projection-current.test.js";
 import { sketchDimensionPointFirstTests } from "./sketch-dimension-point-first.test.js";
@@ -424,6 +425,7 @@ const tests: readonly TestCase[] = [
   ...solidContextMenuTests,
   ...timelineSelectionTests,
   ...deleteImpactTests,
+  ...rollbackInsertTests,
 ];
 let failures = 0;
 

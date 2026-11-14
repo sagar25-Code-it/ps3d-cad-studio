@@ -254,6 +254,24 @@ export function newDesignSketch(project: WorkbenchProject, plane: SketchDatumPla
   return changed({ ...project, sketch, activeWorkspace: "sketch", design: { ...history, editingSketchId: null } }, [project.sketch.id], `Started a new sketch on ${where}.`);
 }
 
+/**
+ * A new step goes in at the rollback marker, so it can only use what exists there: a sketch (or a sweep path, or a loft's second
+ * profile) that sits at or after that position is not part of the model being looked at (HS-12). Returns the refusal, or undefined.
+ */
+export function sketchOrderProblem(history: DesignHistory, referencedIds: readonly (string | undefined)[], insertIndex: number, stepId: string): DesignChange | undefined {
+  for (const id of referencedIds) {
+    if (id === undefined) continue;
+    const index = history.features.findIndex((candidate) => candidate.id === id);
+    if (index < 0 || index < insertIndex) continue;
+    const name = history.features[index]!.name;
+    return fail("INVALID_OPERATION",
+      `${name} comes after the rollback marker, so a step cannot be built on it from here: it does not exist yet at this point of the timeline.`,
+      [stepId, id],
+      "Roll the marker forward past the sketch, or draw a new sketch here (it is inserted at the marker) and build on that.");
+  }
+  return undefined;
+}
+
 function checkSolidFeature(history: DesignHistory, feature: DesignSolidFeature, body: GeneralSolidBody, replacing: boolean): DesignChange | undefined {
   if (feature.bodyId !== body.id) return fail("INVALID_OPERATION", "The solid's ID must match the feature's body ID.", [feature.id, body.id], "Build the solid with the feature's body ID.");
   const sketch = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
@@ -261,6 +279,9 @@ function checkSolidFeature(history: DesignHistory, feature: DesignSolidFeature, 
   for (const referenced of [feature.sweepPath?.sketchFeatureId, feature.loftSecondarySketchFeatureId]) {
     if (referenced !== undefined && !history.features.some((candidate) => candidate.id === referenced && candidate.kind === "sketch")) return missing(referenced, "The sketch this sweep or loft takes its path or second profile from is not in the timeline.");
   }
+  const insertIndex = replacing ? history.features.findIndex((candidate) => candidate.id === feature.id) : history.rollbackIndex;
+  const order = sketchOrderProblem(history, [feature.sketchFeatureId, feature.sweepPath?.sketchFeatureId, feature.loftSecondarySketchFeatureId], insertIndex, feature.id);
+  if (order !== undefined) return order;
   const duplicate = history.features.find((candidate) => (candidate.id === feature.id) !== replacing && candidate.id === feature.id);
   if (duplicate !== undefined) return fail("INVALID_OPERATION", "A timeline feature with this ID already exists.", [feature.id], "Use a new feature ID.");
   if (feature.kind === "pattern" && feature.pattern !== undefined) {

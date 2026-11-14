@@ -23,10 +23,10 @@ export function explicitBody<T extends { readonly id: string; readonly name: str
   return { ok: false, message: `${command}: select which solid first (${bodies.map((body) => body.name).join(", ")}).` };
 }
 
-/** The finished, unsuppressed timeline sketches that satisfy `wanted`, newest first. */
+/** The finished, unsuppressed timeline sketches that satisfy `wanted`, newest first. Sketches after the rollback marker do not exist yet at that point, so a new step cannot use them (HS-12). */
 export function matchingSketches(history: DesignHistory, wanted: (sketch: DesignSketchFeature) => boolean): readonly DesignSketchFeature[] {
   const found: DesignSketchFeature[] = [];
-  for (let index = history.features.length - 1; index >= 0; index -= 1) {
+  for (let index = Math.min(history.rollbackIndex, history.features.length) - 1; index >= 0; index -= 1) {
     const feature = history.features[index]!;
     if (feature.kind === "sketch" && !feature.suppressed && wanted(feature)) found.push(feature);
   }
