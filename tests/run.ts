@@ -194,6 +194,7 @@ import { hoverPickTests } from "./hover-pick.test.js";
 import { commandPanelTests } from "./command-panel.test.js";
 import { panelEnterCommitTests } from "./panel-enter-commit.test.js";
 import { panelModeGuardTests } from "./panel-mode-guards.test.js";
+import { holeFastenerPresetTests } from "./hole-fastener-presets.test.js";
 import { operationDefaultTests } from "./operation-default.test.js";
 import { featureBindingExtrasTests } from "./feature-binding-extras.test.js";
 import { ribbonPanelTests } from "./ribbon-panels.test.js";
@@ -414,6 +415,7 @@ const tests: readonly TestCase[] = [
   ...commandPanelTests,
   ...panelEnterCommitTests,
   ...panelModeGuardTests,
+  ...holeFastenerPresetTests,
   ...operationDefaultTests,
   ...featureBindingExtrasTests,
   ...ribbonPanelTests,

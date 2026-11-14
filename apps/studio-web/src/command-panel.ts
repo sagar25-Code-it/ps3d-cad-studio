@@ -1,5 +1,6 @@
 import type { DesignSolidFeature, EdgeBlendGroup, FaceRef } from "../../../packages/workbench-core/src/index.js";
 import { EDGE_BLEND_MAX_GROUPS } from "../../../packages/workbench-core/src/index.js";
+import { COARSE_PITCH_MM, METRIC_FASTENERS, tapDrillDiameterMm } from "../../../packages/workbench-geometry/src/index.js";
 import type { ViewportGuideSegment } from "../../../packages/viewport-three/src/index.js";
 import { parameterValuesOf } from "./feature-parameters.js";
 
@@ -63,7 +64,7 @@ const CREATE_DEFAULTS: Readonly<Record<PanelCommand, Readonly<Record<string, str
   fillet: { size: "2", endSize: "0" },
   chamfer: { size: "2", second: "0", angle: "0", side: "normal" },
   shell: { wall: "2", side: "inside" },
-  hole: { style: "simple", diameter: "6", depth: "0", thread: "none" }
+  hole: { style: "simple", fastener: "custom", diameter: "6", depth: "0", thread: "none" }
 };
 
 /** Opens the panel for creation with the command's default values. */
@@ -92,7 +93,7 @@ export function openCommandPanelForEdit(feature: DesignSolidFeature, bodyName: s
     return {
       command: "hole", ...common, edges: [], faces: [],
       ...(feature.holePositionMm === undefined ? {} : { holePoint: { pointMm: feature.holePositionMm as readonly [number, number, number], normal: (feature.holeNormal ?? [0, 0, 1]) as readonly [number, number, number] } }),
-      values: { style: feature.holeStyle ?? "simple", ...parameterValuesOf(feature) }
+      values: { style: feature.holeStyle ?? "simple", fastener: "custom", ...parameterValuesOf(feature) }
     };
   }
   return undefined;
@@ -124,6 +125,10 @@ export function panelFields(state: CommandPanelState): readonly PanelFieldSpec[]
       const thread = state.values["thread"] ?? "none";
       return [
         { id: "style", label: "Hole type", unit: "", kind: "select", options: [{ value: "simple", label: "Simple" }, { value: "counterbore", label: "Counterbore" }, { value: "countersink", label: "Countersink" }] },
+        { id: "fastener", label: "Fastener size", unit: "", kind: "select", options: [
+          { value: "custom", label: "Custom sizes" },
+          ...Object.keys(METRIC_FASTENERS).map((size) => ({ value: size, label: size }))
+        ] },
         { id: "diameter", label: "Diameter", unit: "mm", kind: "text" },
         { id: "depth", label: "Depth", unit: "mm", kind: "text", hint: "0 drills through everything" },
         ...(style === "counterbore" ? [
@@ -167,6 +172,42 @@ const HOLE_STYLE_DEFAULTS: Readonly<Record<string, Readonly<Record<string, strin
   countersink: { sinkDiameter: "12", sinkAngle: "90" }
 };
 
+/** The hole fields a fastener size fills in; typing into one of them by hand puts the fastener select back to "custom". */
+const FASTENER_SEEDED_FIELDS: readonly string[] = ["diameter", "counterDiameter", "counterDepth", "sinkDiameter", "threadPitch"];
+
+/**
+ * PT-16: the M-series fastener table, in the panel. Choosing a size (or switching the hole type or thread with one
+ * chosen) fills the fields now in play from `METRIC_FASTENERS`: the clearance diameter for a plain hole, the socket-head
+ * pocket for a counterbore, the head diameter and 90° for a countersink, and for a threaded hole the ISO coarse pitch
+ * with the tap-drill (minor) diameter — so the thread's default major diameter lands on the nominal size. The free typed
+ * values stay the primary path; the table only writes when a size is chosen.
+ */
+function fastenerSeedValues(values: Readonly<Record<string, string>>): Readonly<Record<string, string>> {
+  const spec = METRIC_FASTENERS[values["fastener"] ?? ""];
+  if (spec === undefined) return {};
+  const style = values["style"] ?? "simple";
+  const thread = style === "simple" ? values["thread"] ?? "none" : "none";
+  const pitchMm = COARSE_PITCH_MM[spec.nominalDiameterMm];
+  const seed: Record<string, string> = {};
+  if (thread !== "none" && pitchMm !== undefined) {
+    seed["diameter"] = String(Number(tapDrillDiameterMm(spec.nominalDiameterMm, pitchMm).toFixed(2)));
+    seed["threadPitch"] = String(pitchMm);
+    // The edit dialog's hidden-by-default major diameter: seeded so the thread crest lands exactly on the nominal size.
+    seed["threadMajor"] = String(spec.nominalDiameterMm);
+  } else {
+    seed["diameter"] = String(spec.clearanceDiameterMm);
+  }
+  if (style === "counterbore") {
+    seed["counterDiameter"] = String(spec.counterboreDiameterMm);
+    seed["counterDepth"] = String(spec.counterboreDepthMm);
+  }
+  if (style === "countersink") {
+    seed["sinkDiameter"] = String(spec.countersinkDiameterMm);
+    seed["sinkAngle"] = "90";
+  }
+  return seed;
+}
+
 export function panelWithValue(state: CommandPanelState, fieldId: string, text: string): CommandPanelState {
   const { error: _drop, ...rest } = state;
   void _drop;
@@ -175,6 +216,10 @@ export function panelWithValue(state: CommandPanelState, fieldId: string, text: 
     for (const [key, value] of Object.entries(HOLE_STYLE_DEFAULTS[text] ?? {})) if (values[key] === undefined || values[key] === "") values[key] = value;
   }
   if (fieldId === "thread" && text !== "none" && (values["threadPitch"] === undefined || values["threadPitch"] === "")) values["threadPitch"] = "1";
+  // PT-16: a size typed by hand means custom sizes again — the select never claims a size the numbers no longer match.
+  if (FASTENER_SEEDED_FIELDS.includes(fieldId) && (state.values["fastener"] ?? "custom") !== "custom") values["fastener"] = "custom";
+  // Choosing a fastener size — or changing the type or thread with one chosen — fills the fields now in play from the table.
+  if (fieldId === "fastener" || fieldId === "style" || fieldId === "thread") Object.assign(values, fastenerSeedValues(values));
   return { ...rest, values };
 }
 
