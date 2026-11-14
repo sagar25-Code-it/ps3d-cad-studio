@@ -11,7 +11,7 @@ import { openCommandPanel, openCommandPanelForEdit, panelAddFace, panelSetHolePo
 import { createPreviewController, previewNote, type PreviewBuild, type PreviewGhost, type PreviewRequest, type PreviewState } from "../apps/studio-web/src/part-preview.js";
 import { featurePreviewRequest, panelCandidate, panelPreviewRequest } from "../apps/studio-web/src/part-preview-build.js";
 import { edgeBlendDirection, extrudeHandleSpec, handleDragValue, handleTipDistanceMm, handleValueText, normalsAlongEdge, previewHandleSpec } from "../apps/studio-web/src/part-preview-handle.js";
-import { createValueBridge, dockPreviewOf } from "../apps/studio-web/src/part-preview-bridge.js";
+import { createValueBridge, dockPreviewFor, dockPreviewOf } from "../apps/studio-web/src/part-preview-bridge.js";
 import { dockCandidate } from "../apps/studio-web/src/edit-dock-candidate.js";
 import { CommandPanel } from "../apps/studio-web/src/ui/CommandPanel.js";
 import { FeatureEditDialog } from "../apps/studio-web/src/ui/FeatureEditDialog.js";
@@ -504,6 +504,9 @@ export const partPreviewTests: readonly TestCase[] = [
       assert(ghost.ok, ghost.ok ? "" : ghost.message);
       if (ghost.ok) near(volumeOf(ghost.ghost), 60 * 40 * 35, 60 * 40 * 35 * 0.01, "the ghost is the block 35 mm tall");
       equal(bodyOf(project).positionsMm.length > 0 && volumeOf(bodyOf(project)) > 47_000 && volumeOf(bodyOf(project)) < 49_000, true, "while the real block is still 20 mm tall");
+      assert(dockPreviewFor(undefined, changed) === undefined, "a closed dock has no preview");
+      assert(dockPreviewFor(extrude, changed) === changed, "the open step's own preview is used");
+      assert(dockPreviewFor({ ...extrude, id: "feature:extrude-9" }, changed) === undefined, "a preview told for another step is ignored");
       const junk = dockCandidate(extrude, { ...form, value: "tall" }, project);
       assert(junk !== undefined, "a typed word reaches the same parser");
       if (junk === undefined) return;

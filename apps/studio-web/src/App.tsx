@@ -120,7 +120,7 @@ import { applyParameterValues, bindTypedSize } from "./feature-parameters.js";
 import { openCommandPanel, openCommandPanelForEdit, panelAddFace, panelClearSelection, panelDraft, panelEdgeGroups, panelGlobalKeyCommits, panelNavigationLock, panelReopenPlan, panelSetHolePoint, panelTitle, panelToggleEdge, panelWithError, panelWithValue, type CommandPanelState, type PanelCommand, type PanelEdgeSet } from "./command-panel.js";
 import { CommandPanel } from "./ui/CommandPanel.js";
 import { usePartPreview } from "./usePartPreview.js";
-import { createValueBridge, type DockPreview } from "./part-preview-bridge.js";
+import { createValueBridge, dockPreviewFor, type DockPreview } from "./part-preview-bridge.js";
 import { explicitBody, matchingSketches, profilesByAnswer, sketchByAnswer } from "./explicit-pick.js";
 import { shouldRefit } from "./view-fit.js";
 import { defaultCreateOperation, touchingBodies } from "./operation-default.js";
@@ -1028,7 +1028,7 @@ export function App(): React.JSX.Element {
   }, [commandPanel, partPickCandidates]);
   // Live preview: the open command panel or Edit Feature dock shows the result of its current values as a ghost, with a drag arrow (usePartPreview.ts).
   const partPreview = usePartPreview({
-    viewportRef, project, commandPanel, dock: featureEdit === undefined ? undefined : dockPreview, dockBridge,
+    viewportRef, project, commandPanel, dock: dockPreviewFor(featureEdit, dockPreview), dockBridge,
     onPanelValue: (fieldId, text) => setCommandPanel((current) => current === null ? current : panelWithValue(current, fieldId, text))
   });
   useEffect(() => { setSelectedEdges((current) => current.length === 0 ? current : []); }, [project.part.generalBodies]);

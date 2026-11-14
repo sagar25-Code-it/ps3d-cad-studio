@@ -27,6 +27,15 @@ export type DockPreview =
   | { readonly feature: DesignSolidFeature; readonly changed: boolean }
   | { readonly invalid: string };
 
+/**
+ * The preview the dock may use for the step now open: a candidate that was told for another step (the user opened a different one
+ * while the first was still open) is ignored until the dock tells the new one.
+ */
+export function dockPreviewFor(open: DesignSolidFeature | undefined, told: DockPreview | undefined): DockPreview | undefined {
+  if (open === undefined || told === undefined) return undefined;
+  return "feature" in told && told.feature.id !== open.id ? undefined : told;
+}
+
 /** The dock's preview state for a form: the candidate, flagged unchanged when it equals the step on file. */
 export function dockPreviewOf(stored: DesignSolidFeature, result: { readonly ok: true; readonly feature: DesignSolidFeature } | { readonly ok: false; readonly message: string }): DockPreview {
   if (!result.ok) return { invalid: result.message };

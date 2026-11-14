@@ -1244,7 +1244,8 @@ export class ThreeViewportAdapter {
   }
 
   #beginHandleDrag(event: PointerEvent): boolean {
-    if (this.#handle === undefined || this.#handleDrag !== undefined) return false;
+    // A camera drag already under way (a middle-button orbit or pan) is never taken over by the arrow.
+    if (this.#handle === undefined || this.#handleDrag !== undefined || this.#drag !== undefined) return false;
     const axis = this.#handleAxis();
     if (axis === undefined || !hitHandle(axis, [event.clientX, event.clientY])) return false;
     event.preventDefault();
