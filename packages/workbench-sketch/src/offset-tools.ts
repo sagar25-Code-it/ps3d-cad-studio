@@ -20,6 +20,11 @@ const MIN_MM = 0.01;
 
 export type OffsetCorner = "mitre" | "round" | "chamfer";
 export type OffsetChainMode = "none" | "tangent" | "connected";
+/**
+ * What the Offset tool starts with: a click on one curve takes everything joined to it end to end, so one side of a rectangle or of
+ * a projected outline gives the whole closed loop. (Tangent only stops at every square corner, which left a single parallel line.)
+ */
+export const OFFSET_TOOL_CHAIN_DEFAULT: OffsetChainMode = "connected";
 
 export interface OffsetOptions {
   /** How the outside corners of a chain are closed: a sharp mitre (default, falling back to round on a very sharp corner), a round or a chamfer. */
@@ -648,7 +653,12 @@ export function offsetEntities(context: SketchEditContext, ids: readonly string[
 
   if (lines.length > 0) {
     let built = buildChains(lines, joinTolerance(sketch, lines));
-    // Pulling in tangent neighbours must never be what makes a selection branch: fall back to exactly what was selected.
+    // Pulling in neighbours must never be what makes a selection branch. Everything connected that branches (a rib leaving a corner of
+    // the outline) falls back to the smooth chain, and that to exactly what was selected.
+    if ("error" in built && chainIds.length > ids.length && (options.chain ?? "tangent") === "connected") {
+      const smooth = expandOffsetSelection(sketch, ids, "tangent").map((id) => sketch.entities.find((entity) => entity.id === id)).filter(isRound);
+      built = buildChains(smooth, joinTolerance(sketch, smooth));
+    }
     if ("error" in built && chainIds.length > ids.length) {
       const exact = ids.map((id) => sketch.entities.find((entity) => entity.id === id)).filter(isRound);
       built = buildChains(exact, joinTolerance(sketch, exact));

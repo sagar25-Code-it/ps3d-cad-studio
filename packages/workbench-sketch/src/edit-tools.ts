@@ -68,7 +68,7 @@ function plan(label: string, parts: Partial<Omit<SketchEditPlan, "label">>): Ske
 // Offset
 // ---------------------------------------------------------------------------------------------
 
-export { expandOffsetSelection, offsetEntities } from "./offset-tools.js";
+export { expandOffsetSelection, offsetEntities, OFFSET_TOOL_CHAIN_DEFAULT } from "./offset-tools.js";
 export type { OffsetChainMode, OffsetCorner, OffsetOptions } from "./offset-tools.js";
 
 interface LineChain {

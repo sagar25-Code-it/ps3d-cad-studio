@@ -11,6 +11,7 @@ import {
   cornerLines,
   filletCorners,
   mirrorEntities,
+  OFFSET_TOOL_CHAIN_DEFAULT,
   offsetEntities,
   selectionBounds,
   stretchEntities,
@@ -159,6 +160,9 @@ function describePlan(plan: SketchEditPlan): string {
   return parts.length === 0 ? "No change." : `Apply ${parts.join(", ")}.`;
 }
 
+/** The Offset chain option the person last chose, kept for the session so the tool reopens the way it was left. */
+let rememberedOffsetChain: OffsetChainMode = OFFSET_TOOL_CHAIN_DEFAULT;
+
 /** Options and Apply for the selection-driven sketch edit tools. Trim and Extend act directly on canvas clicks. */
 export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element {
   const unit: SketchLengthUnit = props.unit ?? "mm";
@@ -173,7 +177,8 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
   const [offsetFlip, setOffsetFlip] = useState(false);
   const [offsetBoth, setOffsetBoth] = useState(false);
   const [offsetCorner, setOffsetCorner] = useState<OffsetCorner>("mitre");
-  const [offsetChain, setOffsetChain] = useState<OffsetChainMode>("tangent");
+  const [offsetChain, setOffsetChainState] = useState<OffsetChainMode>(() => rememberedOffsetChain);
+  const setOffsetChain = (mode: OffsetChainMode): void => { rememberedOffsetChain = mode; setOffsetChainState(mode); };
   const [centerX, setCenterX] = useState("0");
   const [centerY, setCenterY] = useState("0");
   const [radius, setRadius] = useState(props.corner?.radius ?? DEFAULT_CORNER_PARAMS.radius);
@@ -310,7 +315,7 @@ export function SketchEditPanel(props: SketchEditPanelProps): React.JSX.Element 
       {check("Flip side", offsetFlip, setOffsetFlip)}
       {check("Both sides", offsetBoth, setOffsetBoth)}
       <label><span>Outside corners</span><select aria-label="Offset corner type" value={offsetCorner} onChange={(event) => setOffsetCorner(event.target.value as OffsetCorner)}><option value="mitre">Sharp (mitre)</option><option value="round">Round</option><option value="chamfer">Chamfer</option></select></label>
-      <label><span>Chain</span><select aria-label="Offset chain selection" value={offsetChain} onChange={(event) => setOffsetChain(event.target.value as OffsetChainMode)}><option value="tangent">Tangent chain</option><option value="connected">Everything connected</option><option value="none">Only what is selected</option></select></label>
+      <label><span>Chain</span><select aria-label="Offset chain selection" value={offsetChain} onChange={(event) => setOffsetChain(event.target.value as OffsetChainMode)}><option value="connected">Everything connected</option><option value="tangent">Tangent chain</option><option value="none">Only what is selected</option></select></label>
     </>}
     {props.tool === "offset-move" && <>
       <label><span>Move by</span><select aria-label="Offset move mode" value={moveMode} onChange={(event) => setMoveMode(event.target.value as "offset" | "vector")}><option value="offset">Offset along the normal</option><option value="vector">X and Y distance</option></select></label>
