@@ -255,6 +255,11 @@
  * 1366 x 768 laptop its lower third was off screen with no way to reach it (the page does not scroll there). The menu now ends above
  * the bottom of the window and scrolls; arrow-key focus scrolls the item into view.
  */
+/* The menu bar is a stacking context at z-index 15, under the timeline strip (30): the lower rows of a tall menu were painted over by the strip. Lift the bar while a menu is open. */
+.studio-app .cad-menu-bar:has(.cad-menu-popover) {
+  z-index: 170;
+}
+
 .studio-app .cad-menu-popover {
   max-height: calc(100dvh - 112px);
   overflow-y: auto;

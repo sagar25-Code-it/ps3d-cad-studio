@@ -6,7 +6,8 @@
   top: 12px;
   right: 12px;
   width: min(300px, calc(100vw - 32px));
-  max-height: calc(100% - 24px);
+  /* Bounded by its canvas AND by the window: on a short window the page scrolls and the canvas runs below the screen, which pushed OK out of reach. 300px covers the chrome above the canvas and the timeline strip below. */
+  max-height: min(calc(100% - 24px), calc(100dvh - 300px));
   overflow-y: auto;
   display: flex;
   flex-direction: column;
