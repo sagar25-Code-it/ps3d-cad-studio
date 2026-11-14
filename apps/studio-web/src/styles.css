@@ -21,5 +21,6 @@
 @import "./styles/analysis.css";
 @import "./styles/chrome.css";
 @import "./styles/command-panel.css";
+@import "./styles/edge-pick.css";
 /* Responsive policy must load last so workspace-specific fixed dimensions cannot override it. */
 @import "./styles/responsive.css";

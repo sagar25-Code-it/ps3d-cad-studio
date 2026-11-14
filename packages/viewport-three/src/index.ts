@@ -6,9 +6,14 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { cloneExchangeObject, disposeExchangeObject, inspectExchangeObject, type ExchangeBounds, type ViewportJpeg } from "../../exchange-3d/src/index.js";
 import type { ModelSuccessResponse } from "../../worker-protocol/src/index.js";
 import type { PreviewBounds, PreviewPrimitive, PreviewScene } from "../../workbench-geometry/src/index.js";
-import { chainsInBox, classifyHover, edgePickToleranceMm, sameHoverTarget, type HoverCandidateBody, type HoverFilter, type HoverRayHit, type HoverTarget, type ProjectedSegment } from "./hover-pick.js";
+import { chainsInBox, classifyHover, flattenPickEdges, sameHoverTarget, stackAtPointer, type HoverCandidateBody, type HoverFilter, type HoverRayHit, type HoverTarget, type PointerPickInput, type ProjectedSegment } from "./hover-pick.js";
+import { ClickTracker, cornerVertices, DEFAULT_EDGE_PICK_SETTINGS, edgePickTolerancePx, tangentChainsFrom, type EdgePickSettings, type PickEdgeSegment, type PickVertex } from "./edge-pick.js";
+import { creaseEdgesOfMeshes, makeVisibilityTest, pickCameraOf } from "./three-pick.js";
+import { clampCreaseAngle } from "../../workbench-geometry/src/crease-edges.js";
 
 export { buildAnalysisGroup, disposeAnalysisGroup, EMPTY_ANALYSIS_OVERLAY, type OverlayRgb, type ViewportAnalysisLines, type ViewportAnalysisMesh, type ViewportAnalysisOverlay } from "./analysis-overlay.js";
+export { classifyPointer, flattenPickEdges, stackAtPointer, edgeTargetOf, vertexTargetOf, type PointerPickInput } from "./hover-pick.js";
+export { ClickTracker, CYCLE_RADIUS_PX, DEFAULT_EDGE_PICK_SETTINGS, DEFAULT_EDGE_TOLERANCE_PX, DOUBLE_CLICK_MS, MAX_EDGE_TOLERANCE_PX, MIN_EDGE_TOLERANCE_PX, cornerVertices, edgeKey, edgePickTolerancePx, nextCycle, pickEdgeAt, pickEdgeCandidates, pickVertexAt, pickVertexCandidates, projectToScreen, tangentChainsFrom, type CycleState, type EdgeCandidate, type EdgePickSettings, type PickCamera, type PickEdgeSegment, type PickOptions, type PickVertex, type ScreenPoint, type VertexCandidate } from "./edge-pick.js";
 export { chainsInBox, classifyHover, edgePickToleranceMm, nearestChainWithin, sameHoverTarget, type HoverCandidateBody, type HoverFilter, type HoverRayHit, type HoverTarget, type PickSegmentMm, type ProjectedSegment, type SelectionBox } from "./hover-pick.js";
 export { applyZebraToObject } from "./zebra-materials.js";
 export { ZEBRA_AXES, ZEBRA_DEFAULT, ZEBRA_MAX_FREQUENCY, ZEBRA_MIN_FREQUENCY, clampZebraFrequency, zebraBandAt, zebraReflection, type ZebraAxis, type ZebraOptions } from "./zebra.js";
@@ -47,7 +52,7 @@ export interface ViewportTouchPoint {
 export type ViewOrientation = "custom" | "front" | "back" | "left" | "right" | "top" | "bottom" | "isometric";
 export type ViewProjection = "perspective" | "orthographic";
 export type NavigationMode = "select" | "orbit" | "pan" | "measure";
-export type SelectionFilter = "auto" | "body" | "component" | "face" | "edge" | "sketch-curve" | "profile" | "connected" | "tangent";
+export type SelectionFilter = "auto" | "body" | "component" | "face" | "edge" | "vertex" | "sketch-curve" | "profile" | "connected" | "tangent";
 export type ViewportShadingMode = "shaded" | "shaded-edges" | "wireframe";
 export type ViewportBackgroundTone = "charcoal" | "dark-gray" | "light-gray" | "white";
 export type ViewportStudioEnvironment = "softbox" | "daylight" | "graphite" | "white-cyclorama" | "warm-studio";
@@ -85,6 +90,16 @@ export interface ViewportViewState {
   readonly axesVisible: boolean;
   readonly azimuthDeg: number;
   readonly elevationDeg: number;
+  /** Edge-picking settings (crease angle for meshes without named edges, pointer tolerance in pixels). Absent in old saved views: the defaults. */
+  readonly edgePick?: EdgePickSettings;
+}
+
+interface RodSpec {
+  readonly segmentsMm: readonly ViewportGuideSegment[];
+  readonly color: string;
+  readonly pixelRadius: number;
+  readonly renderOrder: number;
+  readonly opacity: number;
 }
 
 export interface ViewportMeasurePoint {
@@ -94,6 +109,10 @@ export interface ViewportMeasurePoint {
   readonly faceIndex?: number | null;
   /** The clicked surface's outward normal in world space (unit length), when the renderer knows it. */
   readonly normalMm?: readonly [number, number, number];
+  /** With a pick intent set (setPickIntent): the edge chain (or tangent chain on a double-click) the pointer is over, found on screen. */
+  readonly edgeTarget?: HoverTarget;
+  /** With the vertex pick intent: the corner under the pointer, found on screen. */
+  readonly vertexTarget?: HoverTarget;
 }
 
 /** A line to draw over the model while the user is picking an edge: its end points in millimetres. */
@@ -217,6 +236,12 @@ export class ThreeViewportAdapter {
   #projection: ViewProjection = "perspective";
   #navigationMode: NavigationMode = "select";
   #selectionFilter: SelectionFilter = "auto";
+  /** Edge picking: settings, the lazily detected edges of bodies the host gave none for, and click tracking for cycling and double-click. */
+  #edgePick: EdgePickSettings = DEFAULT_EDGE_PICK_SETTINGS;
+  #autoCandidates: Map<string, HoverCandidateBody> | undefined;
+  #flatPick: { readonly edges: readonly PickEdgeSegment[]; readonly vertices: readonly PickVertex[] } | undefined;
+  #measureIntent: "edge" | "vertex" | null = null;
+  readonly #clicks = new ClickTracker();
   #shadingMode: ViewportShadingMode = "shaded-edges";
   #bodyColor = "#aeb3b8";
   #backgroundTone: ViewportBackgroundTone = "dark-gray";
@@ -230,6 +255,9 @@ export class ThreeViewportAdapter {
   readonly #hoverGroup = new THREE.Group();
   #hoverBodyMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
   readonly #selectedEdgeGroup = new THREE.Group();
+  /** What each rod group was built from, so its rods can be redrawn at a new zoom (they are sized in pixels). */
+  readonly #rodSpecs = new Map<THREE.Group, RodSpec[]>();
+  #rodRadiusBasis = 0.16;
   /** Window / crossing box selection with the Edge intent (PT-09): the drag in client pixels and its rubber-band rectangle. */
   #boxSelect: { readonly startX: number; readonly startY: number; x: number; y: number } | undefined;
   #boxDiv: HTMLDivElement | undefined;
@@ -301,7 +329,8 @@ export class ThreeViewportAdapter {
       gridVisible: this.#grid.visible,
       axesVisible: this.#axes.visible,
       azimuthDeg: Math.round(THREE.MathUtils.radToDeg(this.#azimuth) * 10) / 10,
-      elevationDeg: Math.round(THREE.MathUtils.radToDeg(this.#elevation) * 10) / 10
+      elevationDeg: Math.round(THREE.MathUtils.radToDeg(this.#elevation) * 10) / 10,
+      edgePick: this.#edgePick
     };
   }
 
@@ -342,6 +371,7 @@ export class ThreeViewportAdapter {
     this.#projection = state.projection;
     this.#navigationMode = state.navigationMode;
     this.#selectionFilter = state.selectionFilter;
+    if (state.edgePick !== undefined) this.#edgePick = { creaseAngleDeg: clampCreaseAngle(state.edgePick.creaseAngleDeg), tolerancePx: edgePickTolerancePx(state.edgePick.tolerancePx) };
     this.#grid.visible = state.gridVisible;
     this.#axes.visible = state.axesVisible;
     this.setBackgroundTone(state.backgroundTone);
@@ -369,10 +399,110 @@ export class ThreeViewportAdapter {
     this.#emitViewState();
   }
 
-  /** The faces and sharp edges each body offers to the hover picker (PT-08), keyed by body id. */
+  /** The faces and sharp edges each body offers to the hover picker (PT-08), keyed by body id. Bodies it gives none for are searched by crease angle. */
   setPickCandidates(candidates: ReadonlyMap<string, HoverCandidateBody>): void {
     this.#pickCandidates = candidates;
+    this.#invalidatePickCache();
     this.#setHover(null);
+  }
+
+  /** The crease angle and the pointer tolerance in pixels used to pick edges. */
+  setEdgePickSettings(settings: Partial<EdgePickSettings>): void {
+    const next: EdgePickSettings = {
+      creaseAngleDeg: clampCreaseAngle(settings.creaseAngleDeg ?? this.#edgePick.creaseAngleDeg),
+      tolerancePx: edgePickTolerancePx(settings.tolerancePx ?? this.#edgePick.tolerancePx)
+    };
+    if (next.creaseAngleDeg === this.#edgePick.creaseAngleDeg && next.tolerancePx === this.#edgePick.tolerancePx) return;
+    const creaseChanged = next.creaseAngleDeg !== this.#edgePick.creaseAngleDeg;
+    this.#edgePick = next;
+    if (creaseChanged) this.#invalidatePickCache();
+    this.#setHover(null);
+    this.#emitViewState();
+  }
+
+  getEdgePickSettings(): EdgePickSettings { return this.#edgePick; }
+
+  /** Half the length, in millimetres, of the cross drawn at a picked vertex: about six pixels at the current zoom. */
+  edgeCrossArmMm(): number { return this.#mmPerPixel() * 6; }
+
+  /**
+   * While a command waits for a click on an edge or a vertex (navigation mode "measure"), the hover shows what that click
+   * would pick and the click reports it as `edgeTarget` / `vertexTarget`. null: clicks report only the surface point.
+   */
+  setPickIntent(intent: "edge" | "vertex" | null): void {
+    if (this.#measureIntent === intent) return;
+    this.#measureIntent = intent;
+    this.#setHover(null);
+  }
+
+  #invalidatePickCache(): void {
+    this.#autoCandidates = undefined;
+    this.#flatPick = undefined;
+  }
+
+  /** The host's candidates plus, for every drawn body it gave none for (imports, primitives, unnamed meshes), the creased edges found here. */
+  #candidatesForPicking(): { readonly edges: readonly PickEdgeSegment[]; readonly vertices: readonly PickVertex[] } {
+    if (this.#flatPick !== undefined) return this.#flatPick;
+    if (this.#autoCandidates === undefined) {
+      const byBody = new Map<string, THREE.Mesh[]>();
+      for (const object of this.#pickable) {
+        if (!(object instanceof THREE.Mesh) || object.userData["selectionKind"] !== "body") continue;
+        const id = object.userData["semanticId"];
+        if (typeof id !== "string" || (this.#pickCandidates.get(id)?.edges.length ?? 0) > 0) continue;
+        const list = byBody.get(id);
+        if (list === undefined) byBody.set(id, [object]); else list.push(object);
+      }
+      const auto = new Map<string, HoverCandidateBody>();
+      for (const [id, meshes] of byBody) {
+        const found = creaseEdgesOfMeshes(meshes, this.#edgePick.creaseAngleDeg);
+        auto.set(id, { edges: found.edges.map((edge) => ({ a: edge.a, b: edge.b, chain: edge.chain, concave: edge.concave })) });
+      }
+      this.#autoCandidates = auto;
+    }
+    const merged = new Map<string, HoverCandidateBody>();
+    for (const [id, body] of this.#pickCandidates) if (body.edges.length > 0) merged.set(id, body);
+    for (const [id, body] of this.#autoCandidates) merged.set(id, body);
+    const edges = flattenPickEdges(merged);
+    const vertices: PickVertex[] = [];
+    for (const [bodyId, body] of merged) for (const pointMm of cornerVertices(body.edges)) vertices.push({ bodyId, pointMm });
+    this.#flatPick = { edges, vertices };
+    return this.#flatPick;
+  }
+
+  /** Everything the screen classifier needs for a pointer position and a selection intent. */
+  #pointerInput(clientX: number, clientY: number, pointerType: string, filter: HoverFilter): PointerPickInput | undefined {
+    const rect = this.#canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return undefined;
+    const camera = this.#activeCamera();
+    const wantsPoints = filter === "edge" || filter === "vertex";
+    const flat = wantsPoints ? this.#candidatesForPicking() : { edges: [], vertices: [] };
+    return {
+      pointer: { x: clientX - rect.left, y: clientY - rect.top },
+      camera: pickCameraOf(camera, rect.width, rect.height),
+      filter,
+      hit: wantsPoints ? undefined : this.#hitForHover(clientX, clientY),
+      edges: flat.edges,
+      vertices: flat.vertices,
+      tolerancePx: edgePickTolerancePx(this.#edgePick.tolerancePx, pointerType),
+      options: !wantsPoints || this.#shadingMode === "wireframe" ? {} : { isVisible: makeVisibilityTest(this.#raycaster, camera, this.#pickable) }
+    };
+  }
+
+  /**
+   * What a click at this position picks with the Edge or Vertex intent: the nearest visible edge or corner within the pixel
+   * tolerance; the same spot clicked again walks through the stack; two quick clicks on an edge give its tangent chain.
+   */
+  #resolveClick(clientX: number, clientY: number, pointerType: string, filter: "edge" | "vertex", nowMs: number): HoverTarget | null {
+    const input = this.#pointerInput(clientX, clientY, pointerType, filter);
+    if (input === undefined) return null;
+    const stack = stackAtPointer(input);
+    const click = this.#clicks.register(input.pointer, stack.keys, nowMs);
+    const target = stack.targets[click.index] ?? null;
+    if (target === null || target.kind !== "edge" || !click.doubleClick) return target;
+    const own = input.edges.filter((edge) => edge.bodyId === target.bodyId);
+    const run = tangentChainsFrom(own, target.chain);
+    if (run.chains.length <= 1) return { ...target, tangent: true };
+    return { ...target, segments: run.segments.map((edge) => ({ a: edge.a, b: edge.b, chain: edge.chain, ...(edge.concave === undefined ? {} : { concave: edge.concave }) })), chains: run.chains, tangent: true };
   }
 
   /** Draws the selected edge chains over the model (amber, persistent until replaced); an empty list clears them. */
@@ -776,7 +906,7 @@ export class ThreeViewportAdapter {
         return;
       }
     }
-    if (this.#drag === undefined && event.pointerType !== "touch" && this.#navigationMode === "select") this.#updateHover(event.clientX, event.clientY);
+    if (this.#drag === undefined && event.pointerType !== "touch" && (this.#navigationMode === "select" || (this.#navigationMode === "measure" && this.#measureIntent !== null))) this.#updateHover(event.clientX, event.clientY, event.pointerType);
     if (this.#drag === undefined || this.#drag.pointerId !== event.pointerId) return;
     if (this.#drag.moved) this.#setHover(null);
     // A left drag in select mode with the Edge intent is a selection box, not a camera move.
@@ -838,8 +968,9 @@ export class ThreeViewportAdapter {
     if (this.#drag !== undefined && this.#drag.pointerId === event.pointerId && this.#boxSelect !== undefined) {
       this.#finishSelectionBox(event);
     } else if (this.#drag !== undefined && this.#drag.pointerId === event.pointerId && !this.#drag.moved) {
-      if (this.#drag.mode === "select") this.#pick(event);
-      if (this.#drag.mode === "measure") this.#measurePick(event);
+      // The pick is made where the button went DOWN, not where it came up: a pointer that drifts a pixel or two during the click still picks what it was on.
+      if (this.#drag.mode === "select") this.#pick(event, this.#drag.startX, this.#drag.startY);
+      if (this.#drag.mode === "measure") this.#measurePick(event, this.#drag.startX, this.#drag.startY);
     }
     if (this.#drag?.pointerId === event.pointerId) this.#drag = undefined;
     if (this.#canvas.hasPointerCapture(event.pointerId)) this.#canvas.releasePointerCapture(event.pointerId);
@@ -937,17 +1068,21 @@ export class ThreeViewportAdapter {
     this.#options.onContextMenu?.({ clientX: event.clientX, clientY: event.clientY, semanticId, selectionKind });
   };
 
-  #pick(event: PointerEvent): void {
+  #pick(event: PointerEvent, x: number = event.clientX, y: number = event.clientY): void {
     const filter = this.#hoverFilter();
-    // Face / Edge intent: the click picks what the hover pre-highlight shows and the host decides what to do with it.
-    if (filter === "face" || filter === "edge") {
-      const hit = this.#hitForHover(event.clientX, event.clientY);
-      const target = classifyHover(hit, hit === undefined ? undefined : this.#pickCandidates.get(hit.bodyId), filter, edgePickToleranceMm(this.#radius, this.#canvas.clientHeight));
+    // Face / Edge / Vertex intent: the click picks what the hover pre-highlight shows and the host decides what to do with it.
+    if (filter === "edge" || filter === "vertex") {
+      const target = this.#resolveClick(x, y, event.pointerType, filter, event.timeStamp);
       this.#options.onPickEntity?.(target, { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey });
       return;
     }
+    if (filter === "face") {
+      const hit = this.#hitForHover(x, y);
+      this.#options.onPickEntity?.(classifyHover(hit, undefined, filter, 0), { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey });
+      return;
+    }
     if (this.#pickable.length === 0) return;
-    const hit = this.#hitObject(event.clientX, event.clientY);
+    const hit = this.#hitObject(x, y);
     const id = typeof hit?.userData["semanticId"] === "string" ? hit.userData["semanticId"] as string : null;
     const next = id === this.#selectedId ? null : id;
     this.setSelectedId(next);
@@ -962,24 +1097,39 @@ export class ThreeViewportAdapter {
     return this.#raycaster.intersectObjects(this.#pickable, false).find((entry) => this.#selectionAllows(entry.object))?.object;
   }
 
-  #measurePick(event: PointerEvent): void {
+  #measurePick(event: PointerEvent, x: number = event.clientX, y: number = event.clientY): void {
     if (this.#pickable.length === 0) return;
     const rect = this.#canvas.getBoundingClientRect();
-    this.#pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    // A command that waits for an edge or a corner is told which one the pointer is on, found on screen, even where no surface lies behind the cursor.
+    const wanted = this.#measureIntent === null ? null : this.#resolveClick(x, y, event.pointerType, this.#measureIntent, event.timeStamp);
+    this.#pointer.set((x - rect.left) / rect.width * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1);
     this.#raycaster.setFromCamera(this.#pointer, this.#activeCamera());
     const hit = this.#raycaster.intersectObjects(this.#pickable, false).find((entry) => this.#selectionAllows(entry.object));
-    if (hit === undefined) return;
+    if (hit === undefined) {
+      if (wanted !== null && wanted.kind === "edge") {
+        const mid = wanted.segments[0];
+        if (mid !== undefined) this.#options.onMeasurePoint?.({ pointMm: [(mid.a[0] + mid.b[0]) / 2, (mid.a[1] + mid.b[1]) / 2, (mid.a[2] + mid.b[2]) / 2], semanticId: wanted.bodyId, edgeTarget: wanted });
+      } else if (wanted !== null && wanted.kind === "vertex") {
+        this.#options.onMeasurePoint?.({ pointMm: wanted.pointMm, semanticId: wanted.bodyId, vertexTarget: wanted });
+      }
+      return;
+    }
     const semanticId = typeof hit.object.userData["semanticId"] === "string" ? hit.object.userData["semanticId"] as string : null;
     const faceTriangles = hit.object.userData["faceTriangles"];
     const faceIndex = Array.isArray(faceTriangles) && hit.faceIndex !== undefined && hit.faceIndex !== null ? (faceTriangles[hit.faceIndex] as number | undefined) ?? null : null;
     const worldNormal = hit.face === undefined || hit.face === null ? undefined : hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-    this.#options.onMeasurePoint?.({ pointMm: [hit.point.x * 1000, hit.point.y * 1000, hit.point.z * 1000], semanticId, faceIndex, ...(worldNormal === undefined ? {} : { normalMm: [worldNormal.x, worldNormal.y, worldNormal.z] as const }) });
+    this.#options.onMeasurePoint?.({
+      pointMm: [hit.point.x * 1000, hit.point.y * 1000, hit.point.z * 1000], semanticId, faceIndex,
+      ...(worldNormal === undefined ? {} : { normalMm: [worldNormal.x, worldNormal.y, worldNormal.z] as const }),
+      ...(wanted !== null && wanted.kind === "edge" ? { edgeTarget: wanted } : {}),
+      ...(wanted !== null && wanted.kind === "vertex" ? { vertexTarget: wanted } : {})
+    });
   }
 
   #selectionAllows(object: THREE.Object3D): boolean {
     if (this.#selectionFilter === "auto") return true;
     // The Face and Edge intents pick into bodies, so any body surface may be hit.
-    if (this.#selectionFilter === "face" || this.#selectionFilter === "edge") return object.userData["selectionKind"] === "body";
+    if (this.#selectionFilter === "face" || this.#selectionFilter === "edge" || this.#selectionFilter === "vertex") return object.userData["selectionKind"] === "body";
     return object.userData["selectionKind"] === this.#selectionFilter;
   }
 
@@ -1001,6 +1151,7 @@ export class ThreeViewportAdapter {
       this.#scene.fog.far = Math.max(this.#radius * 5, 0.75);
     }
     this.#updateProjection();
+    this.#refreshRods();
     this.#emitViewState();
   }
 
@@ -1019,6 +1170,8 @@ export class ThreeViewportAdapter {
   };
 
   #clearBody(): void {
+    this.#invalidatePickCache();
+    this.#clicks.reset();
     this.#setHover(null);
     for (const object of this.#objects) {
       this.#bodyGroup.remove(object);
@@ -1086,17 +1239,21 @@ export class ThreeViewportAdapter {
   readonly #onPointerLeave = (): void => { this.#setHover(null); };
 
   /** Raycasts the cursor and pre-highlights the face, edge or body a click would pick (PT-08). */
-  #updateHover(clientX: number, clientY: number): void {
-    const hit = this.#hitForHover(clientX, clientY);
-    const filter = this.#hoverFilter();
-    const tolerance = edgePickToleranceMm(this.#radius, this.#canvas.clientHeight);
-    const target = classifyHover(hit, hit === undefined ? undefined : this.#pickCandidates.get(hit.bodyId), filter, tolerance);
-    this.#setHover(target);
+  #updateHover(clientX: number, clientY: number, pointerType = "mouse"): void {
+    // The hover runs the same classification a click runs, so what lights up is what the click picks.
+    const filter = this.#navigationMode === "measure" ? (this.#measureIntent ?? "auto") : this.#hoverFilter();
+    if (filter === "edge" || filter === "vertex") {
+      const input = this.#pointerInput(clientX, clientY, pointerType, filter);
+      const targets = input === undefined ? [] : stackAtPointer(input).targets;
+      this.#setHover(targets[0] ?? null);
+      return;
+    }
+    this.#setHover(classifyHover(this.#hitForHover(clientX, clientY), undefined, filter, 0));
   }
 
   #hoverFilter(): HoverFilter {
     const filter = this.#selectionFilter;
-    return filter === "body" || filter === "component" || filter === "face" || filter === "edge" ? filter : "auto";
+    return filter === "body" || filter === "component" || filter === "face" || filter === "edge" || filter === "vertex" ? filter : "auto";
   }
 
   #hitForHover(clientX: number, clientY: number): HoverRayHit | undefined {
@@ -1133,7 +1290,11 @@ export class ThreeViewportAdapter {
     if (target.kind === "face") {
       this.#hoverFace = this.#buildFaceOverlay(target.bodyId, target.faceIndex, { color: "#8fd0f2", emissive: "#17405a", renderOrder: 2 });
     } else if (target.kind === "edge") {
-      this.#addRods(this.#hoverGroup, target.segments.map((segment) => [segment.a, segment.b] as ViewportGuideSegment), "#5fd4ff", 1.3, 16);
+      this.#addRods(this.#hoverGroup, target.segments.map((segment) => [segment.a, segment.b] as ViewportGuideSegment), "#5fd4ff", 1.6, 19);
+    } else if (target.kind === "vertex") {
+      const [x, y, z] = target.pointMm;
+      const arm = this.#mmPerPixel() * 7;
+      this.#addRods(this.#hoverGroup, [[[x - arm, y, z], [x + arm, y, z]], [[x, y - arm, z], [x, y + arm, z]], [[x, y, z - arm], [x, y, z + arm]]], "#5fd4ff", 1.8, 19);
     } else {
       for (const object of this.#pickable) {
         if (!(object instanceof THREE.Mesh) || !(object.material instanceof THREE.MeshStandardMaterial)) continue;
@@ -1159,17 +1320,48 @@ export class ThreeViewportAdapter {
     this.#addRods(this.#guideGroup, active, "#ffb347", 1.6, 18, 1);
   }
 
-  #clearRodGroup(group: THREE.Group): void {
+  #clearRodGroup(group: THREE.Group, forget = true): void {
     for (const object of [...group.children]) {
       group.remove(object);
       if ("geometry" in object && object.geometry instanceof THREE.BufferGeometry) object.geometry.dispose();
       if ("material" in object) (object.material as THREE.Material).dispose();
     }
+    if (forget) this.#rodSpecs.delete(group);
   }
 
-  /** A line is one pixel wide whatever the zoom, so each guide or highlight is a thin rod that always draws on top of the model. */
-  #addRods(group: THREE.Group, segmentsMm: readonly ViewportGuideSegment[], color: string, radiusScale: number, renderOrder: number, opacity = 1): void {
-    const rodRadius = THREE.MathUtils.clamp(this.#radius * 0.004, 0.0003, 0.003) * radiusScale;
+  /** Metres of the scene that one canvas pixel covers at the orbit distance (both projections show the same height there). */
+  #metersPerPixel(): number {
+    return 2 * this.#radius * Math.tan(THREE.MathUtils.degToRad(this.#camera.fov / 2)) / Math.max(this.#canvas.clientHeight, 1);
+  }
+
+  #mmPerPixel(): number { return this.#metersPerPixel() * 1000; }
+
+  /** The rods are sized in pixels, so when the zoom changes they are drawn again at the new size. */
+  #refreshRods(): void {
+    if (Math.abs(this.#radius / this.#rodRadiusBasis - 1) < 0.03) return;
+    for (const [group, specs] of [...this.#rodSpecs]) {
+      this.#clearRodGroup(group, false);
+      for (const spec of specs) this.#buildRods(group, spec);
+    }
+    this.#rodRadiusBasis = this.#radius;
+  }
+
+  /**
+   * A line is one pixel wide whatever the zoom, so each guide or highlight is a thin rod that always draws on top of the model.
+   * The rod's half-width is a few pixels at most (`pixelRadius`), not a share of the scene, so on a small part it does not cover
+   * the thin edge it marks.
+   */
+  #addRods(group: THREE.Group, segmentsMm: readonly ViewportGuideSegment[], color: string, pixelRadius: number, renderOrder: number, opacity = 1): void {
+    const spec: RodSpec = { segmentsMm, color, pixelRadius, renderOrder, opacity };
+    const known = this.#rodSpecs.get(group);
+    if (known === undefined) this.#rodSpecs.set(group, [spec]); else known.push(spec);
+    this.#rodRadiusBasis = this.#radius;
+    this.#buildRods(group, spec);
+  }
+
+  #buildRods(group: THREE.Group, spec: RodSpec): void {
+    const { segmentsMm, color, renderOrder, opacity } = spec;
+    const rodRadius = Math.max(this.#metersPerPixel() * spec.pixelRadius * 0.6, 1e-7);
     const up = new THREE.Vector3(0, 1, 0);
     for (const [from, to] of segmentsMm) {
       const start = new THREE.Vector3(from[0] / 1000, from[1] / 1000, from[2] / 1000);

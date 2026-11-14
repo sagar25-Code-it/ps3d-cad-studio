@@ -6,6 +6,7 @@
  * step says so instead of treating something else.
  */
 
+import { classifyBlendRun } from "./blend-classify.js";
 import { meshChamfer, meshFillet, pickableEdges, type ModifyMeshInput, type PickableEdge } from "./mesh-modify.js";
 
 type V3 = readonly [number, number, number];
@@ -249,6 +250,11 @@ export function applyEdgeBlend(mesh: ModifyMeshInput, faces: BlendFaces | undefi
   if (groups.length === 0) return { ok: false, message: "No edge is picked for this blend." };
   const resolvedResult = resolveEdgeGroups(mesh, faces, groups, toleranceMm);
   if (!resolvedResult.ok) return resolvedResult;
+  // Curved cases the cutter cannot follow are refused by name before any geometry is touched.
+  for (const group of resolvedResult.groups) {
+    const kind = classifyBlendRun(mesh, group.segments, spec.type);
+    if (!kind.ok) return { ok: false, message: resolvedResult.groups.length === 1 ? kind.message : `One of the ${resolvedResult.groups.length} picked runs: ${kind.message}` };
+  }
   const variable = spec.type === "fillet" && spec.endSizeMm !== undefined && spec.endSizeMm !== spec.sizeMm;
   if (variable) {
     for (const group of resolvedResult.groups) {

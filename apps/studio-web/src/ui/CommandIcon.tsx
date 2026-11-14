@@ -118,6 +118,7 @@ function geometry(name: string): React.ReactNode {
     case "midpoint": return <><path d="M3 18h18" /><path d="m12 5 4 8H8z" /><circle cx="12" cy="18" r="1.3" fill="currentColor" /></>;
     case "unfixed": return <><path d="m12 4 4 5-4 3-4-3zM12 12v8" /><path d="M8 20h8" /><path d="M4 4l16 16" /></>;
     case "text": return <><path d="M6 6h12M12 6v13M9 19h6" /></>;
+    case "vertex": return <><path d="m5 17 7-11 7 11z" /><circle cx="12" cy="6" r="2.2" fill="currentColor" /></>;
     case "polygon": return <><path d="m12 3.5 7.6 5.5-2.9 9H7.3l-2.9-9z" /></>;
     case "slot": return <><path d="M8 7h8a5 5 0 0 1 0 10H8A5 5 0 0 1 8 7z" /></>;
     case "construction": return <><path d="M4 12h3m2 0h3m2 0h3m2 0h1" /><circle cx="4" cy="12" r="1" /><circle cx="20" cy="12" r="1" /></>;

@@ -42,3 +42,5 @@ export * from "./bend-table.js";
 export * from "./sheet-lofted-bend.js";
 export * from "./sweep-solid.js";
 export * from "./twist-stations.js";
+export * from "./crease-edges.js";
+export * from "./blend-classify.js";

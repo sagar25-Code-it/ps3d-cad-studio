@@ -118,6 +118,7 @@ import { edgesToPick, isSketchProjectCommand, needsPick, pickedEdgeRun, sourceBo
 import { planSketchProjectForSession, refreshLooseSketchProjections } from "./sketch-projection-refresh.js";
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
+import { chainsOfSelection, chainsToToggle, nextEdgeSelection, straightEdgeFromTarget, vertexCrossSegments, vertexPickText, type SelectedEdgePick } from "./edge-pick-wiring.js";
 import { blendSpecOf, facesOfBody } from "./edge-blend-step.js";
 import { blendAllFeature, centroidHoleFeature } from "./one-shot-steps.js";
 import { applyParameterValues, bindTypedSize } from "./feature-parameters.js";
@@ -391,7 +392,9 @@ export function App(): React.JSX.Element {
   const [groupDeleteRequest, setGroupDeleteRequest] = useState<{ readonly impact: DeleteImpact; readonly group: TimelineGroup } | null>(null);
   const [selectedFace, setSelectedFace] = useState<{ readonly bodyId: string; readonly faceIndex: number } | null>(null);
   /** Edge chains picked in the 3D view with the Edge intent (PT-08); Ctrl / Shift adds chains of the same body. */
-  const [selectedEdges, setSelectedEdges] = useState<readonly { readonly bodyId: string; readonly chain: number; readonly segments: readonly ViewportGuideSegment[] }[]>([]);
+  const [selectedEdges, setSelectedEdges] = useState<readonly SelectedEdgePick[]>([]);
+  /** A corner picked with the Vertex intent (shown as an amber cross until Esc or another pick). */
+  const [selectedVertex, setSelectedVertex] = useState<{ readonly bodyId: string; readonly pointMm: readonly [number, number, number] } | null>(null);
   /** PT-06: the shared modeless command panel (Fillet, Chamfer, Shell, Hole), for creation and for Edit Feature. */
   const [commandPanel, setCommandPanel] = useState<CommandPanelState | null>(null);
   const commandPanelRef = useRef<CommandPanelState | null>(null);
@@ -878,24 +881,28 @@ export function App(): React.JSX.Element {
   }, []);
   /** A click with the Face or Edge intent (PT-08): faces select one at a time, edge chains collect with Ctrl / Shift. */
   const acceptEntityPick = useCallback((target: HoverTarget | null, modifiers: { readonly ctrl: boolean; readonly shift: boolean }): void => {
-    if (target === null) { setSelectedFace(null); setSelectedEdges((current) => current.length === 0 ? current : []); return; }
+    if (target === null) { setSelectedFace(null); setSelectedVertex(null); setSelectedEdges((current) => current.length === 0 ? current : []); return; }
     if (target.kind === "face") {
       setSelectedId(target.bodyId);
       setSelectedFace({ bodyId: target.bodyId, faceIndex: target.faceIndex });
+      setSelectedVertex(null);
       setSelectedEdges((current) => current.length === 0 ? current : []);
       return;
     }
     if (target.kind === "edge") {
       setSelectedId(target.bodyId);
       setSelectedFace(null);
-      const pick = { bodyId: target.bodyId, chain: target.chain, segments: target.segments.map((segment) => [segment.a, segment.b] as ViewportGuideSegment) };
-      setSelectedEdges((current) => {
-        const existing = current.findIndex((entry) => entry.bodyId === pick.bodyId && entry.chain === pick.chain);
-        if (!(modifiers.ctrl || modifiers.shift)) return existing >= 0 && current.length === 1 ? [] : [pick];
-        if (existing >= 0) return current.filter((_, index) => index !== existing);
-        // One fillet or chamfer works on one solid, so chains collect within one body; a pick on another body restarts the set.
-        return current.every((entry) => entry.bodyId === pick.bodyId) ? [...current, pick] : [pick];
-      });
+      setSelectedVertex(null);
+      setSelectedEdges((current) => nextEdgeSelection(current, target, modifiers));
+      if (target.tangent === true) setStatusText(`Tangent chain picked: ${(target.chains ?? [target.chain]).length} connected edge run${(target.chains ?? [target.chain]).length === 1 ? "" : "s"} that carry on without a kink.`);
+      return;
+    }
+    if (target.kind === "vertex") {
+      setSelectedId(target.bodyId);
+      setSelectedFace(null);
+      setSelectedEdges((current) => current.length === 0 ? current : []);
+      setSelectedVertex({ bodyId: target.bodyId, pointMm: target.pointMm });
+      setStatusText(vertexPickText(target, (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === target.bodyId)?.name));
       return;
     }
     setSelectedId(target.bodyId);
@@ -981,7 +988,7 @@ export function App(): React.JSX.Element {
   }, [activeImport, assemblyScene, model, partScene, partPickCandidates, project.activeWorkspace, project.id, project.part.templateVisible, surfacePreview.scene, vehiclePreview.scene]);
   useEffect(() => viewportRef.current?.setSelectedId(selectedId), [selectedId]);
   // The picked edge chains stay lit until the selection changes; a change to the bodies invalidates the chains.
-  useEffect(() => { viewportRef.current?.setSelectedEdges(selectedEdges.flatMap((entry) => entry.segments)); }, [selectedEdges]);
+  useEffect(() => { viewportRef.current?.setSelectedEdges([...selectedEdges.flatMap((entry) => entry.segments), ...(selectedVertex === null ? [] : vertexCrossSegments(selectedVertex.pointMm, 1.2 * (viewportRef.current?.edgeCrossArmMm() ?? 2)))]); }, [selectedEdges, selectedVertex]);
   // While the command panel is open, viewport clicks feed its active selection row and Esc cancels the command.
   const panelPickRef = useRef<(picked: ViewportMeasurePoint) => void>(() => undefined);
   useEffect(() => {
@@ -995,9 +1002,12 @@ export function App(): React.JSX.Element {
     pickRef.current?.(null);
     pickRef.current = handler;
     viewport.setNavigationMode("measure");
+    // Fillet and chamfer wait for an edge: the view lights up the edge a click would pick.
+    viewport.setPickIntent(commandPanel.command === "fillet" || commandPanel.command === "chamfer" ? "edge" : null);
     return () => {
       if (pickRef.current === handler) pickRef.current = null;
       const live = viewportRef.current;
+      live?.setPickIntent(null);
       live?.setNavigationMode("select");
       live?.setGuideSegments([]);
     };
@@ -1143,7 +1153,7 @@ export function App(): React.JSX.Element {
       const sketchFilterInvalid = workspace !== "sketch" && (filter === "sketch-curve" || filter === "profile" || filter === "connected" || filter === "tangent");
       const componentFilterInvalid = workspace === "part" && filter === "component";
       const bodyFilterInvalid = (workspace === "assembly" || workspace === "surface" || workspace === "vehicle") && filter === "body";
-      const faceEdgeFilterInvalid = workspace !== "part" && (filter === "face" || filter === "edge");
+      const faceEdgeFilterInvalid = workspace !== "part" && (filter === "face" || filter === "edge" || filter === "vertex");
       return sketchFilterInvalid || componentFilterInvalid || bodyFilterInvalid || faceEdgeFilterInvalid ? { ...currentState, selectionFilter: "auto" } : currentState;
     });
     const next = { ...current, activeWorkspace: workspace };
@@ -1493,12 +1503,14 @@ export function App(): React.JSX.Element {
       if (typeof edges !== "string") for (const edge of edges) guides.push([edge.a, edge.b]);
     }
     setConstructionPicking(true);
-    const picked = await requestViewportPick("Plane through two edges: click a straight edge of a solid (the edges are outlined)", guides);
+    const picked = await requestViewportPick("Plane through two edges: click a straight edge of a solid (the edges are outlined)", guides, null, "edge");
     setConstructionPicking(false);
     if (picked === null) return { ok: false, message: "No edge was picked." };
-    const body = bodies.find((candidate) => candidate.id === picked.semanticId);
-    if (body === undefined) return { ok: false, message: "The click did not land on a solid body. Click an edge of a solid." };
-    return edgeRefFromPick(body, picked.pointMm);
+    const edgeTarget = picked.edgeTarget;
+    if (edgeTarget === undefined || edgeTarget.kind !== "edge") return { ok: false, message: "No edge was under the pointer. Click on an edge of a solid (it lights up when the pointer is close enough)." };
+    const body = bodies.find((candidate) => candidate.id === edgeTarget.bodyId);
+    if (body === undefined) return { ok: false, message: "That edge does not belong to a solid body of this design. Click an edge of a solid." };
+    return straightEdgeFromTarget(body, edgeTarget);
   };
 
   const confirmConstructionPlane = (name: string, definition: import("../../../packages/workbench-core/src/index.js").ConstructionPlaneDefinition): void => {
@@ -1515,6 +1527,8 @@ export function App(): React.JSX.Element {
     if (bodies.length === 0) { setStatus("ready"); setStatusText("A binder points at a solid. Create a solid first."); return; }
     let body: GeneralSolidBody | undefined = bodies.find((candidate) => candidate.id === selectedId);
     let pointMm: Vec3 | undefined;
+    let edgeBinderTarget: { readonly kind: "edge"; readonly bodyId: string; readonly a: Vec3; readonly b: Vec3 } | undefined;
+    let edgeBinderMessage: string | undefined;
     if (kind === "body") {
       body = body ?? (bodies.length === 1 ? bodies[0] : undefined);
       if (body === undefined) { setStatus("ready"); setStatusText("Shape binder: select a solid first."); return; }
@@ -1526,13 +1540,21 @@ export function App(): React.JSX.Element {
           if (typeof edges !== "string") for (const edge of edges) guides.push([edge.a, edge.b]);
         }
       }
-      const picked = await requestViewportPick(kind === "face" ? "Face binder: click the face to follow" : "Edge binder: click a sharp edge to follow", guides);
+      const picked = await requestViewportPick(kind === "face" ? "Face binder: click the face to follow" : "Edge binder: click a sharp edge to follow", guides, null, kind === "edge" ? "edge" : null);
       if (picked === null) return;
-      body = bodies.find((candidate) => candidate.id === picked.semanticId);
+      const edgeHit = kind === "edge" && picked.edgeTarget !== undefined && picked.edgeTarget.kind === "edge" ? picked.edgeTarget : undefined;
+      if (kind === "edge" && edgeHit === undefined) { setStatus("ready"); setStatusText("Edge binder: no edge was under the pointer. Click on a sharp edge (it lights up when the pointer is close enough)."); return; }
+      body = bodies.find((candidate) => candidate.id === (edgeHit?.bodyId ?? picked.semanticId));
       if (body === undefined) { setStatus("ready"); setStatusText("The click did not land on a solid body."); return; }
       pointMm = picked.pointMm;
+      if (edgeHit !== undefined) {
+        const straight = straightEdgeFromTarget(body, edgeHit);
+        if (!straight.ok) { setStatus("ready"); setStatusText(`Edge binder: ${straight.message}`); return; }
+        edgeBinderTarget = { kind: "edge" as const, bodyId: body.id, a: straight.value.a, b: straight.value.b };
+        edgeBinderMessage = straight.message;
+      }
     }
-    const target = binderTargetFromPick(body, kind, pointMm);
+    const target = edgeBinderTarget !== undefined ? { ok: true as const, value: edgeBinderTarget, message: edgeBinderMessage ?? "an edge" } : binderTargetFromPick(body, kind, pointMm);
     if (!target.ok) { setStatus("ready"); setStatusText(`${kind === "body" ? "Shape" : kind === "face" ? "Face" : "Edge"} binder: ${target.message}`); return; }
     const ordinal = (projectRef.current.part.constructionBinders?.length ?? 0) + 1;
     const binder = { id: `binder:${crypto.randomUUID()}`, name: `${kind === "body" ? "Shape" : kind === "face" ? "Face" : "Edge"} binder ${ordinal} · ${body.name}`.slice(0, 120), visible: true, target: target.value };
@@ -1681,17 +1703,19 @@ export function App(): React.JSX.Element {
    * Waits for the user to click the model: the viewport switches to its pick mode, optional guide lines show what can be picked,
    * and the promise resolves with the clicked point (and face) or null when the user presses Escape or starts another pick.
    */
-  const requestViewportPick = (instruction: string, guides: readonly ViewportGuideSegment[] = [], activeGuide: number | null = null): Promise<ViewportMeasurePoint | null> => new Promise((resolve) => {
+  const requestViewportPick = (instruction: string, guides: readonly ViewportGuideSegment[] = [], activeGuide: number | null = null, intent: "edge" | "vertex" | null = null): Promise<ViewportMeasurePoint | null> => new Promise((resolve) => {
     pickRef.current?.(null);
     const viewport = viewportRef.current;
     if (viewport === undefined) { resolve(null); return; }
     viewport.setGuideSegments(guides, activeGuide);
     viewport.setNavigationMode("measure");
+    viewport.setPickIntent(intent);
     setStatus("ready");
     setStatusText(`${instruction} (Esc cancels)`);
     pickRef.current = (point) => {
       pickRef.current = null;
       viewport.setGuideSegments([]);
+      viewport.setPickIntent(null);
       viewport.setNavigationMode("select");
       resolve(point);
     };
@@ -1977,7 +2001,7 @@ export function App(): React.JSX.Element {
     const revolving = mode === "revolve-face";
     const pickMode: ReachPickMode = revolving ? "face" : mode;
     const noun = pickMode === "face" ? "a face" : pickMode === "body" ? "a solid" : "a corner vertex (corners are marked)";
-    const picked = await requestViewportPick(`${lead}: click ${noun}. The profile comes from ${sketchFeature.name}`, pickMode === "vertex" ? vertexPickGuides(bodies) : []);
+    const picked = await requestViewportPick(`${lead}: click ${noun}. The profile comes from ${sketchFeature.name}`, pickMode === "vertex" ? vertexPickGuides(bodies) : [], null, pickMode === "vertex" ? "vertex" : null);
     if (picked === null) return;
     const target = reachTargetFromClick(pickMode, picked, projectRef.current.part.generalBodies ?? []);
     if (!target.ok) { setStatus("ready"); setStatusText(`${lead}: ${target.message}`); return; }
@@ -2045,15 +2069,15 @@ export function App(): React.JSX.Element {
     // One fillet works on one solid, so chains of the first picked body are seeded and the rest are left selected.
     const seedBodyId = selectedEdges[0]?.bodyId;
     if ((command === "fillet" || command === "chamfer") && selectedEdges.length > 0) {
-      for (const entry of selectedEdges.filter((candidate) => candidate.bodyId === seedBodyId)) {
-        const body = bodies.find((candidate) => candidate.id === entry.bodyId);
+      for (const chainId of chainsOfSelection(selectedEdges, seedBodyId)) {
+        const body = bodies.find((candidate) => candidate.id === seedBodyId);
         if (body === undefined) continue;
         const edges = pickableEdges({ positionsMm: body.positionsMm, indices: body.indices }, 5, { includeConcave: true });
         if (typeof edges === "string") continue;
-        const chainEdges = edges.filter((edge) => edge.chain === entry.chain);
+        const chainEdges = edges.filter((edge) => edge.chain === chainId);
         if (chainEdges.length === 0) continue;
         const group = describePickedEdge(chainEdges, facesOfBody(body));
-        state = panelToggleEdge(state, { bodyId: body.id, chain: entry.chain, group, segments: chainEdges.map((edge) => [edge.a, edge.b] as ViewportGuideSegment), summary: chainEdges.length === 1 ? "an edge" : `a run of ${chainEdges.length}` }, body.name);
+        state = panelToggleEdge(state, { bodyId: body.id, chain: chainId, group, segments: chainEdges.map((edge) => [edge.a, edge.b] as ViewportGuideSegment), summary: chainEdges.length === 1 ? "an edge" : `a run of ${chainEdges.length}` }, body.name);
       }
     }
     setFeatureEdit(undefined);
@@ -2071,21 +2095,25 @@ export function App(): React.JSX.Element {
     const state = commandPanelRef.current;
     if (state === null) return;
     const bodies = projectRef.current.part.generalBodies ?? [];
-    const body = bodies.find((candidate) => candidate.id === picked.semanticId);
-    if (body === undefined) { setStatusText(`${panelTitle(state)}: click on a solid body.`); return; }
+    // An edge is picked by where it is on the screen (within the pointer tolerance), even when no surface lies under the cursor.
+    const edgeTarget = picked.edgeTarget !== undefined && picked.edgeTarget.kind === "edge" ? picked.edgeTarget : undefined;
+    const isBlend = state.command === "fillet" || state.command === "chamfer";
+    if (isBlend && edgeTarget === undefined) { setStatusText(`${panelTitle(state)}: no edge is under the pointer. Click on an edge (a highlighted line lights up when the pointer is close enough); clicking the middle of a face picks no edge.`); return; }
+    const body = bodies.find((candidate) => candidate.id === (isBlend && edgeTarget !== undefined ? edgeTarget.bodyId : picked.semanticId));
+    if (body === undefined) { setStatusText(isBlend && edgeTarget !== undefined ? `${panelTitle(state)}: that edge belongs to a body that is not a modelled solid of this design (an imported mesh or a primitive); fillet and chamfer work on solids built in the timeline or kept as general solids.` : `${panelTitle(state)}: click on a solid body.`); return; }
     const round3 = (value: number): number => Number(value.toFixed(3));
-    if (state.command === "fillet" || state.command === "chamfer") {
+    if (isBlend && edgeTarget !== undefined) {
       const edges = pickableEdges({ positionsMm: body.positionsMm, indices: body.indices }, 5, { includeConcave: true });
       if (typeof edges === "string") { setStatusText(`${panelTitle(state)}: ${edges}`); return; }
-      const nearest = nearestPickableEdge(edges, picked.pointMm);
-      if (nearest === undefined) { setStatusText(`${panelTitle(state)}: ${body.name} has no sharp edge to pick.`); return; }
-      const group = describePickedEdge(nearest.chain, facesOfBody(body));
-      const pick: PanelEdgeSet = {
-        bodyId: body.id, chain: nearest.edge.chain, group,
-        segments: nearest.chain.map((edge) => [edge.a, edge.b] as ViewportGuideSegment),
-        summary: nearest.chain.length === 1 ? "an edge" : `a run of ${nearest.chain.length}`
-      };
-      setCommandPanel(panelToggleEdge(state, pick, body.name));
+      let next = state;
+      for (const chainId of chainsToToggle(state.edges, edgeTarget)) {
+        const chainEdges = edges.filter((edge) => edge.chain === chainId);
+        if (chainEdges.length === 0) continue;
+        const group = describePickedEdge(chainEdges, facesOfBody(body));
+        next = panelToggleEdge(next, { bodyId: body.id, chain: chainId, group, segments: chainEdges.map((edge) => [edge.a, edge.b] as ViewportGuideSegment), summary: chainEdges.length === 1 ? "an edge" : `a run of ${chainEdges.length}` }, body.name);
+      }
+      if (next === state) { setStatusText(`${panelTitle(state)}: ${body.name} has no edge the ${state.command} can treat there.`); return; }
+      setCommandPanel(next);
       return;
     }
     if (picked.normalMm === undefined) { setStatusText(`${panelTitle(state)}: the clicked surface has no direction to work from.`); return; }
@@ -4423,7 +4451,7 @@ export function App(): React.JSX.Element {
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const key = event.key.toLowerCase();
       // Esc clears the face / edge selection (a pending viewport pick is cancelled by its own listener).
-      if (key === "escape" && pickRef.current === null) { setSelectedFace(null); setSelectedEdges((current) => current.length === 0 ? current : []); return; }
+      if (key === "escape" && pickRef.current === null) { setSelectedFace(null); setSelectedVertex(null); setSelectedEdges((current) => current.length === 0 ? current : []); return; }
       const command = partHotkeyCommand(key, projectRef.current.activeWorkspace);
       if (command !== undefined) { partHotkeyRef.current(command); return; }
       // Outside the Part workspace the Fusion letters stand aside and the older view keys keep working.
@@ -4906,6 +4934,7 @@ export function App(): React.JSX.Element {
           onShadingMode={(mode) => viewportRef.current?.setShadingMode(mode)}
           onBodyColor={(color) => viewportRef.current?.setBodyColor(color)}
           onBackgroundTone={(tone: ViewportBackgroundTone) => viewportRef.current?.setBackgroundTone(tone)}
+          onEdgePick={(settings) => viewportRef.current?.setEdgePickSettings(settings)}
           onFit={fitViewport}
           onHome={homeViewport}
           onClearMeasure={() => setMeasurePoints([])}

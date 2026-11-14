@@ -7,6 +7,8 @@ export interface ReachClick {
   readonly semanticId: string | null;
   readonly faceIndex?: number | null;
   readonly normalMm?: readonly [number, number, number];
+  /** The corner found under the pointer on screen, when the view was asked for one. */
+  readonly vertexTarget?: { readonly kind: string; readonly bodyId?: string; readonly pointMm?: readonly [number, number, number] };
 }
 
 export type ReachPickMode = "face" | "body" | "vertex";
@@ -37,6 +39,11 @@ export function vertexPickGuides(bodies: readonly GeneralSolidBody[]): readonly 
 /** Turns a click into the target of a "to" extent: the face under it, the solid under it, or the corner nearest it. */
 export function reachTargetFromClick(mode: ReachPickMode, click: ReachClick, bodies: readonly GeneralSolidBody[]): ReachPick {
   if (mode === "vertex") {
+    const screen = click.vertexTarget;
+    if (screen !== undefined && screen.kind === "vertex" && screen.pointMm !== undefined) {
+      const owner = bodies.find((candidate) => candidate.id === screen.bodyId);
+      if (owner !== undefined) return { ok: true, target: { kind: "vertex", bodyId: owner.id, pointMm: screen.pointMm }, description: `the corner (${screen.pointMm.map((value) => value.toFixed(2)).join(", ")}) mm of ${owner.name}` };
+    }
     const all = cornersOf(bodies);
     // The solid under the click wins; a click on empty space takes the nearest corner of any solid.
     const hit = all.find((entry) => entry.body.id === click.semanticId);

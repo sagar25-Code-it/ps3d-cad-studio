@@ -4,6 +4,7 @@ import { useSketchKeymap } from "../workspaces/sketch/useSketchKeymap.js";
 import {
   orbitViewAngles,
   projectWorldAxes,
+  type EdgePickSettings,
   type NavigationMode,
   type SelectionFilter,
   type ViewOrientation,
@@ -16,6 +17,7 @@ import {
 import type { WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { PartAppearanceControls } from "./PartAppearanceControls.js";
+import { EdgePickMenu } from "./EdgePickMenu.js";
 
 /**
  * A command panel (Fillet, Shell, Hole...) takes the canvas's clicks through the viewport's measure pick mode, but it is not
@@ -41,6 +43,8 @@ interface ViewportChromeProps {
   readonly onShadingMode: (mode: ViewportShadingMode) => void;
   readonly onBodyColor: (color: string) => void;
   readonly onBackgroundTone: (tone: ViewportBackgroundTone) => void;
+  /** Changes how edges are picked (crease angle for meshes without named edges, pointer tolerance in pixels). */
+  readonly onEdgePick?: (settings: Partial<EdgePickSettings>) => void;
   readonly onFit: () => void;
   readonly onHome: () => void;
   readonly onClearMeasure: () => void;
@@ -115,6 +119,7 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
           <SelectionButton id="component" label="Component" icon="assembly" state={props.state} onSelect={props.onSelectionFilter} disabled={props.workspace !== "assembly"} />
           <SelectionButton id="face" label="Face" icon="surface" state={props.state} onSelect={props.onSelectionFilter} disabled={props.workspace !== "part"} />
           <SelectionButton id="edge" label="Edge" icon="edge" state={props.state} onSelect={props.onSelectionFilter} disabled={props.workspace !== "part"} />
+          <SelectionButton id="vertex" label="Vertex" icon="vertex" state={props.state} onSelect={props.onSelectionFilter} disabled={props.workspace !== "part"} />
         </>}
       </div>
       {!sketch && <>
@@ -142,6 +147,7 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
         onClick={() => setDisplayOpen((open) => !open)}
         title="Part display style and body color"
       ><CommandIcon name="display" />Display</button>}
+      {props.workspace === "part" && props.onEdgePick !== undefined && <EdgePickMenu settings={props.state.edgePick} onChange={props.onEdgePick} />}
       <span>{sketch ? "Wheel zoom · MMB or Space+drag pan · F fit · Esc cancel" : "MMB pan · Shift+MMB orbit · wheel zoom · RMB commands"}</span>
     </div>
 
