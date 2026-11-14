@@ -1,5 +1,5 @@
 import type { DesignSolidFeature, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
-import { bindFeatureExpressions, edgeBlendTitle, findBindableField, validSolidFeaturePayload } from "../../../packages/workbench-core/src/index.js";
+import { bindFeatureExpressions, designOf, edgeBlendTitle, findBindableField, validSolidFeaturePayload } from "../../../packages/workbench-core/src/index.js";
 import { bodyEditFields, bodyEditName } from "./body-edit-parameters.js";
 
 /**
@@ -337,6 +337,17 @@ export interface PlainSizeInput {
   readonly secondText?: string;
   /** A revolve's thin wall: the thickness as typed (a plain number) and the side the wall sits on. */
   readonly thin?: { readonly wallText: string; readonly side: NonNullable<DesignSolidFeature["thinSide"]> };
+  /** HS-06: what a join, cut or intersect step does with its solid, changed in the edit. Absent leaves it as it is. A new-body step has no target to change to, so it is not offered. */
+  readonly operation?: "join" | "cut" | "intersect";
+}
+
+/** The step's name after its operation changed: "Cut 1" becomes "Join 2" (the next free number for the new verb); a name the person chose is kept. */
+export function renamedForOperation(feature: DesignSolidFeature, operation: "join" | "cut" | "intersect", takenNames: readonly string[]): string {
+  if (!/^(?:Join|Cut|Intersect) [0-9]+$/u.test(feature.name)) return feature.name;
+  const verb = operation === "join" ? "Join" : operation === "cut" ? "Cut" : "Intersect";
+  let next = 1;
+  while (takenNames.some((name) => name.toLowerCase() === `${verb} ${next}`.toLowerCase())) next += 1;
+  return `${verb} ${next}`;
 }
 
 /**
@@ -345,6 +356,19 @@ export interface PlainSizeInput {
  * second side, the "To" reach and the thin wall travel with it (see `PlainSizeInput`), and the result passes the saved-project validator.
  */
 export function applyPlainSize(feature: DesignSolidFeature, input: PlainSizeInput, project: WorkbenchProject): ParameterResult {
+  const changed = input.operation !== undefined && input.operation !== feature.operation && (feature.operation === "join" || feature.operation === "cut" || feature.operation === "intersect")
+    ? input.operation : undefined;
+  if (changed !== undefined) {
+    // Through all only means something for a cut; the other operations measure a distance.
+    if (input.throughAll && changed !== "cut") return { ok: false, message: "Through all only applies to a cut. Pick Distance for the extent first." };
+    const taken = designOf(project).features.filter((other) => other.id !== feature.id).map((other) => other.name);
+    const renamed = { ...feature, operation: changed, name: renamedForOperation(feature, changed, taken) };
+    const { operation: _kept, ...withoutOperation } = input;
+    void _kept;
+    const result = applyPlainSize(renamed, withoutOperation, project);
+    // A step that was a through-all cut and is now something else loses the through-all extent with the cut.
+    return result;
+  }
   const isExtrude = feature.kind === "extrude";
   const fieldId = isExtrude ? "distance" : "angle";
   const reaching = input.reaching === true;

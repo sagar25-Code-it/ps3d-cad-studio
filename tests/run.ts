@@ -198,6 +198,7 @@ import { timelineGroupTests } from "./timeline-groups.test.js";
 import { browserDocumentTests } from "./browser-document.test.js";
 import { holeFaceNameTests } from "./hole-face-names.test.js";
 import { holePlacementTests } from "./hole-placement.test.js";
+import { editFeatureDockTests } from "./edit-feature-dock.test.js";
 import { sketchOffsetChainDefaultTests } from "./sketch-offset-chain-default.test.js";
 import { sketchProjectionCurrentTests } from "./sketch-projection-current.test.js";
 import { sketchDimensionPointFirstTests } from "./sketch-dimension-point-first.test.js";
@@ -458,6 +459,7 @@ const tests: readonly TestCase[] = [
   ...browserDocumentTests,
   ...holeFaceNameTests,
   ...holePlacementTests,
+  ...editFeatureDockTests,
 ];
 let failures = 0;
 

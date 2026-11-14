@@ -26,7 +26,11 @@ const EXTENT_LABEL: Readonly<Record<string, string>> = {
   "to-last": "To last face (the recorded target)"
 };
 
-/** Edit a timeline step: an extrude or revolve has its own form (size, direction, second side, extent, thin wall); every other kind lists its parameters from `parameterFieldsOf`. */
+/**
+ * Edit a timeline step: an extrude or revolve has its own form (operation, size, direction, second side, extent, thin wall); every other
+ * kind lists its parameters from `parameterFieldsOf`. The form is docked at the right of the window with no backdrop (HS-06), so the model
+ * stays live to look at and orbit while it is open; Esc closes it and Update feature applies it.
+ */
 export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Element | null {
   const open = props.feature !== undefined;
   const dialogRef = useDialogFocus<HTMLElement>(open, props.onClose);
@@ -38,6 +42,7 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
   const [thinWall, setThinWall] = useState("2");
   const [thinSide, setThinSide] = useState<NonNullable<DesignSolidFeature["thinSide"]>>("inside");
   const [problem, setProblem] = useState("");
+  const [operation, setOperation] = useState<"join" | "cut" | "intersect">(() => props.feature?.operation === "cut" || props.feature?.operation === "intersect" ? props.feature.operation : "join");
   const [values, setValues] = useState<Readonly<Record<string, string>>>({});
 
   useEffect(() => {
@@ -49,6 +54,7 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
     setThin(props.feature.thinWallMm !== undefined);
     setThinWall(String(props.feature.thinWallMm ?? 2));
     setThinSide(props.feature.thinSide ?? "inside");
+    setOperation(props.feature.operation === "cut" || props.feature.operation === "intersect" ? props.feature.operation : "join");
     setValues(parameterValuesOf(props.feature));
     setProblem("");
   }, [props.feature?.id]);
@@ -58,8 +64,10 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
   const fields = parameterFieldsOf(feature);
   const plainForm = feature.kind === "extrude" || feature.kind === "revolve";
   const isExtrude = feature.kind === "extrude";
+  // A join, cut or intersect step can switch between them; a step that makes a body of its own has no target to switch to.
+  const switchable = plainForm && (feature.operation === "join" || feature.operation === "cut" || feature.operation === "intersect");
   // Through-all is for extruded cuts: the cutter is stretched across the body at rebuild time.
-  const isCut = isExtrude && feature.operation === "cut";
+  const isCut = isExtrude && (switchable ? operation === "cut" : feature.operation === "cut");
   const throughAll = isCut && extent === "through-all";
   // A "to" extent keeps the target recorded when the step was made; it is offered while the step has one.
   const reaching = feature.extentTarget !== undefined && extent === feature.extent && extent !== "distance" && extent !== "through-all";
@@ -86,14 +94,15 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
     if (!plainForm) { props.onClose(); return; }
     const result = applyPlainSize(feature, {
       text: value, direction, throughAll, reaching, secondText: second,
+      ...(switchable && operation !== feature.operation ? { operation } : {}),
       ...(!isExtrude && thin ? { thin: { wallText: thinWall, side: thinSide } } : {})
     }, props.project);
     if (!result.ok) { setProblem(result.message); return; }
     props.onApply(result.feature);
   };
 
-  return <div className="dialog-backdrop save-project-backdrop" role="presentation" onMouseDown={props.onClose}>
-    <section ref={dialogRef} tabIndex={-1} className="save-project-dialog feature-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="feature-edit-title" onMouseDown={(event) => event.stopPropagation()}>
+  return <div className="dialog-backdrop save-project-backdrop feature-edit-dock" role="presentation">
+    <section ref={dialogRef} tabIndex={-1} className="save-project-dialog feature-edit-dialog" role="dialog" aria-modal="false" aria-labelledby="feature-edit-title">
       <header><span><CommandIcon name={feature.kind} /></span><div><small>TIMELINE / EDIT FEATURE</small><h2 id="feature-edit-title">{feature.name}</h2></div><button onClick={props.onClose} aria-label="Cancel editing"><CommandIcon name="cancel" /></button></header>
       <div className="save-project-content feature-edit-form">
         {fields !== undefined && fields.map((field, index) => <label key={field.id}>
@@ -118,6 +127,20 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
           {field.hint !== undefined && <small className="feature-edit-hint">{field.hint}</small>}
         </label>)}
         {!plainForm && fields === undefined && <div className="save-project-note"><CommandIcon name="shield" /><span>This step has no numbers to edit. Delete it from the timeline, or suppress it, to change the result.</span></div>}
+        {switchable && <label>
+          <span>Operation</span>
+          <select value={operation} aria-label="Operation" onChange={(event) => {
+            const next = event.target.value as "join" | "cut" | "intersect";
+            setOperation(next);
+            // Through all belongs to a cut only: leaving the cut puts the extent back to a distance.
+            if (next !== "cut" && extent === "through-all") setExtent("distance");
+            setProblem("");
+          }}>
+            <option value="join">Join (add to the solid)</option>
+            <option value="cut">Cut (remove from the solid)</option>
+            <option value="intersect">Intersect (keep only the overlap)</option>
+          </select>
+        </label>}
         {plainForm && (isCut || feature.extentTarget !== undefined) && <label>
           <span>Extent</span>
           <select value={extent} aria-label="Cut extent" onChange={(event) => { setExtent(event.target.value as Extent); setProblem(""); }}>
