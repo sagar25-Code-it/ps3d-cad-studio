@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { DisplayUnit } from "../../../../packages/model-schema/src/index.js";
 import type { AssemblyTemplateId, DrawingDatumScheme, DrawingDisplayStyle, DrawingDraftingStandard, DrawingSettings, ElectricalComponentKind, ElectricalStandard, ElectricalTemplateId, PartPreviewBodyShape, SurfaceIntent, VehicleLayerId, VehicleSimulationState, VehicleTemplateId, WorkbenchProject } from "../../../../packages/workbench-core/src/index.js";
 import type { SketchTool } from "../../../../packages/workbench-sketch/src/index.js";
@@ -569,13 +570,48 @@ function RibbonGroup({ label, children }: { readonly label: string; readonly chi
  * the rest of the family. The drop-down is bounded by the window height and scrolls inside; clicking a command closes it.
  */
 function RibbonPanel({ label, children, more }: { readonly label: string; readonly children: React.ReactNode; readonly more?: React.ReactNode }): React.JSX.Element {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  const [placed, setPlaced] = useState<{ readonly left: number; readonly top: number; readonly maxHeight: number } | undefined>(undefined);
+
+  // The ribbon scrolls sideways and clips what sticks out of it, so the drop-down is fixed to the window and placed under its panel name
+  // (kept inside the window, as tall as the space below allows) instead of hanging off the ribbon where it was cut off.
+  const place = (): void => {
+    const summary = detailsRef.current?.querySelector("summary");
+    if (summary === null || summary === undefined) return;
+    const rect = summary.getBoundingClientRect();
+    const width = Math.min(320, window.innerWidth - 24);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const top = rect.bottom + 2;
+    setPlaced({ left, top, maxHeight: Math.max(120, Math.min(480, window.innerHeight - top - 12)) });
+  };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (): void => { if (detailsRef.current !== null) detailsRef.current.open = false; };
+    const outside = (event: PointerEvent): void => { if (detailsRef.current?.contains(event.target as Node) !== true) close(); };
+    const escape = (event: KeyboardEvent): void => { if (event.key === "Escape") close(); };
+    // A scroll inside the open drop-down itself must not close it; any other scroll (the ribbon, the page) moves the panel name away.
+    const scrolled = (event: Event): void => { if (detailsRef.current?.contains(event.target as Node) !== true) close(); };
+    window.addEventListener("pointerdown", outside, true);
+    window.addEventListener("keydown", escape, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", scrolled, true);
+    return () => {
+      window.removeEventListener("pointerdown", outside, true);
+      window.removeEventListener("keydown", escape, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", scrolled, true);
+    };
+  }, [open]);
+
   return <div className="ribbon-group ribbon-panel" role="group" aria-label={label}>
     <div>{children}</div>
     {more === undefined
       ? <small>{label}</small>
-      : <details className="ribbon-panel-menu">
+      : <details ref={detailsRef} className="ribbon-panel-menu" onToggle={(event) => { const isOpen = event.currentTarget.open; setOpen(isOpen); if (isOpen) place(); }}>
           <summary aria-label={`All ${label} commands`}>{label} ▾</summary>
-          <div className="ribbon-panel-drop" role="menu" aria-label={`${label} commands`} onClick={(event) => {
+          <div className="ribbon-panel-drop" role="menu" aria-label={`${label} commands`} style={placed === undefined ? undefined : { left: placed.left, top: placed.top, maxHeight: placed.maxHeight }} onClick={(event) => {
             // A command click closes the drop-down; a click on a disabled button leaves it open.
             if ((event.target as HTMLElement).closest("button") !== null) (event.currentTarget.parentElement as HTMLDetailsElement).open = false;
           }}>{more}</div>

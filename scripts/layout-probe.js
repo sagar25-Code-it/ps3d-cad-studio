@@ -88,7 +88,7 @@ window.__layoutProbe = (options = {}) => {
     return { label, ...box(d), scrollsInside: scrollers.length > 0, primaryVisible, primaryReachable, overlapping };
   });
   // Open menus and popovers: none may run past the edge of the window (a menu that is too long must scroll inside itself).
-  report.menus = [...document.querySelectorAll(options.menus ?? "[role='menu'], [class*='popover']")].filter((m) => m.getBoundingClientRect().height > 0).map((menu) => {
+  report.menus = [...document.querySelectorAll(options.menus ?? "[role='menu'], [class*='popover']")].filter((m) => m.getBoundingClientRect().height > 0 && m.closest("details:not([open])") === null).map((menu) => {
     const m = menu.getBoundingClientRect();
     const label = (menu.getAttribute("aria-label") ?? menu.className ?? "").toString().slice(0, 60);
     if (m.top < 0 || m.bottom > vh || m.left < 0 || m.right > vw) problems.push(`menu "${label}" runs outside the window (top ${r0(m.top)}, bottom ${r0(m.bottom)} of ${vh}; left ${r0(m.left)}, right ${r0(m.right)} of ${vw})`);

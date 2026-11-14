@@ -152,11 +152,12 @@
   background: rgb(63 160 255 / 14%);
 }
 
+/* Fixed to the window (left, top and max-height are set from the panel name's position): an absolute drop-down inside the scrolling, clipping ribbon was cut off at the ribbon's bottom edge. */
 .ribbon-panel-drop {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 50;
+  position: fixed;
+  top: 120px;
+  left: 8px;
+  z-index: 200;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -172,22 +173,51 @@
   box-shadow: 0 12px 30px rgb(0 0 0 / 45%);
 }
 
-.ribbon-panel-drop .ribbon-button {
+/* A drop-down row is one line: icon, name, then the hint at the right. These rules need the .studio-app prefix to beat the toolbar's own fixed 86 x 70 px button sizing, which squashed the rows into overlapping text. */
+.studio-app .ribbon-panel-drop .ribbon-button {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: row;
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 32px;
+  grid-template-rows: none;
+  padding: 4px 8px;
+  overflow: hidden;
   text-align: left;
   font-size: 12px;
 }
 
-.ribbon-panel-drop .ribbon-button strong {
-  font-size: 12.5px;
+.studio-app .ribbon-panel-drop .ribbon-button > span {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
 }
 
-.ribbon-panel-drop .ribbon-button small {
+.studio-app .ribbon-panel-drop .ribbon-button > strong {
+  flex: 0 1 auto;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-app .ribbon-panel-drop .ribbon-button > small {
+  flex: 1 1 0;
+  min-width: 0;
   margin-left: auto;
+  max-width: none;
+  overflow: hidden;
   font-size: 12px;
+  line-height: 16px;
   opacity: 0.65;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

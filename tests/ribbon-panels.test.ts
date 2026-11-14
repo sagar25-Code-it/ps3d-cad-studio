@@ -43,6 +43,17 @@ export const ribbonPanelTests: readonly TestCase[] = [
     }
   },
   {
+    name: "The panel drop-down is fixed to the window and placed under its panel name, so the clipping, sideways-scrolling ribbon cannot cut it off",
+    run: () => {
+      const css = readFileSync(CSS, "utf8");
+      const drop = css.slice(css.indexOf(".ribbon-panel-drop {"), css.indexOf("}", css.indexOf(".ribbon-panel-drop {")));
+      assert(/position:\s*fixed/.test(drop), "the drop-down is position: fixed (an absolute one was clipped by the ribbon's overflow)");
+      const ribbon = readFileSync("apps/studio-web/src/ui/WorkbenchRibbon.tsx", "utf8");
+      assert(ribbon.includes("getBoundingClientRect") && ribbon.includes("window.innerHeight - top"), "its position and its height come from where the panel name is and how much window is left below it");
+      assert(ribbon.includes('window.addEventListener("pointerdown", outside, true)') && ribbon.includes('event.key === "Escape"'), "it closes on a click elsewhere and on Esc");
+    }
+  },
+  {
     name: "The panel drop-down is bounded by the window height and scrolls inside",
     run: () => {
       const css = readFileSync(CSS, "utf8");
