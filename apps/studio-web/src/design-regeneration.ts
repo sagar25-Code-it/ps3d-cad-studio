@@ -1,6 +1,6 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, SketchEntity, WorkbenchProject, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
 import { usesZUpPlane } from "../../../packages/workbench-core/src/index.js";
-import { dependentsOf, designOf, HEALTH_NOTE_PREFIX, isHealthNote, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
+import { baseFeatureOf, dependentsOf, designOf, HEALTH_NOTE_PREFIX, isHealthNote, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, lostProfileRefs, profileOutlineMm, resolveProfileRegion, sampleArc, sampleArcToBound, sampleSpline, sampleSplineToBound } from "../../../packages/workbench-sketch/src/index.js";
 import { attachEdgeFlange, attachMiterFlange, booleanMeshes, cutReliefNotch, developBend, flangeReliefs, holeCutter, jogSheetMesh, reliefCorners, snapToAxis, splitMeshPieces, threadBoreWall, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BendRecord, type BentStripSpec, type FlatLayout, type HoleSpec } from "../../../packages/workbench-geometry/src/index.js";
 import { flangeEdgesOf } from "../../../packages/workbench-core/src/index.js";
@@ -540,9 +540,27 @@ async function replayBodies(project: WorkbenchProject, bodyIds: readonly string[
 
 /** Rebuilds the bodies that depend on a sketch feature, with their joins and cuts, in timeline order. */
 export async function rebuildDependents(project: WorkbenchProject, sketchFeatureId: string): Promise<readonly RebuildResult[]> {
+  if (!designOf(project).features.some((feature) => feature.id === sketchFeatureId && feature.kind === "sketch")) return [];
+  return rebuildDependentsOfAll(project, [sketchFeatureId]);
+}
+
+/**
+ * Rebuilds the bodies that depend on any of the given timeline features, in timeline order, as one pass. A sketch brings the bodies
+ * built on it; a step brings its own body. This is what a Finish needs when the edited sketch held a dimension that other sketches
+ * or steps use by name: those changed too, and nothing links them to the edited sketch except the name.
+ */
+export async function rebuildDependentsOfAll(project: WorkbenchProject, featureIds: readonly string[]): Promise<readonly RebuildResult[]> {
   const history = designOf(project);
-  if (!history.features.some((feature) => feature.id === sketchFeatureId && feature.kind === "sketch")) return [];
-  const affected = new Set(dependentsOf(history, sketchFeatureId).filter((feature): feature is DesignSolidFeature => feature.kind !== "sketch").map((feature) => feature.bodyId));
+  const affected = new Set<string>();
+  for (const featureId of new Set(featureIds)) {
+    const feature = history.features.find((candidate) => candidate.id === featureId);
+    if (feature === undefined) continue;
+    // A changed step changes its body, and with it everything that follows the step that made that body (its joins and cuts, its pattern copies).
+    const root = feature.kind === "sketch" ? feature : baseFeatureOf(history, feature.bodyId) ?? feature;
+    if (feature.kind !== "sketch") affected.add(feature.bodyId);
+    for (const dependent of dependentsOf(history, root.id)) if (dependent.kind !== "sketch") affected.add(dependent.bodyId);
+  }
+  if (affected.size === 0) return [];
   // A body that reaches one of these (up to its face, vertex or itself) changes with it.
   for (let grew = true; grew;) {
     grew = false;

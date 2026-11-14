@@ -177,6 +177,7 @@ import { sketchSlotCentrelineTests } from "./sketch-slot-centreline.test.js";
 import { sketchOffsetAssociativeTests } from "./sketch-offset-associative.test.js";
 import { sketchDimensionLabelTests } from "./sketch-dimension-label.test.js";
 import { sketchProjectLinkedTests } from "./sketch-project-linked.test.js";
+import { sketchDimensionFollowTests } from "./sketch-dimension-follow.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -376,6 +377,7 @@ const tests: readonly TestCase[] = [
   ...sketchOffsetAssociativeTests,
   ...sketchDimensionLabelTests,
   ...sketchProjectLinkedTests,
+  ...sketchDimensionFollowTests,
 ];
 let failures = 0;
 

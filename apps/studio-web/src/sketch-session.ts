@@ -1,6 +1,6 @@
 import type { WorkbenchOperation, WorkbenchProject, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
 import { applyWorkbenchOperation, designOf } from "../../../packages/workbench-core/src/index.js";
-import { isRebuildFailure, isRebuildNote, rebuildDependents, type RebuildResult } from "./design-regeneration.js";
+import { isRebuildFailure, isRebuildNote, rebuildDependentsOfAll, type RebuildResult } from "./design-regeneration.js";
 import { upgradeLegacyProfileRefs } from "./legacy-profile-refs.js";
 
 /**
@@ -45,6 +45,23 @@ export function workingSketchState(project: WorkbenchProject): WorkingSketchStat
   return sameSketch(editing.sketch, project.sketch) ? { kind: "clean", sketchFeatureId: editing.id } : { kind: "edited", sketchFeatureId: editing.id };
 }
 
+/**
+ * The timeline features that are in both projects and are not the same in the second: a finished sketch whose curves or dimensions
+ * changed, a step whose numbers changed. A change of the health note alone does not count (it says how the last rebuild went).
+ * Finishing a sketch can change other features without touching them directly, because a dimension of the finished sketch may be
+ * used by name (d1) in another sketch's dimension or in a step's value; those are what this finds.
+ */
+export function changedTimelineFeatureIds(before: WorkbenchProject, after: WorkbenchProject): readonly string[] {
+  const earlier = new Map(designOf(before).features.map((feature) => [feature.id, feature] as const));
+  const plain = (feature: object): string => JSON.stringify({ ...feature, health: undefined });
+  return designOf(after).features.flatMap((feature) => {
+    const was = earlier.get(feature.id);
+    if (was === undefined || was === feature || was.kind !== feature.kind) return [];
+    if (feature.kind === "sketch" && was.kind === "sketch") return was.name === feature.name && was.suppressed === feature.suppressed && sameSketch(was.sketch, feature.sketch) ? [] : [feature.id];
+    return plain(was) === plain(feature) ? [] : [feature.id];
+  });
+}
+
 export interface CommitOutcome {
   readonly project: WorkbenchProject;
   /** The timeline sketch that now holds the working sketch, or undefined when there was nothing to record. */
@@ -76,14 +93,18 @@ export async function commitWorkingSketchAtomically(
   if (state.kind !== "clean") {
     // Features that stored a bare profile name still know their region by the sketch the timeline holds; once the edit replaces it they would not.
     if (state.kind === "edited") current = upgradeLegacyProfileRefs(current, state.sketchFeatureId).project;
+    const beforeCommit = current;
     const committed = applyIntent(current, { kind: "commit-design-sketch", featureId: options.featureId, name: options.name });
     if (!committed.ok) return committed;
     current = committed.value.project;
     summary = committed.value.summary;
     changed = true;
     sketchFeatureId = designOf(current).editingSketchId ?? undefined;
-    if (state.kind === "edited" && sketchFeatureId !== undefined) {
-      rebuilt = await rebuildDependents(current, sketchFeatureId);
+    // The edited sketch, and every other sketch or step that the commit changed with it: a dimension of this sketch used by name
+    // somewhere else re-drives that sketch or step in the same operation, and the bodies built there have to follow too.
+    const roots = [...new Set([...(state.kind === "edited" && sketchFeatureId !== undefined ? [sketchFeatureId] : []), ...changedTimelineFeatureIds(beforeCommit, current)])];
+    if (roots.length > 0) {
+      rebuilt = await rebuildDependentsOfAll(current, roots);
       if (rebuilt.length > 0) {
         const regenerated = applyIntent(current, { kind: "regenerate-design", results: rebuilt });
         if (!regenerated.ok) return regenerated;

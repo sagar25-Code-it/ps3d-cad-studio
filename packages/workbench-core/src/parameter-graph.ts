@@ -117,7 +117,12 @@ class Evaluation {
   private readonly memo = new Map<string, NodeResult>();
   private readonly visiting: string[] = [];
 
-  constructor(private readonly history: DesignHistory, private readonly working?: WorkbenchSketch) {
+  /**
+   * `view` says whose eyes a dimension name is read with. The working sketch ("working") sees its own dimensions first, so what is
+   * typed in it is followed at once. The timeline ("timeline": parameters, steps and finished sketches) sees only what is finished:
+   * an edit of a sketch that is still open reaches the timeline when the sketch is finished, and never if it is cancelled.
+   */
+  constructor(private readonly history: DesignHistory, private readonly working?: WorkbenchSketch, private readonly view: "working" | "timeline" = "working") {
     for (const parameter of history.parameters ?? []) this.parameters.set(parameter.name, parameter);
     for (const feature of history.features) {
       if (feature.kind === "sketch") continue;
@@ -256,7 +261,7 @@ class Evaluation {
     if (reference.owner === undefined) {
       if (!this.parameters.has(reference.name)) {
         // The name of a sketch dimension (d1, d2 ...): its value now, or what its own expression gives.
-        const named = DIMENSION_NAME_PATTERN.test(reference.name) ? dimensionNamed(this.history, this.working, reference.name) : undefined;
+        const named = DIMENSION_NAME_PATTERN.test(reference.name) ? dimensionNamed(this.history, this.view === "timeline" ? undefined : this.working, reference.name) : undefined;
         if (named !== undefined) {
           const node = this.dimensionNode(reference.name, named);
           return node.ok ? node : { ok: false, message: `Dimension ${reference.name} has a problem: ${node.message}` };
@@ -310,9 +315,14 @@ export function evaluateTextInDesign(history: DesignHistory, text: string, worki
   return new Evaluation(history, working).evaluateText(text);
 }
 
-/** Evaluates every expression in the history, and in the working sketch if one is given. */
+/**
+ * Evaluates every expression in the history, and in the working sketch if one is given. The parameters, the steps and the finished
+ * sketches are evaluated against the timeline alone; only the working sketch's own dimensions see the working sketch, so a
+ * dimension changed in an open sketch does not reach anything finished until the sketch is.
+ */
 export function evaluateDesignExpressions(history: DesignHistory, working?: WorkbenchSketch): ExpressionReport {
-  const evaluation = new Evaluation(history, working);
+  const evaluation = new Evaluation(history, working, "timeline");
+  const workingEvaluation = working === undefined ? evaluation : new Evaluation(history, working, "working");
   const bindings: BindingResult[] = [];
   for (const parameter of history.parameters ?? []) {
     const node = evaluation.parameterNode(parameter.name);
@@ -335,12 +345,15 @@ export function evaluateDesignExpressions(history: DesignHistory, working?: Work
         : { source: "feature", ownerId: feature.id, fieldId, label, expression, ok: false, message: node.message, ...(node.position === undefined ? {} : { position: node.position }) });
     }
   }
-  for (const owner of sketchesOf(history, working)) {
+  const owners = sketchesOf(history, working);
+  for (const [index, owner] of owners.entries()) {
+    // The working sketch is the last owner; every one before it is a finished sketch of the timeline.
+    const view = working !== undefined && index === owners.length - 1 ? workingEvaluation : evaluation;
     for (const constraint of owner.sketch.constraints) {
       if (constraint.expression === undefined) continue;
       const dimension = sketchDimensionOf(constraint);
       const label = `${owner.name} · ${DIMENSION_WORD[dimension]} of ${constraint.entityIds[0] === undefined ? "?" : sketchEntityName(owner.sketch, constraint.entityIds[0])}`;
-      const node = evaluation.sketchNode(constraint);
+      const node = view.sketchNode(constraint);
       bindings.push(node.ok
         ? { source: "sketch", ownerId: owner.ownerId, fieldId: constraint.id, label, expression: constraint.expression, ok: true, value: node.quantity.value, dimension: constraint.kind === "angle" ? "angle" : "length" }
         : { source: "sketch", ownerId: owner.ownerId, fieldId: constraint.id, label, expression: constraint.expression, ok: false, message: node.message, ...(node.position === undefined ? {} : { position: node.position }) });
