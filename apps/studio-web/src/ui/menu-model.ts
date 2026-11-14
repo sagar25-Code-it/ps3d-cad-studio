@@ -67,6 +67,8 @@ export interface WorkbenchMenuActions {
   readonly onChangeParameters: () => void;
   readonly onToggleSuppressSelected: () => void;
   readonly onDeleteSelected: () => void;
+  /** Compute All (Ctrl+B): rebuild every step of the timeline. Left out by a host with no timeline. */
+  readonly onComputeAll?: () => void;
   readonly onMoveSelectedBody: () => void;
   readonly onResizeSelectedBody: () => void;
   readonly onModifyGeneralBody: (modifier: "hole" | "fillet" | "chamfer" | "shell", scope?: "picked" | "all") => void;
@@ -133,6 +135,7 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
       hint: feature === undefined ? "Select a timeline feature or a solid first" : "Skips the step without deleting it", action: actions.onToggleSuppressSelected },
     { id: "modify.delete", label: "Delete selection", icon: "trash", shortcut: "Del", disabled: !state.selectionDeletable,
       hint: state.selectionDeletable ? "Features built on it go with it" : "Select a feature or a body first", action: actions.onDeleteSelected },
+    ...(actions.onComputeAll === undefined ? [] : [{ id: "modify.compute-all", label: "Compute all", icon: "update-model", shortcut: "Ctrl+B", hint: "Rebuilds every step of the timeline in order, as one undo step", action: actions.onComputeAll }]),
     { id: "modify.move", label: "Move body…", icon: "move", divider: true, disabled: !state.previewBodySelected,
       hint: state.previewBodySelected ? "Translate and rotate in the inspector" : "Select a preview body (Block, Cylinder, …) first", action: actions.onMoveSelectedBody },
     { id: "modify.resize", label: "Resize body…", icon: "scale", disabled: !state.previewBodySelected,

@@ -286,6 +286,7 @@ const SHORTCUT_GROUPS: readonly { readonly title: string; readonly items: readon
       { keys: ["Ctrl", "N"], label: "New project" },
       { keys: ["Ctrl", "Z"], label: "Undo" },
       { keys: ["Ctrl", "Shift", "Z"], label: "Redo" },
+      { keys: ["Ctrl", "B"], label: "Compute All: rebuild every step of the timeline" },
       { keys: ["Ctrl", "P"], label: "Print" }
     ]
   },
@@ -472,6 +473,8 @@ export function App(): React.JSX.Element {
   const partCreateRef = useRef<(kind: "extrude" | "revolve", preferredSketchFeatureId?: string) => void>(() => undefined);
   /** Runs a Part keyboard command (part-hotkeys.ts); assigned after the handlers are defined. */
   const partHotkeyRef = useRef<(command: PartHotkeyCommand) => void>(() => undefined);
+  /** Compute All (Ctrl+B, Modify menu, command search); assigned after the replay handlers are defined. */
+  const computeAllRef = useRef<() => Promise<void>>(async () => undefined);
   const viewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
   /** Set while a command waits for the user to click something in the viewport; called with the click, or null when cancelled. */
   const pickRef = useRef<((point: ViewportMeasurePoint | null) => void) | null>(null);
@@ -2643,6 +2646,7 @@ export function App(): React.JSX.Element {
       openDesignHealth();
       return;
     }
+    if (action.kind === "compute-all") { void computeAllRef.current(); return; }
     if (action.kind === "file-new") { setNewDialogOpen(true); return; }
     if (action.kind === "file-open") { void openProjectFromSystem(); return; }
     if (action.kind === "file-save") { void saveAll(); return; }
@@ -3223,6 +3227,40 @@ export function App(): React.JSX.Element {
     // Shell runs through the shared command panel (PT-06); the other face-driven edits keep their pick-and-ask flow for now.
     if (mode === "shell") { openPanelFor("shell"); return; }
     void bodyEditHandlers.run(mode);
+  };
+
+  /**
+   * Compute All (Ctrl+B): rebuilds every body from its steps in timeline order and records the result as one undo step. It is the way to
+   * be sure nothing is stale (a body sketched on another body's face, a step that was not rebuilt after an edit) and it reports which
+   * steps cannot compute, with their reasons, without removing them.
+   */
+  computeAllRef.current = async (): Promise<void> => {
+    const before = projectRef.current;
+    const history = designOf(before);
+    if (history.features.length === 0) { setStatus("ready"); setStatusText("Compute All: the timeline is empty, so there is nothing to rebuild."); return; }
+    if (status === "working") return;
+    setStatus("working");
+    setStatusText("Computing all steps of the timeline…");
+    const results = await replayAllBodies(before);
+    if (projectRef.current !== before) { setStatus("ready"); setStatusText("The design changed while it was rebuilding, so Compute All was not applied. Run it again."); return; }
+    let next = before;
+    if (results.length > 0) {
+      const applied = applyWorkbenchOperation(next, { kind: "regenerate-design", results, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: next.revision } as WorkbenchOperation);
+      if (applied.ok) next = applied.value.project;
+      const loose = await refreshLooseSketchProjections(next);
+      if (projectRef.current !== before) { setStatus("ready"); setStatusText("The design changed while it was rebuilding, so Compute All was not applied. Run it again."); return; }
+      if (loose.length > 0) {
+        const refreshed = applyWorkbenchOperation(next, { kind: "regenerate-design", results: [], sketchCurves: loose, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: next.revision } as WorkbenchOperation);
+        if (refreshed.ok) next = refreshed.value.project;
+      }
+    }
+    if (next !== before) pushProject(next);
+    const failed = results.filter(isRebuildFailure);
+    setDiagnostic(undefined);
+    setStatus(failed.length > 0 ? "error" : "ready");
+    setStatusText(failed.length > 0
+      ? `Compute All rebuilt ${results.length - failed.length} of ${results.length} bod${results.length === 1 ? "y" : "ies"}; ${failed.length} could not be computed: ${failed[0]!.message}`
+      : `Compute All rebuilt ${results.length} bod${results.length === 1 ? "y" : "ies"} from ${history.features.length} timeline step${history.features.length === 1 ? "" : "s"}. Ctrl+Z undoes it.`);
   };
 
   /** A timeline change that only shows or hides solids is cheap; once a body has joins or cuts it is replayed with the change. */
@@ -4280,6 +4318,7 @@ export function App(): React.JSX.Element {
       if (key === "n") { event.preventDefault(); setNewDialogOpen(true); }
       if (key === "p") { event.preventDefault(); window.print(); }
       if (key === "h" && event.shiftKey) { event.preventDefault(); openDesignHealth(); }
+      if (key === "b" && !event.shiftKey && !event.altKey) { event.preventDefault(); void computeAllRef.current(); }
       if (key === "z" && event.shiftKey) { event.preventDefault(); historyActionRef.current.redo(); }
       else if (key === "z") { event.preventDefault(); historyActionRef.current.undo(); }
       if (key === "y") { event.preventDefault(); historyActionRef.current.redo(); }
@@ -4482,6 +4521,7 @@ export function App(): React.JSX.Element {
     onChangeParameters: () => setParametersOpen(true),
     onToggleSuppressSelected: () => { if (selectedTimelineFeature !== undefined) timelineOperation({ kind: "set-design-feature-suppressed", featureId: selectedTimelineFeature.id, suppressed: !selectedTimelineFeature.suppressed }); },
     onDeleteSelected: deleteSelection,
+    onComputeAll: () => { void computeAllRef.current(); },
     onMoveSelectedBody: () => runSelectedPartPreviewAction("edit-transform", "Move Body"),
     onResizeSelectedBody: () => runSelectedPartPreviewAction("edit-size", "Scale Body"),
     onModifyGeneralBody: handleModifyGeneralBody,

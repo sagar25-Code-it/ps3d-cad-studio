@@ -51,6 +51,7 @@ export type CadCommandAction =
   | { readonly kind: "set-selection-filter"; readonly filter: "auto" | "body" | "component" }
   | { readonly kind: "open-exchange-center" }
   | { readonly kind: "open-design-health" }
+  | { readonly kind: "compute-all" }
   | { readonly kind: "apply-electrical-template"; readonly template: ElectricalTemplateId }
   | { readonly kind: "insert-electrical-component"; readonly componentKind: ElectricalComponentKind }
   | { readonly kind: "generate-electromechanical-realization" }
@@ -104,7 +105,7 @@ export const CAD_EXECUTABLE_ACTION_KINDS = [
   "create-part-preview-body", "selected-part-preview-body-action", "part-feature-action", "set-part-preview-bodies-visibility", "insert-component",
   "apply-assembly-template", "selected-component-action", "set-surface-mode", "fit-view", "set-view-orientation",
   "set-view-projection", "set-shading-mode", "set-background-tone", "set-navigation-mode", "set-selection-filter",
-  "open-exchange-center", "open-design-health", "apply-electrical-template", "insert-electrical-component",
+  "open-exchange-center", "open-design-health", "compute-all", "apply-electrical-template", "insert-electrical-component",
   "generate-electromechanical-realization", "apply-vehicle-template", "set-vehicle-state", "toggle-vehicle-layer"
 ] as const;
 
@@ -147,6 +148,7 @@ export const CAD_COMMANDS: readonly CadCommandRecord[] = [
   command("command:sketch-relax-relations", "sketch", "construct", "Relax Relations", "Suppress the geometric relations on the selected geometry, or restore them. Relaxed relations stay recorded but are ignored by the solver.", "preview", { kind: "sketch-command", command: "relax-relations" }, ["constraint", "suppress", "solve"]),
   command("command:sketch-check", "sketch", "inspect", "Sketch Checking", "List open ends, tiny or duplicate curves, conflicting or unsolved relations and the degree-of-freedom state.", "preview", { kind: "sketch-command", command: "sketch-check" }, ["validate", "profile", "diagnostic"]),
   unavailable("command:sketch-reattach", "sketch", "construct", "Reattach Sketch", "Requires persistent plane or face references, orientation mapping, origin control, and broken-reference repair.", ["plane", "face", "support"]),
+  command("command:part-compute-all", "part", "modify", "Compute All", "Rebuild every step of the timeline from its sketches and parameters in order, as one undo step. Use it after a change that did not rebuild what follows, or to check that the whole history still computes.", "preview", { kind: "compute-all" }, ["rebuild", "regenerate", "recompute", "history", "timeline", "update"], "Ctrl+B"),
   command("command:part-update-model", "part", "inspect", "Update Model", "Revalidate and regenerate every supported analytic Part body in one auditable revision.", "preview", { kind: "part-feature-action", operation: "update-model" }, ["regenerate", "rebuild", "history"]),
   command("command:sketch-finish", "sketch", "construct", "Finish Sketch", "Close the active sketch session and return to the Part workspace while preserving the revisioned sketch geometry.", "preview", { kind: "finish-sketch" }, ["finish", "exit sketch", "update model"]),
   command("command:sketch-options", "sketch", "inspect", "Sketch Options", "Open the existing sketch palette for grid, snap, profile shading, dimensions, constraints, and construction visibility.", "preview", { kind: "open-workspace" }, ["options", "palette", "show movable", "sketch checking"]),

@@ -597,9 +597,15 @@ export async function rebuildDependentsOfAll(project: WorkbenchProject, featureI
   return replayBodies(project, order);
 }
 
-/** Whether any step of the design joins or cuts, which is when a change to the timeline has to be replayed rather than just shown or hidden. */
+/**
+ * Whether a change to the timeline has to be replayed rather than just shown or hidden: some step joins or cuts, repeats a body, reaches
+ * for a face, or a sketch sits on the face of a solid or projects curves from one. That last case is what makes the new body of a sketch
+ * drawn on another body's face follow an edit of that body (HS-17): without it only the edited body was rebuilt.
+ */
 export function hasModifiers(project: WorkbenchProject): boolean {
-  return designOf(project).features.some((feature: DesignFeature) => modifiesBody(feature) || feature.kind === "pattern" || (feature.kind !== "sketch" && isToExtent(feature.extent)));
+  return designOf(project).features.some((feature: DesignFeature) => modifiesBody(feature) || feature.kind === "pattern"
+    || (feature.kind !== "sketch" && isToExtent(feature.extent))
+    || (feature.kind === "sketch" && (feature.sketch.planeFace !== undefined || projectionBodyIds(feature.sketch).length > 0)));
 }
 
 /**

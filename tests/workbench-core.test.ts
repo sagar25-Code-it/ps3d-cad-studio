@@ -397,7 +397,7 @@ export const workbenchCoreTests: readonly TestCase[] = [
       });
       equal(REFERENCE_IMAGE_COMMAND_TERMS.length, 230, "the screenshot transcription should retain all 230 unique reference terms");
       equal(missing.join(", "), "", "every supplied reference-image command term should remain discoverable without implying execution");
-      equal(CAD_COMMANDS.length, 345,"the audited catalog count should remain synchronized with release copy and evidence");
+      equal(CAD_COMMANDS.length, 346,"the audited catalog count should remain synchronized with release copy and evidence");
     }
   }
 ];
