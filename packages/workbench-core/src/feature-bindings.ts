@@ -1,5 +1,5 @@
 import { MAX_EXPRESSION_LENGTH, parseExpression } from "./expressions.js";
-import type { DesignSolidFeature } from "./types.js";
+import type { DesignSolidFeature, HolePlacement } from "./types.js";
 
 /**
  * The numbers of a timeline step that an expression can drive. Each one has an id (the key in `feature.expressions` and the part
@@ -48,6 +48,21 @@ function size(id: string, label: string, dimension: BindableDimension, limits: L
     id, label, dimension, ...limits,
     read: (feature) => Math.abs(feature.valueMm),
     write: (feature, value) => ({ ...feature, valueMm: value })
+  };
+}
+
+/** One of the two distances a hole is placed by (HS-15); it only exists for a hole that was placed from faces. */
+function placementDistance(id: string, label: string, index: 0 | 1): BindableField {
+  return {
+    id, label, dimension: "length", ...positive, max: 100_000,
+    applies: (feature) => feature.holePlacement !== undefined,
+    read: (feature) => feature.holePlacement?.from[index].distanceMm,
+    write: (feature, value) => {
+      const placement = feature.holePlacement;
+      if (placement === undefined) return feature;
+      const from: HolePlacement["from"] = index === 0 ? [{ ...placement.from[0], distanceMm: value }, placement.from[1]] : [placement.from[0], { ...placement.from[1], distanceMm: value }];
+      return { ...feature, holePlacement: { ...placement, from } };
+    }
   };
 }
 
@@ -195,6 +210,8 @@ const FIELDS: Partial<Record<DesignSolidFeature["kind"], readonly BindableField[
   ],
   hole: [
     property("diameter", "Hole diameter", "length", "holeDiameterMm", { ...positive, max: 10_000 }),
+    placementDistance("offsetA", "Distance from the first face", 0),
+    placementDistance("offsetB", "Distance from the second face", 1),
     { id: "depth", label: "Depth", dimension: "length", min: 0, max: 100_000, read: (feature) => feature.holeDepthMm ?? 0, write: (feature, value) => ({ ...feature, holeDepthMm: value }) },
     property("counterDiameter", "Pocket diameter", "length", "holeCounterDiameterMm", { ...positive, max: 10_000, applies: (feature) => feature.holeStyle === "counterbore" }),
     property("counterDepth", "Pocket depth", "length", "holeCounterDepthMm", { ...positive, max: 100_000, applies: (feature) => feature.holeStyle === "counterbore" }),

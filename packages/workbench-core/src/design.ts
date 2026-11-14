@@ -566,8 +566,23 @@ function validDirectionAndThin(value: Record<string, unknown>): boolean {
 /** Region references one feature may store: a grid of a few hundred cells is one selection. */
 export const MAX_PROFILE_REFS = 2048;
 
+const faceName = (value: unknown): boolean => typeof value === "string" && value.length >= 1 && value.length <= 400;
+
+/** A hole placement names three different faces: the one it starts on and two neighbours, each neighbour with a positive distance. */
+function validHolePlacement(value: unknown): boolean {
+  if (!isRecord(value) || !hasOnly(value, ["face", "from"], []) || !isRecord(value.face) || !hasOnly(value.face, ["faceKey", "faceRole"], []) || !faceName(value.face.faceKey) || !faceName(value.face.faceRole)) return false;
+  if (!Array.isArray(value.from) || value.from.length !== 2) return false;
+  const keys = [value.face.faceKey];
+  for (const entry of value.from) {
+    if (!isRecord(entry) || !hasOnly(entry, ["faceKey", "faceRole", "distanceMm"], []) || !faceName(entry.faceKey) || !faceName(entry.faceRole)) return false;
+    if (typeof entry.distanceMm !== "number" || !Number.isFinite(entry.distanceMm) || !(entry.distanceMm > 0) || entry.distanceMm > 100_000) return false;
+    keys.push(entry.faceKey);
+  }
+  return new Set(keys).size === 3;
+}
+
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "combineToolBodyIds", "combineMode", "combineKeepTools", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "flangeReliefShape", ...FEATURE_REF_KEYS, ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "combineToolBodyIds", "combineMode", "combineKeepTools", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "holePlacement", "flangeReliefShape", ...FEATURE_REF_KEYS, ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "intersect", "direct-edit"].includes(String(value.operation))) return false;
   if (!validExtent(value) || !validFeatureRefs(value)) return false;
   if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "combine", "sheet-base", "sheet-flange", "sheet-hem", "sheet-edge-flange", "hole", "pattern", "edge-blend", ...BODY_EDIT_ONLY_KINDS, ...SHEET_FEATURE_KINDS].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
@@ -728,7 +743,7 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
     // How a corner relief is cut: a straight gap between the flanges, or a square or round notch taken out of the plate's corner.
     if (value.kind !== "sheet-edge-flange" || !["straight", "square", "round"].includes(String(value.flangeReliefShape))) return false;
   }
-  const holeKeys = ["holeThread", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg"];
+  const holeKeys = ["holeThread", "holePlacement", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg"];
   if (value.kind !== "hole" && holeKeys.some((key) => Object.hasOwn(value, key))) return false;
   if (value.kind === "hole") {
     const triple = (candidate: unknown, nonZero: boolean): boolean => Array.isArray(candidate) && candidate.length === 3 && candidate.every((entry) => typeof entry === "number" && Number.isFinite(entry) && Math.abs(entry) <= 1_000_000) && (!nonZero || candidate.some((entry) => entry !== 0));
@@ -744,6 +759,7 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
     if (!counterbore && (Object.hasOwn(value, "holeCounterDiameterMm") || Object.hasOwn(value, "holeCounterDepthMm"))) return false;
     if (!countersink && (Object.hasOwn(value, "holeSinkDiameterMm") || Object.hasOwn(value, "holeSinkAngleDeg"))) return false;
     if (counterbore && (!positive(value.holeCounterDiameterMm, 10_000) || !positive(value.holeCounterDepthMm, 100_000) || (value.holeCounterDiameterMm as number) <= (value.holeDiameterMm as number))) return false;
+    if (Object.hasOwn(value, "holePlacement") && !validHolePlacement(value.holePlacement)) return false;
     if (Object.hasOwn(value, "holeThread")) {
       // A thread belongs on a plain hole: its diameter is the tap-drill (minor) diameter and the thread reaches the major diameter.
       const thread = value.holeThread;

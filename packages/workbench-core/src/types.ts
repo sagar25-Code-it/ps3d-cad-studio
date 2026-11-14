@@ -1270,6 +1270,22 @@ export interface SweepPathRef {
   readonly entityIds: readonly string[];
 }
 
+/** A face of a body by the name the body's B-rep gives it (its key, and the role it was made with as a fallback). */
+export interface HoleFaceRef {
+  readonly faceKey: string;
+  readonly faceRole: string;
+}
+
+/**
+ * Where a hole sits on a body, as a person would measure it: the face it starts on and its distances from two neighbouring faces. The
+ * point is worked out again from those faces at every rebuild, so the hole moves with them. `distanceMm` is how far inside the neighbour
+ * face the hole's axis lies.
+ */
+export interface HolePlacement {
+  readonly face: HoleFaceRef;
+  readonly from: readonly [HoleFaceRef & { readonly distanceMm: number }, HoleFaceRef & { readonly distanceMm: number }];
+}
+
 export interface DesignSolidFeature extends DesignFeatureBase {
   readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "combine" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "pattern" | "edge-blend" | "offset-region" | "replace-face" | "web" | "wrap" | "flex" | "sheet-jog" | "sheet-lofted-bend";
   /**
@@ -1495,6 +1511,12 @@ export interface DesignSolidFeature extends DesignFeatureBase {
    * `majorDiameterMm`. `cosmetic` only annotates the hole; `modelled` cuts the helical groove into the wall. `lengthMm` 0 or absent
    * threads the hole's full depth.
    */
+  /**
+   * Hole only: the face it starts on and its distances from two neighbouring faces (HS-15). When present the hole's position is worked out
+   * from them at every rebuild and `holePositionMm` only keeps the last place as a fallback for when those faces are gone. Absent for a hole
+   * placed by a bare point, which stays where it was put.
+   */
+  readonly holePlacement?: HolePlacement;
   readonly holeThread?: { readonly mode: "cosmetic" | "modelled"; readonly pitchMm: number; readonly majorDiameterMm: number; readonly lengthMm?: number; readonly handedness: "right" | "left" };
   /** Sheet-edge-flange only: how the corner relief is cut where this flange meets a neighbour: a straight gap (default), or a square or round notch in the plate's corner of the relief's size. */
   readonly flangeReliefShape?: "straight" | "square" | "round";

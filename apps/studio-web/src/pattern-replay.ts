@@ -122,7 +122,10 @@ async function repeatFeatures(step: DesignSolidFeature, current: GeneralSolidBod
       let tool: { readonly positionsMm: readonly number[]; readonly indices: readonly number[] } | undefined;
       if (source.kind === "hole") {
         if (source.holePositionMm === undefined || source.holeNormal === undefined) { problems.push(`${where}: the hole has no position recorded.`); continue; }
-        const moved: DesignSolidFeature = { ...source, holePositionMm: transformPoint(transform, source.holePositionMm), holeNormal: transformDirection(transform, source.holeNormal) };
+        // A copy is laid out by the pattern, so it does not keep the faces its source was placed from (they would put it back on the source).
+        const { holePlacement: _sourcePlacement, ...sourceWithoutPlacement } = source;
+        void _sourcePlacement;
+        const moved: DesignSolidFeature = { ...sourceWithoutPlacement, holePositionMm: transformPoint(transform, source.holePositionMm), holeNormal: transformDirection(transform, source.holeNormal) };
         const cutter = context.holeTool(moved, result);
         if (!cutter.ok) { problems.push(`${where}: ${cutter.message}`); continue; }
         tool = cutter;

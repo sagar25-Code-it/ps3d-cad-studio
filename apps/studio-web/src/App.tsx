@@ -226,6 +226,7 @@ import {
 import { SurfaceInspector } from "./workspaces/SurfaceInspector.js";
 import { withCosmeticThreads } from "./hole-threads.js";
 import { withSketchCurves } from "./sketch-curves.js";
+import { holePlacementFor } from "./hole-placement.js";
 import { namedViewById, type NamedViewId } from "./ui/named-views.js";
 import { withStaleBodies } from "./stale-bodies.js";
 import { runSurfaceAction, withFormCages, withSurfaceBodies, type SurfaceAction } from "./surface-actions.js";
@@ -2126,6 +2127,11 @@ export function App(): React.JSX.Element {
     if (!applied.ok) { setCommandPanel(panelWithError(state, applied.message)); return; }
     let feature = applied.feature;
     if (feature.kind === "edge-blend" && state.mode === "create") feature = { ...feature, name: edgeBlendTitle(feature) };
+    // HS-15: a hole is placed by the faces beside it when the solid has named flat faces there, so it moves with them; otherwise it stays at its point.
+    if (feature.kind === "hole" && feature.holePlacement === undefined && feature.holePositionMm !== undefined && feature.holeNormal !== undefined) {
+      const placement = holePlacementFor(body, feature.holePositionMm as Vec3, feature.holeNormal as Vec3);
+      if (placement !== undefined) feature = { ...feature, holePlacement: placement };
+    }
     setCommandPanel(null);
     if (state.mode === "edit") { await updateTimelineSolid(feature); return; }
     const added = await commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id);

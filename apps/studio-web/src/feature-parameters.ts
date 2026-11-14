@@ -174,7 +174,13 @@ export function parameterFieldsOf(feature: DesignSolidFeature): readonly Paramet
       ...(feature.loftTopScale !== undefined ? [number("scale", "Top scale", "×", (f) => f.loftTopScale, (f, v) => ({ ...f, loftTopScale: v }), { ...positive, max: 100 })] : [])
     ];
     case "hole": return [
-      vector("position", "Position on the face", (f) => f.holePositionMm, (f, v) => ({ ...f, holePositionMm: v })),
+      // HS-15: a hole placed from faces is edited by its two distances; a hole placed by a bare point by its coordinates.
+      ...(feature.holePlacement === undefined
+        ? [vector("position", "Position on the face", (f) => f.holePositionMm, (f, v) => ({ ...f, holePositionMm: v }))]
+        : [
+          number("offsetA", "Distance from the first face", "mm", (f) => f.holePlacement?.from[0].distanceMm, (f, v) => findBindableField(f, "offsetA")?.write(f, v) ?? f, { ...positive, max: 100_000, hint: "measured from a face beside the hole; the hole follows that face" }),
+          number("offsetB", "Distance from the second face", "mm", (f) => f.holePlacement?.from[1].distanceMm, (f, v) => findBindableField(f, "offsetB")?.write(f, v) ?? f, { ...positive, max: 100_000, hint: "measured from the other face beside the hole" })
+        ]),
       number("diameter", "Hole diameter", "mm", (f) => f.holeDiameterMm, (f, v) => ({ ...f, holeDiameterMm: v }), { ...positive, max: 10_000 }),
       number("depth", "Depth", "mm", (f) => f.holeDepthMm ?? 0, (f, v) => ({ ...f, holeDepthMm: v }), { min: 0, max: 100_000, hint: "0 drills through everything" }),
       ...(feature.holeStyle === "counterbore" ? [

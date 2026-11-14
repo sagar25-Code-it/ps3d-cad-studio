@@ -6,6 +6,7 @@ import { attachEdgeFlange, attachMiterFlange, booleanMeshes, cutReliefNotch, dev
 import { flangeEdgesOf } from "../../../packages/workbench-core/src/index.js";
 import { bendResolverOfStep, loftedBendBody, loftedBendFlat, plateFlangesOf, plateJogsOf } from "./sheet-metal-features.js";
 import { combineGeneralBodies, createGeneralSolidBody, type BuildPlane, type SketchPlane } from "./general-modeling.js";
+import { resolvedHolePosition } from "./hole-placement.js";
 import { applyPatternStep } from "./pattern-replay.js";
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { createThinRevolveBody, startRevolveAt } from "./revolve-thin.js";
@@ -392,6 +393,7 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
         const cutter = holeCutter(holeSpec);
         if (!cutter.ok) { outcomes.set(step.id, { featureId: step.id, message: cutter.message }); continue; }
         const wallRole = `${step.id}.wall`;
+        const placement = resolvedHolePosition(step, current);
         const tool: GeneralSolidBody = {
           id: `${step.id}:tool`, name: "Hole", visible: false, color: current.color, positionsMm: [...cutter.positionsMm], indices: [...cutter.indices],
           brep: { topology: { vertices: cutter.positionsMm.length / 3, edges: 0, faces: 1 }, faces: [{ role: wallRole, key: wallRole, areaMm2: 0 }], faceTriangles: new Array<number>(cutter.indices.length / 3).fill(0), origin: "mesh-boolean" }
@@ -401,7 +403,8 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
         const parent = current;
         current = { ...combined.body, color: parent.color };
         for (const part of combined.pieces ?? []) keepPiece(renumberedPiece(part, bodyId, parent.name, pieces.length + 2));
-        outcomes.set(step.id, { featureId: step.id });
+        // A hole placed from faces that could not follow them says so (a note: the hole is still cut, at its last place).
+        outcomes.set(step.id, { featureId: step.id, ...(placement?.note === undefined ? {} : { message: clipMessage(`${REBUILD_NOTE_PREFIX}${placement.note}`) }) });
         continue;
       }
       const drilled = drillHole(step, current);
@@ -828,10 +831,12 @@ export type HoleDrilling =
   | { readonly ok: false; readonly message: string };
 
 /** The HoleSpec a hole step describes for a body: the through-all depth is measured against the body as it is now. */
-export function holeSpecOf(step: DesignSolidFeature, body: { readonly positionsMm: readonly number[] }): HoleSpec | undefined {
+export function holeSpecOf(step: DesignSolidFeature, body: { readonly positionsMm: readonly number[]; readonly indices?: readonly number[]; readonly brep?: GeneralSolidBody["brep"] }): HoleSpec | undefined {
   if (step.holePositionMm === undefined || step.holeNormal === undefined || step.holeDiameterMm === undefined || step.holeStyle === undefined) return undefined;
-  const normal = snapToAxis(step.holeNormal);
-  const origin = step.holePositionMm;
+  // HS-15: a hole placed from faces is worked out from those faces on the body as it is now; otherwise it stays at its stored point.
+  const placed = resolvedHolePosition(step, body);
+  const normal = snapToAxis(placed?.normal ?? step.holeNormal);
+  const origin = placed?.pointMm ?? step.holePositionMm;
   let depth = step.holeDepthMm ?? 0;
   if (!(depth > 0)) {
     // Through all: far enough to leave the far side of the body along the hole's axis, plus a margin.
@@ -864,7 +869,7 @@ export function holeTool(step: DesignSolidFeature, body: { readonly positionsMm:
  * Cuts a hole step out of a body. The hole starts at `holePositionMm` on the face looking along `holeNormal` and goes the
  * other way; a depth of 0 (or none) drills through everything the axis meets.
  */
-export function drillHole(step: DesignSolidFeature, body: { readonly positionsMm: readonly number[]; readonly indices: readonly number[] }): HoleDrilling {
+export function drillHole(step: DesignSolidFeature, body: { readonly positionsMm: readonly number[]; readonly indices: readonly number[]; readonly brep?: GeneralSolidBody["brep"] }): HoleDrilling {
   const spec = holeSpecOf(step, body);
   if (spec === undefined) return { ok: false, message: "This hole has no position, direction or diameter recorded." };
   const cutter = holeCutter(spec);

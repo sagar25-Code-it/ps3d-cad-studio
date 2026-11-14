@@ -130,6 +130,11 @@ export function panelFields(state: CommandPanelState): readonly PanelFieldSpec[]
           ...Object.keys(METRIC_FASTENERS).map((size) => ({ value: size, label: size }))
         ] },
         { id: "diameter", label: "Diameter", unit: "mm", kind: "text" },
+        // A hole placed from faces is moved by its two distances (HS-15).
+        ...(state.values["offsetA"] === undefined ? [] : [
+          { id: "offsetA", label: "Distance from the first face", unit: "mm", kind: "text" as const, hint: "the hole follows the face it is measured from" },
+          { id: "offsetB", label: "Distance from the second face", unit: "mm", kind: "text" as const }
+        ]),
         { id: "depth", label: "Depth", unit: "mm", kind: "text", hint: "0 drills through everything" },
         ...(style === "counterbore" ? [
           { id: "counterDiameter", label: "Pocket diameter", unit: "mm", kind: "text" as const },
@@ -341,10 +346,14 @@ export function panelDraft(state: CommandPanelState, context: { readonly sketchF
   const start: DesignSolidFeature = existing ?? { ...base, name: "Hole Ø 6.00", kind: "hole", valueMm: 6, holeDiameterMm: 6, holeDepthMm: 0 };
   // A style change drops the other styles' numbers so the stored step only carries what its type uses.
   const { holeCounterDiameterMm: _cbd, holeCounterDepthMm: _cbz, holeSinkDiameterMm: _skd, holeSinkAngleDeg: _ska, ...stripped } = start;
+  // HS-15: a hole kept at the point it was placed keeps the faces it was placed from; a new pick drops them (the caller works out the new ones).
+  const sameSpot = existing?.holePositionMm !== undefined && existing.holePositionMm.every((value, axis) => Math.abs(value - point.pointMm[axis]!) < 1e-6);
+  const { holePlacement: _oldPlacement, ...unplaced } = stripped;
+  void _oldPlacement;
   return {
     ok: true,
     feature: {
-      ...stripped, holeStyle: style, holePositionMm: point.pointMm, holeNormal: point.normal,
+      ...(sameSpot ? stripped : unplaced), holeStyle: style, holePositionMm: point.pointMm, holeNormal: point.normal,
       ...(style === "counterbore" ? { holeCounterDiameterMm: _cbd ?? 11, holeCounterDepthMm: _cbz ?? 4 } : {}),
       ...(style === "countersink" ? { holeSinkDiameterMm: _skd ?? 12, holeSinkAngleDeg: _ska ?? 90 } : {})
     }
