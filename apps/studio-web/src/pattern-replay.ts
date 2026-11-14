@@ -6,6 +6,7 @@ import {
 } from "../../../packages/workbench-geometry/src/index.js";
 import { stableFaceKey } from "../../../packages/occt-kernel-adapter/src/reference-runtime.js";
 import { combineGeneralBodies } from "./general-modeling.js";
+import { resolvedHolePosition } from "./hole-placement.js";
 import type { HoleDrilling, SolidRebuild } from "./design-regeneration.js";
 
 /** What a pattern step needs from the timeline replay. They are passed in so this module does not depend on the replay (which calls it). */
@@ -110,6 +111,8 @@ async function repeatFeatures(step: DesignSolidFeature, current: GeneralSolidBod
   let result = current;
   let placed = 0;
   const problems: string[] = [];
+  /** Things the user should know that do not skip a position (a source hole that could not follow its faces). */
+  const layoutNotes: string[] = [];
   for (const featureId of step.pattern?.featureIds ?? []) {
     const source = context.stepOf(featureId);
     if (source === undefined) continue;
@@ -117,15 +120,19 @@ async function repeatFeatures(step: DesignSolidFeature, current: GeneralSolidBod
     if (mode === undefined || source.kind === "pattern") { problems.push(`${source.name}: only holes, cuts and joins can be repeated.`); continue; }
     const tools: PlacedTool[] = [];
     const bodyBounds = meshBounds(result.positionsMm);
+    // A hole placed from faces sits where those faces put it on the body as it is now (the same rule the source's own rebuild uses), so
+    // the copies are laid out from there and follow the source when the plate changes, not from the point it was first picked at.
+    const sourceAt = source.kind === "hole" ? resolvedHolePosition(source, result) : undefined;
+    if (sourceAt?.note !== undefined) layoutNotes.push(`${source.name}: ${sourceAt.note}`);
     for (const [index, transform] of transforms.entries()) {
       const where = `${source.name}, copy ${index + 1}`;
       let tool: { readonly positionsMm: readonly number[]; readonly indices: readonly number[] } | undefined;
       if (source.kind === "hole") {
-        if (source.holePositionMm === undefined || source.holeNormal === undefined) { problems.push(`${where}: the hole has no position recorded.`); continue; }
+        if (sourceAt === undefined) { problems.push(`${where}: the hole has no position recorded.`); continue; }
         // A copy is laid out by the pattern, so it does not keep the faces its source was placed from (they would put it back on the source).
         const { holePlacement: _sourcePlacement, ...sourceWithoutPlacement } = source;
         void _sourcePlacement;
-        const moved: DesignSolidFeature = { ...sourceWithoutPlacement, holePositionMm: transformPoint(transform, source.holePositionMm), holeNormal: transformDirection(transform, source.holeNormal) };
+        const moved: DesignSolidFeature = { ...sourceWithoutPlacement, holePositionMm: transformPoint(transform, sourceAt.pointMm), holeNormal: transformDirection(transform, sourceAt.normal) };
         const cutter = context.holeTool(moved, result);
         if (!cutter.ok) { problems.push(`${where}: ${cutter.message}`); continue; }
         tool = cutter;
@@ -164,5 +171,6 @@ async function repeatFeatures(step: DesignSolidFeature, current: GeneralSolidBod
     }
   }
   if (placed === 0) return { ok: false, message: problems[0] ?? "None of the repeated steps is live, so the pattern changes nothing." };
-  return problems.length === 0 ? { ok: true, body: result } : { ok: true, body: result, note: `${problems.length} of ${placed + problems.length} positions were skipped: ${problems[0]}` };
+  const notes = [...(problems.length === 0 ? [] : [`${problems.length} of ${placed + problems.length} positions were skipped: ${problems[0]}`]), ...layoutNotes];
+  return notes.length === 0 ? { ok: true, body: result } : { ok: true, body: result, note: notes.join(" ") };
 }

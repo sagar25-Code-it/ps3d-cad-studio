@@ -93,8 +93,21 @@ export type PlacementResolution =
   | { readonly ok: true; readonly pointMm: Vec3; readonly normal: Vec3 }
   | { readonly ok: false; readonly message: string };
 
-const findFace = (planes: readonly FacePlane[], ref: { readonly faceKey: string; readonly faceRole: string }): FacePlane | undefined =>
-  planes.find((plane) => plane.key === ref.faceKey) ?? planes.find((plane) => plane.role === ref.faceRole);
+/**
+ * A face's role without the `target.` the mesh Boolean puts in front of the roles of the body it works on. A face of the plate keeps its
+ * name through every cut and hole, but its role (and so its key) gains one prefix each time, so a placement made before a Boolean (or
+ * read after one, as a pattern does) is matched by the role underneath.
+ */
+export function canonicalFaceRole(role: string): string {
+  let rest = role;
+  while (rest.startsWith("target.")) rest = rest.slice("target.".length);
+  return rest;
+}
+
+const findFace = (planes: readonly FacePlane[], ref: { readonly faceKey: string; readonly faceRole: string }): FacePlane | undefined => {
+  const wanted = canonicalFaceRole(ref.faceRole);
+  return planes.find((plane) => plane.key === ref.faceKey) ?? planes.find((plane) => plane.role === ref.faceRole) ?? planes.find((plane) => canonicalFaceRole(plane.role) === wanted);
+};
 
 /** The point a placement gives on the body as it is now: on the start face, each distance inside its neighbour face. */
 export function resolveHolePlacement(placement: HolePlacement, body: BodyFaces): PlacementResolution {
