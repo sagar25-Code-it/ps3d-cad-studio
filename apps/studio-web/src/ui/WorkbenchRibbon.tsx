@@ -323,8 +323,8 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="trash" label="Delete" hint="body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("delete", "Delete Body")} />
       </RibbonGroup>
       <RibbonGroup label="Face operations">
-        <RibbonButton icon="move-face" label="Move Face" hint="local +Z · 2 mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("move-face", "Move Face")} />
-        <RibbonButton icon="offset-face" label="Offset Face" hint="normal · 2 mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("offset-face", "Offset Face")} />
+        <RibbonButton icon="move-face" label="Move Face" hint="top face · typed mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("move-face", "Move Face")} />
+        <RibbonButton icon="offset-face" label="Offset Face" hint="top face · typed mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("offset-face", "Offset Face")} />
         <RibbonButton icon="replace-face" label="Replace Face" hint="parallel datum" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("replace-face", "Replace Face")} />
         <RibbonButton icon="delete-face" label="Delete Face" hint="recognize + heal" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("delete-face", "Delete Face")} />
       </RibbonGroup>
@@ -332,7 +332,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="boolean" label="Combine" hint="join · cut · intersect" disabled={(props.project.part.generalBodies?.length ?? 0) < 2} onClick={props.onCombine} />
         <RibbonButton icon="unite" label="Unite" hint="target + tool" disabled={!(analyticBodySelected && (props.project.part.previewBodies?.length ?? 0) >= 2) && !(generalBodySelected && (props.project.part.generalBodies?.length ?? 0) >= 2)} onClick={() => props.onPartFeatureAction("unite", "Unite")} />
         <RibbonButton icon="subtract" label="Subtract" hint="through cylinder" disabled={!(analyticBodySelected && (props.project.part.previewBodies?.length ?? 0) >= 2) && !(generalBodySelected && (props.project.part.generalBodies?.length ?? 0) >= 2)} onClick={() => props.onPartFeatureAction("subtract", "Subtract")} />
-        <RibbonButton icon="trim" label="Trim Body" hint="keep 70%" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("trim-body", "Trim Body")} />
+        <RibbonButton icon="trim" label="Trim Body" hint="typed kept length" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("trim-body", "Trim Body")} />
       </RibbonGroup>
       <RibbonGroup label="Construction">
         <RibbonButton icon="projection" label="Offset Plane" hint="base + distance" onClick={() => props.onAddConstructionPlane("offset")} />
@@ -361,7 +361,7 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="mirror" label="Mirror" hint="datum / offset / construction plane" disabled={!generalBodySelected} onClick={() => props.onPattern("mirror")} />
       </RibbonGroup>
       <RibbonGroup label="Solid modify">
-        <RibbonButton icon="hole" label="Hole" hint="Ø 6 · through" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("hole")} />
+        <RibbonButton icon="hole" label="Hole" hint="typed Ø · through" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("hole")} />
         <RibbonButton icon="bore" label="Hole Wizard" hint="M-series + style" disabled={!generalBodySelected} onClick={props.onHoleWizard} />
         <RibbonButton icon="fillet" label="Fillet" hint="click an edge" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("fillet")} />
         <RibbonButton icon="chamfer" label="Chamfer" hint="click an edge" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer")} />

@@ -189,6 +189,7 @@ import { viewFitTests } from "./view-fit.test.js";
 import { partCreateTests } from "./part-create.test.js";
 import { partHotkeyTests } from "./part-hotkeys.test.js";
 import { combineStepTests } from "./combine-step.test.js";
+import { ribbonHonestyTests } from "./ribbon-honesty.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -400,6 +401,7 @@ const tests: readonly TestCase[] = [
   ...partCreateTests,
   ...partHotkeyTests,
   ...combineStepTests,
+  ...ribbonHonestyTests,
 ];
 let failures = 0;
 

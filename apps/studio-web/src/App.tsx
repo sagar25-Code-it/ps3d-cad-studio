@@ -2048,31 +2048,56 @@ export function App(): React.JSX.Element {
       if (applyProjectOperation({ kind: "boolean-part-bodies", targetBodyId: body.id, toolBodyId: tool.id, operation })) setSelectedId(body.id);
       return;
     }
+    // PT-16: the analytic tools ask for their one number instead of applying a fixed value silently.
     if (operation === "trim-body") {
-      applyProjectOperation({ kind: "trim-part-body", bodyId: body.id, keptLengthMm: Math.max(0.5, body.sizeMm[2] * 0.7), side: "negative" });
+      void (async () => {
+        const kept = await onView.ask({ label: `Kept length of ${body.name} from its base (mm)`, quantity: "length", defaultValue: Number((body.sizeMm[2] * 0.7).toFixed(2)), min: 0, exclusiveMin: true, step: 0.5 });
+        if (kept === null) return;
+        applyProjectOperation({ kind: "trim-part-body", bodyId: body.id, keptLengthMm: Math.max(0.5, kept), side: "negative" });
+      })();
       return;
     }
     if (operation === "edge-blend" || operation === "chamfer") {
-      const maximum = Math.max(0.25, Math.min(body.sizeMm[0], body.sizeMm[1]) / 2 - 0.5);
-      const sizeMm = Math.min(Math.max(0.5, current.part.edgeTreatmentMm), maximum);
-      applyProjectOperation({ kind: "set-part-body-edge-treatment", bodyId: body.id, treatment: operation === "edge-blend" ? "blend" : "chamfer", sizeMm });
+      void (async () => {
+        const maximum = Math.max(0.25, Math.min(body.sizeMm[0], body.sizeMm[1]) / 2 - 0.5);
+        const size = await onView.ask({ label: operation === "edge-blend" ? "Blend radius" : "Chamfer distance", quantity: "length", defaultValue: Math.min(Math.max(0.5, current.part.edgeTreatmentMm), maximum), min: 0, exclusiveMin: true, step: 0.25 });
+        if (size === null) return;
+        applyProjectOperation({ kind: "set-part-body-edge-treatment", bodyId: body.id, treatment: operation === "edge-blend" ? "blend" : "chamfer", sizeMm: Math.min(Math.max(0.25, size), maximum) });
+      })();
       return;
     }
     if (operation === "draft") {
-      applyProjectOperation({ kind: "set-part-body-draft", bodyId: body.id, angleDeg: 5 });
+      void (async () => {
+        const angle = await onView.ask({ label: "Draft angle", quantity: "angle", defaultValue: 5, min: 0, exclusiveMin: true, step: 0.5 });
+        if (angle === null) return;
+        applyProjectOperation({ kind: "set-part-body-draft", bodyId: body.id, angleDeg: angle });
+      })();
       return;
     }
     if (operation === "shell") {
-      const thicknessMm = Math.min(2, Math.max(0.5, Math.min(body.sizeMm[0] / 4, body.sizeMm[1] / 4, body.sizeMm[2] / 3)));
-      applyProjectOperation({ kind: "set-part-body-shell", bodyId: body.id, thicknessMm });
+      void (async () => {
+        const suggested = Math.min(2, Math.max(0.5, Math.min(body.sizeMm[0] / 4, body.sizeMm[1] / 4, body.sizeMm[2] / 3)));
+        const thickness = await onView.ask({ label: "Shell wall thickness", quantity: "length", defaultValue: Number(suggested.toFixed(2)), min: 0, exclusiveMin: true, step: 0.25 });
+        if (thickness === null) return;
+        applyProjectOperation({ kind: "set-part-body-shell", bodyId: body.id, thicknessMm: thickness });
+      })();
       return;
     }
     if (operation === "move-face" || operation === "offset-face") {
-      applyProjectOperation({ kind: "move-part-body-face", bodyId: body.id, face: "z-positive", offsetMm: 2, mode: operation === "move-face" ? "move" : "offset" });
+      void (async () => {
+        const offset = await onView.ask({ label: `${operation === "move-face" ? "Move" : "Offset"} the top (+Z) face by (mm)`, quantity: "length", defaultValue: 2, min: -1000, step: 0.5 });
+        if (offset === null) return;
+        if (offset === 0) { setStatus("ready"); setStatusText(`${commandName}: enter a non-zero distance in millimetres.`); return; }
+        applyProjectOperation({ kind: "move-part-body-face", bodyId: body.id, face: "z-positive", offsetMm: offset, mode: operation === "move-face" ? "move" : "offset" });
+      })();
       return;
     }
     if (operation === "replace-face") {
-      applyProjectOperation({ kind: "replace-part-body-face", bodyId: body.id, face: "z-positive", localPositionMm: body.sizeMm[2] / 2 + 2 });
+      void (async () => {
+        const position = await onView.ask({ label: `New height of the top (+Z) face of ${body.name} from its centre (mm)`, quantity: "length", defaultValue: Number((body.sizeMm[2] / 2 + 2).toFixed(2)), min: 0, exclusiveMin: true, step: 0.5 });
+        if (position === null) return;
+        applyProjectOperation({ kind: "replace-part-body-face", bodyId: body.id, face: "z-positive", localPositionMm: position });
+      })();
       return;
     }
     if (operation === "resize-blend") {
