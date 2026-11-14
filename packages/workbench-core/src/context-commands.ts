@@ -20,6 +20,8 @@ export interface WorkbenchContextRequest {
   readonly selectionKind?: WorkbenchSelectionKind;
   /** For a timeline step: whether it is a sketch (opened with Edit Sketch) or a solid step. Absent for anything else. */
   readonly featureKind?: "sketch" | "solid";
+  /** For a timeline step: what its own commands (Suppress, Roll Marker Here, Edit Profile Sketch) depend on. */
+  readonly featureState?: { readonly suppressed: boolean; readonly markerAfter: boolean; readonly hasSketch: boolean };
   readonly canUndo?: boolean;
   readonly canRedo?: boolean;
 }
@@ -109,12 +111,23 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
   else if (kind === "feature") commands.push(
     command("feature.edit", "Edit Feature Parameters", "edit", "edit"),
     command("feature.reveal-inputs", "Show Parent Sketch", "sketch", "select"),
-    command("feature.suppress", "Suppress Feature", "hide", "edit", false, "Feature suppression requires an ordered dependency graph."),
     command("inspect.properties", "Properties", "inspect", "inspect", false, PROPERTIES_REASON)
   );
 
   // A solid step right-clicked on its browser row arrives as its body (that is what the row selects): the step's own Edit comes first.
   if (kind === "body" && request.featureKind === "solid") commands.push(command("feature.edit", "Edit Feature Parameters", "edit", "edit"));
+
+  // A timeline step right-clicked in the browser: its own history commands, whatever the row selects (a solid step selects its body).
+  if (request.featureKind !== undefined) {
+    const state = request.featureState;
+    commands.push(
+      ...(request.featureKind === "solid" ? [command("step.edit-profile", "Edit Profile Sketch", "sketch", "history", state?.hasSketch ?? true, "The sketch this step was built on is not in the timeline.")] : []),
+      command("step.suppress", state?.suppressed === true ? "Unsuppress" : "Suppress", "hide", "history"),
+      command("step.rename", "Rename", "edit", "history", true, undefined, false, "F2"),
+      command("step.roll-here", "Roll Marker Here", "home", "history", state?.markerAfter !== true, "The rollback marker is already right after this step."),
+      command("step.delete", "Delete", "trash", "history", true, undefined, true, "Del")
+    );
+  }
 
   if (kind === "body") {
     const analyticBody = request.selectionId?.startsWith("part-body:") === true;

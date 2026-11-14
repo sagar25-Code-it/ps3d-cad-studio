@@ -122,3 +122,13 @@
 .studio-app .delete-step-list li strong { color: #edf6f8; font-size: 0.8rem; overflow-wrap: anywhere; }
 .studio-app .delete-step-list li span { color: #afc0c8; font-size: 0.76rem; overflow-wrap: anywhere; }
 .studio-app .engineering-confirmation-dialog > footer > button.primary.danger { border-color: #b8453a; color: #fff; background: #a93a30; }
+
+/* Browser rows (HS-10): the eye on a body row and the inline rename field. The row is a flex pair so the eye never overlaps the label. */
+.studio-app .tree-row { display: flex; align-items: stretch; gap: 2px; }
+.studio-app .tree-row > .tree-item { flex: 1 1 0; width: auto; min-width: 0; }
+.studio-app .tree-row > .tree-eye { flex: none; display: grid; place-items: center; width: 34px; min-height: 34px; padding: 0; border-color: transparent; border-radius: 5px; color: #3c4349; background: transparent; box-shadow: none; cursor: pointer; }
+.studio-app .tree-row > .tree-eye:hover { border-color: #c5cacf; background: #fff; }
+.studio-app .tree-row > .tree-eye[aria-pressed="false"] { color: #8b949b; }
+.studio-app .tree-eye .command-icon { width: 16px; height: 16px; }
+.studio-app .tree-rename { box-sizing: border-box; width: 100%; min-height: 34px; margin: 2px 0; padding: 0 0.5rem; border: 2px solid #c62836; border-radius: 5px; color: #1f2327; background: #fff; font: inherit; font-size: 12.5px; }
+.studio-app .tree-row > .tree-rename { flex: 1 1 0; width: auto; min-width: 0; }

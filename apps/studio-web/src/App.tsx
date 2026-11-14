@@ -235,7 +235,7 @@ type OperationIntent = WithoutEnvelope<WorkbenchOperation>;
 type PartParameter = Extract<WorkbenchOperation, { kind: "set-part-parameter" }>["parameter"];
 type ReplaceableAssemblyTemplate = Exclude<AssemblyTemplateId, "custom" | "electrical-panel">;
 type UiDiagnostic = Pick<Diagnostic, "code" | "message" | "recovery"> | { readonly code: string; readonly message: string; readonly recovery: string };
-interface OpenContextMenu { readonly x: number; readonly y: number; readonly selectionId: string | null; readonly selectionKind: WorkbenchSelectionKind; /** Open as the radial marking menu rather than the list. */ readonly radial?: boolean; /** The timeline step whose browser row was right-clicked (the row itself selects the step's body). */ readonly featureId?: string; }
+interface OpenContextMenu { readonly x: number; readonly y: number; readonly selectionId: string | null; readonly selectionKind: WorkbenchSelectionKind; /** Open as the radial marking menu rather than the list. */ readonly radial?: boolean; /** The timeline step whose browser row was right-clicked (the row itself selects the step's body). */ readonly featureId?: string; /** Opened from a row of the model browser (Rename then edits the row in place). */ readonly fromBrowser?: boolean; }
 interface PreparedQualifiedWorker {
   readonly client: GeometryWorkerClient;
   readonly response: ModelSuccessResponse;
@@ -368,6 +368,8 @@ export function App(): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** HS-01: which step of the selected body the user picked in the timeline or browser (see timeline-selection.ts). */
   const [stepPick, setStepPick] = useState<StepPick | null>(null);
+  /** HS-10: asks the model browser to start renaming a row in place (a step ID or a body ID). */
+  const [treeRenameRequest, setTreeRenameRequest] = useState<{ readonly id: string; readonly serial: number } | null>(null);
   /** HS-02: a delete that would take other steps with it waits here for the person to confirm (see DeleteStepDialog). */
   const [deleteRequest, setDeleteRequest] = useState<DeleteImpact | null>(null);
   const [selectedFace, setSelectedFace] = useState<{ readonly bodyId: string; readonly faceIndex: number } | null>(null);
@@ -906,7 +908,7 @@ export function App(): React.JSX.Element {
   const openTreeContextMenu = useCallback((clientX: number, clientY: number, selectionId: string | null, featureId?: string): void => {
     if (selectionId !== null) setSelectedId(selectionId);
     setStepPick(featureId !== undefined && selectionId !== null ? { featureId, selectionId } : null);
-    setContextMenu({ x: clientX, y: clientY, selectionId, selectionKind: classifyWorkbenchSelection(selectionId), ...(featureId === undefined ? {} : { featureId }) });
+    setContextMenu({ x: clientX, y: clientY, selectionId, selectionKind: classifyWorkbenchSelection(selectionId), fromBrowser: true, ...(featureId === undefined ? {} : { featureId }) });
   }, []);
   const openRadialContextMenu = useCallback((clientX: number, clientY: number, selectionId: string | null, selectionKind?: WorkbenchSelectionKind): void => openContextMenu(clientX, clientY, selectionId, selectionKind, true), [openContextMenu]);
   useEffect(() => {
@@ -4238,7 +4240,25 @@ export function App(): React.JSX.Element {
     }
     if (commandId === "component.move" || commandId === "mate.create" || commandId === "mate.edit") { switchWorkspace("assembly"); if (selectionId !== null) setSelectedId(selectionId); return; }
     if (commandId === "component.ground" && selectionId !== null) { applyProjectOperation({ kind: "toggle-component-grounded", componentId: selectionId }); return; }
-    if (commandId === "selection.rename" && selectionId !== null) { renameBodyWithPrompt(selectionId); return; }
+    if (commandId.startsWith("step.")) {
+      const history = designOf(projectRef.current);
+      const step = history.features.find((feature) => feature.id === contextStepId(contextMenu?.featureId, selectionId));
+      if (step === undefined) { setStatus("ready"); setStatusText("That timeline step is not there any more."); return; }
+      if (commandId === "step.edit-profile") {
+        const sketch = step.kind === "sketch" ? step : history.features.find((feature) => feature.id === step.sketchFeatureId && feature.kind === "sketch");
+        if (sketch === undefined) { setStatus("ready"); setStatusText(`${step.name}: the sketch it was built on is not in the timeline.`); return; }
+        editTimelineFeature(sketch);
+      } else if (commandId === "step.suppress") timelineOperation({ kind: "set-design-feature-suppressed", featureId: step.id, suppressed: !step.suppressed });
+      else if (commandId === "step.rename") setTreeRenameRequest((request) => ({ id: step.id, serial: (request?.serial ?? 0) + 1 }));
+      else if (commandId === "step.roll-here") timelineOperation({ kind: "set-design-rollback", index: history.features.indexOf(step) + 1 });
+      else if (commandId === "step.delete") requestStepDelete(step);
+      return;
+    }
+    if (commandId === "selection.rename" && selectionId !== null) {
+      if (contextMenu?.fromBrowser === true && (projectRef.current.part.generalBodies ?? []).some((body) => body.id === selectionId)) { setTreeRenameRequest((request) => ({ id: selectionId, serial: (request?.serial ?? 0) + 1 })); return; }
+      renameBodyWithPrompt(selectionId);
+      return;
+    }
     if (commandId === "selection.toggle-visibility" && selectionId !== null) {
       if (selectionId.startsWith("entity:")) applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId: selectionId });
       else if (selectionId.startsWith("component:")) applyProjectOperation({ kind: "toggle-component-visibility", componentId: selectionId });
@@ -4401,8 +4421,18 @@ export function App(): React.JSX.Element {
       }
     }
   };
-  const contextFeatureKind = contextMenu === undefined ? undefined : designOf(project).features.find((feature) => feature.id === contextStepId(contextMenu.featureId, contextMenu.selectionId))?.kind;
-  const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({ workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo, ...(contextFeatureKind === undefined ? {} : { featureKind: contextFeatureKind === "sketch" ? "sketch" as const : "solid" as const }) });
+  const contextStep = contextMenu === undefined ? undefined : designOf(project).features.find((feature) => feature.id === contextStepId(contextMenu.featureId, contextMenu.selectionId));
+  const contextCommands = contextMenu === undefined ? [] : resolveWorkbenchContextCommands({
+    workspace: project.activeWorkspace, selectionId: contextMenu.selectionId, selectionKind: contextMenu.selectionKind, canUndo, canRedo,
+    ...(contextStep === undefined ? {} : {
+      featureKind: contextStep.kind === "sketch" ? "sketch" as const : "solid" as const,
+      featureState: {
+        suppressed: contextStep.suppressed,
+        markerAfter: designOf(project).rollbackIndex === designOf(project).features.indexOf(contextStep) + 1,
+        hasSketch: contextStep.kind === "sketch" || designOf(project).features.some((candidate) => candidate.id === contextStep.sketchFeatureId && candidate.kind === "sketch")
+      }
+    })
+  });
 
   /** Double-click in the browser: a timeline step opens for editing (a sketch in the sketcher, a solid in its dialog); the working sketch row opens the sketcher. */
   const openTreeItem = (id: string): void => {
@@ -4721,7 +4751,7 @@ export function App(): React.JSX.Element {
     />}
     {!renderStudioOpen && <section className="workbench-grid">
       {masterCartOpen && <MasterCartWorkspace assemblyComponentCount={project.assembly.components.length} onAdd={insertMasterCartItem} onMessage={setStatusText} />}
-      {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} selectedStepId={selectedTimelineFeature?.id ?? null} onSelectStep={toggleStep} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openTreeContextMenu} onOpenItem={openTreeItem} />}
+      {!masterCartOpen && <ProjectTree project={project} selectedId={selectedId} selectedStepId={selectedTimelineFeature?.id ?? null} onSelectStep={toggleStep} revealSelectionRequest={treeRevealRequest} designHealth={designHealth} onSelect={routeSelection} onContextMenu={openTreeContextMenu} onOpenItem={openTreeItem} renameRequest={treeRenameRequest} onRenameStep={(feature, name) => { applyProjectOperation({ kind: "rename-design-feature", featureId: feature.id, name }); }} onRenameBody={(bodyId, name) => { applyProjectOperation({ kind: "rename-general-body", bodyId, name }); }} onToggleBody={(bodyId, kind) => { applyProjectOperation(kind === "general" ? { kind: "toggle-general-body-visibility", bodyId } : { kind: "toggle-part-preview-body-visibility", bodyId }); }} />}
       {!masterCartOpen && project.activeWorkspace === "sketch" && <SketchWorkspace displayUnit={unitToShow(project, document.displayUnit)} finishedSketches={finishedSketches} reference={sketchReference} workingTimelineId={designOf(project).editingSketchId} projectId={project.id} sketch={project.sketch} tool={sketchTool} dimensionMode={sketchDimensionMode} cancelVersion={sketchCancelVersion} selectedId={selectedId} onSelect={setSelectedId} onAddEntity={(entity: SketchEntity) => applyProjectOperation({ kind: "add-sketch-entity", entity })} onDeleteEntity={(entityId) => { if (applyProjectOperation({ kind: "delete-sketch-entity", entityId })) setSelectedId(null); }} onAddConstraint={(constraint: WorkbenchSketchConstraint) => applyProjectOperation({ kind: "add-sketch-constraint", constraint })} onDeleteConstraint={(constraintId) => applyProjectOperation({ kind: "delete-sketch-constraint", constraintId })} onSetDimension={(entityId, dimension, valueMm, extra) => setSketchDimension(entityId, dimension, valueMm, extra)} constraintExtras={{ revision: project.revision, pierceHits: () => listPierceHits(project), pierceRefresh: () => { const edit = pierceRefreshEdit(project); if (edit === undefined) return undefined; const { kind: _kind, ...plan } = edit; return plan; }, pierceUnresolved: () => refreshPierceConstraints(project).unresolved }} onToggleConstruction={(entityId) => applyProjectOperation({ kind: "toggle-sketch-construction", entityId })} onToggleVisibility={(entityId) => applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId })} viewportState={viewportState} onNavigationMode={setViewportNavigation} onSelectionFilter={setViewportSelectionFilter} onOrientation={setViewportOrientation} onViewAngles={setViewportAngles} onProjection={setViewportProjection} onGrid={setViewportGrid} onAxes={setViewportAxes} fitSerial={sketchFitSerial} onContextMenu={openRadialContextMenu} onMessage={(text) => setStatusText(friendlySketchText(text, [projectRef.current.sketch]))} optionsRevealRequest={sketchOptionsRevealRequest} solidBodies={(project.part.generalBodies ?? []).map((body) => ({ id: body.id, name: body.name }))} targetBodies={project.part.generalBodies ?? []} onCreateSolid={(profileId, plane, operation, valueMm, edge, direction, target, advancedParams) => guard(createGeneralSolid(profileId, plane, operation, valueMm, edge, direction, target, advancedParams), "Creating the solid")} onChangePlane={() => openSketchPlaneDialog("set")} onDisplayUnit={(unit) => guard(changeUnit(unit), "Changing the unit")} editTool={sketchEditTool} showMovable={sketchShowMovable} checkOpen={sketchCheckOpen} request={sketchRequest} onConstraintToolChange={setSketchConstraintTool} onProjectBody={() => runSketchCommand("project-body", "with the Project key")} onApplyEdit={(plan: SketchEditPlan) => applyProjectOperation({ kind: "apply-sketch-edit", ...plan })} onSetSuppressed={(constraintIds, suppressed) => applyProjectOperation({ kind: "set-sketch-constraints-suppressed", constraintIds, suppressed })} onPlaceDimensionLabel={(constraintId, offsetPx) => applyProjectOperation({ kind: "set-sketch-dimension-label", constraintId, offsetPx })} onCloseEditTool={() => { setSketchEditTool(null); setStatusText("Sketch edit tool closed."); }} onCloseCheck={() => setSketchCheckOpen(false)} onActivateTool={(tool) => activateSketchTool(tool, "from the keyboard")} onActivateDimension={() => activateSketchDimension("from the keyboard")} onExitDimension={() => { setSketchDimensionMode(false); setStatusText("Sketch Dimension finished."); }} onActivateEditTool={(tool) => activateSketchEdit(tool, "from the keyboard")} onFinishSketch={() => guard(finishSketch(), "Finishing the sketch")} onCancelSketch={cancelSketch} onSelectionCount={setSketchSelectionCount} evaluateText={(text) => evaluateTextInDesign(designOf(project), text, project.sketch)} />}
       {!masterCartOpen && isThreeDimensional && <section className="workspace-canvas model-stage" aria-label={`${project.activeWorkspace} three-dimensional viewport`}>
         <canvas ref={canvasRef} className="model-canvas" role="img" aria-label={`Interactive ${project.activeWorkspace} preview`} />

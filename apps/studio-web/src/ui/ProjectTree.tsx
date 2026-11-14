@@ -27,13 +27,31 @@ interface ProjectTreeProps {
   readonly onContextMenu: (clientX: number, clientY: number, selectionId: string | null, featureId?: string) => void;
   /** Double-click on a row that can be opened: a timeline step (by the row's ID) or the working sketch. */
   readonly onOpenItem?: (id: string) => void;
+  /** HS-10: rename a timeline step from its browser row (F2 on the row, or Rename in its menu). */
+  readonly onRenameStep?: (feature: DesignFeature, name: string) => void;
+  /** Rename a solid body from its browser row. */
+  readonly onRenameBody?: (bodyId: string, name: string) => void;
+  /** The eye on a body row: show or hide that body. */
+  readonly onToggleBody?: (bodyId: string, kind: "general" | "preview") => void;
+  /** Starts the inline rename of a row (a step ID or a body ID); a new `serial` is a new request. */
+  readonly renameRequest?: { readonly id: string; readonly serial: number } | null;
 }
 
 type TreeKind = "project" | "health" | "datum" | "sketch" | "feature" | "body" | "component" | "mate" | "surface" | "drawing" | "electrical" | "vehicle" | "route" | "tool" | "history";
 
-export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep, revealSelectionRequest, designHealth, onSelect, onContextMenu, onOpenItem }: ProjectTreeProps): React.JSX.Element {
+export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep, revealSelectionRequest, designHealth, onSelect, onContextMenu, onOpenItem, onRenameStep, onRenameBody, onToggleBody, renameRequest }: ProjectTreeProps): React.JSX.Element {
   const treeRef = useRef<HTMLElement>(null);
   const handledRevealRequest = useRef(0);
+  /** The row being renamed inline (a step ID or a body ID). */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const handledRenameRequest = useRef(0);
+  useEffect(() => {
+    if (renameRequest === undefined || renameRequest === null || renameRequest.serial <= handledRenameRequest.current) return;
+    handledRenameRequest.current = renameRequest.serial;
+    setRenaming(renameRequest.id);
+  }, [renameRequest]);
+  const renameFor = (key: string, commit: ((name: string) => void) | undefined): { readonly rename?: { readonly editing: boolean; readonly onStart: () => void; readonly onCommit: (name: string) => void; readonly onCancel: () => void } } =>
+    commit === undefined ? {} : { rename: { editing: renaming === key, onStart: () => setRenaming(key), onCommit: (name: string) => { setRenaming(null); commit(name); }, onCancel: () => setRenaming(null) } };
   // Curves are listed as "Line 3", "Circle 1" (derived, see sketch-names.ts), never by their generated ids.
   const entityNames = sketchEntityNames(project.sketch.entities);
   useEffect(() => {
@@ -133,6 +151,7 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
           selectedId={selectedId}
           onSelect={onSelect}
           {...(onSelectStep === undefined ? {} : { selected: selectedStepId === feature.id, onPick: (wasSelected: boolean) => onSelectStep(feature, wasSelected) })}
+          {...renameFor(feature.id, onRenameStep === undefined ? undefined : (name) => onRenameStep(feature, name))}
           {...(onOpenItem === undefined ? {} : { onOpen: onOpenItem, openHint: feature.kind === "sketch" ? "Double-click to edit this sketch" : "Double-click to edit this step" })}
           {...(locked ? { trailingIcon: "lock" as const } : {})}
         />;
@@ -147,8 +166,8 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
     </TreeSection>}
     {showBodies && <TreeSection title="Bodies" badge={project.activeWorkspace === "part" ? "qualified" : "preview"}>
       {hasPlate && <TreeItem kind="body" id="body:bracket" label="Mounting plate" meta="closed manifold mesh" selectedId={selectedId} onSelect={onSelect} />}
-      {(project.part.previewBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.shape} · ${body.visible ? "shown" : "hidden"} · preview`} selectedId={selectedId} onSelect={onSelect} indent />)}
-      {(project.part.generalBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.feature?.operation === "surface" ? "surface" : body.subd !== undefined ? "SubD form" : `${body.feature?.operation ?? "mesh"} solid`} · ${body.visible ? "shown" : "hidden"} · ${body.brep !== undefined ? `${body.brep.topology.faces} faces · ${body.brep.origin === "mesh-boolean" ? "Boolean mesh" : "B-rep"}` : `${body.positionsMm.length / 3} verts`}`} selectedId={selectedId} onSelect={onSelect} indent />)}
+      {(project.part.previewBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.shape} · ${body.visible ? "shown" : "hidden"} · preview`} selectedId={selectedId} onSelect={onSelect} indent {...(onToggleBody === undefined ? {} : { eye: { shown: body.visible, onToggle: () => onToggleBody(body.id, "preview") } })} />)}
+      {(project.part.generalBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} {...(onToggleBody === undefined ? {} : { eye: { shown: body.visible, onToggle: () => onToggleBody(body.id, "general") } })} {...renameFor(body.id, onRenameBody === undefined ? undefined : (name) => onRenameBody(body.id, name))} meta={`${body.feature?.operation === "surface" ? "surface" : body.subd !== undefined ? "SubD form" : `${body.feature?.operation ?? "mesh"} solid`} · ${body.visible ? "shown" : "hidden"} · ${body.brep !== undefined ? `${body.brep.topology.faces} faces · ${body.brep.origin === "mesh-boolean" ? "Boolean mesh" : "B-rep"}` : `${body.positionsMm.length / 3} verts`}`} selectedId={selectedId} onSelect={onSelect} indent />)}
       <TreeItem kind="surface" id={project.surface.id} label={project.surface.name} meta={`${project.surface.mode} · open surface preview`} selectedId={selectedId} onSelect={onSelect} />
     </TreeSection>}
     {project.activeWorkspace === "assembly" && <>
@@ -296,12 +315,40 @@ function TreeSection({ title, badge, children, initiallyOpen = true }: { readonl
   return <details className="tree-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}><summary><span className="tree-chevron" aria-hidden="true">›</span><strong>{title}</strong><CapabilityBadge level={badge} /></summary><div>{children}</div></details>;
 }
 
-function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean; readonly icon?: string; readonly trailingIcon?: string; readonly onOpen?: (id: string) => void; readonly openHint?: string; /** The timeline step this row shows. Double-click opens it, whatever the row selects. */ readonly featureId?: string; /** A row that stands for one step says itself whether it is selected, and what a click does. */ readonly selected?: boolean; readonly onPick?: (wasSelected: boolean) => void }): React.JSX.Element {
+export function TreeItem(props: { readonly kind: TreeKind; readonly id: string; readonly label: string; readonly meta: string; readonly selectedId: string | null; readonly onSelect: (id: string | null) => void; readonly indent?: boolean; readonly icon?: string; readonly trailingIcon?: string; readonly onOpen?: (id: string) => void; readonly openHint?: string; /** The timeline step this row shows. Double-click opens it, whatever the row selects. */ readonly featureId?: string; /** A row that stands for one step says itself whether it is selected, and what a click does. */ readonly selected?: boolean; readonly onPick?: (wasSelected: boolean) => void; /** Inline rename: F2 on the row starts it, Enter commits, Esc cancels. */ readonly rename?: { readonly editing: boolean; readonly onStart: () => void; readonly onCommit: (name: string) => void; readonly onCancel: () => void }; /** The eye of a body row. */ readonly eye?: { readonly shown: boolean; readonly onToggle: () => void } }): React.JSX.Element {
   const selected = props.selected ?? props.selectedId === props.id;
   // A double-click is two clicks first (select, then deselect); opening selects the row again so it reads as the thing being edited.
   const open = props.onOpen;
   const openId = props.featureId ?? props.id;
-  return <button data-tree-id={props.id} {...(props.featureId === undefined ? {} : { "data-tree-feature-id": props.featureId })} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => { if (props.onPick !== undefined) props.onPick(selected); else props.onSelect(selected ? null : props.id); }} {...(open === undefined ? {} : { onDoubleClick: () => { if (props.onPick !== undefined) props.onPick(false); else props.onSelect(props.id); open(openId); }, "data-opens": "true", "data-tree-open-id": openId, title: props.openHint ?? "Double-click to open" })}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={props.icon ?? treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span>{props.trailingIcon !== undefined && <span className="tree-trailing" aria-label="Fully constrained" title="Fully constrained"><CommandIcon name={props.trailingIcon} /></span>}</button>;
+  const rename = props.rename;
+  const main = rename?.editing === true
+    ? <input
+      className="tree-rename"
+      aria-label={`Rename ${props.label}`}
+      defaultValue={props.label}
+      maxLength={120}
+      autoFocus
+      onFocus={(event) => event.currentTarget.select()}
+      onBlur={() => rename.onCancel()}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") { event.preventDefault(); const name = event.currentTarget.value.trim(); if (name.length > 0 && name !== props.label) rename.onCommit(name); else rename.onCancel(); }
+        else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); rename.onCancel(); }
+      }}
+    />
+    : <button data-tree-id={props.id} {...(props.featureId === undefined ? {} : { "data-tree-feature-id": props.featureId })} className={`tree-item ${selected ? "selected" : ""} ${props.indent === true ? "indent" : ""}`} aria-pressed={selected} onClick={() => { if (props.onPick !== undefined) props.onPick(selected); else props.onSelect(selected ? null : props.id); }} {...(rename === undefined ? {} : { onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => { if (event.key === "F2") { event.preventDefault(); rename.onStart(); } } })} {...(open === undefined ? {} : { onDoubleClick: () => { if (props.onPick !== undefined) props.onPick(false); else props.onSelect(props.id); open(openId); }, "data-opens": "true", "data-tree-open-id": openId, title: props.openHint ?? "Double-click to open" })}><span className={`tree-glyph ${props.kind}`} aria-hidden="true"><CommandIcon name={props.icon ?? treeIcon(props.kind, props.label, props.id)} /></span><span><strong>{props.label}</strong><small>{props.meta}</small></span>{props.trailingIcon !== undefined && <span className="tree-trailing" aria-label="Fully constrained" title="Fully constrained"><CommandIcon name={props.trailingIcon} /></span>}</button>;
+  if (props.eye === undefined && rename?.editing !== true) return main;
+  return <div className="tree-row">
+    {main}
+    {props.eye !== undefined && <button
+      type="button"
+      data-tree-id={props.id}
+      className="tree-eye"
+      aria-pressed={props.eye.shown}
+      aria-label={`${props.eye.shown ? "Hide" : "Show"} ${props.label}`}
+      title={props.eye.shown ? "Hide this body" : "Show this body"}
+      onClick={props.eye.onToggle}
+    ><CommandIcon name={props.eye.shown ? "eye" : "eye-off"} /></button>}
+  </div>;
 }
 
 /** A sketch is fully constrained when every drawn primitive has a determined pose: the solver reports zero degrees of freedom. An empty sketch is not called "fully constrained" because there is nothing to constrain yet. */
