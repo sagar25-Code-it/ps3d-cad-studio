@@ -38,6 +38,7 @@ import { solveAssemblyMates } from "./assembly-solve.js";
 import { friendlySketchText, sketchEntityName } from "./sketch-names.js";
 import {
   addDesignSolid,
+  baseFeatureOf,
   commitDesignSketch,
   deleteDesignFeature,
   editDesignSketch,
@@ -932,6 +933,15 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const target = current.find((body) => body.id === operation.targetBodyId);
       if (target === undefined) return broken(operation.targetBodyId, "The general body being modified does not exist.");
       if (operation.body.id !== operation.targetBodyId) return invalidOperation("A modify result must keep the target body's ID.");
+      // HS-04: a solid made by timeline steps is rebuilt from them, so a hole, fillet, chamfer or shell swapped into its mesh would silently
+      // vanish at the next rebuild (a sketch edit, a suppress, a rollback). Those are recorded as timeline steps instead.
+      const owner = project.design === undefined ? undefined : baseFeatureOf(project.design, target.id);
+      if (owner !== undefined && TIMELINE_ONLY_MODIFIERS.has(operation.modifier)) {
+        return failure("INVALID_OPERATION",
+          `${target.name} is built by the timeline (${owner.name}), so a ${operation.modifier} applied straight to its mesh would be lost at the next rebuild.`,
+          [target.id, owner.id],
+          "Use the Hole, Fillet, Chamfer or Shell command on the body: it records the change as a timeline step that survives rebuilds and can be edited, suppressed or rolled back.");
+      }
       const next = current.map((body) => body.id === target.id ? { ...operation.body, visible: body.visible } : body);
       return changed({ ...project, part: { ...project.part, generalBodies: next } }, [target.id], `${operation.label} on ${target.name}.`);
     }
@@ -1618,6 +1628,9 @@ function envelopeFailure(problem: EnvelopeProblem): WorkbenchResult<never> {
   return failure(problem.code, problem.message, problem.entityId === undefined ? [] : [problem.entityId], problem.code === "OUTSIDE_SUPPORTED_ENVELOPE" || problem.code === "DEGENERATE_GEOMETRY"
     ? `Keep sketch geometry between ${MODEL_ENVELOPE.minGeometryMm} mm and ${MODEL_ENVELOPE.maxSketchCoordinateMm.toLocaleString("en-US")} mm.` : "Use an exact bounded operation schema from the capability list.");
 }
+
+/** The whole-body modifiers that have a timeline step of their own: on a body the timeline builds, they must be recorded as steps. */
+const TIMELINE_ONLY_MODIFIERS: ReadonlySet<string> = new Set(["hole", "shell", "chamfer", "fillet", "counterbore", "countersink", "tapped-hole"]);
 
 function invalidOperation(message: string): WorkbenchResult<never> {
   return failure("INVALID_OPERATION", message, [], "Use an exact bounded operation schema from the capability list.");

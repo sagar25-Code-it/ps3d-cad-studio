@@ -1313,17 +1313,19 @@ export function App(): React.JSX.Element {
     if (body !== undefined && baseFeatureOf(designOf(current), body.id) === undefined) {
       // PT-15: the prompt-driven mesh wizard takes over the interaction, so a running panel command is cancelled first.
       if (commandPanelRef.current !== null) setCommandPanel(null);
-      holeWizardOnMesh();
+      holeWizardOnMesh(body.id);
       return;
     }
     openPanelFor("hole", preferredBodyId);
   };
 
-  const holeWizardOnMesh = (): void => {
+  const holeWizardOnMesh = (bodyId: string | null = selectedId): void => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
-    const body = bodies.find((candidate) => candidate.id === selectedId);
+    const body = bodies.find((candidate) => candidate.id === bodyId);
     if (body === undefined) { setStatus("ready"); setStatusText("Hole Wizard needs a general solid body selected first."); return; }
+    // A body the timeline builds takes its holes as timeline steps (the Hole panel); the in-place wizard is for bodies with no steps.
+    if (baseFeatureOf(designOf(current), body.id) !== undefined) { setStatus("ready"); setStatusText(`${body.name} is built by the timeline, so its holes are timeline steps: use the Hole command (H) and click the face.`); return; }
     const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
     const typeRaw = (ask("Hole type (simple, counterbore, countersink, tapped):", "counterbore") ?? "").trim().toLowerCase();
     if (!["simple", "counterbore", "countersink", "tapped"].includes(typeRaw)) { setStatus("ready"); setStatusText("Hole Wizard: enter simple, counterbore, countersink or tapped."); return; }

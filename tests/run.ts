@@ -188,6 +188,7 @@ import { computeAllTests } from "./compute-all.test.js";
 import { bodyRenameTests } from "./body-rename.test.js";
 import { browserRowTests } from "./browser-rows.test.js";
 import { failedBodyTests } from "./failed-body.test.js";
+import { oneShotGuardTests } from "./one-shot-guard.test.js";
 import { sketchOffsetChainDefaultTests } from "./sketch-offset-chain-default.test.js";
 import { sketchProjectionCurrentTests } from "./sketch-projection-current.test.js";
 import { sketchDimensionPointFirstTests } from "./sketch-dimension-point-first.test.js";
@@ -438,6 +439,7 @@ const tests: readonly TestCase[] = [
   ...bodyRenameTests,
   ...browserRowTests,
   ...failedBodyTests,
+  ...oneShotGuardTests,
 ];
 let failures = 0;
 
