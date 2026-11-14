@@ -230,6 +230,8 @@ import { solidContextMenuTests } from "./solid-context-menu.test.js";
 import { creaseEdgeTests } from "./crease-edges.test.js";
 import { curvedBlendTests } from "./blend-curved.test.js";
 
+import { edgePickTests } from "./edge-pick.test.js";
+
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
   ...sketchChromeTests,
@@ -479,6 +481,7 @@ const tests: readonly TestCase[] = [
   ...partSceneTests,
   ...creaseEdgeTests,
   ...curvedBlendTests,
+  ...edgePickTests,
 ];
 let failures = 0;
 

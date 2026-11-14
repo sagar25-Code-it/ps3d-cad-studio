@@ -10,6 +10,8 @@
  * are edge-pickable; that is the honest subset of a tessellated kernel.
  */
 
+import { pickEdgeCandidates, pickVertexCandidates, edgeKey, type EdgeCandidate, type PickCamera, type PickEdgeSegment, type PickOptions, type PickVertex, type ScreenPoint, type VertexCandidate } from "./edge-pick.js";
+
 type V3 = readonly [number, number, number];
 
 /** One pickable edge segment of a body, in millimetres, with the smooth run (chain) it belongs to. */
@@ -27,7 +29,7 @@ export interface HoverCandidateBody {
 }
 
 /** The selection intents the hover classifier distinguishes. Other filters (sketch ones) never reach the 3D hover path. */
-export type HoverFilter = "auto" | "body" | "component" | "face" | "edge";
+export type HoverFilter = "auto" | "body" | "component" | "face" | "edge" | "vertex";
 
 /** What the renderer's raycast found under the cursor. */
 export interface HoverRayHit {
@@ -40,7 +42,16 @@ export interface HoverRayHit {
 export type HoverTarget =
   | { readonly kind: "body"; readonly bodyId: string }
   | { readonly kind: "face"; readonly bodyId: string; readonly faceIndex: number; readonly pointMm: V3 }
-  | { readonly kind: "edge"; readonly bodyId: string; readonly chain: number; readonly segments: readonly PickSegmentMm[]; readonly distanceMm: number; readonly concave: boolean };
+  | {
+    readonly kind: "edge"; readonly bodyId: string; readonly chain: number; readonly segments: readonly PickSegmentMm[]; readonly distanceMm: number; readonly concave: boolean;
+    /** Distance on screen from the pointer to the drawn edge, when the pick was made by screen position. */
+    readonly distancePx?: number;
+    /** Every chain the target covers: just `chain`, or all the chains of a tangent chain (double-click). */
+    readonly chains?: readonly number[];
+    /** The target is the tangent chain of the edge under the pointer. */
+    readonly tangent?: boolean;
+  }
+  | { readonly kind: "vertex"; readonly bodyId: string; readonly pointMm: V3; readonly distancePx: number };
 
 function distanceToSegmentMm(point: V3, a: V3, b: V3): number {
   const ab: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -65,7 +76,7 @@ export function nearestChainWithin(edges: readonly PickSegmentMm[], pointMm: V3,
  * What the cursor is over, by selection intent:
  * - `edge`: the nearest sharp edge chain within the tolerance, else nothing.
  * - `face`: the named face under the cursor, else nothing (a body without face names is not face-pickable).
- * - `auto`: the named face when the body has one there, else the body (clicks in auto keep selecting the body).
+ * - `auto`: the body: a click in Auto selects the body, so that is what lights up (it used to tint a face the click then did not pick).
  * - `body` / `component`: the body.
  */
 export function classifyHover(
@@ -75,6 +86,7 @@ export function classifyHover(
   toleranceMm: number
 ): HoverTarget | null {
   if (hit === undefined) return null;
+  if (filter === "vertex") return null; // vertices are picked by screen position (classifyPointer), never by a surface hit
   if (filter === "edge") {
     const edges = candidates?.edges ?? [];
     const nearest = nearestChainWithin(edges, hit.pointMm, toleranceMm);
@@ -84,9 +96,6 @@ export function classifyHover(
   }
   if (filter === "face") {
     return hit.faceIndex === null || hit.faceIndex < 0 ? null : { kind: "face", bodyId: hit.bodyId, faceIndex: hit.faceIndex, pointMm: hit.pointMm };
-  }
-  if (filter === "auto" && hit.faceIndex !== null && hit.faceIndex >= 0) {
-    return { kind: "face", bodyId: hit.bodyId, faceIndex: hit.faceIndex, pointMm: hit.pointMm };
   }
   return { kind: "body", bodyId: hit.bodyId };
 }
@@ -161,7 +170,67 @@ export function chainsInBox(segments: readonly ProjectedSegment[], box: Selectio
 export function sameHoverTarget(left: HoverTarget | null, right: HoverTarget | null): boolean {
   if (left === null || right === null) return left === right;
   if (left.kind !== right.kind || left.bodyId !== right.bodyId) return false;
+  if (left.kind === "vertex" && right.kind === "vertex") return left.pointMm[0] === right.pointMm[0] && left.pointMm[1] === right.pointMm[1] && left.pointMm[2] === right.pointMm[2];
   if (left.kind === "face" && right.kind === "face") return left.faceIndex === right.faceIndex;
-  if (left.kind === "edge" && right.kind === "edge") return left.chain === right.chain;
+  if (left.kind === "edge" && right.kind === "edge") return left.chain === right.chain && left.tangent === right.tangent;
   return true;
+}
+
+/** Everything the screen-space classifier needs about one pointer position. */
+export interface PointerPickInput {
+  readonly pointer: ScreenPoint;
+  readonly camera: PickCamera;
+  readonly filter: HoverFilter;
+  /** The surface under the pointer, from a raycast (faces and bodies come from it). */
+  readonly hit: HoverRayHit | undefined;
+  /** All pickable edge segments of every body, flattened (see `flattenPickEdges`). */
+  readonly edges: readonly PickEdgeSegment[];
+  /** All corner vertices of every body. */
+  readonly vertices: readonly PickVertex[];
+  readonly tolerancePx: number;
+  readonly options?: PickOptions;
+}
+
+/** Flattens per-body candidates into the list the screen picker searches. */
+export function flattenPickEdges(candidates: ReadonlyMap<string, HoverCandidateBody>): readonly PickEdgeSegment[] {
+  const list: PickEdgeSegment[] = [];
+  for (const [bodyId, body] of candidates) for (const edge of body.edges) list.push({ bodyId, chain: edge.chain, a: edge.a, b: edge.b, ...(edge.concave === undefined ? {} : { concave: edge.concave }) });
+  return list;
+}
+
+/** The edge target for a screen candidate: the whole chain of that body's segments. */
+export function edgeTargetOf(candidate: EdgeCandidate, edges: readonly PickEdgeSegment[]): HoverTarget {
+  const segments = edges.filter((edge) => edge.bodyId === candidate.bodyId && edge.chain === candidate.chain).map((edge): PickSegmentMm => ({ a: edge.a, b: edge.b, chain: edge.chain, ...(edge.concave === undefined ? {} : { concave: edge.concave }) }));
+  return { kind: "edge", bodyId: candidate.bodyId, chain: candidate.chain, segments, distanceMm: 0, distancePx: candidate.distancePx, concave: segments[0]?.concave === true, chains: [candidate.chain] };
+}
+
+export function vertexTargetOf(candidate: VertexCandidate): HoverTarget {
+  return { kind: "vertex", bodyId: candidate.bodyId, pointMm: candidate.pointMm, distancePx: candidate.distancePx };
+}
+
+/** The stack of things a click at this position could pick with the Edge or Vertex intent, nearest first (empty for other intents). */
+export function stackAtPointer(input: PointerPickInput): { readonly keys: readonly string[]; readonly targets: readonly HoverTarget[] } {
+  if (input.filter === "edge") {
+    const found = pickEdgeCandidates(input.pointer, input.camera, input.edges, input.tolerancePx, input.options);
+    return { keys: found.map(edgeKey), targets: found.map((candidate) => edgeTargetOf(candidate, input.edges)) };
+  }
+  if (input.filter === "vertex") {
+    const found = pickVertexCandidates(input.pointer, input.camera, input.vertices, input.tolerancePx, input.options);
+    return { keys: found.map((candidate) => `${candidate.bodyId}@${candidate.pointMm.join(",")}`), targets: found.map(vertexTargetOf) };
+  }
+  return { keys: [], targets: [] };
+}
+
+/**
+ * What the pointer is over, by selection intent, measured on screen: the nearest visible edge or vertex within the pixel
+ * tolerance (whether or not a surface lies behind the cursor), else the face or body under the cursor from the raycast. Hover and
+ * click both call this (the click with the stack index chosen by repeated clicks), so what lights up is what a click picks.
+ */
+export function classifyPointer(input: PointerPickInput, stackIndex = 0): HoverTarget | null {
+  if (input.filter === "edge" || input.filter === "vertex") {
+    const { targets } = stackAtPointer(input);
+    if (targets.length === 0) return null;
+    return targets[((Math.floor(stackIndex) % targets.length) + targets.length) % targets.length] ?? null;
+  }
+  return classifyHover(input.hit, undefined, input.filter, 0);
 }

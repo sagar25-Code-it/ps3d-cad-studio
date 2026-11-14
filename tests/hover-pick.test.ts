@@ -47,12 +47,12 @@ export const hoverPickTests: readonly TestCase[] = [
     }
   },
   {
-    name: "Auto intent: the face lights up when the body has one under the cursor, otherwise the body; body intent always takes the body",
+    name: "Auto intent: the body lights up (a click in Auto selects the body, so a face tint was a promise the click broke); body intent always takes the body",
     run: () => {
       const auto = classifyHover({ bodyId: "general-body:a", pointMm: [30, 20, 10], faceIndex: 4 }, BODY, "auto", 2);
-      assert(auto !== null && auto.kind === "face", "auto pre-highlights the named face under the cursor");
+      assert(auto !== null && auto.kind === "body", "auto pre-highlights the body, which is what the click will select, even where a named face lies under the cursor");
       const noFaces = classifyHover({ bodyId: "general-body:b", pointMm: [1, 2, 3], faceIndex: null }, undefined, "auto", 2);
-      assert(noFaces !== null && noFaces.kind === "body", "auto falls back to the body when there is no named face");
+      assert(noFaces !== null && noFaces.kind === "body", "and the same when there is no named face");
       const body = classifyHover({ bodyId: "general-body:a", pointMm: [30, 0.1, 10], faceIndex: 4 }, BODY, "body", 2);
       assert(body !== null && body.kind === "body", "body intent picks the body even right on an edge");
       assert(classifyHover(undefined, BODY, "auto", 2) === null, "no hit, no hover");
