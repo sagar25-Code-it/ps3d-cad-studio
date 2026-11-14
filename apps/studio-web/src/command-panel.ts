@@ -182,6 +182,21 @@ export function panelWithError(state: CommandPanelState, error: string): Command
   return { ...state, error };
 }
 
+/**
+ * PT-14: Enter commits the panel from anywhere, exactly as its footer promises — after picking in the canvas too, when
+ * focus has left the panel and sits on the body or the canvas. Focus inside a field or button of the panel is handled by
+ * the panel's own key handler (which stops the event), another editable control keeps its own Enter, a modal dialog owns
+ * the keyboard, and a commit that is already running is not doubled.
+ */
+export function panelGlobalKeyCommits(key: string, options: {
+  readonly panelOpen: boolean;
+  readonly editableTarget: boolean;
+  readonly dialogOpen: boolean;
+  readonly busy: boolean;
+}): boolean {
+  return key === "Enter" && options.panelOpen && !options.editableTarget && !options.dialogOpen && !options.busy;
+}
+
 /** Adds or removes a picked edge chain. The first pick fixes the body; a pick on another body restarts the set. */
 export function panelToggleEdge(state: CommandPanelState, pick: PanelEdgeSet, bodyName: string): CommandPanelState {
   const { error: _drop, storedGroups: _stored, ...rest } = state;

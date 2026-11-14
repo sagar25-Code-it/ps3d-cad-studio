@@ -192,6 +192,7 @@ import { combineStepTests } from "./combine-step.test.js";
 import { ribbonHonestyTests } from "./ribbon-honesty.test.js";
 import { hoverPickTests } from "./hover-pick.test.js";
 import { commandPanelTests } from "./command-panel.test.js";
+import { panelEnterCommitTests } from "./panel-enter-commit.test.js";
 import { operationDefaultTests } from "./operation-default.test.js";
 import { featureBindingExtrasTests } from "./feature-binding-extras.test.js";
 import { ribbonPanelTests } from "./ribbon-panels.test.js";
@@ -410,6 +411,7 @@ const tests: readonly TestCase[] = [
   ...ribbonHonestyTests,
   ...hoverPickTests,
   ...commandPanelTests,
+  ...panelEnterCommitTests,
   ...operationDefaultTests,
   ...featureBindingExtrasTests,
   ...ribbonPanelTests,

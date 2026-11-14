@@ -111,7 +111,7 @@ import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./re
 import { blendSpecOf, facesOfBody } from "./edge-blend-step.js";
 import { blendAllFeature, centroidHoleFeature } from "./one-shot-steps.js";
 import { applyParameterValues } from "./feature-parameters.js";
-import { openCommandPanel, openCommandPanelForEdit, panelAddFace, panelClearSelection, panelDraft, panelEdgeGroups, panelSetHolePoint, panelTitle, panelToggleEdge, panelWithError, panelWithValue, type CommandPanelState, type PanelCommand, type PanelEdgeSet } from "./command-panel.js";
+import { openCommandPanel, openCommandPanelForEdit, panelAddFace, panelClearSelection, panelDraft, panelEdgeGroups, panelGlobalKeyCommits, panelSetHolePoint, panelTitle, panelToggleEdge, panelWithError, panelWithValue, type CommandPanelState, type PanelCommand, type PanelEdgeSet } from "./command-panel.js";
 import { CommandPanel } from "./ui/CommandPanel.js";
 import { explicitBody, matchingSketches, profilesByAnswer, sketchByAnswer } from "./explicit-pick.js";
 import { shouldRefit } from "./view-fit.js";
@@ -366,6 +366,10 @@ export function App(): React.JSX.Element {
   const [commandPanel, setCommandPanel] = useState<CommandPanelState | null>(null);
   const commandPanelRef = useRef<CommandPanelState | null>(null);
   commandPanelRef.current = commandPanel;
+  /** PT-14: the latest commit closure, for the window-level Enter listener (the panel's own handler covers focus inside it). */
+  const commitPanelRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const panelBusyRef = useRef(false);
+  panelBusyRef.current = status === "working";
   const [treeRevealRequest, setTreeRevealRequest] = useState(0);
   const [sketchOptionsRevealRequest, setSketchOptionsRevealRequest] = useState(0);
   const [undoDepth, setUndoDepth] = useState(0);
@@ -989,6 +993,23 @@ export function App(): React.JSX.Element {
       if (event.key !== "Escape" || pickRef.current === null) return;
       pickRef.current(null);
       setStatusText("Pick cancelled.");
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+  // PT-14: Enter commits the open command panel from anywhere — after picking in the canvas too, when focus has left the
+  // panel — exactly as the panel footer promises. Focus inside the panel is its own handler (which stops the event).
+  useEffect(() => {
+    const listener = (event: KeyboardEvent): void => {
+      const commits = panelGlobalKeyCommits(event.key, {
+        panelOpen: commandPanelRef.current !== null,
+        editableTarget: isEditableTarget(event.target),
+        dialogOpen: globalThis.document.querySelector('[role="dialog"]') !== null,
+        busy: panelBusyRef.current
+      });
+      if (!commits) return;
+      event.preventDefault();
+      void commitPanelRef.current();
     };
     window.addEventListener("keydown", listener);
     return () => window.removeEventListener("keydown", listener);
@@ -2074,6 +2095,8 @@ export function App(): React.JSX.Element {
       setStatusText(`Added ${feature.name} to ${body.name} as a timeline step; double-click it in the timeline to edit it, suppress it or roll back past it.`);
     }
   };
+
+  commitPanelRef.current = commitCommandPanel;
 
   /** Fillet or chamfer picked edges: opens the shared command panel (several edge runs go into one timeline step). */
   const handleEdgeTreatment = (modifier: "fillet" | "chamfer"): void => {
