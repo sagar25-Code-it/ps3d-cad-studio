@@ -19,7 +19,8 @@ export interface WorkbenchContextRequest {
   readonly selectionId: string | null;
   readonly selectionKind?: WorkbenchSelectionKind;
   /** For a timeline step: whether it is a sketch (opened with Edit Sketch) or a solid step. Absent for anything else. */
-  readonly featureKind?: "sketch" | "solid";
+  /** A construction plane, axis, point or primitive step is "reference": it has no sketch, so it gets the step commands without Edit Profile Sketch. */
+  readonly featureKind?: "sketch" | "solid" | "reference";
   /** For a timeline step: what its own commands (Suppress, Roll Marker Here, Edit Profile Sketch) depend on. */
   readonly featureState?: { readonly suppressed: boolean; readonly markerAfter: boolean; readonly hasSketch: boolean };
   readonly canUndo?: boolean;
@@ -117,6 +118,9 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
   // A solid step right-clicked on its browser row arrives as its body (that is what the row selects): the step's own Edit comes first.
   if (kind === "body" && request.featureKind === "solid") commands.push(command("feature.edit", "Edit Feature Parameters", "edit", "edit"));
 
+  // A construction plane, axis, point or primitive step opens its numbers in the Edit panel.
+  if (request.featureKind === "reference") commands.push(command("feature.edit", "Edit Feature Parameters", "edit", "edit"));
+
   // A timeline step right-clicked in the browser: its own history commands, whatever the row selects (a solid step selects its body).
   if (request.featureKind !== undefined) {
     const state = request.featureState;
@@ -136,7 +140,7 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
     const GENERAL_ONLY_REASON = "This command works on a solid built from a sketch (Extrude or Revolve).";
     // PT-18: on a sketch-built solid, the modelling commands a right-click means come first: edit its owning step,
     // then Fillet / Chamfer / Shell / Hole (the shared command panel) and the Booleans and patterns.
-    if (request.featureKind !== "solid") commands.push(command("feature.edit", "Edit Feature", "edit", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON));
+    if (request.featureKind !== "solid" && request.featureKind !== "reference") commands.push(command("feature.edit", "Edit Feature", "edit", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON));
     commands.push(
       command("sketch.create", "Create Sketch", "sketch", "create", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON),
       command("modify.fillet", "Fillet", "fillet", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON, false, "F"),

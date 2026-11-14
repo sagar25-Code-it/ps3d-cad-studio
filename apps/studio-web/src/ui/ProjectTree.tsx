@@ -6,6 +6,8 @@ import { analyzeWorkbenchSketch, detectSketchProfiles } from "../../../../packag
 import { friendlySketchText, sketchConstraintNames, sketchEntityNames, type WorkbenchSketch } from "../../../../packages/workbench-core/src/index.js";
 import { evaluateConstructionPlane, resolveBinder } from "../../../../packages/workbench-geometry/src/index.js";
 import { describeBinderKind } from "../construction-ui.js";
+import { adoptRowLabel, referenceRow } from "./reference-rows.js";
+import { TIMELINE_ICONS } from "./TimelineBar.js";
 import { relationsEmptyHelp } from "../sketch-help-text.js";
 import { timelineRowOpenId, timelineRowSelectionId } from "../sketch-plane-ui.js";
 import { useSketchKeymap } from "../workspaces/sketch/useSketchKeymap.js";
@@ -42,13 +44,15 @@ interface ProjectTreeProps {
   readonly onView?: (view: NamedViewId) => void;
   /** The eye on a row of the Sketches folder: show or hide that sketch's curves in the model (HS-24). */
   readonly onToggleSketch?: (feature: DesignSketchFeature, shown: boolean) => void;
+  /** Puts the construction planes, axes, points and primitives that predate the timeline into it (the row appears while there are some). Absent hides the row. */
+  readonly onAdoptLegacy?: () => void;
   /** Starts the inline rename of a row (a step ID or a body ID); a new `serial` is a new request. */
   readonly renameRequest?: { readonly id: string; readonly serial: number } | null;
 }
 
 type TreeKind = "project" | "health" | "datum" | "sketch" | "feature" | "body" | "component" | "mate" | "surface" | "drawing" | "electrical" | "vehicle" | "route" | "tool" | "history";
 
-export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep, revealSelectionRequest, designHealth, onSelect, onContextMenu, onOpenItem, onRenameStep, onRenameBody, onToggleBody, onToggleSketch, displayUnit, onUnit, onView, renameRequest }: ProjectTreeProps): React.JSX.Element {
+export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep, revealSelectionRequest, designHealth, onSelect, onContextMenu, onOpenItem, onRenameStep, onRenameBody, onToggleBody, onToggleSketch, onAdoptLegacy, displayUnit, onUnit, onView, renameRequest }: ProjectTreeProps): React.JSX.Element {
   const treeRef = useRef<HTMLElement>(null);
   const handledRevealRequest = useRef(0);
   /** The row being renamed inline (a step ID or a body ID). */
@@ -142,16 +146,24 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
       <TreeItem kind="datum" id="datum:xy" label="XY plane" meta="primary sketch plane" selectedId={selectedId} onSelect={onSelect} indent />
       <TreeItem kind="datum" id="datum:yz" label="YZ plane" meta="reference" selectedId={selectedId} onSelect={onSelect} indent />
       <TreeItem kind="datum" id="datum:xz" label="XZ plane" meta="reference" selectedId={selectedId} onSelect={onSelect} indent />
-      {(project.part.constructionAxes ?? []).map((axis) => <TreeItem key={axis.id} kind="datum" id={axis.id} label={axis.name} meta={`axis · ${axis.definition.kind.replaceAll("-", " ")}${axis.visible ? "" : " · hidden"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
+      {(project.part.constructionAxes ?? []).map((axis) => {
+        const row = referenceRow(history, axis.id);
+        return <TreeItem key={axis.id} kind="datum" id={axis.id} label={axis.name} meta={`axis · ${axis.definition.kind.replaceAll("-", " ")}${axis.visible ? "" : " · hidden"} · ${row.note}`} selectedId={selectedId} onSelect={onSelect} indent {...referenceRowProps(row, onOpenItem)} />;
+      })}
       {(project.part.construction ?? []).map((plane) => {
         const frame = evaluateConstructionPlane(plane, project.part.generalBodies ?? [], project.part.constructionAxes ?? [], project.part.constructionBinders ?? []);
-        return <TreeItem key={plane.id} kind="datum" id={plane.id} label={plane.name} meta={`plane · ${plane.definition.kind.replaceAll("-", " ")}${plane.visible ? "" : " · hidden"}${"error" in frame ? ` · broken: ${frame.error}` : ""}`} selectedId={selectedId} onSelect={onSelect} indent />;
+        const row = referenceRow(history, plane.id);
+        return <TreeItem key={plane.id} kind="datum" id={plane.id} label={plane.name} meta={`plane · ${plane.definition.kind.replaceAll("-", " ")}${plane.visible ? "" : " · hidden"} · ${row.note}${"error" in frame ? ` · broken: ${frame.error}` : ""}`} selectedId={selectedId} onSelect={onSelect} indent {...referenceRowProps(row, onOpenItem)} />;
       })}
       {(project.part.constructionBinders ?? []).map((binder) => {
         const resolved = resolveBinder(binder, project.part.generalBodies ?? []);
         return <TreeItem key={binder.id} kind="datum" id={binder.id} label={binder.name} meta={`${describeBinderKind(binder)}${binder.visible ? "" : " · hidden"} · ${"error" in resolved ? `lost: ${resolved.error}` : "resolved"}`} selectedId={selectedId} onSelect={onSelect} indent />;
       })}
-      {(project.part.constructionPoints ?? []).map((point) => <TreeItem key={point.id} kind="datum" id={point.id} label={point.name} meta={`point · ${point.definition.kind.replaceAll("-", " ")}${point.visible ? "" : " · hidden"}`} selectedId={selectedId} onSelect={onSelect} indent />)}
+      {(project.part.constructionPoints ?? []).map((point) => {
+        const row = referenceRow(history, point.id);
+        return <TreeItem key={point.id} kind="datum" id={point.id} label={point.name} meta={`point · ${point.definition.kind.replaceAll("-", " ")}${point.visible ? "" : " · hidden"} · ${row.note}`} selectedId={selectedId} onSelect={onSelect} indent {...referenceRowProps(row, onOpenItem)} />;
+      })}
+      {onAdoptLegacy !== undefined && adoptRowLabel(project) !== undefined && <button type="button" className="tree-item tree-adopt-row" title="Older planes, axes, points and primitives are shown as they are but are not steps of the timeline, so rolling back, suppressing and editing do not reach them. This adds them to the timeline in the order they are listed, without changing any geometry." onClick={onAdoptLegacy}><span className="tree-glyph datum" aria-hidden="true"><CommandIcon name="plane" /></span><span><strong>{adoptRowLabel(project)}</strong><small>keeps every shape as it is</small></span></button>}
     </TreeSection>}
     {showSketch && <TreeSection title={`Sketches · ${timelineSketches.length + (workingSketchListed ? 1 : 0)}`} badge="preview">
       {timelineSketches.map((feature) => {
@@ -190,7 +202,7 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
         return <TreeItem
           key={feature.id}
           kind={feature.kind === "sketch" ? "sketch" : "feature"}
-          icon={feature.kind}
+          icon={TIMELINE_ICONS[feature.kind] ?? feature.kind}
           id={timelineRowSelectionId(feature)}
           featureId={timelineRowOpenId(feature)}
           label={feature.name}
@@ -214,7 +226,7 @@ export function ProjectTree({ project, selectedId, selectedStepId, onSelectStep,
     </TreeSection>}
     {showBodies && <TreeSection title="Bodies" badge={project.activeWorkspace === "part" ? "qualified" : "preview"}>
       {hasPlate && <TreeItem kind="body" id="body:bracket" label="Mounting plate" meta="closed manifold mesh" selectedId={selectedId} onSelect={onSelect} />}
-      {(project.part.previewBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.shape} · ${body.visible ? "shown" : "hidden"} · preview`} selectedId={selectedId} onSelect={onSelect} indent {...(onToggleBody === undefined ? {} : { eye: { shown: body.visible, onToggle: () => onToggleBody(body.id, "preview") } })} />)}
+      {(project.part.previewBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} meta={`${body.shape} · ${body.visible ? "shown" : "hidden"} · ${referenceRow(history, body.id).note === "not in the timeline" ? "preview · not in the timeline" : "preview · in the timeline"}`} selectedId={selectedId} onSelect={onSelect} indent {...referenceRowProps(referenceRow(history, body.id), onOpenItem)} {...(onToggleBody === undefined ? {} : { eye: { shown: body.visible, onToggle: () => onToggleBody(body.id, "preview") } })} />)}
       {(project.part.generalBodies ?? []).map((body) => <TreeItem key={body.id} kind="body" id={body.id} label={body.name} {...(failures.has(body.id) ? { failed: true } : {})} {...(onToggleBody === undefined ? {} : { eye: { shown: body.visible, onToggle: () => onToggleBody(body.id, "general") } })} {...renameFor(body.id, onRenameBody === undefined ? undefined : (name) => onRenameBody(body.id, name))} meta={`${body.feature?.operation === "surface" ? "surface" : body.subd !== undefined ? "SubD form" : `${body.feature?.operation ?? "mesh"} solid`} · ${body.visible ? "shown" : "hidden"} · ${body.brep !== undefined ? `${body.brep.topology.faces} faces · ${body.brep.origin === "mesh-boolean" ? "Boolean mesh" : "B-rep"}` : `${body.positionsMm.length / 3} verts`}${failures.has(body.id) ? ` · ${describeBodyFailure(failures.get(body.id)!)}` : ""}`} selectedId={selectedId} onSelect={onSelect} indent />)}
       <TreeItem kind="surface" id={project.surface.id} label={project.surface.name} meta={`${project.surface.mode} · open surface preview`} selectedId={selectedId} onSelect={onSelect} />
     </TreeSection>}
@@ -475,4 +487,12 @@ function selectionRelationships(project: WorkbenchProject, selectedId: string | 
     return related === undefined ? [] : [{ role: "Component", id: related.id, label: related.name, meta: related.grounded ? "grounded" : related.shape, kind: "component" as const }];
   });
   return [];
+}
+
+/** The props that make a construction row open its timeline step on a double-click and draw it as failed when the step could not be rebuilt. */
+function referenceRowProps(row: ReturnType<typeof referenceRow>, onOpenItem: ((id: string) => void) | undefined): { readonly featureId?: string; readonly onOpen?: (id: string) => void; readonly openHint?: string; readonly failed?: boolean } {
+  return {
+    ...(row.featureId === undefined || onOpenItem === undefined ? {} : { featureId: row.featureId, onOpen: onOpenItem, openHint: "Double-click to edit this step" }),
+    ...(row.failed ? { failed: true } : {})
+  };
 }

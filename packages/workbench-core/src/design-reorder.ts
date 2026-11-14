@@ -1,4 +1,5 @@
 import { baseFeatureOf, designOf, modifiesBody, withHistory, type DesignChange } from "./design.js";
+import { isReferenceFeature, referenceNeeds } from "./reference-feature.js";
 import type { DesignFeature, DesignHistory, WorkbenchProject } from "./types.js";
 
 /**
@@ -40,6 +41,9 @@ export function stepNeeds(history: DesignHistory, feature: DesignFeature): reado
     return base === undefined || base.id === feature.id ? undefined : base.id;
   };
   const position = history.features.findIndex((candidate) => candidate.id === feature.id);
+  // A sketch placed on a construction plane, a plane, axis or point built on others, and a pattern about a construction axis or plane.
+  for (const need of referenceNeeds(history, feature, (bodyId) => baseFeatureOf(history, bodyId))) add(need.id, need.verb);
+  if (isReferenceFeature(feature)) return needs;
   if (feature.kind === "sketch") {
     const face = feature.sketch.planeFace;
     // A sketch on a face lies on the body as it was when the sketch was drawn: every step of that body before it made the face.

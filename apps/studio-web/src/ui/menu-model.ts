@@ -1,4 +1,4 @@
-import type { PartPreviewBodyShape, WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
+import type { DesignFeature, PartPreviewBodyShape, WorkspaceId } from "../../../../packages/workbench-core/src/index.js";
 
 /**
  * The application menubar, built as data so tests can hold it against the project state. Every item is a real,
@@ -41,7 +41,7 @@ export interface WorkbenchMenuState {
   /** A general solid body (built from a sketch extrude or revolve) is selected. */
   readonly generalBodySelected: boolean;
   /** The timeline feature the current selection resolves to, if any. */
-  readonly selectedFeature?: { readonly name: string; readonly suppressed: boolean; readonly kind: "sketch" | "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "combine" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "pattern" | "edge-blend" | "offset-region" | "replace-face" | "web" | "wrap" | "flex" | "sheet-jog" | "sheet-lofted-bend" };
+  readonly selectedFeature?: { readonly name: string; readonly suppressed: boolean; readonly kind: DesignFeature["kind"] };
   /** Something deletable is selected: a timeline feature, a solid body, or a preview body. */
   readonly selectionDeletable: boolean;
   /** Solid bodies the Part analyses can look at (general solids and analytic bodies); defaults to the general solid count. */

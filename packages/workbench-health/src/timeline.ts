@@ -1,4 +1,4 @@
-import { designOf, isHealthNote, type DesignFeature, type WorkbenchProject } from "../../workbench-core/src/index.js";
+import { designOf, isHealthNote, isReferenceFeature, type DesignFeature, type WorkbenchProject } from "../../workbench-core/src/index.js";
 
 /**
  * What the design timeline says about the health of a project: steps whose last rebuild failed, steps that point at a sketch or a solid
@@ -30,7 +30,7 @@ export function timelineMetrics(project: WorkbenchProject): TimelineMetrics {
   return {
     timelineSteps: features.length,
     timelineSketches: features.filter((feature) => feature.kind === "sketch").length,
-    timelineSolids: features.filter((feature) => feature.kind !== "sketch").length,
+    timelineSolids: features.filter((feature) => feature.kind !== "sketch" && !isReferenceFeature(feature)).length,
     timelineFailedSteps: features.filter((feature) => feature.health !== undefined && !isHealthNote(feature.health.message)).length
   };
 }
@@ -52,12 +52,14 @@ export function timelineFindings(project: WorkbenchProject): readonly TimelineFi
         message: feature.health.message,
         recovery: feature.kind === "sketch"
           ? `Reopen the sketch with edit-design-sketch (featureId ${feature.id}), repair it and commit it again.`
-          : `Reopen its sketch (${feature.sketchFeatureId}) with edit-design-sketch and repair what the step refers to, or change the step with update-design-solid; then run regenerate-design.`,
-        relatedIds: feature.kind === "sketch" ? [feature.id] : [feature.id, feature.sketchFeatureId],
+          : isReferenceFeature(feature)
+            ? `Change the step with update-design-reference (it is a construction plane, axis, point or primitive) so what it refers to exists.`
+            : `Reopen its sketch (${feature.sketchFeatureId}) with edit-design-sketch and repair what the step refers to, or change the step with update-design-solid; then run regenerate-design.`,
+        relatedIds: feature.kind === "sketch" || isReferenceFeature(feature) ? [feature.id] : [feature.id, feature.sketchFeatureId],
         evidence: `${KIND_LABEL(feature)} step ${feature.id}`
       });
     }
-    if (feature.kind !== "sketch") {
+    if (feature.kind !== "sketch" && !isReferenceFeature(feature)) {
       if (!sketchIds.has(feature.sketchFeatureId)) {
         findings.push({ id: `health:timeline-orphan:${feature.id}`, workspace: "part", severity: "error", title: `${feature.name} has lost its sketch`, message: `The ${feature.kind} step ${feature.id} is built on ${feature.sketchFeatureId}, which is no longer in the timeline.`, recovery: "Restore the sketch (undo) or delete the step.", relatedIds: [feature.id, feature.sketchFeatureId], evidence: `${feature.kind} step ${feature.id}` });
       }

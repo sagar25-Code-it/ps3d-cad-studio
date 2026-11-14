@@ -27,9 +27,9 @@ function rectProfile(): SketchProfile {
 
 export const bigPushTests: readonly TestCase[] = [
   {
-    name: "WORKBENCH_OPERATION_KINDS now includes the four UCS operations and the dimension label placement (count 113, with rename-general-body, move-design-feature and set-design-sketch-visibility)",
+    name: "WORKBENCH_OPERATION_KINDS now includes the four UCS operations and the dimension label placement (count 116, with rename-general-body, move-design-feature, set-design-sketch-visibility and the three construction-step operations)",
     run: () => {
-      assert(WORKBENCH_OPERATION_KINDS.length === 113, `expected 113, got ${WORKBENCH_OPERATION_KINDS.length}`);
+      assert(WORKBENCH_OPERATION_KINDS.length === 116, `expected 116, got ${WORKBENCH_OPERATION_KINDS.length}`);
       for (const op of ["add-construction-ucs", "delete-construction-ucs", "toggle-construction-ucs-visibility", "rename-construction-ucs"]) {
         assert((WORKBENCH_OPERATION_KINDS as readonly string[]).includes(op), `missing ${op}`);
       }

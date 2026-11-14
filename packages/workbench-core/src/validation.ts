@@ -43,6 +43,7 @@ import { validSubdCageData } from "./subd-cage.js";
 import { validSketchObjectFields } from "./sketch-objects.js";
 import { createElectricalTemplate } from "./templates.js";
 import { validateDesignHistory } from "./design.js";
+import { referenceConsistencyProblem } from "./reference-feature.js";
 import { MAX_EXPRESSION_LENGTH, parseExpression } from "./expressions.js";
 import {
   ELECTROMECHANICAL_CATALOG,
@@ -134,6 +135,9 @@ export function validateWorkbenchProject(rawInput: unknown, options?: { readonly
   if (Object.hasOwn(input, "design") && !validateDesignHistory(input.design, (candidate) => validateSketch(candidate).ok)) {
     return invalid("The design timeline is invalid: a feature, a sketch snapshot, a reference or the rollback marker is wrong.");
   }
+  // A construction plane, axis, point or primitive step and the item of the part it describes must agree.
+  const referenceProblem = Object.hasOwn(input, "design") ? referenceConsistencyProblem(input as unknown as WorkbenchProject) : undefined;
+  if (referenceProblem !== undefined) return invalid(`The design timeline is invalid: ${referenceProblem}`);
   if (options?.share === true) return { ok: true, value: { ...(input as unknown as WorkbenchProject), assembly: normalizedAssembly, electrical: electrical.value, vehicle: vehicle.value } };
   return { ok: true, value: { ...(structuredClone(input) as unknown as WorkbenchProject), assembly: structuredClone(normalizedAssembly), electrical: structuredClone(electrical.value), vehicle: structuredClone(vehicle.value) } };
 }
@@ -265,9 +269,11 @@ function validateSketch(value: unknown): WorkbenchResult<WorkbenchSketch> {
   const optionalFace = isRecord(value) && Object.hasOwn(value, "planeFace") ? ["planeFace"] : [];
   const optionalObjects = isRecord(value) ? ["texts", "patterns", "underlay", "projections"].filter((key) => Object.hasOwn(value, key)) : [];
   const optionalConvention = isRecord(value) && Object.hasOwn(value, "planeConvention") ? ["planeConvention"] : [];
-  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame, ...optionalFace, ...optionalObjects, ...optionalConvention])
+  const optionalRef = isRecord(value) && Object.hasOwn(value, "planeRef") ? ["planeRef"] : [];
+  if (!isRecord(value) || !exactKeys(value, ["id", "name", "plane", "gridMm", "snapToleranceMm", "entities", "constraints", ...optionalOffset, ...optionalTilt, ...optionalFrame, ...optionalFace, ...optionalObjects, ...optionalConvention, ...optionalRef])
     || (optionalConvention.length > 0 && (value.planeConvention !== "z-up" || value.plane !== "datum:yz"))
     || (optionalFace.length > 0 && (!validSketchPlaneFace(value.planeFace) || optionalTilt.length > 0 || optionalFrame.length > 0))
+    || (optionalRef.length > 0 && (!stableId(value.planeRef) || optionalFrame.length === 0))
     || (optionalTilt.length > 0 && !validSketchPlaneTilt(value.planeTilt))
     || (optionalFrame.length > 0 && (!validSketchPlaneFrame(value.planeFrame) || value.plane !== "datum:xy" || optionalOffset.length > 0 || optionalTilt.length > 0))
     || value.id !== "sketch:primary-profile" || !(SKETCH_DATUM_PLANES as readonly unknown[]).includes(value.plane) || !shortText(value.name, 1, 120)

@@ -1,6 +1,7 @@
 import type { DesignSolidFeature, WorkbenchProject } from "../../../packages/workbench-core/src/index.js";
-import { bindFeatureExpressions, designOf, edgeBlendTitle, findBindableField, validSolidFeaturePayload } from "../../../packages/workbench-core/src/index.js";
+import { bindFeatureExpressions, designOf, edgeBlendTitle, findBindableField, isReferenceKind, validSolidFeaturePayload } from "../../../packages/workbench-core/src/index.js";
 import { bodyEditFields, bodyEditName } from "./body-edit-parameters.js";
+import { referenceParameterFields } from "./reference-parameters.js";
 
 /**
  * The editable parameters of every solid step in the timeline. The edit dialog renders `parameterFieldsOf(feature)` and
@@ -73,6 +74,7 @@ function holeThreadFields(feature: DesignSolidFeature): readonly ParameterField[
 
 /** The fields to show for a step, or undefined when the step has none (extrude and revolve use their own dialog; an indent has no number to edit). */
 export function parameterFieldsOf(feature: DesignSolidFeature): readonly ParameterField[] | undefined {
+  if (isReferenceKind(feature.kind)) return referenceParameterFields(feature);
   if (feature.bodyEdit !== undefined) return bodyEditFields(feature);
   switch (feature.kind) {
     case "sweep": return [

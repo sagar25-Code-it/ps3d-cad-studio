@@ -1,4 +1,4 @@
-import { designOf, isHealthNote, type DesignFeature, type WorkbenchProject } from "../../workbench-core/src/index.js";
+import { describeReference, designOf, isHealthNote, isReferenceFeature, type DesignFeature, type WorkbenchProject } from "../../workbench-core/src/index.js";
 
 const MAX_LISTED = 200;
 
@@ -16,6 +16,7 @@ export function timelineSummary(project: WorkbenchProject): Readonly<Record<stri
     if (feature.kind === "sketch") {
       return { ...base, plane: feature.sketch.plane, ...(feature.sketch.planeOffsetMm === undefined ? {} : { offsetMm: feature.sketch.planeOffsetMm }), entities: feature.sketch.entities.length, constraints: feature.sketch.constraints.length, ...health };
     }
+    if (isReferenceFeature(feature)) return { ...base, itemId: feature.bodyId, definition: describeReference(feature.reference), ...health };
     return { ...base, sketchFeatureId: feature.sketchFeatureId, valueMm: feature.valueMm, bodyId: feature.bodyId, ...(feature.operation === undefined ? {} : { operation: feature.operation }), ...health };
   };
   return {

@@ -1,5 +1,6 @@
 import { MAX_EXPRESSION_LENGTH, parseExpression } from "./expressions.js";
 import type { DesignSolidFeature, HolePlacement } from "./types.js";
+import { REFERENCE_FIELDS } from "./reference-fields.js";
 
 /**
  * The numbers of a timeline step that an expression can drive. Each one has an id (the key in `feature.expressions` and the part
@@ -69,6 +70,7 @@ function placementDistance(id: string, label: string, index: 0 | 1): BindableFie
 const floorValue = (value: number): number => Math.max(0.01, Math.abs(value));
 
 const FIELDS: Partial<Record<DesignSolidFeature["kind"], readonly BindableField[]>> = {
+  ...REFERENCE_FIELDS,
   extrude: [size("distance", "Distance", "length", { ...positive, max: 100_000 })],
   revolve: [size("angle", "Angle", "angle", { ...positive, max: 360 })],
   sweep: [

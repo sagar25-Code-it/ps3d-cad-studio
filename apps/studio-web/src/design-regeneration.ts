@@ -1,5 +1,5 @@
 import type { DesignFeature, DesignSketchFeature, DesignSolidFeature, GeneralSolidBody, SketchDatumPlane, SketchEntity, WorkbenchProject, WorkbenchSketch } from "../../../packages/workbench-core/src/index.js";
-import { usesZUpPlane } from "../../../packages/workbench-core/src/index.js";
+import { isReferenceKind, usesZUpPlane } from "../../../packages/workbench-core/src/index.js";
 import { baseFeatureOf, dependentsOf, designOf, HEALTH_NOTE_PREFIX, isHealthNote, isBodyEditFeature, isDirectEditFeature, isFeatureActive, modifiesBody, planeWorldCoordinate, splitPieceId, splitPieceName } from "../../../packages/workbench-core/src/index.js";
 import { detectSketchProfiles, lostProfileRefs, profileOutlineMm, resolveProfileRegion, sampleArc, sampleArcToBound, sampleSpline, sampleSplineToBound } from "../../../packages/workbench-sketch/src/index.js";
 import { attachEdgeFlange, attachMiterFlange, booleanMeshes, cutReliefNotch, developBend, flangeReliefs, holeCutter, jogSheetMesh, reliefCorners, snapToAxis, splitMeshPieces, threadBoreWall, isPlaced, placeDirection, placePositions, flatPatternOf, flatPatternOfPlate, layoutOfFlatPattern, sheetFrameOf, type BendRecord, type BentStripSpec, type FlatLayout, type HoleSpec } from "../../../packages/workbench-geometry/src/index.js";
@@ -77,6 +77,7 @@ export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFea
   if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "combine" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "pattern" || feature.kind === "edge-blend" || feature.kind === "offset-region" || feature.kind === "replace-face" || feature.kind === "web" || feature.kind === "wrap" || feature.kind === "flex" || feature.kind === "sheet-jog" || feature.bodyEdit !== undefined) {
     return { ok: false, message: "A direct-edit / indent step is applied during timeline replay, not through the sketch-driven builder." };
   }
+  if (isReferenceKind(feature.kind)) return { ok: false, message: "A construction plane, axis, point or primitive step has no sketch to build a solid from; its item is derived from the step itself." };
   const sketch = sketchFeature.sketch;
   const profiles = detectSketchProfiles(sketch);
   const lost = lostProfileRefs(profiles, feature.profileIds);
@@ -529,7 +530,7 @@ function renumberedPiece(piece: GeneralSolidBody, bodyId: string, name: string, 
 /** Replays every body of the timeline. */
 export async function replayAllBodies(project: WorkbenchProject): Promise<readonly RebuildResult[]> {
   const history = designOf(project);
-  const bodyIds = [...new Set(history.features.filter((feature): feature is DesignSolidFeature => feature.kind !== "sketch").map((feature) => feature.bodyId))];
+  const bodyIds = [...new Set(history.features.filter((feature): feature is DesignSolidFeature => feature.kind !== "sketch" && !isReferenceKind(feature.kind)).map((feature) => feature.bodyId))];
   return replayBodies(project, bodyIds);
 }
 
@@ -616,7 +617,7 @@ export async function rebuildDependentsOfAll(project: WorkbenchProject, featureI
       grew = true;
     }
   }
-  const order = [...new Set(history.features.filter((feature): feature is DesignSolidFeature => feature.kind !== "sketch").map((feature) => feature.bodyId))].filter((bodyId) => affected.has(bodyId));
+  const order = [...new Set(history.features.filter((feature): feature is DesignSolidFeature => feature.kind !== "sketch" && !isReferenceKind(feature.kind)).map((feature) => feature.bodyId))].filter((bodyId) => affected.has(bodyId));
   return replayBodies(project, order);
 }
 

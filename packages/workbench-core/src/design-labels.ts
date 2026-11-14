@@ -3,6 +3,7 @@ import { isFeatureActive, modifiesBody } from "./design.js";
 import { describePattern } from "./pattern.js";
 import { edgeBlendSummary } from "./edge-blend.js";
 import { planeWorldCoordinate } from "./planar-faces.js";
+import { describeReference, isReferenceFeature } from "./reference-feature.js";
 import type { DesignFeature, DesignHistory, DesignSolidFeature } from "./types.js";
 
 /** How a timeline step stands right now, in the order that decides what the user sees first. */
@@ -57,6 +58,7 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
     if (feature.sketch.planeFrame !== undefined) return `Plane through 3 points · ${curves} ${curves === 1 ? "curve" : "curves"}`;
     return `${sketchPlaneName(feature.sketch.plane)} plane${offset}${tilt} · ${curves} ${curves === 1 ? "curve" : "curves"}`;
   }
+  if (isReferenceFeature(feature)) return describeReference(feature.reference);
   if (feature.kind === "pattern" && feature.pattern !== undefined) {
     const pattern = feature.pattern;
     const repeated = (pattern.featureIds ?? []).map((id) => history.features.find((candidate) => candidate.id === id)?.name ?? "a deleted step");
@@ -117,7 +119,7 @@ const STATUS_TEXT: Readonly<Record<DesignFeatureStatus, string>> = {
   error: "needs attention",
   suppressed: "suppressed",
   "rolled-back": "rolled back",
-  inactive: "off (its sketch is suppressed)",
+  inactive: "off (something it is built on is suppressed)",
   active: ""
 };
 
