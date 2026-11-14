@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { DesignFeature, DesignHistory } from "../../../../packages/workbench-core/src/index.js";
-import { isFeatureActive, isHealthNote } from "../../../../packages/workbench-core/src/index.js";
+import { isFeatureActive, isHealthNote, reorderProblem } from "../../../../packages/workbench-core/src/index.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { nearestSlot, placeMenu, type MenuPlacement } from "./menu-placement.js";
+import { dragHasStarted, dropIndexFor, edgeScroll, keyboardMoveTarget } from "./timeline-drag.js";
 
 interface TimelineBarProps {
   readonly history: DesignHistory;
@@ -17,6 +18,8 @@ interface TimelineBarProps {
   readonly onRename: (feature: DesignFeature, name: string) => void;
   /** Find in browser: select the step's row in the model browser and bring it into view. */
   readonly onReveal?: (feature: DesignFeature) => void;
+  /** Move a step to another place (its final index). The step is refused with a reason when the move would put it before what it is built on. */
+  readonly onMove?: (feature: DesignFeature, toIndex: number) => void;
 }
 
 const ICONS: Readonly<Record<DesignFeature["kind"], string>> = { sketch: "sketch", extrude: "extrude", revolve: "revolve", sweep: "extrude", loft: "extrude", "edge-fillet": "fillet", "edge-chamfer": "chamfer", shell: "shell", draft: "draft", "move-body": "move", "scale-body": "scale", "move-face": "move", "offset-face": "scale", helix: "revolve", thread: "revolve", rib: "extrude", dome: "extrude", emboss: "move", indent: "chamfer", combine: "unite", "sheet-base": "extrude", "sheet-flange": "extrude", "sheet-hem": "extrude", "sheet-edge-flange": "extrude", hole: "bore", pattern: "pattern", "edge-blend": "fillet", "offset-region": "offset-face", "replace-face": "replace-face", web: "extrude", wrap: "move", flex: "move", "sheet-jog": "extrude", "sheet-lofted-bend": "extrude" };
@@ -38,6 +41,11 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
   const [placement, setPlacement] = useState<MenuPlacement | undefined>(undefined);
   /** The slot the rollback marker would land in while it is being dragged. */
   const [drag, setDrag] = useState<{ readonly slot: number } | undefined>(undefined);
+  /** A step being dragged along the strip: where it would land, and the reason that place is closed (when it is). */
+  const [chipDrag, setChipDrag] = useState<{ readonly id: string; readonly toIndex: number; readonly refusal: string | undefined } | undefined>(undefined);
+  /** A press on a step that may become a drag; it becomes one once the pointer has moved a few pixels. */
+  const [press, setPress] = useState<{ readonly id: string; readonly x: number } | undefined>(undefined);
+  const suppressClick = useRef(false);
   const features = history.features;
   // The status bar changes height with the responsive layout, so the strip sits on top of wherever it actually is.
   const [bottom, setBottom] = useState(34);
@@ -87,6 +95,52 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
     window.addEventListener("keydown", cancel, true);
     return () => window.removeEventListener("keydown", cancel, true);
   }, [drag === undefined]);
+
+  // Dragging a step: the strip scrolls under the pointer near its ends, the place the step would land in is shown on the strip itself, and the
+  // move is made once, on release. A place the dependency rule closes is drawn as closed, and the reason is shown when it is let go there.
+  useEffect(() => {
+    if (press === undefined) return undefined;
+    let started = false;
+    const centersWithout = (id: string): readonly number[] => [...(trackRef.current?.querySelectorAll<HTMLElement>("[data-chip-id]") ?? [])]
+      .filter((element) => element.dataset["chipId"] !== id)
+      .map((element) => { const box = element.getBoundingClientRect(); return box.left + box.width / 2; });
+    const landing = (x: number): { readonly toIndex: number; readonly refusal: string | undefined } => {
+      const toIndex = dropIndexFor(centersWithout(press.id), x);
+      const from = history.features.findIndex((feature) => feature.id === press.id);
+      return { toIndex, refusal: toIndex === from ? undefined : reorderProblem(history, press.id, toIndex)?.message };
+    };
+    const move = (event: PointerEvent): void => {
+      if (!started && !dragHasStarted(event.clientX - press.x)) return;
+      started = true;
+      const track = trackRef.current;
+      if (track !== null) { const box = track.getBoundingClientRect(); track.scrollLeft += edgeScroll(box.left, box.right, event.clientX); }
+      setChipDrag({ id: press.id, ...landing(event.clientX) });
+    };
+    const finish = (event: PointerEvent): void => {
+      const wasDrag = started;
+      setPress(undefined);
+      setChipDrag(undefined);
+      if (!wasDrag) return;
+      // The click that follows a release over the same step must not select or open it.
+      suppressClick.current = true;
+      window.setTimeout(() => { suppressClick.current = false; }, 0);
+      const feature = history.features.find((candidate) => candidate.id === press.id);
+      const { toIndex } = landing(event.clientX);
+      if (feature !== undefined && toIndex !== history.features.indexOf(feature)) props.onMove?.(feature, toIndex);
+    };
+    const cancelKey = (event: KeyboardEvent): void => { if (event.key === "Escape") { setPress(undefined); setChipDrag(undefined); } };
+    const cancelPointer = (): void => { setPress(undefined); setChipDrag(undefined); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", cancelPointer);
+    window.addEventListener("keydown", cancelKey, true);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", cancelPointer);
+      window.removeEventListener("keydown", cancelKey, true);
+    };
+  }, [press?.id, press?.x, history]);
 
   const marker = (index: number): React.JSX.Element => {
     const current = history.rollbackIndex === index;
@@ -151,8 +205,15 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
             const active = isFeatureActive(history, feature.id);
             const selected = props.selectedFeatureId === feature.id;
             const rolledBack = index >= history.rollbackIndex;
-            const classes = ["timeline-chip", selected ? "selected" : "", feature.suppressed ? "suppressed" : "", rolledBack ? "rolled-back" : "", feature.health !== undefined ? (isHealthNote(feature.health.message) ? "note" : "error") : "", !active && !rolledBack && !feature.suppressed ? "inactive" : ""].filter(Boolean).join(" ");
-            return <span key={feature.id} className="timeline-slot" role="listitem">
+            const dragged = chipDrag?.id === feature.id;
+            const classes = ["timeline-chip", selected ? "selected" : "", dragged ? "dragging" : "", feature.suppressed ? "suppressed" : "", rolledBack ? "rolled-back" : "", feature.health !== undefined ? (isHealthNote(feature.health.message) ? "note" : "error") : "", !active && !rolledBack && !feature.suppressed ? "inactive" : ""].filter(Boolean).join(" ");
+            // While a step is dragged, the slot it would land in shows a bar before it (or after the last one); a closed place shows it in red.
+            const others = chipDrag === undefined ? [] : features.filter((candidate) => candidate.id !== chipDrag.id);
+            const landsBefore = chipDrag !== undefined && !dragged && others[chipDrag.toIndex]?.id === feature.id;
+            const landsAfter = chipDrag !== undefined && !dragged && chipDrag.toIndex >= others.length && others[others.length - 1]?.id === feature.id;
+            const closed = (landsBefore || landsAfter) && chipDrag?.refusal !== undefined;
+            const slotClasses = ["timeline-slot", landsBefore ? "land-before" : "", landsAfter ? "land-after" : "", closed ? "closed" : ""].filter(Boolean).join(" ");
+            return <span key={feature.id} className={slotClasses} role="listitem" {...(closed && chipDrag?.refusal !== undefined ? { title: chipDrag.refusal } : {})}>
               {marker(index)}
               {renaming === feature.id
                 ? <input
@@ -170,9 +231,12 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
                 : <button
                   className={classes}
                   disabled={props.busy}
-                  title={`${feature.name}${feature.suppressed ? " (suppressed)" : ""}${rolledBack ? " (rolled back)" : ""}${feature.health === undefined ? "" : ` - ${feature.health.message}`}\nDouble-click to edit, right-click for more.`}
+                  title={`${feature.name}${feature.suppressed ? " (suppressed)" : ""}${rolledBack ? " (rolled back)" : ""}${feature.health === undefined ? "" : ` - ${feature.health.message}`}\nDouble-click to edit, drag to move, right-click for more.`}
+                  data-chip-id={feature.id}
                   aria-label={`${feature.name}${feature.health === undefined ? "" : `, ${isHealthNote(feature.health.message) ? "" : "needs attention: "}${feature.health.message}`}`}
                   aria-pressed={selected}
+                  onPointerDown={(event) => { if (event.button === 0 && event.pointerType !== "touch" && props.onMove !== undefined) setPress({ id: feature.id, x: event.clientX }); }}
+                  onClickCapture={(event) => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); } }}
                   onClick={() => props.onSelect(feature)}
                   onDoubleClick={() => props.onEdit(feature)}
                   onContextMenu={(event) => { event.preventDefault(); setMenu({ feature, x: event.clientX, y: event.clientY }); }}
@@ -180,6 +244,11 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
                     if (event.key === "F2") { event.preventDefault(); setDraft(feature.name); setRenaming(feature.id); }
                     else if (event.key === "Delete") { event.preventDefault(); props.onDelete(feature); }
                     else if (event.key === "Enter" && event.shiftKey) { event.preventDefault(); props.onEdit(feature); }
+                    else if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight") && props.onMove !== undefined) {
+                      event.preventDefault();
+                      const to = keyboardMoveTarget(index, features.length, event.key === "ArrowLeft" ? "left" : "right");
+                      if (to !== undefined) props.onMove(feature, to);
+                    }
                   }}
                 >
                   <CommandIcon name={ICONS[feature.kind]} />
@@ -203,6 +272,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
       onRollback={props.onRollback}
       onDelete={props.onDelete}
       {...(props.onReveal === undefined ? {} : { onReveal: props.onReveal })}
+      {...(props.onMove === undefined ? {} : { onMove: props.onMove })}
     />}
   </section>;
 }
@@ -219,10 +289,11 @@ interface TimelineMenuProps {
   readonly onRollback: (index: number) => void;
   readonly onDelete: (feature: DesignFeature) => void;
   readonly onReveal?: (feature: DesignFeature) => void;
+  readonly onMove?: (feature: DesignFeature, toIndex: number) => void;
 }
 
 /** The right-click menu of a step. It is fixed to the window and kept inside it; its list scrolls when the window is short. */
-export function TimelineMenu({ menuRef, feature, history, placement, onClose, onEdit, onSuppress, onRename, onRollback, onDelete, onReveal }: TimelineMenuProps): React.JSX.Element {
+export function TimelineMenu({ menuRef, feature, history, placement, onClose, onEdit, onSuppress, onRename, onRollback, onDelete, onReveal, onMove }: TimelineMenuProps): React.JSX.Element {
   const index = history.features.findIndex((candidate) => candidate.id === feature.id);
   const profileSketch = feature.kind === "sketch" ? undefined : history.features.find((candidate) => candidate.id === feature.sketchFeatureId && candidate.kind === "sketch");
   const markerHere = history.rollbackIndex === index + 1;
@@ -247,6 +318,16 @@ export function TimelineMenu({ menuRef, feature, history, placement, onClose, on
     <button role="menuitem" onClick={run(() => onRename(feature))}>Rename</button>
     <button role="menuitem" disabled={markerHere} title={markerHere ? "The rollback marker is already right after this step." : "Roll the model back to just after this step"} onClick={run(() => onRollback(index + 1))}>Roll marker here</button>
     {onReveal !== undefined && <button role="menuitem" onClick={run(() => onReveal(feature))}>Find in browser</button>}
+    {onMove !== undefined && <MoveItems feature={feature} index={index} history={history} onMove={(to) => run(() => onMove(feature, to))()} />}
     <button role="menuitem" className="danger" onClick={run(() => onDelete(feature))}>Delete</button>
   </div>;
+}
+
+/** Move earlier and Move later: the same move as a drag, for a keyboard or a touch screen. A closed move says why in its tooltip. */
+function MoveItems({ feature, index, history, onMove }: { readonly feature: DesignFeature; readonly index: number; readonly history: DesignHistory; readonly onMove: (toIndex: number) => void }): React.JSX.Element {
+  const item = (label: string, to: number): React.JSX.Element => {
+    const problem = to < 0 ? `${feature.name} is the first step.` : to >= history.features.length ? `${feature.name} is the last step.` : reorderProblem(history, feature.id, to)?.message;
+    return <button role="menuitem" disabled={problem !== undefined} title={problem ?? `Move ${feature.name} one place ${to < index ? "earlier" : "later"}`} onClick={() => onMove(to)}>{label}</button>;
+  };
+  return <>{item("Move earlier", index - 1)}{item("Move later", index + 1)}</>;
 }

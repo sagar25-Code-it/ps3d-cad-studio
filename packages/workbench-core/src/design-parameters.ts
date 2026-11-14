@@ -17,6 +17,7 @@ import {
   SKETCH_DIMENSION_RANGE_MM,
   type BindingResult
 } from "./parameter-graph.js";
+import { applyModelValueEdits, type ModelValueEdit } from "./model-values.js";
 import { locateDimensionConstraint, redriveDimension, restateDimensionSummary } from "./sketch-dimension-edit.js";
 import { dimensionTargetValue } from "./sketch-measure.js";
 import type { DesignFeature, DesignHistory, DesignParameter, DesignSolidFeature, SketchEntity, WorkbenchOperation, WorkbenchProject, WorkbenchSketch, WorkbenchSketchConstraint } from "./types.js";
@@ -284,7 +285,7 @@ function allExpressionTexts(project: WorkbenchProject): readonly string[] {
  * be removed; a circular reference or an expression that does not evaluate is refused. After that, every bound number is
  * re-evaluated and the project comes back with the new values (the solids are rebuilt by the caller).
  */
-export function setDesignParameters(project: WorkbenchProject, parameters: readonly DesignParameter[], renames: readonly ParameterRename[], resize: SketchResizer): DesignChange {
+export function setDesignParameters(project: WorkbenchProject, parameters: readonly DesignParameter[], renames: readonly ParameterRename[], resize: SketchResizer, modelValues: readonly ModelValueEdit[] = []): DesignChange {
   const history = designOf(project);
   const before = history.parameters ?? [];
   const problem = tableProblem(parameters);
@@ -302,7 +303,17 @@ export function setDesignParameters(project: WorkbenchProject, parameters: reado
 
   // Put the new table in, then rewrite every expression for the renames in one pass (so two names can swap).
   const withTable: WorkbenchProject = { ...project, design: { ...history, parameters } };
-  const renamed = renameMap.size === 0 ? withTable : rewriteAllExpressions(withTable, (text) => renameParameterReferences(text, renameMap));
+  const renamedAll = renameMap.size === 0 ? withTable : rewriteAllExpressions(withTable, (text) => renameParameterReferences(text, renameMap));
+
+  // HS-08: the model parameters edited in the same table (a step's numbers, a sketch's dimensions) go in with the user parameters, so one Apply is one change.
+  let renamed = renamedAll;
+  const touchedOwners = new Set<string>();
+  if (modelValues.length > 0) {
+    const edited = applyModelValueEdits(renamedAll, modelValues);
+    if (!edited.ok) return denied(edited.message, edited.relatedIds);
+    renamed = edited.project;
+    for (const id of edited.touched) touchedOwners.add(id);
+  }
 
   // A parameter that something still uses cannot be removed.
   const gone = before.map((parameter) => parameter.name).filter((name) => !newNames.has(name) && !renameMap.has(name));
@@ -322,10 +333,13 @@ export function setDesignParameters(project: WorkbenchProject, parameters: reado
   if (broken !== undefined) return denied(describeBindingIssue(broken), [broken.ownerId]);
 
   const applied = applyDesignExpressions(renamed, resize);
+  // A model value typed in the table must work: refuse the whole change rather than flag the step it was typed for.
+  const ownProblem = applied.issues.find((issue) => issue.source !== "parameter" && touchedOwners.has(issue.ownerId));
+  if (ownProblem !== undefined) return denied(describeBindingIssue(ownProblem), [ownProblem.ownerId]);
   const finalHistory = designOf(applied.project);
   const withoutEmpty = withoutEmptyTable(finalHistory);
   // Audit IDs must be stable IDs, which a parameter name is not, so the table's rows are named by position.
-  const changedIds = [...new Set([...parameters.map((_parameter, index) => `parameter:row-${index + 1}`), ...applied.changedIds])];
+  const changedIds = [...new Set([...parameters.map((_parameter, index) => `parameter:row-${index + 1}`), ...touchedOwners, ...applied.changedIds])];
   const rewritten = renameMap.size === 0 ? "" : ` Renamed ${[...renameMap].map(([from, to]) => `${from} to ${to}`).join(", ")} in every expression.`;
   const trouble = applied.issues.filter((issue) => issue.source !== "parameter");
   return {

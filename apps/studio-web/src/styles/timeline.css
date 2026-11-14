@@ -138,3 +138,11 @@
 .studio-app .tree-item.failed small { color: #8f2a1f; }
 .studio-app .tree-item.failed .tree-glyph { border-color: #c0392b; color: #c0392b; }
 .studio-app .tree-item.failed.selected { box-shadow: inset 3px 0 0 #c0392b; }
+
+/* A step dragged along the strip: the dragged step is lifted, the place it would land in shows a bar (red when the dependency rule closes it). */
+.timeline-chip.dragging { opacity: 0.55; cursor: grabbing; }
+.timeline-track:has(.timeline-chip.dragging) { user-select: none; }
+.timeline-slot.land-before > .timeline-chip { box-shadow: -4px 0 0 0 #1f6fb6; }
+.timeline-slot.land-after > .timeline-chip { box-shadow: 4px 0 0 0 #1f6fb6; }
+.timeline-slot.closed.land-before > .timeline-chip { box-shadow: -4px 0 0 0 #c0392b; }
+.timeline-slot.closed.land-after > .timeline-chip { box-shadow: 4px 0 0 0 #c0392b; }

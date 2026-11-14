@@ -1629,7 +1629,9 @@ export type WorkbenchOperation = OperationEnvelope & (
    * in the table, in features and in sketch dimensions, is rewritten, so a rename never breaks a reference. Every bound number is then
    * re-evaluated; the caller rebuilds the solids afterwards with `regenerate-design`.
    */
-  | { readonly kind: "set-design-parameters"; readonly parameters: readonly DesignParameter[]; readonly renames?: readonly { readonly from: string; readonly to: string }[] }
+  | { readonly kind: "set-design-parameters"; readonly parameters: readonly DesignParameter[]; readonly renames?: readonly { readonly from: string; readonly to: string }[];
+      /** Model parameters edited in the same table: a step's number or a timeline sketch's dimension, as a plain number or an expression. Applied after the renames, in the same change. */
+      readonly modelValues?: readonly { readonly ownerId: string; readonly fieldId: string; readonly text: string }[] }
   /** Applies the result of rebuilding features after a sketch changed: new solids, or the reason a feature failed. */
   | { readonly kind: "regenerate-design"; readonly results: readonly { readonly featureId: string; readonly body?: GeneralSolidBody; readonly pieces?: readonly GeneralSolidBody[]; readonly message?: string; readonly sketchPlaneOffsetMm?: number; /** The linked (projected) curves of the sketch this feature is built on, where their solid puts them now; each keeps its id. */ readonly sketchEntities?: readonly SketchEntity[] }[];
       /**
@@ -1641,6 +1643,8 @@ export type WorkbenchOperation = OperationEnvelope & (
   | { readonly kind: "set-design-feature-suppressed"; readonly featureId: string; readonly suppressed: boolean }
   | { readonly kind: "delete-design-feature"; readonly featureId: string }
   | { readonly kind: "set-design-rollback"; readonly index: number }
+  /** Moves one timeline step to another place (its final index, from 0); refused, with the step it would break, when something built on it or that it is built on would change places with it. */
+  | { readonly kind: "move-design-feature"; readonly featureId: string; readonly toIndex: number }
   | { readonly kind: "rename-design-feature"; readonly featureId: string; readonly name: string }
   | {
       readonly kind: "set-part-parameter";
@@ -1788,7 +1792,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "select-workspace", "add-sketch-entity", "delete-sketch-entity", "add-sketch-constraint", "delete-sketch-constraint",
   "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-sketch-dimension-label", "set-sketch-plane",
   "commit-design-sketch", "edit-design-sketch", "new-design-sketch", "add-design-solid", "update-design-solid", "regenerate-design", "set-design-parameters",
-  "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
+  "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "move-design-feature", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
   "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility", "rename-general-body", "modify-general-body",
   "add-construction-plane", "delete-construction-plane", "toggle-construction-plane-visibility", "rename-construction-plane",
   "add-construction-binder", "delete-construction-binder", "toggle-construction-binder-visibility",

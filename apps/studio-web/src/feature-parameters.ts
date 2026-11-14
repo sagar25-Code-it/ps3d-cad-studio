@@ -376,3 +376,19 @@ export function applyPlainSize(feature: DesignSolidFeature, input: PlainSizeInpu
   const plain = bindFeatureExpressions(project, { ...rest, valueMm: parsed, ...placement }, {});
   return checked(plain.ok ? plain.feature : { ...rest, valueMm: parsed, ...placement });
 }
+
+/**
+ * HS-07: the size typed when a step is created (the Part Extrude or Revolve field, the Create solid height). A plain number leaves the
+ * step as it is. Anything else is an expression (`plate_h / 2`, `Extrude1.distance`): it is bound to the step's own size (`distance`
+ * of an extrude, `angle` of a revolve) and the size takes what it evaluates to, so the new step follows its parameters from then on.
+ * Refuses, with the evaluator's message, an expression that does not evaluate or a step that cannot take one.
+ */
+export function bindTypedSize(project: WorkbenchProject, feature: DesignSolidFeature, text: string): ParameterResult {
+  const fieldId = feature.kind === "extrude" ? "distance" : feature.kind === "revolve" ? "angle" : undefined;
+  const typed = text.trim();
+  if (typed === "" || Number.isFinite(Number(typed.replace(",", ".")))) return { ok: true, feature };
+  if (fieldId === undefined) return { ok: false, message: `${feature.name} takes a plain number here.` };
+  const bound = bindFeatureExpressions(project, feature, { [fieldId]: typed });
+  if (!bound.ok) return { ok: false, fieldId, message: `${bound.message}${bound.position === undefined ? "" : ` (character ${bound.position + 1})`}` };
+  return { ok: true, feature: bound.feature };
+}

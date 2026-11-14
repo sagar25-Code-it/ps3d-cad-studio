@@ -55,12 +55,14 @@ export const EXPRESSION_UNITS: Readonly<Record<string, { readonly factor: number
   rad: { factor: 180 / Math.PI, dimension: { length: 0, angle: 1 } }
 };
 
-export const EXPRESSION_FUNCTIONS = ["sin", "cos", "tan", "asin", "acos", "atan", "sqrt", "abs", "min", "max", "round", "floor", "ceil", "pi"] as const;
+export const EXPRESSION_FUNCTIONS = ["sin", "cos", "tan", "asin", "acos", "atan", "sqrt", "abs", "min", "max", "round", "floor", "ceil", "pi", "log", "ln", "exp"] as const;
 const FUNCTION_SET: ReadonlySet<string> = new Set(EXPRESSION_FUNCTIONS);
+/** The functions that were reserved words before log, ln and exp were added. A function is only a function when it is followed by "(", so those three stay free as parameter names and old files that use them keep loading. */
+const RESERVED_FUNCTIONS: ReadonlySet<string> = new Set(EXPRESSION_FUNCTIONS.filter((name) => name !== "log" && name !== "ln" && name !== "exp"));
 
 /** Words a parameter cannot be called, because the language already gives them a meaning. */
 export function isReservedExpressionName(name: string): boolean {
-  return Object.hasOwn(EXPRESSION_UNITS, name) || FUNCTION_SET.has(name);
+  return Object.hasOwn(EXPRESSION_UNITS, name) || RESERVED_FUNCTIONS.has(name);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -512,6 +514,17 @@ function evaluateCall(node: Extract<ExpressionNode, { type: "call" }>, environme
       if (operand.value < 0) throw new ExpressionFailure("The square root of a negative number is not real.", nodeStart(argumentAt(0)), nodeEnd(argumentAt(0)) - nodeStart(argumentAt(0)));
       if (operand.length % 2 !== 0 || operand.angle % 2 !== 0) throw new ExpressionFailure(`Cannot take the square root of ${describeDimension(operand)}.`, nodeStart(argumentAt(0)), nodeEnd(argumentAt(0)) - nodeStart(argumentAt(0)));
       return { value: clean(Math.sqrt(operand.value)), length: operand.length / 2, angle: operand.angle / 2 };
+    }
+    case "log":
+    case "ln":
+    case "exp": {
+      // log is the base-10 logarithm and ln the natural one; all three take and give plain numbers.
+      arity(1, 1);
+      const operand = args[0]!;
+      if (!isScalar(operand)) throw new ExpressionFailure(`${node.name} needs a plain number, not ${describeDimension(operand)}.`, nodeStart(argumentAt(0)), nodeEnd(argumentAt(0)) - nodeStart(argumentAt(0)));
+      if (node.name !== "exp" && !(operand.value > 0)) throw new ExpressionFailure(`The ${node.name === "log" ? "logarithm" : "natural logarithm"} needs a number above zero.`, nodeStart(argumentAt(0)), nodeEnd(argumentAt(0)) - nodeStart(argumentAt(0)));
+      const value = node.name === "log" ? Math.log10(operand.value) : node.name === "ln" ? Math.log(operand.value) : Math.exp(operand.value);
+      return { value: finiteOrFail(clean(value), node.start, span), length: 0, angle: 0 };
     }
     case "abs": arity(1, 1); return { ...args[0]!, value: Math.abs(args[0]!.value) };
     case "round": arity(1, 1); return { ...args[0]!, value: roundHalfAwayFromZero(args[0]!.value) };

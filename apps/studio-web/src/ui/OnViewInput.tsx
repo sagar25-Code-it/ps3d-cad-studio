@@ -1,23 +1,27 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  answerOnViewText,
   evaluateOnViewText,
   formatOnViewValue,
   onViewLimitMessage,
   placeNearCursor,
   stepOnViewValue,
   unitLabel,
+  type OnViewAnswer,
   type OnViewRequest
 } from "./on-view-input.js";
 
 interface Pending {
   readonly request: OnViewRequest;
   readonly cursor: { readonly x: number; readonly y: number };
-  readonly resolve: (value: number | null) => void;
+  readonly resolve: (value: OnViewAnswer | null) => void;
 }
 
 export interface OnViewInputApi {
   /** Asks for one number beside the cursor. Resolves with the value, or null when cancelled with Esc or a click elsewhere. */
   readonly ask: (request: OnViewRequest) => Promise<number | null>;
+  /** Like ask, but also gives back the text that was typed and whether it is an expression the design evaluated (HS-07: the step binds to it). */
+  readonly askText: (request: OnViewRequest) => Promise<OnViewAnswer | null>;
   /** Render once, anywhere in the tree. */
   readonly element: React.JSX.Element | null;
 }
@@ -39,13 +43,14 @@ export function useOnViewInput(): OnViewInputApi {
     return () => { window.removeEventListener("pointermove", track); window.removeEventListener("pointerdown", track, true); };
   }, []);
 
-  const ask = useCallback((request: OnViewRequest): Promise<number | null> => new Promise((resolve) => {
+  const askText = useCallback((request: OnViewRequest): Promise<OnViewAnswer | null> => new Promise((resolve) => {
     // Only one field at a time: a new request cancels the one still open.
     pendingRef.current?.resolve(null);
     setPending({ request, cursor: { ...cursor.current }, resolve });
   }), []);
+  const ask = useCallback((request: OnViewRequest): Promise<number | null> => askText(request).then((answer) => answer === null ? null : answer.value), [askText]);
 
-  const finish = useCallback((value: number | null): void => {
+  const finish = useCallback((value: OnViewAnswer | null): void => {
     const current = pendingRef.current;
     if (current === null) return;
     setPending(null);
@@ -53,10 +58,10 @@ export function useOnViewInput(): OnViewInputApi {
   }, []);
 
   const element = pending === null ? null : <OnViewField key={`${pending.request.label}:${pending.cursor.x}:${pending.cursor.y}`} pending={pending} onFinish={finish} />;
-  return { ask, element };
+  return { ask, askText, element };
 }
 
-function OnViewField({ pending, onFinish }: { readonly pending: Pending; readonly onFinish: (value: number | null) => void }): React.JSX.Element {
+function OnViewField({ pending, onFinish }: { readonly pending: Pending; readonly onFinish: (value: OnViewAnswer | null) => void }): React.JSX.Element {
   const { request } = pending;
   const [text, setText] = useState(formatOnViewValue(request.defaultValue));
   const [error, setError] = useState<string | undefined>(undefined);
@@ -77,13 +82,13 @@ function OnViewField({ pending, onFinish }: { readonly pending: Pending; readonl
     return () => window.removeEventListener("pointerdown", outside, true);
   }, [onFinish]);
 
-  const evaluate = (value: string): { readonly ok: true; readonly value: number } | { readonly ok: false } => {
-    const parsed = evaluateOnViewText(value, request.quantity, request.variables ?? {});
+  const evaluate = (value: string): { readonly ok: true; readonly answer: OnViewAnswer } | { readonly ok: false } => {
+    const parsed = answerOnViewText(request, value);
     if (!parsed.ok) { setError(parsed.message); return { ok: false }; }
     const limit = onViewLimitMessage(request, parsed.value);
     if (limit !== undefined) { setError(limit); return { ok: false }; }
     setError(undefined);
-    return { ok: true, value: parsed.value };
+    return { ok: true, answer: { value: parsed.value, text: value.trim(), bound: parsed.bound } };
   };
 
   const unit = unitLabel(request.quantity);
@@ -93,7 +98,7 @@ function OnViewField({ pending, onFinish }: { readonly pending: Pending; readonl
     style={{ left: placed.left, top: placed.top }}
     role="dialog"
     aria-label={request.label}
-    onSubmit={(event) => { event.preventDefault(); const result = evaluate(text); if (result.ok) onFinish(result.value); }}
+    onSubmit={(event) => { event.preventDefault(); const result = evaluate(text); if (result.ok) onFinish(result.answer); }}
   >
     <label>
       <span>{request.label}</span>
@@ -109,7 +114,7 @@ function OnViewField({ pending, onFinish }: { readonly pending: Pending; readonl
           if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onFinish(null); return; }
           if (event.key === "ArrowUp" || event.key === "ArrowDown") {
             event.preventDefault();
-            const parsed = evaluateOnViewText(text, request.quantity, request.variables ?? {});
+            const parsed = answerOnViewText(request, text);
             const base = parsed.ok ? parsed.value : request.defaultValue;
             const next = stepOnViewValue(base, event.key === "ArrowUp" ? 1 : -1, request.step ?? (request.quantity === "count" ? 1 : request.quantity === "angle" ? 1 : 0.5), { shift: event.shiftKey, alt: event.altKey });
             setText(formatOnViewValue(next));

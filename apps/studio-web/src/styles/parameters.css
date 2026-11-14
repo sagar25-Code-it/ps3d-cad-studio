@@ -30,3 +30,27 @@
   .parameters-row { grid-template-columns: 1fr 1fr; }
   .parameters-head { display: none; }
 }
+
+/* Model parameters: every step's numbers and every sketch dimension, grouped under their step (HS-08). */
+.studio-app .parameters-model { border: 1px solid #d3d9de; border-radius: 6px; padding: 0.4rem 0.6rem; background: #fbfcfc; }
+.studio-app .parameters-model > summary { display: flex; align-items: baseline; gap: 0.6rem; cursor: pointer; color: #2c3237; font-size: 12.5px; font-weight: 600; }
+.studio-app .parameters-model > summary small { color: #5d6a73; font-size: 12px; font-weight: 400; }
+.studio-app .parameters-model-intro { margin: 0.4rem 0; color: #4a545c; font-size: 12.5px; line-height: 1.45; }
+.studio-app .parameters-model-intro code { padding: 0 0.25rem; border-radius: 3px; background: #e6ebef; font-family: var(--mono, monospace); font-size: 12px; }
+.studio-app .parameters-model-table { display: grid; gap: 0.5rem; }
+.studio-app .parameters-model-group { display: grid; gap: 0.25rem; }
+.studio-app .parameters-model-group h3 { display: flex; align-items: baseline; gap: 0.5rem; margin: 0.2rem 0 0; color: #2c3237; font-size: 12.5px; }
+.studio-app .parameters-model-group h3 small { color: #5d6a73; font-size: 12px; font-weight: 400; }
+.studio-app .parameters-model-row { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(9rem, 1.6fr) 7rem; align-items: center; gap: 0.35rem; }
+.studio-app .parameters-model-row > input { min-width: 0; padding: 0.35rem 0.45rem; border: 1px solid #aeb5bb; border-radius: 5px; background: #fff; font: inherit; font-size: 12.5px; }
+.studio-app .parameters-model-row > input[aria-invalid="true"] { border-color: #c0392b; background: #fdeceb; }
+.studio-app .parameters-model-row > output { overflow: hidden; color: #2c3237; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.studio-app .parameters-model-row > output em { color: #1f6fb6; font-style: normal; font-size: 12px; }
+.studio-app .parameters-model-name { display: grid; min-width: 0; }
+.studio-app .parameters-model-name strong { font-size: 12.5px; }
+.studio-app .parameters-model-name small { color: #5d6a73; font-size: 12px; overflow-wrap: anywhere; }
+.studio-app .parameters-model-row .parameters-problem { grid-column: 1 / -1; margin: 0; }
+@media (max-width: 720px) {
+  .studio-app .parameters-model-row { grid-template-columns: 1fr 1fr; }
+  .studio-app .parameters-model-name { grid-column: 1 / -1; }
+}

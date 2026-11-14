@@ -169,7 +169,7 @@ export function pruneOrphanedSolidFeatures(project: WorkbenchProject): { readonl
  * is new or its live state changed (suppressed, unsuppressed, rolled back or forward), so a body the user hid stays hidden through
  * any other timeline edit.
  */
-function withHistory(project: WorkbenchProject, history: DesignHistory): WorkbenchProject {
+export function withHistory(project: WorkbenchProject, history: DesignHistory): WorkbenchProject {
   const previous = project.design;
   const owned = new Map<string, boolean>();
   for (const feature of history.features) {

@@ -1,3 +1,4 @@
+import { moveDesignFeature } from "./design-reorder.js";
 import { isNewPrimitiveShape, NEW_PRIMITIVE_SHAPES, normalizePrimitiveSize, validPrimitiveBody } from "./primitive-bodies.js";
 import { nameSketchDimensions, unbindLostDimensionNames } from "./dimension-names.js";
 import { hasDimensionLabel, MAX_LABEL_OFFSET_PX, MIN_LABEL_OFFSET_PX, storedLabelOffsetPx, validLabelOffsetPx } from "./dimension-label.js";
@@ -414,7 +415,9 @@ function validateWorkbenchOperationShape(rawInput: unknown): WorkbenchResult<Wor
           || (Object.hasOwn(result, "message") && !shortText(result.message, 1, 400)))) return invalidOperation(Array.isArray(input.results) ? (rebuildResultProblem(input.results) ?? "The rebuild results are invalid.") : "The rebuild results are invalid.");
       break;
     case "set-design-parameters":
-      if (!keys(input, [...common, "parameters", ...(Object.hasOwn(input, "renames") ? ["renames"] : [])]) || !boundedList(input.parameters, 200, isRecord)
+      if (!keys(input, [...common, "parameters", ...(Object.hasOwn(input, "renames") ? ["renames"] : []), ...(Object.hasOwn(input, "modelValues") ? ["modelValues"] : [])]) || !boundedList(input.parameters, 200, isRecord)
+        || (Object.hasOwn(input, "modelValues") && (!boundedList(input.modelValues, 400, isRecord)
+          || input.modelValues.some((value) => !keys(value, ["ownerId", "fieldId", "text"]) || !stableId(value.ownerId) || typeof value.fieldId !== "string" || value.fieldId.length === 0 || value.fieldId.length > 160 || typeof value.text !== "string" || value.text.length > 400)))
         || input.parameters.some((parameter) => !keys(parameter, ["name", "expression", "unit", "comment"]) || typeof parameter.name !== "string" || typeof parameter.expression !== "string"
           || !["mm", "deg", ""].includes(String(parameter.unit)) || typeof parameter.comment !== "string")
         || (Object.hasOwn(input, "renames") && (!boundedList(input.renames, 200, isRecord)
@@ -425,6 +428,9 @@ function validateWorkbenchOperationShape(rawInput: unknown): WorkbenchResult<Wor
       break;
     case "set-design-rollback":
       if (!keys(input, [...common, "index"]) || typeof input.index !== "number" || !Number.isInteger(input.index) || input.index < 0 || input.index > 1_000) return invalidOperation("The rollback position is invalid.");
+      break;
+    case "move-design-feature":
+      if (!keys(input, [...common, "featureId", "toIndex"]) || !stableId(input.featureId) || typeof input.toIndex !== "number" || !Number.isInteger(input.toIndex) || input.toIndex < 0 || input.toIndex > 1_000) return invalidOperation("The move request is invalid: name the step and the place (a whole number from 0) it should end up in.");
       break;
     case "rename-design-feature":
       if (!keys(input, [...common, "featureId", "name"]) || !stableId(input.featureId) || !shortText(input.name, 1, 120)) return invalidOperation("The rename request is invalid.");
@@ -841,10 +847,11 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
     case "add-design-solid": return addDesignSolid(project, operation.feature, operation.body);
     case "update-design-solid": return updateDesignSolid(project, operation.feature, operation.body);
     case "regenerate-design": return regenerateDesign(project, operation.results, operation.sketchCurves);
-    case "set-design-parameters": return setDesignParameters(project, operation.parameters, operation.renames ?? [], resizeSketchEntity);
+    case "set-design-parameters": return setDesignParameters(project, operation.parameters, operation.renames ?? [], resizeSketchEntity, operation.modelValues ?? []);
     case "set-design-feature-suppressed": return setDesignFeatureSuppressed(project, operation.featureId, operation.suppressed);
     case "delete-design-feature": return deleteDesignFeature(project, operation.featureId);
     case "set-design-rollback": return setDesignRollback(project, operation.index);
+    case "move-design-feature": return moveDesignFeature(project, operation.featureId, operation.toIndex);
     case "rename-design-feature": return renameDesignFeature(project, operation.featureId, operation.name);
     case "toggle-sketch-construction": {
       const target = project.sketch.entities.find((entity) => entity.id === operation.entityId);

@@ -19,6 +19,30 @@ export interface OnViewRequest {
   readonly step?: number;
   /** Named values the expression may use, such as design parameters. */
   readonly variables?: Readonly<Record<string, number>>;
+  /**
+   * HS-07: evaluates text the field itself cannot (a parameter name, `Extrude1.distance / 2`) against the design. The answer says the
+   * value was reached through an expression, so the step that asked can bind the field to the text instead of keeping only a number.
+   */
+  readonly resolve?: (text: string) => OnViewParse;
+}
+
+/** What the field gave back: the number, the text it came from, and whether that text is an expression to bind (it used a name the design knows). */
+export interface OnViewAnswer {
+  readonly value: number;
+  readonly text: string;
+  readonly bound: boolean;
+}
+
+/**
+ * Evaluates the text for a request: the field's own arithmetic and units first; when that cannot read it and the request has a
+ * `resolve`, the design's expressions (parameter names) are tried. `bound` is true only when the design's evaluator was needed.
+ */
+export function answerOnViewText(request: Pick<OnViewRequest, "quantity" | "variables" | "resolve">, text: string): (OnViewParse & { readonly bound: boolean }) {
+  const own = evaluateOnViewText(text, request.quantity, request.variables ?? {});
+  if (own.ok || request.resolve === undefined) return { ...own, bound: false };
+  const resolved = request.resolve(text);
+  // Keep the field's own message when the design cannot read it either, unless the design says something more useful about a name.
+  return resolved.ok ? { ...resolved, bound: true } : { ok: false, message: resolved.message, bound: false };
 }
 
 export type OnViewParse = { readonly ok: true; readonly value: number } | { readonly ok: false; readonly message: string };

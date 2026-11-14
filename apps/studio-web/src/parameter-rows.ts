@@ -4,6 +4,10 @@ import {
   evaluateDesignExpressions,
   findParameterCycle,
   MAX_DESIGN_PARAMETERS,
+  modelValueRowsOf,
+  previewModelValue,
+  type ModelValueEdit,
+  type ModelValueRow,
   parameterNameProblem,
   parseExpression,
   renameParameterReferences
@@ -138,4 +142,55 @@ export function boundValuesOf(project: WorkbenchProject): readonly { readonly la
       valueText: binding.ok && binding.value !== undefined ? `${trim(binding.value)}${binding.dimension === "length" ? " mm" : binding.dimension === "angle" ? "°" : ""}` : "",
       ...(binding.ok ? {} : { problem: binding.message ?? "This expression cannot be used." })
     }));
+}
+
+// ---------------------------------------------------------------------------------------------
+// HS-08: the model parameters section (every step's numbers and every timeline sketch's dimensions)
+// ---------------------------------------------------------------------------------------------
+
+/** One model parameter as the dialog edits it: the row of the project plus the text typed in its expression cell. */
+export interface ModelParameterRow extends ModelValueRow {
+  readonly key: string;
+  /** What the cell holds now; the row is changed when this differs from `row.text`. */
+  readonly typed: string;
+}
+
+export function modelParameterRowsOf(project: WorkbenchProject): readonly ModelParameterRow[] {
+  return modelValueRowsOf(project).map((row) => ({ ...row, key: `${row.ownerId}|${row.fieldId}`, typed: row.text }));
+}
+
+/** The groups of the section, in timeline order: one per step or sketch, each with its rows. */
+export function groupModelParameterRows(rows: readonly ModelParameterRow[]): readonly { readonly ownerId: string; readonly group: string; readonly groupKind: "step" | "sketch"; readonly rows: readonly ModelParameterRow[] }[] {
+  const groups: { ownerId: string; group: string; groupKind: "step" | "sketch"; rows: ModelParameterRow[] }[] = [];
+  for (const row of rows) {
+    const last = groups[groups.length - 1];
+    if (last !== undefined && last.ownerId === row.ownerId) last.rows.push(row);
+    else groups.push({ ownerId: row.ownerId, group: row.group, groupKind: row.groupKind, rows: [row] });
+  }
+  return groups;
+}
+
+/** The edits Apply sends: only the rows whose text was changed. */
+export function modelValueEditsOf(rows: readonly ModelParameterRow[]): readonly ModelValueEdit[] {
+  return rows.filter((row) => row.typed.trim() !== row.text.trim()).map((row) => ({ ownerId: row.ownerId, fieldId: row.fieldId, text: row.typed.trim() }));
+}
+
+export interface ModelRowReport {
+  /** What the typed text gives, in the row's unit ("15 mm"); absent for a row that is not changed. */
+  readonly valueText?: string;
+  readonly problem?: string;
+}
+
+/**
+ * What each changed model row comes to, or why it is refused, checked against the project as it is (with no other pending edit).
+ * Unchanged rows have no report: their value is the one the project holds.
+ */
+export function analyseModelRows(project: WorkbenchProject, rows: readonly ModelParameterRow[]): Readonly<Record<string, ModelRowReport>> {
+  const reports: Record<string, ModelRowReport> = {};
+  for (const row of rows) {
+    if (row.typed.trim() === row.text.trim()) continue;
+    const preview = previewModelValue(project, { ownerId: row.ownerId, fieldId: row.fieldId, text: row.typed });
+    reports[row.key] = preview.ok ? { valueText: preview.valueText } : { problem: preview.message };
+  }
+  return reports;
 }

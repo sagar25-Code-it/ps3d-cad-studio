@@ -267,8 +267,12 @@ interface SketchWorkspaceProps {
       readonly flangeLengthMm?: number;
       readonly flangeAngleDeg?: number;
       readonly hemStyle?: "closed" | "open";
+      /** Extrude and revolve: the size as typed when it is an expression (HS-07); the new step is bound to it. */
+      readonly valueExpression?: string;
     }
   ) => void;
+  /** HS-07: evaluates a size typed as a parameter name or formula for Extrude (distance) or Revolve (angle); the number the new step starts with, or why not. */
+  readonly previewSolidValue?: (operation: "extrude" | "revolve", text: string) => { readonly ok: true; readonly value: number } | { readonly ok: false; readonly message: string };
   /** The solids a join or cut can modify. */
   readonly solidBodies: readonly { readonly id: string; readonly name: string }[];
   /** The same solids with their shapes, for the faces and vertices a "to" extent can reach. */
@@ -2568,7 +2572,7 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               <option value="sheet-flange">Sheet metal: flange</option>
               <option value="sheet-hem">Sheet metal: hem</option>
             </select>
-            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? `Sweep distance in ${unitWord(unit)}` : `Height in ${unitWord(unit)}`} type="number" min={solidOp === "revolve" ? 1 : unit === "in" ? 0.005 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : unit === "in" ? 0.125 : 1} value={solidOp === "revolve" ? solidValue : lengthTextToDisplay(solidValue, unit)} disabled={cutThroughAll || reachesTarget} onChange={(event) => setSolidValue(solidOp === "revolve" ? event.target.value : lengthTextFromDisplay(event.target.value, unit))} />
+            <input aria-label={solidOp === "revolve" ? "Angle in degrees" : solidOp === "sweep" ? `Sweep distance in ${unitWord(unit)}` : `Height in ${unitWord(unit)}`} type={solidOp === "extrude" || solidOp === "revolve" ? "text" : "number"} inputMode="decimal" title={solidOp === "extrude" || solidOp === "revolve" ? "A number, or a parameter name or formula such as plate_h / 2: the step then follows the parameter." : undefined} min={solidOp === "revolve" ? 1 : unit === "in" ? 0.005 : 0.1} max={solidOp === "revolve" ? 360 : undefined} step={solidOp === "revolve" ? 5 : unit === "in" ? 0.125 : 1} value={solidOp === "revolve" ? solidValue : lengthTextToDisplay(solidValue, unit)} disabled={cutThroughAll || reachesTarget} onChange={(event) => setSolidValue(solidOp === "revolve" ? event.target.value : lengthTextFromDisplay(event.target.value, unit))} />
             <small>{solidOp === "revolve" ? "°" : unit}</small>
           </div>
           <small className="make-solid-plane">On the {planePlacement}</small>
@@ -2754,7 +2758,17 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
             </>}
           </div>}
           <button className="palette-action primary" title={profiles.length === 0 ? `No closed region to build from. ${noProfileReasons.join(" ")} Validate Sketch lists every open end and gap.` : undefined} disabled={profiles.length === 0 || (solidResult !== "new-body" && !modifying) || (solidOp !== "extrude" && solidOp !== "revolve" && solidResult !== "new-body")} onClick={() => {
-            const reachResult = solidOp === "extrude" || solidOp === "revolve" ? buildReach(solidOp, reach, Number(solidValue), props.targetBodies, props.selectedId) : undefined;
+            // A size typed as a name or formula is evaluated by the design and kept as the step's expression (HS-07).
+            const sizeText = solidValue.trim();
+            const sizeIsExpression = (solidOp === "extrude" || solidOp === "revolve") && sizeText !== "" && !Number.isFinite(Number(sizeText.replace(",", ".")));
+            let sizeNumber = Number(solidValue);
+            if (sizeIsExpression && (solidOp === "extrude" || solidOp === "revolve")) {
+              const preview = props.previewSolidValue?.(solidOp, sizeText);
+              if (preview === undefined) { props.onMessage("Type a number for the size."); return; }
+              if (!preview.ok) { props.onMessage(`${solidOp === "revolve" ? "Angle" : "Height"}: ${preview.message}`); return; }
+              sizeNumber = preview.value;
+            }
+            const reachResult = solidOp === "extrude" || solidOp === "revolve" ? buildReach(solidOp, reach, sizeNumber, props.targetBodies, props.selectedId) : undefined;
             if (reachResult !== undefined && !reachResult.ok) { props.onMessage(reachResult.message); return; }
             const sweepTwistValue = Number(sweepTwist);
             const loftTangencyWeightValue = Number(loftTangencyWeight);
@@ -2806,11 +2820,11 @@ export function SketchWorkspace(props: SketchWorkspaceProps): React.JSX.Element 
               effectiveProfileIds,
               plane,
               solidOp,
-              cutThroughAll && !(Number(solidValue) > 0) ? 1 : Number(solidValue),
+              cutThroughAll && !(sizeNumber > 0) ? 1 : sizeNumber,
               edgeForOp,
               reachResult?.ok === true ? reachResult.direction : undefined,
               modifying ? { mode: solidResult, bodyId: effectiveTarget, ...(cutThroughAll ? { extent: "through-all" as const } : {}) } : undefined,
-              revolveAxis === undefined ? advanced : { ...(advanced ?? {}), revolveAxis }
+              revolveAxis === undefined && !sizeIsExpression ? advanced : { ...(advanced ?? {}), ...(revolveAxis === undefined ? {} : { revolveAxis }), ...(sizeIsExpression ? { valueExpression: sizeText } : {}) }
             );
           }}><CommandIcon name={solidResult === "cut" ? "subtract" : solidResult === "join" ? "unite" : "box"} />{solidResult === "cut" ? "Cut solid" : solidResult === "join" ? "Join solid" : "Create solid"}</button>
           {profiles.length === 0 && <small className="make-solid-hint make-solid-reason" role="status">No closed region yet. {noProfileReasons.join(" ")} Open Validate Sketch for every open end and gap.</small>}
