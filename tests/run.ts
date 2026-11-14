@@ -180,6 +180,7 @@ import { sketchProjectLinkedTests } from "./sketch-project-linked.test.js";
 import { sketchDimensionFollowTests } from "./sketch-dimension-follow.test.js";
 import { browserStepOpenTests } from "./browser-step-open.test.js";
 import { timelineSelectionTests } from "./timeline-selection.test.js";
+import { deleteImpactTests } from "./delete-impact.test.js";
 import { sketchOffsetChainDefaultTests } from "./sketch-offset-chain-default.test.js";
 import { sketchProjectionCurrentTests } from "./sketch-projection-current.test.js";
 import { sketchDimensionPointFirstTests } from "./sketch-dimension-point-first.test.js";
@@ -422,6 +423,7 @@ const tests: readonly TestCase[] = [
   ...ribbonPanelTests,
   ...solidContextMenuTests,
   ...timelineSelectionTests,
+  ...deleteImpactTests,
 ];
 let failures = 0;
 

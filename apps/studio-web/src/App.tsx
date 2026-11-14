@@ -28,6 +28,8 @@ import {
   type SketchPlaneFaceRef,
   type RevolveAxisRef,
   featureOfBody,
+  deleteImpact,
+  type DeleteImpact,
   isElectricalSheetPositionAvailable,
   parseWorkbenchProjectText,
   serializeWorkbenchProject,
@@ -189,6 +191,7 @@ import { formatBuildLabel } from "./build-info.js";
 import { dimensionModeStatus } from "./sketch-help-text.js";
 import { INITIAL_PLANE_OFFER, browserOpenAction, contextSketchAction, contextStepId, decidePlaneOffer, conventionOf, describeSketchPlane, existingSketchPlanes, planeOfferAfterFinish } from "./sketch-plane-ui.js";
 import { pickStep, resolveSelectedStep, type StepPick } from "./timeline-selection.js";
+import { DeleteStepDialog } from "./ui/DeleteStepDialog.js";
 import { ShortcutsOverlay } from "./ui/ShortcutsOverlay.js";
 import { describeFailure } from "./failure-text.js";
 import { shortcutGroupsFor } from "./ui/sketch-shortcut-items.js";
@@ -362,6 +365,8 @@ export function App(): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** HS-01: which step of the selected body the user picked in the timeline or browser (see timeline-selection.ts). */
   const [stepPick, setStepPick] = useState<StepPick | null>(null);
+  /** HS-02: a delete that would take other steps with it waits here for the person to confirm (see DeleteStepDialog). */
+  const [deleteRequest, setDeleteRequest] = useState<DeleteImpact | null>(null);
   const [selectedFace, setSelectedFace] = useState<{ readonly bodyId: string; readonly faceIndex: number } | null>(null);
   /** Edge chains picked in the 3D view with the Edge intent (PT-08); Ctrl / Shift adds chains of the same body. */
   const [selectedEdges, setSelectedEdges] = useState<readonly { readonly bodyId: string; readonly chain: number; readonly segments: readonly ViewportGuideSegment[] }[]>([]);
@@ -4150,6 +4155,8 @@ export function App(): React.JSX.Element {
     }
     if (commandId === "selection.isolate" && selectionId?.startsWith("part-body:") === true) { applyProjectOperation({ kind: "isolate-part-preview-body", bodyId: selectionId }); return; }
     if (commandId === "selection.delete" && selectionId !== null) {
+      const owner = selectionId.startsWith("general-body:") ? featureOfBody(designOf(projectRef.current), selectionId) : undefined;
+      if (owner !== undefined) { requestStepDelete(owner); return; }
       if (selectionId.startsWith("entity:")) applyProjectOperation({ kind: "delete-sketch-entity", entityId: selectionId });
       else if (selectionId.startsWith("part-body:")) applyProjectOperation({ kind: "delete-part-preview-body", bodyId: selectionId });
       else if (selectionId.startsWith("general-body:")) applyProjectOperation({ kind: "delete-general-body", bodyId: selectionId });
@@ -4329,6 +4336,17 @@ export function App(): React.JSX.Element {
     setStepPick(pick);
     setSelectedId(pick.selectionId);
   };
+  /** Deletes a step and what is built on it, as one undo step. */
+  const performStepDelete = (featureId: string): void => {
+    timelineOperation({ kind: "delete-design-feature", featureId }, () => { setStepPick(null); setSelectedId(null); });
+  };
+  /** Delete from any entry point (strip, browser, menu, key): a step that stands alone goes at once, one with dependants asks first and names them. */
+  const requestStepDelete = (feature: DesignFeature): void => {
+    const impact = deleteImpact(projectRef.current, feature.id);
+    if (impact === undefined) return;
+    if (impact.dependents.length === 0) { performStepDelete(feature.id); return; }
+    setDeleteRequest(impact);
+  };
   /** A browser row toggles: a second click on the selected step clears the selection. */
   const toggleStep = (feature: DesignFeature, wasSelected: boolean): void => {
     if (wasSelected) { setStepPick(null); setSelectedId(null); return; }
@@ -4376,7 +4394,7 @@ export function App(): React.JSX.Element {
     setStatusText("Create solid is in the sketch palette: pick Extrude or Revolve, the result (new body, join or cut), and the distance or extent.");
   };
   const deleteSelection = (): void => {
-    if (selectedTimelineFeature !== undefined) { timelineOperation({ kind: "delete-design-feature", featureId: selectedTimelineFeature.id }, () => setSelectedId(null)); return; }
+    if (selectedTimelineFeature !== undefined) { requestStepDelete(selectedTimelineFeature); return; }
     if (previewBodySelected && selectedId !== null) { if (applyProjectOperation({ kind: "delete-part-preview-body", bodyId: selectedId })) setSelectedId(null); return; }
     if (selectedGeneralBody !== undefined) { if (applyProjectOperation({ kind: "delete-general-body", bodyId: selectedGeneralBody.id })) setSelectedId(null); return; }
     if (selectedId?.startsWith("binder:") === true || selectedId?.startsWith("construction-plane:") === true) handleConstructionReference(selectedId, "delete");
@@ -4672,6 +4690,7 @@ export function App(): React.JSX.Element {
     />}
     {onView.element}
     {contextMenu !== undefined && contextMenu.radial !== true && <WorkbenchContextMenu x={contextMenu.x} y={contextMenu.y} selectionLabel={contextMenu.selectionId ?? `${project.activeWorkspace} canvas`} commands={contextCommands} onRun={runContextCommand} onClose={() => setContextMenu(undefined)} />}
+    {deleteRequest !== null && <DeleteStepDialog impact={deleteRequest} onCancel={() => setDeleteRequest(null)} onConfirm={() => { const featureId = deleteRequest.featureId; setDeleteRequest(null); performStepDelete(featureId); }} />}
     {showTimeline && <TimelineBar
       history={designOf(project)}
       selectedFeatureId={selectedTimelineFeature?.id ?? null}
@@ -4680,7 +4699,7 @@ export function App(): React.JSX.Element {
       onEdit={editTimelineFeature}
       onRollback={(index) => timelineOperation({ kind: "set-design-rollback", index })}
       onSuppress={(feature, suppressed) => timelineOperation({ kind: "set-design-feature-suppressed", featureId: feature.id, suppressed })}
-      onDelete={(feature) => timelineOperation({ kind: "delete-design-feature", featureId: feature.id }, () => setSelectedId(null))}
+      onDelete={requestStepDelete}
       onRename={(feature, name) => { applyProjectOperation({ kind: "rename-design-feature", featureId: feature.id, name }); }}
     />}
     <footer className="app-status"><div className={`status-copy ${status}`} role="status" aria-live={status === "error" ? "assertive" : "polite"}><span />{statusText}</div><div className="status-facts"><a className="app-brand-credit" href="/about" title={`${PS3D_BRAND.name} - ${PS3D_BRAND.serviceLine}`}>{PS3D_BRAND.name}</a><button className={`status-health ${designHealth.overallStatus}`} onClick={openDesignHealth}>health {designHealth.score}</button><button className="status-shortcuts" onClick={() => setShortcutsOpen(true)} title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">? keys</button><button className="status-build" onClick={() => setAboutOpen(true)} title="Which build is running. Click for details and to copy it." aria-label={formatBuildLabel(buildUpdate.running)}>{formatBuildLabel(buildUpdate.running)}</button><span>{document.displayUnit}</span><span>{project.activeWorkspace === "sketch" ? selectionCountLabel(sketchSelectionCount) : selectedId === null ? "0 selected" : "1 selected"}</span><span>{renderStudioOpen ? `${renderSettings.resolution} ${renderSettings.format}` : masterCartOpen ? "parametric preview" : isThreeDimensional ? viewportState.selectionFilter : project.activeWorkspace === "electrical" ? `ERC ${electrical.erc.status}` : "local"}</span><span>{renderStudioOpen ? "render-studio" : masterCartOpen ? "master-cart" : project.activeWorkspace}</span></div>{diagnostic !== undefined && <div className="diagnostic-toast" role="alert"><strong>{diagnostic.code}</strong><span>{diagnostic.message}</span><small>{diagnostic.recovery}</small><button onClick={() => setDiagnostic(undefined)} aria-label="Dismiss diagnostic">×</button></div>}</footer>

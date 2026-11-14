@@ -126,7 +126,7 @@ export function TimelineBar(props: TimelineBarProps): React.JSX.Element {
       <button role="menuitem" onClick={() => { props.onEdit(menu.feature); setMenu(undefined); }}>{menu.feature.kind === "sketch" ? "Edit sketch" : "Edit feature"}</button>
       <button role="menuitem" onClick={() => { props.onSuppress(menu.feature, !menu.feature.suppressed); setMenu(undefined); }}>{menu.feature.suppressed ? "Unsuppress" : "Suppress"}</button>
       <button role="menuitem" onClick={() => { setDraft(menu.feature.name); setRenaming(menu.feature.id); setMenu(undefined); }}>Rename</button>
-      <button role="menuitem" className="danger" onClick={() => { props.onDelete(menu.feature); setMenu(undefined); }}>Delete{menu.feature.kind === "sketch" ? " (and what is built on it)" : ""}</button>
+      <button role="menuitem" className="danger" onClick={() => { props.onDelete(menu.feature); setMenu(undefined); }}>Delete</button>
     </div>}
   </section>;
 }

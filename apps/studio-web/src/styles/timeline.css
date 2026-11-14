@@ -111,3 +111,10 @@
 /* Quick-measure strip under the viewport: the selected entity's live metrics. */
 .studio-app .quick-measure-bar { position: absolute; left: 0.75rem; bottom: 2.6rem; display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; padding: 0.4rem 0.7rem; border: 1px solid #c5ccd2; border-radius: 6px; background: rgba(255, 255, 255, 0.95); color: #2c3237; font-size: 12.5px; pointer-events: none; box-shadow: 0 2px 6px #15191d1a; }
 .studio-app .quick-measure-bar .quick-measure-title { font-weight: 600; color: #1f6fb6; }
+
+/* Delete-step confirmation (HS-02): the steps and solids that go with the one being deleted. The dialog frame is the dark shell one. */
+.studio-app .delete-step-list { display: grid; gap: 0.3rem; max-height: min(40dvh, 18rem); margin: 0; padding: 0; list-style: none; overflow-y: auto; }
+.studio-app .delete-step-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.7rem; padding: 0.4rem 0.6rem; border: 1px solid #315063; border-radius: 6px; background: #0d1e2b; }
+.studio-app .delete-step-list li strong { color: #edf6f8; font-size: 0.8rem; overflow-wrap: anywhere; }
+.studio-app .delete-step-list li span { color: #afc0c8; font-size: 0.76rem; overflow-wrap: anywhere; }
+.studio-app .engineering-confirmation-dialog > footer > button.primary.danger { border-color: #b8453a; color: #fff; background: #a93a30; }
