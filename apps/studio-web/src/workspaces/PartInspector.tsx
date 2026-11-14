@@ -155,7 +155,7 @@ function SolidCard(props: {
   return <section className="inspector-section solid-card" aria-label={`${body.name} properties`}>
     <header><strong>{feature === undefined ? "Ordinary solid" : feature.name}</strong><span>{feature === undefined ? "not in the timeline" : "timeline step"}</span></header>
     <p className="solid-source">{feature === undefined
-      ? "This body is not driven by the timeline (it came from Combine, or was saved before the timeline existed), so editing a sketch does not change it."
+      ? "This body is not driven by the timeline (it was saved before the timeline existed, or came from an old-style Combine), so editing a sketch does not change it."
       : `${describeFeature(history, feature)}${status === "" ? "" : ` · ${status}`}. Edit the step, or edit its sketch, and this solid rebuilds.`}</p>
     {feature?.health !== undefined && <p className={isHealthNote(feature.health.message) ? "solid-warning note" : "solid-warning"} role={isHealthNote(feature.health.message) ? "status" : "alert"}>{feature.health.message}</p>}
     {steps.length > 1 && <ol className="solid-steps" aria-label="Steps that shaped this solid">

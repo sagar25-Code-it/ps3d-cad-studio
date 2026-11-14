@@ -1107,6 +1107,31 @@ export function App(): React.JSX.Element {
     const tool = bodies.find((body) => body.id === choice.toolId);
     if (target === undefined || tool === undefined) return "Choose two existing bodies.";
     const label = choice.mode === "join" ? "Join" : choice.mode === "cut" ? "Cut" : "Intersect";
+    const history = designOf(projectRef.current);
+    const targetBase = baseFeatureOf(history, target.id);
+    const toolBase = baseFeatureOf(history, tool.id);
+    // PT-15: when both bodies are driven by the timeline, Combine is one timeline step on the target. The input
+    // bodies keep every step they have, so a sketch edit on either side still rebuilds the combined result.
+    if (targetBase !== undefined && toolBase !== undefined) {
+      const feature: DesignSolidFeature = {
+        id: `feature:combine-${crypto.randomUUID()}`,
+        name: `${label} ${tool.name}`.slice(0, 120), kind: "combine", suppressed: false,
+        sketchFeatureId: targetBase.sketchFeatureId, profileIds: [], valueMm: 1,
+        bodyId: target.id, operation: "direct-edit",
+        combineToolBodyIds: [tool.id], combineMode: choice.mode,
+        ...(choice.keepTool ? { combineKeepTools: true } : {})
+      };
+      const added = await commitWithReplay({ kind: "add-design-solid", feature, body: target }, feature.id);
+      if (!added) return "The combine was not applied; the status line names the reason.";
+      // A consumed tool is hidden rather than deleted: its steps stay, and showing it again brings it back.
+      if (!choice.keepTool && tool.visible) applyProjectOperation({ kind: "toggle-general-body-visibility", bodyId: tool.id }, false);
+      setSelectedId(target.id);
+      setCombineRequest(null);
+      setStatus("ready");
+      setStatusText(`Added ${feature.name} to the timeline. ${target.name} and ${tool.name} keep their steps, and editing either side rebuilds the result.${choice.keepTool ? "" : ` ${tool.name} is hidden; show it in the browser to get it back.`}`);
+      return undefined;
+    }
+    // A body with no timeline step of its own (saved before the timeline, or an import) keeps the older in-place Boolean.
     const result = await combineGeneralBodies({ target, tool, mode: choice.mode, bodyId: `general-body:${crypto.randomUUID()}`, name: `${label} ${target.name}${choice.mode === "cut" ? " − " : " + "}${tool.name}`.slice(0, 120) });
     if (!result.ok) return result.message;
     if (!applyProjectOperation({ kind: "boolean-general-bodies", targetBodyId: target.id, toolBodyId: tool.id, mode: choice.mode, keepTool: choice.keepTool, body: result.body })) return "The project rejected the Boolean result.";

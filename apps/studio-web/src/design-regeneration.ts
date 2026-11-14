@@ -73,7 +73,7 @@ function shifted(body: GeneralSolidBody, normal: readonly [number, number, numbe
 
 /** Builds the solid a feature describes from the sketch snapshot it is based on. For a join or cut this is the tool solid. */
 export async function rebuildSolidFeature(feature: DesignSolidFeature, sketchFeature: DesignSketchFeature, color = "#b9c2c8", sketchLookup?: SketchLookup): Promise<SolidRebuild> {
-  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "pattern" || feature.kind === "edge-blend" || feature.kind === "offset-region" || feature.kind === "replace-face" || feature.kind === "web" || feature.kind === "wrap" || feature.kind === "flex" || feature.kind === "sheet-jog" || feature.bodyEdit !== undefined) {
+  if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss" || feature.kind === "indent" || feature.kind === "combine" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "pattern" || feature.kind === "edge-blend" || feature.kind === "offset-region" || feature.kind === "replace-face" || feature.kind === "web" || feature.kind === "wrap" || feature.kind === "flex" || feature.kind === "sheet-jog" || feature.bodyEdit !== undefined) {
     return { ok: false, message: "A direct-edit / indent step is applied during timeline replay, not through the sketch-driven builder." };
   }
   const sketch = sketchFeature.sketch;
@@ -421,6 +421,23 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
       outcomes.set(step.id, { featureId: step.id });
       continue;
     }
+    // Combine (a timeline Boolean): join, cut or intersect the tool bodies, as rebuilt in this pass, into the target.
+    if (step.kind === "combine") {
+      if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this combine changes could not be built." }); continue; }
+      const mode = step.combineMode ?? "join";
+      let failed = false;
+      for (const toolId of step.combineToolBodyIds ?? []) {
+        const toolBody = fresh?.get(toolId) ?? project.part.generalBodies?.find((candidate) => candidate.id === toolId);
+        if (toolBody === undefined) { outcomes.set(step.id, { featureId: step.id, message: `A tool body of this combine is no longer in the part.` }); failed = true; break; }
+        const parent: GeneralSolidBody = current;
+        const combined = await combineGeneralBodies({ target: parent, tool: toolBody, mode, bodyId, name: parent.name, ...(mode === "cut" ? { allowSplit: true } : {}) });
+        if (!combined.ok) { outcomes.set(step.id, { featureId: step.id, message: combined.message }); failed = true; break; }
+        current = { ...combined.body, color: parent.color };
+        for (const part of combined.pieces ?? []) keepPiece(renumberedPiece(part, bodyId, parent.name, pieces.length + 2));
+      }
+      if (!failed) outcomes.set(step.id, { featureId: step.id });
+      continue;
+    }
     // Indent: boolean-cut the referenced tool body out of the current body.
     if (step.kind === "indent") {
       if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "Indent needs an existing body to carve out of." }); continue; }
@@ -504,7 +521,8 @@ function targetsFirst(history: ReturnType<typeof designOf>, bodyIds: readonly st
     const faceBody = sketchFace !== undefined && sketchFace.kind === "sketch" ? sketchFace.sketch.planeFace?.bodyId : undefined;
     // ... and the bodies its sketch projected curves from.
     const projected = sketchFace !== undefined && sketchFace.kind === "sketch" ? projectionBodyIds(sketchFace.sketch) : [];
-    for (const reached of [feature.extentTarget?.bodyId, faceBody, ...projected]) {
+    // ... and a combine replays after the tool bodies it consumes.
+    for (const reached of [feature.extentTarget?.bodyId, faceBody, ...projected, ...(feature.combineToolBodyIds ?? [])]) {
       if (reached === undefined || reached === feature.bodyId) continue;
       const set = reaches.get(feature.bodyId) ?? new Set<string>();
       set.add(reached);

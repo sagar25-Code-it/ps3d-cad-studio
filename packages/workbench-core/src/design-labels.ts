@@ -63,6 +63,11 @@ export function describeFeature(history: DesignHistory, feature: DesignFeature):
     return `${describePattern(pattern)}${repeated.length === 0 ? "" : ` · ${repeated.join(", ")}`}${pattern.copyIndex === undefined ? "" : ` · copy ${pattern.copyIndex}`}`;
   }
   if (feature.bodyEdit !== undefined) return describeBodyEdit(feature.bodyEdit);
+  if (feature.kind === "combine") {
+    const tools = (feature.combineToolBodyIds ?? []).length;
+    const mode = feature.combineMode === "cut" ? "Cut" : feature.combineMode === "intersect" ? "Intersect" : "Join";
+    return `${mode} with ${tools} ${tools === 1 ? "body" : "bodies"}${feature.combineKeepTools === true ? " · tools kept" : ""}`;
+  }
   const source = history.features.find((candidate) => candidate.id === feature.sketchFeatureId);
   const amount = feature.extent === "through-all" ? "through all"
     : feature.kind === "extrude"

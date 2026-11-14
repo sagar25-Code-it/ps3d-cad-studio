@@ -223,6 +223,12 @@ export function parameterFieldsOf(feature: DesignSolidFeature): readonly Paramet
     case "emboss": return [
       number("height", "Emboss height", "mm", (f) => f.embossHeightMm, (f, v) => ({ ...f, embossHeightMm: v, valueMm: Math.max(0.01, Math.abs(v)) }), { min: -10_000, max: 10_000, hint: "negative presses the face in; zero is not allowed" })
     ];
+    case "combine": return [
+      { id: "mode", label: "Operation", unit: "", input: "select",
+        options: [{ value: "join", label: "Join" }, { value: "cut", label: "Cut" }, { value: "intersect", label: "Intersect" }],
+        read: (f) => f.combineMode ?? "join",
+        write: (f, v) => ({ ...f, combineMode: v === "cut" ? "cut" as const : v === "intersect" ? "intersect" as const : "join" as const }) }
+    ];
     default: return undefined;
   }
 }

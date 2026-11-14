@@ -1266,7 +1266,7 @@ export interface SweepPathRef {
 }
 
 export interface DesignSolidFeature extends DesignFeatureBase {
-  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "pattern" | "edge-blend" | "offset-region" | "replace-face" | "web" | "wrap" | "flex" | "sheet-jog" | "sheet-lofted-bend";
+  readonly kind: "extrude" | "revolve" | "sweep" | "loft" | "edge-fillet" | "edge-chamfer" | "shell" | "draft" | "move-body" | "scale-body" | "move-face" | "offset-face" | "helix" | "thread" | "rib" | "dome" | "emboss" | "indent" | "combine" | "sheet-base" | "sheet-flange" | "sheet-hem" | "sheet-edge-flange" | "hole" | "pattern" | "edge-blend" | "offset-region" | "replace-face" | "web" | "wrap" | "flex" | "sheet-jog" | "sheet-lofted-bend";
   /**
    * A step that reshapes an existing body by picked faces or a transform (a general shell or draft, offset region, replace face,
    * a rib / web, wrap or flex). Always paired with `operation: "direct-edit"`; see `BodyEditSpec`.
@@ -1428,6 +1428,16 @@ export interface DesignSolidFeature extends DesignFeatureBase {
    * The tool body is subtracted from the target to carve the indent cavity.
    */
   readonly indentToolBodyId?: string;
+  /**
+   * Combine only (a timeline Boolean): the tool bodies combined into this step's body (the target). The tools and the
+   * target keep their own timeline steps; the replay combines their rebuilt shapes at this step's position, so a sketch
+   * edit on either side still drives the result.
+   */
+  readonly combineToolBodyIds?: readonly string[];
+  /** Combine only: how the tools are applied to the target. */
+  readonly combineMode?: "join" | "cut" | "intersect";
+  /** Combine only: true leaves the tool bodies in the part (and visible); absent or false hides them while the step is live. */
+  readonly combineKeepTools?: boolean;
   /** Sheet-base / sheet-flange only: sheet thickness in millimetres. */
   readonly sheetThicknessMm?: number;
   /** Sheet-base / sheet-flange only: inner bend radius in millimetres (for the bend K-factor and flat-pattern unfold). */

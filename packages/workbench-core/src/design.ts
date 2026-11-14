@@ -79,7 +79,7 @@ export function isSolidFeature(feature: DesignFeature): feature is DesignSolidFe
 export function modifiesBody(feature: DesignFeature): feature is DesignSolidFeature & { readonly operation: "join" | "cut" | "direct-edit" } {
   if (feature.kind === "sketch") return false;
   if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss") return true;
-  if (feature.kind === "indent" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "edge-blend" || feature.kind === "sheet-jog") return true;
+  if (feature.kind === "indent" || feature.kind === "combine" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "edge-blend" || feature.kind === "sheet-jog") return true;
   // A pattern joined into its body, or of features in it, changes that body; a new-bodies pattern makes bodies of its own.
   if (feature.kind === "pattern") return feature.pattern !== undefined && (feature.pattern.result === "join" || feature.pattern.featureIds !== undefined);
   if (feature.bodyEdit !== undefined) return true;
@@ -120,7 +120,11 @@ export function dependentsOf(history: DesignHistory, featureId: string): readonl
         || (feature.loftSecondarySketchFeatureId !== undefined && closure.has(feature.loftSecondarySketchFeatureId));
       const copiesClosureBody = feature.kind === "pattern" && feature.pattern !== undefined && history.features.some((other) => closure.has(other.id) && other.kind !== "sketch" && !modifiesBody(other) && other.bodyId === feature.pattern!.sourceBodyId);
       const modifiesClosureBody = modifiesBody(feature) && history.features.some((other) => closure.has(other.id) && other.kind !== "sketch" && !modifiesBody(other) && other.bodyId === feature.bodyId);
-      if (builtOnClosure || modifiesClosureBody || copiesClosureBody) { closure.add(feature.id); grew = true; }
+      // An indent or a timeline combine consumes other bodies: it follows the steps that made its tools.
+      const consumesClosureBody = (feature.indentToolBodyId !== undefined || feature.combineToolBodyIds !== undefined)
+        && history.features.some((other) => closure.has(other.id) && other.kind !== "sketch" && !modifiesBody(other)
+          && (feature.indentToolBodyId === other.bodyId || (feature.combineToolBodyIds ?? []).includes(other.bodyId)));
+      if (builtOnClosure || modifiesClosureBody || copiesClosureBody || consumesClosureBody) { closure.add(feature.id); grew = true; }
     }
   }
   return history.features.filter((feature) => feature.id !== featureId && closure.has(feature.id));
@@ -535,10 +539,10 @@ function validDirectionAndThin(value: Record<string, unknown>): boolean {
 export const MAX_PROFILE_REFS = 2048;
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
-  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "flangeReliefShape", ...FEATURE_REF_KEYS, ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
+  if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "combineToolBodyIds", "combineMode", "combineKeepTools", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "flangeReliefShape", ...FEATURE_REF_KEYS, ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
   if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
   if (!validExtent(value) || !validFeatureRefs(value)) return false;
-  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "sheet-base", "sheet-flange", "sheet-hem", "sheet-edge-flange", "hole", "pattern", "edge-blend", ...BODY_EDIT_ONLY_KINDS, ...SHEET_FEATURE_KINDS].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
+  if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "combine", "sheet-base", "sheet-flange", "sheet-hem", "sheet-edge-flange", "hole", "pattern", "edge-blend", ...BODY_EDIT_ONLY_KINDS, ...SHEET_FEATURE_KINDS].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;
   if (!Array.isArray(value.profileIds) || value.profileIds.length > MAX_PROFILE_REFS || value.profileIds.some((id) => typeof id !== "string" || id.length === 0 || id.length > 160)) return false;
   if (typeof value.valueMm !== "number" || !Number.isFinite(value.valueMm) || value.valueMm === 0 || Math.abs(value.valueMm) > 100_000) return false;
@@ -616,7 +620,7 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (value.kind === "helix") {
     if (!Object.hasOwn(value, "helixRadiusMm") || !Object.hasOwn(value, "helixPitchMm") || !Object.hasOwn(value, "helixTurns")) return false;
   }
-  if (value.operation === "direct-edit" && value.kind !== "move-body" && value.kind !== "scale-body" && value.kind !== "move-face" && value.kind !== "offset-face" && value.kind !== "emboss" && value.kind !== "sheet-edge-flange" && value.kind !== "hole" && value.kind !== "pattern" && value.kind !== "edge-blend" && value.kind !== "sheet-jog" && !Object.hasOwn(value, "bodyEdit")) return false;
+  if (value.operation === "direct-edit" && value.kind !== "move-body" && value.kind !== "scale-body" && value.kind !== "move-face" && value.kind !== "offset-face" && value.kind !== "emboss" && value.kind !== "sheet-edge-flange" && value.kind !== "hole" && value.kind !== "pattern" && value.kind !== "edge-blend" && value.kind !== "sheet-jog" && value.kind !== "combine" && !Object.hasOwn(value, "bodyEdit")) return false;
   if (Object.hasOwn(value, "pattern") && value.kind !== "pattern") return false;
   if (value.kind === "pattern") {
     // A new-bodies pattern builds a body of its own; a joined pattern and a pattern of features change the body they are in.
@@ -657,6 +661,15 @@ export function validSolidFeaturePayload(value: unknown): value is DesignSolidFe
   if (Object.hasOwn(value, "indentToolBodyId")) {
     if (value.kind !== "indent" || !stable(String(value.indentToolBodyId))) return false;
   }
+  if (Object.hasOwn(value, "combineToolBodyIds")) {
+    const tools = value.combineToolBodyIds;
+    if (value.kind !== "combine" || !Array.isArray(tools) || tools.length < 1 || tools.length > 16) return false;
+    if (tools.some((id) => typeof id !== "string" || !stable(id) || id === value.bodyId)) return false;
+    if (new Set(tools).size !== tools.length) return false;
+  }
+  if (Object.hasOwn(value, "combineMode") && (value.kind !== "combine" || !["join", "cut", "intersect"].includes(String(value.combineMode)))) return false;
+  if (Object.hasOwn(value, "combineKeepTools") && (value.kind !== "combine" || typeof value.combineKeepTools !== "boolean")) return false;
+  if (value.kind === "combine" && (value.operation !== "direct-edit" || !Object.hasOwn(value, "combineToolBodyIds") || !Object.hasOwn(value, "combineMode"))) return false;
   const sheetKind = value.kind === "sheet-base" || value.kind === "sheet-flange" || value.kind === "sheet-hem" || value.kind === "sheet-lofted-bend";
   const bendKind = sheetKind || value.kind === "sheet-edge-flange" || value.kind === "sheet-jog";
   if (Object.hasOwn(value, "sheetThicknessMm")) {
