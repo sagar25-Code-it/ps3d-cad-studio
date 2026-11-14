@@ -22,7 +22,9 @@ interface TimelineBarProps {
   readonly onMove?: (feature: DesignFeature, toIndex: number) => void;
 }
 
-const ICONS: Readonly<Record<DesignFeature["kind"], string>> = { sketch: "sketch", extrude: "extrude", revolve: "revolve", sweep: "extrude", loft: "extrude", "edge-fillet": "fillet", "edge-chamfer": "chamfer", shell: "shell", draft: "draft", "move-body": "move", "scale-body": "scale", "move-face": "move", "offset-face": "scale", helix: "revolve", thread: "revolve", rib: "extrude", dome: "extrude", emboss: "move", indent: "chamfer", combine: "unite", "sheet-base": "extrude", "sheet-flange": "extrude", "sheet-hem": "extrude", "sheet-edge-flange": "extrude", hole: "bore", pattern: "pattern", "edge-blend": "fillet", "offset-region": "offset-face", "replace-face": "replace-face", web: "extrude", wrap: "move", flex: "move", "sheet-jog": "extrude", "sheet-lofted-bend": "extrude" };
+/** The glyph of each step kind (HS-26): kinds that share one are the same operation in two forms (a fillet and an edge blend), not a borrowed icon. */
+export const TIMELINE_ICONS: Readonly<Record<DesignFeature["kind"], string>> = { sketch: "sketch", extrude: "extrude", revolve: "revolve", sweep: "sweep", loft: "loft", "edge-fillet": "fillet", "edge-chamfer": "chamfer", shell: "shell", draft: "draft", "move-body": "move", "scale-body": "scale", "move-face": "move-face", "offset-face": "offset-face", helix: "helix", thread: "thread", rib: "rib", dome: "dome", emboss: "emboss", indent: "indent", combine: "unite", "sheet-base": "sheet-base", "sheet-flange": "sheet-flange", "sheet-hem": "sheet-hem", "sheet-edge-flange": "sheet-edge-flange", hole: "bore", pattern: "pattern", "edge-blend": "fillet", "offset-region": "offset-region", "replace-face": "replace-face", web: "web", wrap: "wrap", flex: "flex", "sheet-jog": "sheet-jog", "sheet-lofted-bend": "sheet-lofted-bend" };
+const ICONS = TIMELINE_ICONS;
 
 /**
  * The parametric timeline: one chip per step, a rollback marker you can drag (or click a slot, or use the step buttons) to see the

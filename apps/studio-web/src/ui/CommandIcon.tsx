@@ -269,6 +269,23 @@ function geometry(name: string): React.ReactNode {
     case "automate": return <><path d="M6 5h12v14H6z" /><path d="m9 9 2 2-2 2m4 0h2" /></>;
     case "file": return <><path d="M6 3h9l4 4v14H6zM15 3v5h4" /></>;
     case "view": return <><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6" /><circle cx="12" cy="12" r="2.5" /></>;
+    // HS-26: the timeline's own glyphs for steps that used to borrow another command's icon (own-drawn artwork).
+    case "rib": return <><path d="M3 20h18" /><path d="M7 20V5h3l9 15" /></>;
+    case "dome": return <><path d="M4 19h16" /><path d="M5 19c0-10 14-10 14 0" /><path d="M12 6V4" /></>;
+    case "helix": return <><path d="M6 4c9 0 9 4 0 4s-9 4 0 4 9 4 0 4" /><path d="M6 20h12" /></>;
+    case "thread": return <><path d="M8 3v18M16 3v18" /><path d="m8 7 8 2m-8 2 8 2m-8 2 8 2" /></>;
+    case "web": return <><path d="M4 20V6h16v14" /><path d="M4 13h16M12 6v14" /></>;
+    case "offset-region": return <><path d="m4 14 7-4 7 4-7 4z" /><path d="m4 10 7-4 7 4" opacity=".5" /><path d="M11 6V3m0 0L9 5m2-2 2 2" /></>;
+    case "emboss": return <><path d="M3 18h5v-5h8v5h5" /><path d="m8 13 2-3h4l2 3" /></>;
+    case "wrap": return <><ellipse cx="12" cy="6" rx="6" ry="2.5" /><path d="M6 6v12c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V6" /><path d="M8 12c2 1 6 1 8 0" /></>;
+    case "flex": return <><path d="M3 9c3-3 6 3 9 0s6 3 9 0" /><path d="M3 15c3-3 6 3 9 0s6 3 9 0" /></>;
+    case "indent": return <><path d="M3 16h5l2 3h4l2-3h5" /><path d="M12 3v8m-3-3 3 3 3-3" /></>;
+    case "sheet-base": return <><path d="m3 15 6-6h12l-6 6z" /><path d="M3 15v2h12v-2m0 2 6-6V9" /></>;
+    case "sheet-flange": return <><path d="M3 18h9c3 0 5-2 5-5V4" /><path d="M3 21h10c5 0 7-3 7-8V4" /></>;
+    case "sheet-hem": return <><path d="M3 8h12a4 4 0 0 1 0 8H8" /><path d="M3 12h12" /></>;
+    case "sheet-edge-flange": return <><path d="M3 19h14l4-4H7z" /><path d="M17 19V7l4-4v12" /></>;
+    case "sheet-jog": return <><path d="M3 16h6l3-6h9" /><path d="M3 19h7l3-6h8" /></>;
+    case "sheet-lofted-bend": return <><path d="M4 6h16M7 18h10" /><path d="M4 6c0 6 3 12 3 12M20 6c0 6-3 12-3 12" /><path d="M12 6v12" /></>;
     case "help": return <><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.7 2.7 0 1 1 4.2 2.3c-1.3.8-1.7 1.3-1.7 2.7M12 18h.01" /></>;
     default: return <><path d="M5 5h14v14H5z" /><path d="M8 12h8M12 8v8" /></>;
   }
