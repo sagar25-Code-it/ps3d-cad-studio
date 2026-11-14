@@ -81,8 +81,85 @@ const FIELDS: Partial<Record<DesignSolidFeature["kind"], readonly BindableField[
     size("valueMm", "Height", "length"),
     { id: "size", label: "Distance", dimension: "length", ...positive, max: 10_000, read: (feature) => feature.edge?.sizeMm, write: (feature, value) => ({ ...feature, edge: { kind: "chamfer" as const, sizeMm: value } }) }
   ],
-  shell: [size("valueMm", "Height", "length"), property("wall", "Wall thickness", "length", "shellThicknessMm", { ...positive, max: 10_000 })],
-  draft: [size("valueMm", "Height", "length"), property("angle", "Draft angle", "angle", "draftAngleDeg", { ...positive, max: 79.9 })],
+  shell: [
+    size("valueMm", "Height", "length"),
+    // The sketch-palette shell stores its wall in shellThicknessMm; the face-picked general shell stores it in its bodyEdit spec.
+    {
+      id: "wall", label: "Wall thickness", dimension: "length", ...positive, max: 10_000,
+      read: (feature) => feature.bodyEdit?.kind === "shell" ? feature.bodyEdit.thicknessMm : feature.shellThicknessMm,
+      write: (feature, value) => feature.bodyEdit?.kind === "shell"
+        ? { ...feature, bodyEdit: { ...feature.bodyEdit, thicknessMm: value }, valueMm: floorValue(value) }
+        : { ...feature, shellThicknessMm: value }
+    }
+  ],
+  draft: [
+    size("valueMm", "Height", "length", { ...positive, applies: (feature) => feature.bodyEdit === undefined }),
+    property("angle", "Draft angle", "angle", "draftAngleDeg", { ...positive, max: 79.9, applies: (feature) => feature.bodyEdit === undefined }),
+    {
+      id: "angle", label: "Draft angle", dimension: "angle", min: -45, max: 45, nonZero: true,
+      applies: (feature) => feature.bodyEdit?.kind === "draft",
+      read: (feature) => feature.bodyEdit?.kind === "draft" ? feature.bodyEdit.angleDeg : undefined,
+      write: (feature, value) => feature.bodyEdit?.kind === "draft" ? { ...feature, bodyEdit: { ...feature.bodyEdit, angleDeg: value }, valueMm: floorValue(value) } : feature
+    }
+  ],
+  "offset-region": [{
+    id: "distance", label: "Offset distance", dimension: "length", min: -100_000, max: 100_000, nonZero: true,
+    applies: (feature) => feature.bodyEdit?.kind === "offset-region",
+    read: (feature) => feature.bodyEdit?.kind === "offset-region" ? feature.bodyEdit.distanceMm : undefined,
+    write: (feature, value) => feature.bodyEdit?.kind === "offset-region" ? { ...feature, bodyEdit: { ...feature.bodyEdit, distanceMm: value }, valueMm: floorValue(value) } : feature
+  }],
+  web: [{
+    id: "thickness", label: "Thickness", dimension: "length", ...positive, max: 10_000,
+    applies: (feature) => feature.bodyEdit?.kind === "web",
+    read: (feature) => feature.bodyEdit?.kind === "web" ? feature.bodyEdit.thicknessMm : undefined,
+    write: (feature, value) => feature.bodyEdit?.kind === "web" ? { ...feature, bodyEdit: { ...feature.bodyEdit, thicknessMm: value }, valueMm: floorValue(value) } : feature
+  }],
+  wrap: [{
+    id: "height", label: "Height", dimension: "length", ...positive, max: 10_000,
+    applies: (feature) => feature.bodyEdit?.kind === "wrap",
+    read: (feature) => feature.bodyEdit?.kind === "wrap" ? feature.bodyEdit.heightMm : undefined,
+    write: (feature, value) => feature.bodyEdit?.kind === "wrap" ? { ...feature, bodyEdit: { ...feature.bodyEdit, heightMm: value }, valueMm: floorValue(value) } : feature
+  }],
+  "edge-blend": [
+    {
+      id: "size", label: "Size", dimension: "length", ...positive, max: 10_000,
+      read: (feature) => Math.abs(feature.valueMm),
+      write: (feature, value) => ({ ...feature, valueMm: value })
+    },
+    {
+      id: "endSize", label: "End radius", dimension: "length", min: 0, max: 10_000,
+      applies: (feature) => feature.blendType === "fillet",
+      read: (feature) => feature.blendEndSizeMm ?? 0,
+      write: (feature, value) => {
+        const { blendEndSizeMm: _drop, ...rest } = feature;
+        void _drop;
+        return value === 0 || value === feature.valueMm ? rest : { ...rest, blendEndSizeMm: value };
+      }
+    },
+    {
+      id: "second", label: "Second distance", dimension: "length", min: 0, max: 10_000,
+      applies: (feature) => feature.blendType === "chamfer",
+      read: (feature) => feature.blendSecondSizeMm ?? 0,
+      write: (feature, value) => {
+        const { blendSecondSizeMm: _drop, ...rest } = feature;
+        void _drop;
+        return value === 0 || value === feature.valueMm ? rest : { ...rest, blendSecondSizeMm: value };
+      }
+    },
+    {
+      id: "angle", label: "Angle with the first face", dimension: "angle", min: 0, max: 179,
+      applies: (feature) => feature.blendType === "chamfer",
+      read: (feature) => feature.blendAngleDeg ?? 0,
+      write: (feature, value) => {
+        const { blendAngleDeg: _dropAngle, ...rest } = feature;
+        void _dropAngle;
+        if (value === 0) return rest;
+        const { blendSecondSizeMm: _dropSecond, ...withoutSecond } = rest;
+        void _dropSecond;
+        return { ...withoutSecond, blendAngleDeg: value };
+      }
+    }
+  ],
   helix: [
     property("radius", "Coil radius", "length", "helixRadiusMm", { ...positive, max: 10_000 }),
     property("pitch", "Pitch", "length", "helixPitchMm", { ...positive, max: 10_000 }),
