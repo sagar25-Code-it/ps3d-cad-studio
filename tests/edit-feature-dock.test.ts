@@ -50,7 +50,7 @@ export const editFeatureDockTests: readonly TestCase[] = [
       const project = await blockWithCut();
       const dialog = (feature: DesignSolidFeature): string => renderToStaticMarkup(createElement(FeatureEditDialog, { feature, project, busy: false, onApply: () => undefined, onClose: () => undefined }));
       const html = dialog(stepOf(project, "feature:cut-1"));
-      assert(html.includes("feature-edit-dock") && html.includes('aria-modal="false"'), "docked, and not announced as modal");
+      assert(html.includes("feature-edit-dock") && !html.includes('role="dialog"'), "docked, and not a dialog");
       assert(!html.includes('aria-modal="true"'), "no modal marker");
       assert(html.includes('aria-label="Operation"') && html.includes("Join (add to the solid)") && html.includes("Cut (remove from the solid)") && html.includes("Intersect"), "the operation can be changed");
       assert(/<option value="cut" selected="">/u.test(html) || html.includes('value="cut"'), "the cut is the chosen one");

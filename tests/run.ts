@@ -199,6 +199,7 @@ import { browserDocumentTests } from "./browser-document.test.js";
 import { holeFaceNameTests } from "./hole-face-names.test.js";
 import { holePlacementTests } from "./hole-placement.test.js";
 import { editFeatureDockTests } from "./edit-feature-dock.test.js";
+import { dockedPanelTests } from "./docked-panel.test.js";
 import { sketchOffsetChainDefaultTests } from "./sketch-offset-chain-default.test.js";
 import { sketchProjectionCurrentTests } from "./sketch-projection-current.test.js";
 import { sketchDimensionPointFirstTests } from "./sketch-dimension-point-first.test.js";
@@ -460,6 +461,7 @@ const tests: readonly TestCase[] = [
   ...holeFaceNameTests,
   ...holePlacementTests,
   ...editFeatureDockTests,
+  ...dockedPanelTests,
 ];
 let failures = 0;
 

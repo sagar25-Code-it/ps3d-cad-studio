@@ -3,7 +3,7 @@ import type { DesignSolidFeature, WorkbenchProject } from "../../../../packages/
 import { designOf, previewFieldExpression } from "../../../../packages/workbench-core/src/index.js";
 import { applyParameterValues, applyPlainSize, fieldAcceptsExpression, parameterFieldsOf, parameterValuesOf } from "../feature-parameters.js";
 import { CommandIcon } from "./CommandIcon.js";
-import { useDialogFocus } from "./useDialogFocus.js";
+import { useDockedPanel } from "./docked-panel.js";
 
 interface FeatureEditDialogProps {
   /** The feature being edited; the dialog is open while this is defined. */
@@ -29,11 +29,13 @@ const EXTENT_LABEL: Readonly<Record<string, string>> = {
 /**
  * Edit a timeline step: an extrude or revolve has its own form (operation, size, direction, second side, extent, thin wall); every other
  * kind lists its parameters from `parameterFieldsOf`. The form is docked at the right of the window with no backdrop (HS-06), so the model
- * stays live to look at and orbit while it is open; Esc closes it and Update feature applies it.
+ * stays live to look at and orbit while it is open; Esc closes it and Update feature applies it. It is a docked panel and not a modal
+ * dialog: it has no dialog role, so the Part hotkeys, Ctrl+Z, Ctrl+B and the timeline keep working while it is open, Tab is not trapped
+ * in it, and Esc closes it from the canvas too (see docked-panel.ts).
  */
 export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Element | null {
   const open = props.feature !== undefined;
-  const dialogRef = useDialogFocus<HTMLElement>(open, props.onClose);
+  const dock = useDockedPanel<HTMLElement>(open, props.onClose);
   const [value, setValue] = useState("");
   const [direction, setDirection] = useState<Direction>("one-side");
   const [second, setSecond] = useState("10");
@@ -101,8 +103,8 @@ export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Elem
     props.onApply(result.feature);
   };
 
-  return <div className="dialog-backdrop save-project-backdrop feature-edit-dock" role="presentation">
-    <section ref={dialogRef} tabIndex={-1} className="save-project-dialog feature-edit-dialog" role="dialog" aria-modal="false" aria-labelledby="feature-edit-title">
+  return <div className="dialog-backdrop save-project-backdrop feature-edit-dock" role="presentation" style={dock.style}>
+    <section ref={dock.ref} tabIndex={-1} className="save-project-dialog feature-edit-dialog" role="region" aria-labelledby="feature-edit-title">
       <header><span><CommandIcon name={feature.kind} /></span><div><small>TIMELINE / EDIT FEATURE</small><h2 id="feature-edit-title">{feature.name}</h2></div><button onClick={props.onClose} aria-label="Cancel editing"><CommandIcon name="cancel" /></button></header>
       <div className="save-project-content feature-edit-form">
         {fields !== undefined && fields.map((field, index) => <label key={field.id}>

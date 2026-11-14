@@ -237,7 +237,7 @@
 .render-gallery > div > p { display: flex; align-items: center; gap: 0.45rem; margin: auto 0; color: #83929a; font-size: 0.48rem; }
 .render-gallery > div > p .command-icon { width: 22px; height: 22px; color: #4fa7be; }
 
-/* Edit Feature is docked at the right with no backdrop (HS-06): the model behind it stays live; only the panel takes pointer events. The offsets clear the header, the timeline strip and the status bar. */
-.studio-app .dialog-backdrop.feature-edit-dock { place-items: start end; padding: 76px 12px 96px; background: transparent; backdrop-filter: none; pointer-events: none; }
-.studio-app .dialog-backdrop.feature-edit-dock > .feature-edit-dialog { width: min(340px, calc(100vw - 24px)); max-height: calc(100dvh - 172px); pointer-events: auto; box-shadow: 0 10px 28px #15191d66; }
+/* Edit Feature is docked at the right with no backdrop (HS-06): the model behind it stays live; only the panel takes pointer events. --dock-* are measured from the canvas row and the timeline strip (ui/docked-panel.ts), so the panel starts at the canvas edge and ends above the strip at every window size; the fallbacks apply until the first measurement. */
+.studio-app .dialog-backdrop.feature-edit-dock { place-items: start end; padding: var(--dock-top, 76px) var(--dock-right, 12px) var(--dock-bottom, 96px) 12px; background: transparent; backdrop-filter: none; pointer-events: none; }
+.studio-app .dialog-backdrop.feature-edit-dock > .feature-edit-dialog { width: min(340px, calc(100vw - 24px)); max-height: var(--dock-max-height, calc(100dvh - 172px)); pointer-events: auto; box-shadow: 0 10px 28px #15191d66; }
 .studio-app .dialog-backdrop.feature-edit-dock > .feature-edit-dialog .save-project-content { overflow-y: auto; }

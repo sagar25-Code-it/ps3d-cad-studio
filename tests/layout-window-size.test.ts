@@ -99,6 +99,8 @@ export const layoutWindowSizeTests: readonly TestCase[] = [
         const lines = readFileSync(file, "utf8").split("\n");
         lines.forEach((line, index) => {
           if (!/className="[^"]*\bdialog-backdrop\b/.test(line)) return;
+          // A docked panel (Edit Feature) is not a modal: it has no dialog role and bounds its own height from the measured canvas row.
+          if (/\bfeature-edit-dock\b/.test(line)) return;
           dialogs += 1;
           const frame = lines.slice(index + 1, index + 4).find((candidate) => /role="dialog"/.test(candidate)) ?? "";
           if (!/className="[^"]*\bsave-project-dialog\b/.test(frame)) offenders.push(`${file.replace(/\\/g, "/")}:${index + 1}`);
