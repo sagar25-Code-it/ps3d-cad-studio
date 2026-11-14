@@ -3,6 +3,7 @@ import { EDGE_BLEND_MAX_GROUPS } from "../../../packages/workbench-core/src/inde
 import { COARSE_PITCH_MM, METRIC_FASTENERS, tapDrillDiameterMm } from "../../../packages/workbench-geometry/src/index.js";
 import type { ViewportGuideSegment } from "../../../packages/viewport-three/src/index.js";
 import { parameterValuesOf } from "./feature-parameters.js";
+import { repickedPlacement, type FaceChoice, type PlacementReferences } from "./hole-placement.js";
 
 /**
  * PT-06: one shared modeless command panel. The panel is plain state (this module) plus one component (ui/CommandPanel.tsx):
@@ -55,6 +56,8 @@ export interface CommandPanelState {
   readonly values: Readonly<Record<string, string>>;
   /** Edit mode: the stored edge sets, kept when the user does not re-pick. */
   readonly storedGroups?: readonly EdgeBlendGroup[];
+  /** Hole edit: the faces a face-placed hole is measured from, named, with the faces it could be measured from instead (hole-placement.ts). */
+  readonly holeRefs?: PlacementReferences;
   readonly error?: string;
 }
 
@@ -73,7 +76,7 @@ export function openCommandPanel(command: PanelCommand): CommandPanelState {
 }
 
 /** Opens the panel filled from an existing step (Edit Feature): same fields, stored selections summarised. */
-export function openCommandPanelForEdit(feature: DesignSolidFeature, bodyName: string | undefined): CommandPanelState | undefined {
+export function openCommandPanelForEdit(feature: DesignSolidFeature, bodyName: string | undefined, holeRefs?: PlacementReferences): CommandPanelState | undefined {
   const common = { mode: "edit" as const, editFeatureId: feature.id, bodyId: feature.bodyId, ...(bodyName === undefined ? {} : { bodyName }) };
   if (feature.kind === "edge-blend" && (feature.blendType === "fillet" || feature.blendType === "chamfer")) {
     return {
@@ -93,7 +96,11 @@ export function openCommandPanelForEdit(feature: DesignSolidFeature, bodyName: s
     return {
       command: "hole", ...common, edges: [], faces: [],
       ...(feature.holePositionMm === undefined ? {} : { holePoint: { pointMm: feature.holePositionMm as readonly [number, number, number], normal: (feature.holeNormal ?? [0, 0, 1]) as readonly [number, number, number] } }),
-      values: { style: feature.holeStyle ?? "simple", fastener: "custom", ...parameterValuesOf(feature) }
+      ...(holeRefs === undefined || feature.holePlacement === undefined ? {} : { holeRefs }),
+      values: {
+        style: feature.holeStyle ?? "simple", fastener: "custom", ...parameterValuesOf(feature),
+        ...(holeRefs === undefined || feature.holePlacement === undefined ? {} : { faceA: holeRefs.current[0].faceKey, faceB: holeRefs.current[1].faceKey })
+      }
     };
   }
   return undefined;
@@ -130,10 +137,14 @@ export function panelFields(state: CommandPanelState): readonly PanelFieldSpec[]
           ...Object.keys(METRIC_FASTENERS).map((size) => ({ value: size, label: size }))
         ] },
         { id: "diameter", label: "Diameter", unit: "mm", kind: "text" },
-        // A hole placed from faces is moved by its two distances (HS-15).
+        // A hole placed from faces is moved by its two distances (HS-15), each measured from a named face the hole follows.
         ...(state.values["offsetA"] === undefined ? [] : [
-          { id: "offsetA", label: "Distance from the first face", unit: "mm", kind: "text" as const, hint: "the hole follows the face it is measured from" },
-          { id: "offsetB", label: "Distance from the second face", unit: "mm", kind: "text" as const }
+          ...(state.holeRefs === undefined ? [] : [
+            { id: "faceA", label: "Measure from (first face)", unit: "", kind: "select" as const, options: faceOptions(state.holeRefs, 0), hint: "the hole follows this face; both faces are outlined in the view" },
+            { id: "faceB", label: "Measure from (second face)", unit: "", kind: "select" as const, options: faceOptions(state.holeRefs, 1) }
+          ]),
+          { id: "offsetA", label: `Distance from the ${shortFaceName(state, "faceA", 0)}`, unit: "mm", kind: "text" as const, hint: "the hole follows the face it is measured from" },
+          { id: "offsetB", label: `Distance from the ${shortFaceName(state, "faceB", 1)}`, unit: "mm", kind: "text" as const }
         ]),
         { id: "depth", label: "Depth", unit: "mm", kind: "text", hint: "0 drills through everything" },
         ...(style === "counterbore" ? [
@@ -153,6 +164,21 @@ export function panelFields(state: CommandPanelState): readonly PanelFieldSpec[]
   }
 }
 
+/** The faces a hole may be measured from, as select options: name and how far the hole is inside each. The face now in use is always listed. */
+function faceOptions(refs: PlacementReferences, side: 0 | 1): readonly { readonly value: string; readonly label: string }[] {
+  const all: readonly FaceChoice[] = refs.choices.some((choice) => choice.faceKey === refs.current[side].faceKey) ? refs.choices : [refs.current[side], ...refs.choices];
+  return all.map((choice) => ({ value: choice.faceKey, label: `${choice.name}, ${Number(choice.distanceMm.toFixed(2))} mm away` }));
+}
+
+/** The face a hole distance is measured from, by the name before the coordinate: "Right face". */
+function shortFaceName(state: CommandPanelState, field: "faceA" | "faceB", side: 0 | 1): string {
+  const refs = state.holeRefs;
+  if (refs === undefined) return side === 0 ? "first face" : "second face";
+  const key = state.values[field] ?? refs.current[side].faceKey;
+  const choice = refs.choices.find((candidate) => candidate.faceKey === key) ?? refs.current[side];
+  return choice.name.split(" (")[0]!;
+}
+
 /** What the selection row asks for and shows. */
 export function panelSelectionRow(state: CommandPanelState): { readonly label: string; readonly status: string; readonly count: number; readonly clearable: boolean } {
   if (state.command === "fillet" || state.command === "chamfer") {
@@ -168,7 +194,8 @@ export function panelSelectionRow(state: CommandPanelState): { readonly label: s
     return { label: "Faces to leave open", status: count === 0 ? "None · the shell is hollowed closed" : `${count} selected`, count, clearable: count > 0 };
   }
   const placed = state.holePoint !== undefined;
-  return { label: "Start point", status: placed ? `On the face at (${state.holePoint!.pointMm.map((value) => value.toFixed(1)).join(", ")}) mm` : "Select · click a face in the view", count: placed ? 1 : 0, clearable: placed };
+  const measured = state.holeRefs === undefined ? "" : `, measured from the ${shortFaceName(state, "faceA", 0)} and the ${shortFaceName(state, "faceB", 1)}`;
+  return { label: "Start point", status: placed ? `On the ${state.holeRefs === undefined ? "face" : state.holeRefs.start.name.split(" (")[0]!} at (${state.holePoint!.pointMm.map((value) => value.toFixed(1)).join(", ")}) mm${measured}` : "Select · click a face in the view", count: placed ? 1 : 0, clearable: placed };
 }
 
 /** The default texts of the fields a hole type brings with it, seeded when the type changes so no field starts empty. */
@@ -217,6 +244,11 @@ export function panelWithValue(state: CommandPanelState, fieldId: string, text: 
   const { error: _drop, ...rest } = state;
   void _drop;
   const values: Record<string, string> = { ...state.values, [fieldId]: text };
+  // HS-15 review: measuring from another face keeps the hole where it is, so the distance becomes how far it already is inside that face.
+  if ((fieldId === "faceA" || fieldId === "faceB") && state.holeRefs !== undefined) {
+    const choice = state.holeRefs.choices.find((candidate) => candidate.faceKey === text);
+    if (choice !== undefined) values[fieldId === "faceA" ? "offsetA" : "offsetB"] = String(Number(choice.distanceMm.toFixed(4)));
+  }
   if (fieldId === "style") {
     for (const [key, value] of Object.entries(HOLE_STYLE_DEFAULTS[text] ?? {})) if (values[key] === undefined || values[key] === "") values[key] = value;
   }
@@ -350,10 +382,27 @@ export function panelDraft(state: CommandPanelState, context: { readonly sketchF
   const sameSpot = existing?.holePositionMm !== undefined && existing.holePositionMm.every((value, axis) => Math.abs(value - point.pointMm[axis]!) < 1e-6);
   const { holePlacement: _oldPlacement, ...unplaced } = stripped;
   void _oldPlacement;
+  let kept: DesignSolidFeature = sameSpot ? stripped : unplaced;
+  // A face chosen again in the panel replaces that measuring face (the hole does not move; the numbers are re-measured).
+  const refs = state.holeRefs;
+  if (sameSpot && refs !== undefined && kept.holePlacement !== undefined) {
+    const chosen = (value: string | undefined, now: FaceChoice): FaceChoice | undefined => value === undefined || value === now.faceKey ? undefined : refs.choices.find((choice) => choice.faceKey === value);
+    const first = chosen(state.values["faceA"], refs.current[0]);
+    const second = chosen(state.values["faceB"], refs.current[1]);
+    if (first !== undefined || second !== undefined) {
+      const repicked = repickedPlacement(kept.holePlacement, refs, { first, second });
+      if (!repicked.ok) return { ok: false, message: repicked.message };
+      // A number bound to a parameter was measured from the old face, so it is let go with it.
+      const expressions = kept.expressions === undefined ? undefined : Object.fromEntries(Object.entries(kept.expressions).filter(([field]) => !(first !== undefined && field === "offsetA") && !(second !== undefined && field === "offsetB")));
+      const { expressions: _old, ...withoutExpressions } = kept;
+      void _old;
+      kept = { ...withoutExpressions, holePlacement: repicked.placement, ...(expressions === undefined || Object.keys(expressions).length === 0 ? {} : { expressions }) };
+    }
+  }
   return {
     ok: true,
     feature: {
-      ...(sameSpot ? stripped : unplaced), holeStyle: style, holePositionMm: point.pointMm, holeNormal: point.normal,
+      ...kept, holeStyle: style, holePositionMm: point.pointMm, holeNormal: point.normal,
       ...(style === "counterbore" ? { holeCounterDiameterMm: _cbd ?? 11, holeCounterDepthMm: _cbz ?? 4 } : {}),
       ...(style === "countersink" ? { holeSinkDiameterMm: _skd ?? 12, holeSinkAngleDeg: _ska ?? 90 } : {})
     }

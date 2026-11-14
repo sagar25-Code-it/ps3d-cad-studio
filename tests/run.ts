@@ -203,6 +203,7 @@ import { dockedPanelTests } from "./docked-panel.test.js";
 import { holePatternFollowTests } from "./hole-pattern-follows.test.js";
 import { lengthFieldDraftTests } from "./length-field-draft.test.js";
 import { timelineMenuLayerTests } from "./timeline-menu-layer.test.js";
+import { holeReferenceFaceTests } from "./hole-reference-faces.test.js";
 import { timelineMarkerKeyTests } from "./timeline-marker-keys.test.js";
 import { partSceneTests } from "./part-scenes.test.js";
 import { sketchOffsetChainDefaultTests } from "./sketch-offset-chain-default.test.js";
@@ -470,6 +471,7 @@ const tests: readonly TestCase[] = [
   ...holePatternFollowTests,
   ...lengthFieldDraftTests,
   ...timelineMenuLayerTests,
+  ...holeReferenceFaceTests,
   ...timelineMarkerKeyTests,
   ...partSceneTests,
 ];

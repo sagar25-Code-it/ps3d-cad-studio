@@ -226,7 +226,7 @@ import {
 import { SurfaceInspector } from "./workspaces/SurfaceInspector.js";
 import { withCosmeticThreads } from "./hole-threads.js";
 import { partScenes } from "./part-scenes.js";
-import { holePlacementFor } from "./hole-placement.js";
+import { faceOutline, holePlacementFor, placementReferences } from "./hole-placement.js";
 import { namedViewById, type NamedViewId } from "./ui/named-views.js";
 import { runSurfaceAction, withFormCages, withSurfaceBodies, type SurfaceAction } from "./surface-actions.js";
 import { DrawingWorkspace } from "./workspaces/DrawingWorkspace.js";
@@ -1006,6 +1006,19 @@ export function App(): React.JSX.Element {
       const body = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === commandPanel.bodyId);
       if (body !== undefined) viewport.setGuideSegments(faceOutlineSegments({ positionsMm: body.positionsMm, indices: body.indices }, commandPanel.faces.map((entry) => entry.ref)));
       return;
+    }
+    // A face-placed hole outlines the face it starts on (cyan) and the two faces it is measured from (amber), so it is clear which faces it follows.
+    const refs = commandPanel.command === "hole" ? commandPanel.holeRefs : undefined;
+    if (refs !== undefined) {
+      const body = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === commandPanel.bodyId);
+      const chosen = (field: "faceA" | "faceB", side: 0 | 1) => refs.choices.find((choice) => choice.faceKey === commandPanel.values[field]) ?? refs.current[side];
+      if (body !== undefined) {
+        const segments: ViewportGuideSegment[] = [...faceOutline(body, refs.start)];
+        const active: number[] = [];
+        for (const face of [chosen("faceA", 0), chosen("faceB", 1)]) for (const segment of faceOutline(body, face)) active.push(segments.push([segment[0], segment[1]]) - 1);
+        viewport.setGuideSegments(segments, active);
+        return;
+      }
     }
     viewport.setGuideSegments([]);
   }, [commandPanel, partPickCandidates]);
@@ -2140,7 +2153,9 @@ export function App(): React.JSX.Element {
     if (added) {
       setSelectedId(body.id);
       setStatus("ready");
-      setStatusText(`Added ${feature.name} to ${body.name} as a timeline step; double-click it in the timeline to edit it, suppress it or roll back past it.`);
+      const refs = feature.kind === "hole" && feature.holePlacement !== undefined ? placementReferences(feature.holePlacement, body) : undefined;
+      const measured = refs === undefined || feature.holePlacement === undefined ? "" : ` It sits ${Number(feature.holePlacement.from[0].distanceMm.toFixed(2))} mm from the ${refs.current[0].name.split(" (")[0]} and ${Number(feature.holePlacement.from[1].distanceMm.toFixed(2))} mm from the ${refs.current[1].name.split(" (")[0]}, and follows them; Edit Feature shows both faces and lets you pick others.`;
+      setStatusText(`Added ${feature.name} to ${body.name} as a timeline step; double-click it in the timeline to edit it, suppress it or roll back past it.${measured}`);
     }
   };
 
@@ -3376,8 +3391,11 @@ export function App(): React.JSX.Element {
     }
     if (feature.kind === "pattern") { openPatternEdit(feature); return; }
     // Fillet / Chamfer, the general Shell and Hole reopen the same command panel they were created with (PT-06).
-    const bodyName = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === feature.bodyId)?.name;
-    const panelState = openCommandPanelForEdit(feature, bodyName);
+    const editedBody = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === feature.bodyId);
+    const bodyName = editedBody?.name;
+    // A hole placed from faces names the faces it is measured from and offers the others (HS-15 review).
+    const holeRefs = feature.kind === "hole" && feature.holePlacement !== undefined && editedBody !== undefined ? placementReferences(feature.holePlacement, editedBody) : undefined;
+    const panelState = openCommandPanelForEdit(feature, bodyName, holeRefs);
     if (panelState !== undefined) { setCommandPanel(panelState); return; }
     setFeatureEdit(feature);
   };

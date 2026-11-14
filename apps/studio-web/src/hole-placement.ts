@@ -148,3 +148,100 @@ export function resolvedHolePosition(step: DesignSolidFeature, body: { readonly 
   const resolved = resolveHolePlacement(step.holePlacement, { positionsMm: body.positionsMm, indices: body.indices, brep: body.brep });
   return resolved.ok ? { pointMm: resolved.pointMm, normal: resolved.normal } : { ...fallback, note: `${resolved.message} It stays where it was last placed.` };
 }
+
+/* ---- HS-15 review: the faces a hole is measured from are named, shown and can be chosen again ---- */
+
+const trimMm = (value: number): string => String(Number(value.toFixed(2)));
+
+/**
+ * What a flat face is called to a person: the side it looks to ("Right", "Back", "Top"...) and where it is ("x = 30 mm"), so two parallel
+ * faces (an outer wall and the wall of a pocket) never share a name. A face that is not square to an axis is an "Angled face".
+ */
+export function faceName(plane: FacePlane): string {
+  const axes: readonly { readonly index: number; readonly letter: string; readonly positive: string; readonly negative: string }[] = [
+    { index: 0, letter: "x", positive: "Right", negative: "Left" },
+    { index: 1, letter: "y", positive: "Back", negative: "Front" },
+    { index: 2, letter: "z", positive: "Top", negative: "Bottom" }
+  ];
+  for (const axis of axes) {
+    const component = plane.normal[axis.index]!;
+    if (Math.abs(component) < 0.999) continue;
+    return `${component > 0 ? axis.positive : axis.negative} face (${axis.letter} = ${trimMm(component > 0 ? plane.offset : -plane.offset)} mm)`;
+  }
+  return "Angled face";
+}
+
+/** A flat face a hole can be measured from, with how far the hole is inside it. */
+export interface FaceChoice {
+  readonly faceKey: string;
+  readonly faceRole: string;
+  readonly name: string;
+  readonly distanceMm: number;
+  readonly normal: Vec3;
+}
+
+/** The faces of a face-placed hole as the solid is now: their names, the faces it could be measured from instead, and the keys in use. */
+export interface PlacementReferences {
+  readonly start: { readonly faceKey: string; readonly faceRole: string; readonly name: string };
+  /** The two faces the hole is measured from now, in the placement's order, by their keys in the solid as it is now. */
+  readonly current: readonly [FaceChoice, FaceChoice];
+  /** Every flat face at right angles to the start face that the hole lies inside, nearest first. */
+  readonly choices: readonly FaceChoice[];
+}
+
+/** Names the faces of a placement on `body` and lists the faces it could be measured from; undefined when the placement cannot be resolved there. */
+export function placementReferences(placement: HolePlacement, body: BodyFaces): PlacementReferences | undefined {
+  const planes = planarFacesOf(body);
+  const start = findFace(planes, placement.face);
+  const first = findFace(planes, placement.from[0]);
+  const second = findFace(planes, placement.from[1]);
+  const at = resolveHolePlacement(placement, body);
+  if (start === undefined || first === undefined || second === undefined || !at.ok) return undefined;
+  const choiceOf = (plane: FacePlane): FaceChoice => ({ faceKey: plane.key, faceRole: plane.role, name: faceName(plane), distanceMm: plane.offset - dot(plane.normal, at.pointMm), normal: plane.normal });
+  const choices = planes
+    .filter((plane) => plane.key !== start.key && Math.abs(dot(plane.normal, start.normal)) < 0.1 && plane.offset - dot(plane.normal, at.pointMm) > -ON_FACE_MM)
+    .map(choiceOf)
+    .sort((left, right) => left.distanceMm - right.distanceMm);
+  return { start: { faceKey: start.key, faceRole: start.role, name: faceName(start) }, current: [choiceOf(first), choiceOf(second)], choices };
+}
+
+export type Repick = { readonly ok: true; readonly placement: HolePlacement } | { readonly ok: false; readonly message: string };
+
+/**
+ * The placement with one or both of its measuring faces replaced. The new distance is how far the hole already is inside the new face,
+ * so choosing another face does not move the hole. Two faces that are the same, or parallel, cannot pin a point and are refused.
+ */
+export function repickedPlacement(placement: HolePlacement, references: PlacementReferences, picks: { readonly first?: FaceChoice | undefined; readonly second?: FaceChoice | undefined }): Repick {
+  const first = picks.first ?? references.current[0];
+  const second = picks.second ?? references.current[1];
+  if (first.faceKey === second.faceKey) return { ok: false, message: `Both distances are measured from the ${first.name}. Pick two different faces.` };
+  if (Math.abs(dot(first.normal, second.normal)) > 0.5) return { ok: false, message: `The ${first.name} and the ${second.name} face the same way, so they cannot fix a point together. Pick a face that stands at an angle to the other.` };
+  const entry = (choice: FaceChoice, kept: HolePlacement["from"][0], changed: boolean): HolePlacement["from"][0] => changed ? { faceKey: choice.faceKey, faceRole: choice.faceRole, distanceMm: Math.max(choice.distanceMm, 1e-3) } : kept;
+  return { ok: true, placement: { ...placement, from: [entry(first, placement.from[0], picks.first !== undefined), entry(second, placement.from[1], picks.second !== undefined)] } };
+}
+
+/** The border of one named flat face as line segments, for outlining it in the view: the edges used by exactly one of its triangles. */
+export function faceOutline(body: BodyFaces, ref: { readonly faceKey: string; readonly faceRole: string }): readonly (readonly [Vec3, Vec3])[] {
+  const brep = body.brep;
+  if (brep === undefined || brep.faceTriangles.length * 3 !== body.indices.length) return [];
+  const wanted = canonicalFaceRole(ref.faceRole);
+  const index = brep.faces.findIndex((face) => face.key === ref.faceKey) >= 0 ? brep.faces.findIndex((face) => face.key === ref.faceKey)
+    : brep.faces.findIndex((face) => face.role === ref.faceRole) >= 0 ? brep.faces.findIndex((face) => face.role === ref.faceRole)
+      : brep.faces.findIndex((face) => canonicalFaceRole(face.role) === wanted);
+  if (index < 0) return [];
+  const point = (vertex: number): Vec3 => [body.positionsMm[vertex * 3]!, body.positionsMm[vertex * 3 + 1]!, body.positionsMm[vertex * 3 + 2]!];
+  const keyOf = (p: Vec3): string => p.map((value) => Math.round(value * 1e4)).join(",");
+  const edges = new Map<string, { a: Vec3; b: Vec3; count: number }>();
+  brep.faceTriangles.forEach((face, triangle) => {
+    if (face !== index) return;
+    const corners = [0, 1, 2].map((slot) => point(body.indices[triangle * 3 + slot]!));
+    for (let slot = 0; slot < 3; slot += 1) {
+      const a = corners[slot]!; const b = corners[(slot + 1) % 3]!;
+      const ka = keyOf(a); const kb = keyOf(b);
+      const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+      const found = edges.get(key);
+      if (found === undefined) edges.set(key, { a, b, count: 1 }); else found.count += 1;
+    }
+  });
+  return [...edges.values()].filter((edge) => edge.count === 1).map((edge) => [edge.a, edge.b] as const);
+}
