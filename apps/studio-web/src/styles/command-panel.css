@@ -226,3 +226,52 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The Extrude / Revolve panel: a profile check list (bounded, scrolls inside) and the live reading under a size field. */
+.command-panel-profiles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 132px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.command-panel-profiles label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.command-panel-profiles label:hover {
+  background: rgb(63 160 255 / 12%);
+}
+
+.command-panel-profiles input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.command-panel-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.command-panel-live {
+  margin-left: 126px;
+  font-size: 12px;
+  color: #9fd0f2;
+}
+
+.command-panel-live.failed {
+  color: #ff9d9d;
+}

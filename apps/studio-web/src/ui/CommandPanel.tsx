@@ -17,25 +17,53 @@ interface CommandPanelProps {
   readonly onCancel: () => void;
 }
 
-export function CommandPanel({ state, busy, onValue, onClearSelection, onCommit, onCancel }: CommandPanelProps): React.JSX.Element {
-  const firstField = useRef<HTMLInputElement | null>(null);
-  // The first value field takes the keyboard when the panel opens, like a Fusion dialog; the canvas stays live for picks.
-  useEffect(() => { firstField.current?.focus(); firstField.current?.select(); }, [state.command, state.editFeatureId]);
-  const selection = panelSelectionRow(state);
-  const fields = panelFields(state);
+interface CommandPanelFrameProps {
+  /** The small label above the title: COMMAND, or EDIT FEATURE. */
+  readonly kicker: string;
+  readonly title: string;
+  readonly busy: boolean;
+  readonly error?: string | undefined;
+  readonly onCommit: () => void;
+  readonly onCancel: () => void;
+  readonly children: React.ReactNode;
+}
+
+/**
+ * The frame every command panel shares: header with the title and a cancel button, the rows, an error line, and the OK and
+ * Cancel footer. Enter commits and Esc cancels from any control inside it. Fillet, Chamfer, Shell, Hole and the Extrude /
+ * Revolve panel all draw their rows inside this one frame.
+ */
+export function CommandPanelFrame({ kicker, title, busy, error, onCommit, onCancel, children }: CommandPanelFrameProps): React.JSX.Element {
   return <aside
     className="command-panel"
     role="form"
-    aria-label={panelTitle(state)}
+    aria-label={title}
     onKeyDown={(event) => {
       if (event.key === "Enter" && !busy) { event.preventDefault(); event.stopPropagation(); onCommit(); }
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onCancel(); }
     }}
   >
     <header>
-      <div><span>{state.mode === "edit" ? "EDIT FEATURE" : "COMMAND"}</span><strong>{panelTitle(state)}</strong></div>
-      <button type="button" onClick={onCancel} aria-label={`Cancel ${panelTitle(state)}`}><CommandIcon name="cancel" /></button>
+      <div><span>{kicker}</span><strong>{title}</strong></div>
+      <button type="button" onClick={onCancel} aria-label={`Cancel ${title}`}><CommandIcon name="cancel" /></button>
     </header>
+    {children}
+    {error !== undefined && <p className="command-panel-error" role="alert">{error}</p>}
+    <footer>
+      <button type="button" className="command-panel-ok" onClick={onCommit} disabled={busy}>OK</button>
+      <button type="button" onClick={onCancel}>Cancel</button>
+      <small>Enter commits · Esc cancels</small>
+    </footer>
+  </aside>;
+}
+
+export function CommandPanel({ state, busy, onValue, onClearSelection, onCommit, onCancel }: CommandPanelProps): React.JSX.Element {
+  const firstField = useRef<HTMLInputElement | null>(null);
+  // The first value field takes the keyboard when the panel opens, like a Fusion dialog; the canvas stays live for picks.
+  useEffect(() => { firstField.current?.focus(); firstField.current?.select(); }, [state.command, state.editFeatureId]);
+  const selection = panelSelectionRow(state);
+  const fields = panelFields(state);
+  return <CommandPanelFrame kicker={state.mode === "edit" ? "EDIT FEATURE" : "COMMAND"} title={panelTitle(state)} busy={busy} error={state.error} onCommit={onCommit} onCancel={onCancel}>
     <div className="command-panel-row command-panel-selection" data-active="true">
       <span className="command-panel-label">{selection.label}</span>
       <span className="command-panel-chip" data-empty={selection.count === 0}>{selection.status}</span>
@@ -58,11 +86,5 @@ export function CommandPanel({ state, busy, onValue, onClearSelection, onCommit,
             onChange={(event) => onValue(field.id, event.target.value)}
           />}
     </label>)}
-    {state.error !== undefined && <p className="command-panel-error" role="alert">{state.error}</p>}
-    <footer>
-      <button type="button" className="command-panel-ok" onClick={onCommit} disabled={busy}>OK</button>
-      <button type="button" onClick={onCancel}>Cancel</button>
-      <small>Enter commits · Esc cancels</small>
-    </footer>
-  </aside>;
+  </CommandPanelFrame>;
 }

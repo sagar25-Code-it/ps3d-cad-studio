@@ -17,7 +17,17 @@ import type { WorkspaceId } from "../../../../packages/workbench-core/src/index.
 import { CommandIcon } from "./CommandIcon.js";
 import { PartAppearanceControls } from "./PartAppearanceControls.js";
 
+/**
+ * A command panel (Fillet, Shell, Hole...) takes the canvas's clicks through the viewport's measure pick mode, but it is not
+ * the Measure command: the bar then shows Select as the active mode and the point-to-point Measure card stays closed.
+ */
+export function chromeNavigation(mode: NavigationMode, panelPicking: boolean): { readonly shown: NavigationMode; readonly measureCard: boolean } {
+  return panelPicking && mode === "measure" ? { shown: "select", measureCard: false } : { shown: mode, measureCard: mode === "measure" };
+}
+
 interface ViewportChromeProps {
+  /** A command panel is picking in the view: the Measure card does not open for it. */
+  readonly panelPicking?: boolean;
   readonly workspace: Extract<WorkspaceId, "sketch" | "part" | "assembly" | "surface" | "vehicle">;
   readonly state: ViewportViewState;
   readonly measurePoints: readonly ViewportMeasurePoint[];
@@ -73,6 +83,7 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
     : undefined;
   const distance = delta === undefined ? undefined : Math.hypot(...delta);
   const sketch = props.workspace === "sketch";
+  const navigation = chromeNavigation(props.state.navigationMode, props.panelPicking === true);
 
   return <>
     <div className="viewport-controller" aria-label="Viewport navigation and selection controller">
@@ -82,8 +93,8 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
           .filter((mode) => !sketch || (mode !== "measure" && mode !== "orbit"))
           .map((mode) => <button
           key={mode}
-          className={props.state.navigationMode === mode ? "active" : ""}
-          aria-pressed={props.state.navigationMode === mode}
+          className={navigation.shown === mode ? "active" : ""}
+          aria-pressed={navigation.shown === mode}
           onClick={() => props.onNavigationMode(mode)}
           title={navigationTitle(mode, sketch, panKey)}
           aria-label={mode === "select" ? "Select" : mode === "measure" ? "Measure" : capitalize(mode)}
@@ -141,7 +152,7 @@ export function ViewportChrome(props: ViewportChromeProps): React.JSX.Element {
       <small>Display-only settings do not change qualified geometry or mass properties. Shaded / wireframe style applies to the qualified model body; analytic preview bodies keep their reference edges.</small>
     </aside>}
 
-    {props.state.navigationMode === "measure" && !sketch && <aside className="measure-panel" aria-label="Point to point measurement">
+    {navigation.measureCard && !sketch && <aside className="measure-panel" aria-label="Point to point measurement">
       <header><div><span>INSPECT</span><strong><CommandIcon name="measure" />Measure</strong></div><button onClick={props.onClearMeasure}><CommandIcon name="cancel" />Clear</button></header>
       <p>{props.measurePoints.length === 0 ? "Pick the first model point." : props.measurePoints.length === 1 ? "Pick the second model point." : "Two-point result"}</p>
       <div className="measure-points">

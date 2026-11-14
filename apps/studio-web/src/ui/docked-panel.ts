@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { anotherSurfaceOpen, escapeClosesEditPanel, NO_ESCAPE_FLAGS, type EscapeAppFlags } from "../esc-order.js";
 
 /**
  * A docked command panel (Edit Feature) is not a modal dialog: the model stays live behind it, so the Part hotkeys, Ctrl+Z / Ctrl+B,
@@ -58,16 +59,22 @@ export function dockStyle(bounds: DockBounds): CSSProperties {
   return { "--dock-top": `${bounds.top}px`, "--dock-right": `${bounds.right}px`, "--dock-bottom": `${bounds.bottom}px`, "--dock-max-height": `${bounds.maxHeight}px` } as CSSProperties;
 }
 
+function isTextField(element: Element | null): boolean {
+  return element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement || (element instanceof HTMLElement && element.isContentEditable);
+}
+
 const FOCUSABLE = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]";
 
 /**
  * Behaviour of a docked panel: focus moves to its first field when it opens (and back to where it was when it closes), Esc closes it
  * from anywhere, Tab is never trapped, and the panel's frame follows the canvas row and the timeline strip as the window changes.
  */
-export function useDockedPanel<T extends HTMLElement>(open: boolean, onClose: () => void): { readonly ref: RefObject<T | null>; readonly style: CSSProperties } {
+export function useDockedPanel<T extends HTMLElement>(open: boolean, onClose: () => void, escapeFlags?: () => EscapeAppFlags): { readonly ref: RefObject<T | null>; readonly style: CSSProperties } {
   const ref = useRef<T>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const flagsRef = useRef(escapeFlags);
+  flagsRef.current = escapeFlags;
   const [bounds, setBounds] = useState<DockBounds>(() => dockBounds({ canvas: undefined, timelineTop: undefined, viewport: { width: 1280, height: 800 } }));
 
   useLayoutEffect(() => {
@@ -99,14 +106,20 @@ export function useDockedPanel<T extends HTMLElement>(open: boolean, onClose: ()
     const panel = ref.current;
     const initial = panel?.querySelector<HTMLElement>("[data-dialog-initial-focus]") ?? panel?.querySelector<HTMLElement>(FOCUSABLE) ?? panel;
     queueMicrotask(() => initial?.focus());
+    // Esc is read in the capture phase so a handler lower down that stops the event (a React onKeyDown on a toolbar button or the
+    // timeline) cannot swallow it, and the decision is the shared Esc order: a dialog or an open menu, a text field being edited
+    // elsewhere, a running tool or pick and the command panels all come first (esc-order.ts).
     const onKeyDown = (event: KeyboardEvent): void => {
-      const otherSurfaceOpen = globalThis.document.querySelector('[role="dialog"], [role="menu"]') !== null;
-      if (!dockClosesOnKey({ key: event.key, defaultPrevented: event.defaultPrevented, otherSurfaceOpen })) return;
+      if (event.key !== "Escape") return;
+      const focused = globalThis.document.activeElement;
+      const foreignTextFieldFocused = isTextField(focused) && ref.current?.contains(focused) !== true;
+      const context = { ...(flagsRef.current?.() ?? NO_ESCAPE_FLAGS), otherSurfaceOpen: anotherSurfaceOpen(globalThis.document), foreignTextFieldFocused, editPanelOpen: true };
+      if (!dockClosesOnKey({ key: event.key, defaultPrevented: event.defaultPrevented, otherSurfaceOpen: false }) || !escapeClosesEditPanel(context)) return;
       closeRef.current();
     };
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
       queueMicrotask(() => { if (returnFocus?.isConnected === true && globalThis.document.querySelector('[role="dialog"]') === null) returnFocus.focus(); });
     };
   }, [open]);

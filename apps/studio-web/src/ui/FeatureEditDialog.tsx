@@ -4,8 +4,11 @@ import { designOf, previewFieldExpression } from "../../../../packages/workbench
 import { applyParameterValues, applyPlainSize, fieldAcceptsExpression, parameterFieldsOf, parameterValuesOf } from "../feature-parameters.js";
 import { CommandIcon } from "./CommandIcon.js";
 import { useDockedPanel } from "./docked-panel.js";
+import type { EscapeAppFlags } from "../esc-order.js";
 
 interface FeatureEditDialogProps {
+  /** What else is running (a pick, a tool, a command panel), asked when Esc is pressed so the dock closes only when it is the innermost thing open. */
+  readonly escapeFlags?: () => EscapeAppFlags;
   /** The feature being edited; the dialog is open while this is defined. */
   readonly feature: DesignSolidFeature | undefined;
   /** The project the step lives in: its parameters and the other steps' numbers are what an expression can name. */
@@ -35,7 +38,7 @@ const EXTENT_LABEL: Readonly<Record<string, string>> = {
  */
 export function FeatureEditDialog(props: FeatureEditDialogProps): React.JSX.Element | null {
   const open = props.feature !== undefined;
-  const dock = useDockedPanel<HTMLElement>(open, props.onClose);
+  const dock = useDockedPanel<HTMLElement>(open, props.onClose, props.escapeFlags);
   const [value, setValue] = useState("");
   const [direction, setDirection] = useState<Direction>("one-side");
   const [second, setSecond] = useState("10");
