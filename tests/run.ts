@@ -195,6 +195,7 @@ import { commandPanelTests } from "./command-panel.test.js";
 import { operationDefaultTests } from "./operation-default.test.js";
 import { featureBindingExtrasTests } from "./feature-binding-extras.test.js";
 import { ribbonPanelTests } from "./ribbon-panels.test.js";
+import { solidContextMenuTests } from "./solid-context-menu.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -412,6 +413,7 @@ const tests: readonly TestCase[] = [
   ...operationDefaultTests,
   ...featureBindingExtrasTests,
   ...ribbonPanelTests,
+  ...solidContextMenuTests,
 ];
 let failures = 0;
 

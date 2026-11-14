@@ -120,10 +120,20 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
     const analyticBody = request.selectionId?.startsWith("part-body:") === true;
     const generalBody = request.selectionId?.startsWith("general-body:") === true;
     const directBody = analyticBody || generalBody;
-    const MESH_BODY_REASON = "General mesh solids support visibility and delete here; face, blend, and Boolean editing needs the qualified B-rep kernel.";
+    const GENERAL_ONLY_REASON = "This command works on a solid built from a sketch (Extrude or Revolve).";
+    // PT-18: on a sketch-built solid, the modelling commands a right-click means come first: edit its owning step,
+    // then Fillet / Chamfer / Shell / Hole (the shared command panel) and the Booleans and patterns.
+    if (request.featureKind !== "solid") commands.push(command("feature.edit", "Edit Feature", "edit", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON));
     commands.push(
+      command("sketch.create", "Create Sketch", "sketch", "create", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON),
+      command("modify.fillet", "Fillet", "fillet", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON, false, "F"),
+      command("modify.chamfer", "Chamfer", "chamfer", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON),
+      command("modify.shell", "Shell", "shell", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON),
+      command("modify.hole", "Hole", "bore", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON, false, "H"),
+      command("modify.combine", "Combine", "boolean", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON),
+      command("modify.pattern", "Rectangular Pattern", "pattern", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON),
       command("selection.toggle-visibility", "Show / Hide Body", "show", "visibility", directBody, directBody ? undefined : ANALYTIC_BODY_REASON),
-      command("selection.isolate", "Isolate Body", "isolate", "visibility", analyticBody, analyticBody ? undefined : (generalBody ? MESH_BODY_REASON : ANALYTIC_BODY_REASON)),
+      command("selection.isolate", "Isolate Body", "isolate", "visibility", analyticBody, analyticBody ? undefined : (generalBody ? "Isolate is not a recorded operation for solids yet; hide the other bodies from the browser instead." : ANALYTIC_BODY_REASON)),
       command("body.appearance", "Appearance", "appearance", "edit"),
       command("body.move", "Move / Copy", "move", "edit", analyticBody, analyticBody ? undefined : ANALYTIC_BODY_REASON),
       submenu("body.direct-features", "Direct & Detail Features", "edge", "edit", [

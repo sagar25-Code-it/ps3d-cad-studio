@@ -66,8 +66,8 @@ export const MARKING_SLOTS = 8;
 /** Candidate commands per context, most relevant first; the first eight that exist (and are offered) make the menu. */
 const CANDIDATES: Readonly<Record<MarkingContext, readonly string[]>> = {
   sketch: ["sketch.dimension", "sketch.finish", "sketch.toggle-construction", "selection.delete", "sketch.select-connected", "sketch.select-tangent", "selection.toggle-visibility", "sketch.look-at", "sketch.edit", "history.undo", "history.redo", "view.fit"],
-  body: ["body.appearance", "selection.toggle-visibility", "body.boolean-join", "body.boolean-cut", "analysis:geometry-check", "analysis:interference", "sketch.create", "body.create-component", "selection.delete", "view.fit"],
-  face: ["body.offset-face", "body.move-face", "sketch.create", "body.draft", "analysis:draft", "body.delete-face", "inspect.measure", "analysis:wall-thickness", "view.fit"],
+  body: ["modify.fillet", "modify.hole", "modify.shell", "feature.edit", "modify.combine", "sketch.create", "modify.chamfer", "body.appearance", "selection.toggle-visibility", "modify.pattern", "body.boolean-join", "body.boolean-cut", "analysis:geometry-check", "analysis:interference", "body.create-component", "selection.delete", "view.fit"],
+  face: ["sketch.create", "modify.hole", "modify.shell", "modify.fillet", "body.offset-face", "body.move-face", "body.draft", "inspect.measure", "analysis:draft", "body.delete-face", "analysis:wall-thickness", "view.fit"],
   empty: ["sketch.create", "inspect.measure", "analysis:geometry-check", "analysis:interference", "view.fit", "view.home", "history.undo", "history.redo"]
 };
 
@@ -150,6 +150,8 @@ function shortLabel(label: string): string {
     .replace("Select Connected Curves", "Connected")
     .replace("Select Tangent Chain", "Tangent chain")
     .replace("Create Component from Body", "Make component")
+    .replace("Rectangular Pattern", "Pattern")
+    .replace("Edit Feature Parameters", "Edit feature")
     .replace("Delete Face / Heal", "Delete face")
     .replace("Look At sketch plane", "Look at")
     .replace("Create Sketch", "Sketch")

@@ -90,14 +90,18 @@ export const onViewAndMarkingTests: readonly TestCase[] = [
       const body = buildMarkingMenu({ ...base, workspace: "part", selectionId: "general-body:a", selectionKind: "body" });
       equal(body.context, "body", "body context");
       equal(body.items.length, MARKING_SLOTS, "eight items");
-      assert(body.items.some((item) => item.id === "analysis:geometry-check" && item.enabled), "the geometry check is offered and enabled with bodies present");
-      assert(body.items.some((item) => item.id === "body.boolean-join" && item.enabled), "Unite is offered");
+      // PT-18: the modelling commands lead on a solid; the analysis entries keep the empty-canvas menu.
+      assert(body.items[0]?.id === "modify.fillet" && body.items[0].enabled, "Fillet leads the body menu");
+      assert(body.items.some((item) => item.id === "modify.hole" && item.enabled) && body.items.some((item) => item.id === "modify.shell" && item.enabled), "Hole and Shell are one flick away");
+      assert(body.items.some((item) => item.id === "feature.edit" && item.enabled), "Edit Feature is on the body menu");
       assert(body.items.slice(0, 5).every((item) => item.enabled), "enabled commands take the first slots");
 
       const face = buildMarkingMenu({ ...base, workspace: "part", selectionId: "general-body:a", selectionKind: "body", faceSelected: true });
       equal(face.context, "face", "face context");
       equal(face.title, "Face", "titled");
-      assert(face.items.some((item) => item.id === "analysis:draft"), "draft analysis is offered on a face");
+      // PT-18: Create Sketch leads on a face, the way a Fusion user expects; the face edits follow.
+      assert(face.items[0]?.id === "sketch.create" && face.items[0].enabled, "Create Sketch leads the face menu");
+      assert(face.items.some((item) => item.id === "modify.hole" && item.enabled), "Hole is on the face menu");
       assert(face.items.some((item) => item.id === "body.offset-face" || item.id === "body.move-face"), "face edits are present (disabled for mesh solids, with a reason)");
       const disabled = face.items.find((item) => !item.enabled);
       assert(disabled === undefined || (disabled.disabledReason ?? "") !== "", "a disabled item says why");

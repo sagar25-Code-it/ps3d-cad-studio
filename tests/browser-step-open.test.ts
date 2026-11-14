@@ -71,8 +71,9 @@ export const browserStepOpenTests: readonly TestCase[] = [
       const onRow = resolveWorkbenchContextCommands({ workspace: "part", selectionId: BODY, selectionKind: "body", featureKind: "solid" });
       assert(onRow.some((entry) => entry.id === "feature.edit" && entry.enabled), "Edit Feature Parameters is offered on the step's row");
       assert(onRow.some((entry) => entry.id === "selection.toggle-visibility"), "with the body's Show / Hide");
+      // PT-18: a body right-clicked in the view now offers Edit Feature; the app resolves the step that made the body when it runs.
       const inViewport = resolveWorkbenchContextCommands({ workspace: "part", selectionId: BODY, selectionKind: "body" });
-      assert(!inViewport.some((entry) => entry.id === "feature.edit"), "a body right-clicked in the view names no step, so it gets no step Edit");
+      assert(inViewport.some((entry) => entry.id === "feature.edit" && entry.enabled), "a body right-clicked in the view offers Edit Feature (its owning step)");
     }
   },
 ];

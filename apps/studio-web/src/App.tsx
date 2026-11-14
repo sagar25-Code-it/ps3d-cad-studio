@@ -1262,11 +1262,11 @@ export function App(): React.JSX.Element {
    * or countersink with a free diameter, and the hole is recorded as a timeline step drilled straight into the face. A body
    * that is not in the timeline gets the older whole-body prompt version (tapped fastener holes live there too).
    */
-  const handleHoleWizard = (): void => {
+  const handleHoleWizard = (preferredBodyId: string | null = selectedId): void => {
     const current = projectRef.current;
-    const body = (current.part.generalBodies ?? []).find((candidate) => candidate.id === selectedId);
+    const body = (current.part.generalBodies ?? []).find((candidate) => candidate.id === preferredBodyId);
     if (body !== undefined && baseFeatureOf(designOf(current), body.id) === undefined) { holeWizardOnMesh(); return; }
-    openPanelFor("hole");
+    openPanelFor("hole", preferredBodyId);
   };
 
   const holeWizardOnMesh = (): void => {
@@ -1937,11 +1937,11 @@ export function App(): React.JSX.Element {
    * Shell takes its open faces and thickness, Hole its face, type and sizes; the canvas stays live for picking while the
    * panel is open, Enter commits, Esc cancels, and Edit Feature reopens the same panel filled.
    */
-  const openPanelFor = (command: PanelCommand): void => {
+  const openPanelFor = (command: PanelCommand, preferredBodyId: string | null = selectedId): void => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
     let state = openCommandPanel(command);
-    const selected = bodies.find((candidate) => candidate.id === selectedId);
+    const selected = bodies.find((candidate) => candidate.id === preferredBodyId);
     if (selected !== undefined) state = { ...state, bodyId: selected.id, bodyName: selected.name };
     // PT-09: edge chains picked with the Edge intent before the command fill its first selection row.
     // One fillet works on one solid, so chains of the first picked body are seeded and the rest are left selected.
@@ -3980,10 +3980,16 @@ export function App(): React.JSX.Element {
     if (commandId === "view.look-at" || commandId === "sketch.look-at") { setViewportOrientation(selectionId === "datum:yz" ? "right" : selectionId === "datum:xz" ? "front" : "top"); return; }
     if (commandId === "inspect.measure") { setViewportNavigation("measure"); return; }
     if (commandId === "sketch.create" || commandId === "sketch.edit" || commandId === "feature.edit") {
-      // Edit on a timeline step reopens that step: a sketch for editing, a solid in its parameter dialog.
+      // Edit on a timeline step reopens that step: a sketch for editing, a solid in its own dialog or command panel.
       const stepId = contextStepId(contextMenu?.featureId, selectionId);
-      const timelineFeature = commandId === "sketch.create" ? undefined : designOf(projectRef.current).features.find((feature) => feature.id === stepId);
+      const history = designOf(projectRef.current);
+      const timelineFeature = commandId === "sketch.create" ? undefined : history.features.find((feature) => feature.id === stepId);
       if (timelineFeature !== undefined) { editTimelineFeature(timelineFeature); return; }
+      // Edit Feature on a solid clicked in the view: the step that made that body (PT-18).
+      if (commandId === "feature.edit" && selectionId?.startsWith("general-body:") === true) {
+        const owner = featureOfBody(history, selectionId);
+        if (owner !== undefined) { setSelectedId(selectionId); editTimelineFeature(owner); return; }
+      }
       if (commandId === "feature.edit") { switchWorkspace("part"); if (selectionId !== null) setSelectedId(selectionId); return; }
       const action = contextSketchAction(commandId, selectionId, [], selectedFace?.bodyId ?? null);
       // Create Sketch always starts a new sketch; it never moves the one that is already drawn (see contextSketchAction).
@@ -4040,6 +4046,24 @@ export function App(): React.JSX.Element {
       switchWorkspace("sketch");
       if (selectionId !== null) setSelectedId(selectionId);
       setStatusText("Extrude ready: review the selected closed profile and operation in the right inspector.");
+      return;
+    }
+    // PT-18: the solid modelling commands on the right-click and marking menus open the shared command panel on the clicked body.
+    if (commandId === "modify.fillet" || commandId === "modify.chamfer") { if (selectionId !== null) setSelectedId(selectionId); openPanelFor(commandId === "modify.fillet" ? "fillet" : "chamfer", selectionId); return; }
+    if (commandId === "modify.shell") { if (selectionId !== null) setSelectedId(selectionId); openPanelFor("shell", selectionId); return; }
+    if (commandId === "modify.hole") { if (selectionId !== null) setSelectedId(selectionId); handleHoleWizard(selectionId); return; }
+    if (commandId === "modify.combine") {
+      if (selectionId !== null) setSelectedId(selectionId);
+      if ((projectRef.current.part.generalBodies ?? []).length < 2) { setStatusText("Combine needs two solid bodies. Create another with Extrude or Revolve first."); return; }
+      setCombineRequest({ targetId: selectionId?.startsWith("general-body:") === true ? selectionId : undefined, mode: "join" });
+      return;
+    }
+    if (commandId === "modify.pattern") {
+      const body = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === selectionId);
+      if (body === undefined) { setStatusText("Rectangular Pattern: right-click a solid body made with Extrude or Revolve."); return; }
+      if (baseFeatureOf(designOf(projectRef.current), body.id) === undefined) { setStatusText(`${body.name} is not a step of the timeline (it came from Combine or an import), so a pattern cannot follow it.`); return; }
+      setSelectedId(body.id);
+      setPatternDialog({ kind: "rectangular", mode: "new", sourceBodyId: body.id });
       return;
     }
     if (commandId === "body.boolean-join") { runPartFeatureAction("unite", "Unite", selectionId); return; }
