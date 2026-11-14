@@ -182,6 +182,7 @@ import { browserStepOpenTests } from "./browser-step-open.test.js";
 import { sketchOffsetChainDefaultTests } from "./sketch-offset-chain-default.test.js";
 import { sketchProjectionCurrentTests } from "./sketch-projection-current.test.js";
 import { sketchDimensionPointFirstTests } from "./sketch-dimension-point-first.test.js";
+import { oneShotModifierTests } from "./one-shot-modifiers.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -386,6 +387,7 @@ const tests: readonly TestCase[] = [
   ...sketchOffsetChainDefaultTests,
   ...sketchProjectionCurrentTests,
   ...sketchDimensionPointFirstTests,
+  ...oneShotModifierTests,
 ];
 let failures = 0;
 

@@ -6,7 +6,9 @@ import type { DesignSolidFeature, EdgeBlendGroup } from "./types.js";
  */
 export const EDGE_BLEND_KEYS = ["blendType", "blendEdges", "blendEndSizeMm", "blendSecondSizeMm", "blendAngleDeg", "blendFlip"] as const;
 
-const MAX_GROUPS = 16;
+/** Fillet All / Chamfer All record one group per sharp run, so a plate with a few bores already needs more than a handful. */
+export const EDGE_BLEND_MAX_GROUPS = 64;
+const MAX_GROUPS = EDGE_BLEND_MAX_GROUPS;
 const MAX_SEGMENTS_PER_GROUP = 512;
 const COORDINATE_LIMIT = 1_000_000;
 

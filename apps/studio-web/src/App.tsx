@@ -108,6 +108,7 @@ import { planSketchProjectForSession, refreshLooseSketchProjections } from "./sk
 import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
 import { facesOfBody } from "./edge-blend-step.js";
+import { blendAllFeature, centroidHoleFeature } from "./one-shot-steps.js";
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
 import { flatPatternForBody, isRebuildFailure, isRebuildNote, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
@@ -1872,6 +1873,18 @@ export function App(): React.JSX.Element {
     const value = await onView.ask({ label: prompt[modifier], quantity: "length", defaultValue: defaults[modifier], min: 0, exclusiveMin: true, step: 0.5 });
     if (value === null) return;
     if ((projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === body.id) !== body) { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)}: ${body.name} changed while the value was being typed; run the command again.`); return; }
+    // A body built by the timeline gets a timeline step, so the hole or blend survives every rebuild and can be edited,
+    // suppressed or rolled back. The in-place mesh swap below stays only for bodies with no step of their own.
+    const base = baseFeatureOf(designOf(projectRef.current), body.id);
+    if (base !== undefined) {
+      const feature = modifier === "hole"
+        ? centroidHoleFeature(body, value, base.sketchFeatureId)
+        : blendAllFeature(body, modifier, value, base.sketchFeatureId);
+      if (typeof feature === "string") { setStatus("ready"); setStatusText(`${modifierLabelOf(modifier)}: ${feature}`); return; }
+      const added = await commitWithReplay({ kind: "add-design-solid", feature, body }, feature.id);
+      if (added) { setSelectedId(body.id); setStatusText(`Added ${feature.name} to ${body.name} as a timeline step.`); }
+      return;
+    }
     const input = { positionsMm: body.positionsMm, indices: body.indices };
     let result: { readonly ok: true; readonly positionsMm: readonly number[]; readonly indices: readonly number[] } | { readonly ok: false; readonly message: string };
     let label: string;

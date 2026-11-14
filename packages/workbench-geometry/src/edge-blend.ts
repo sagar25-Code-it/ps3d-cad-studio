@@ -260,16 +260,26 @@ export function applyEdgeBlend(mesh: ModifyMeshInput, faces: BlendFaces | undefi
   let current: ModifyMeshInput = { positionsMm: mesh.positionsMm, indices: mesh.indices, ...(faces === undefined ? {} : { faceTriangles: faces.faceTriangles }) };
   // The blend's own surface is a face of its own, numbered after the faces the body already has.
   let newFaceIndex: number | undefined = faces?.keys.length;
-  for (let index = 0; index < resolvedResult.groups.length; index += 1) {
-    const group = resolvedResult.groups[index]!;
+  // Runs of the same kind (outside or inside corners) are treated in one kernel call, the way the whole-body fillet
+  // treats every edge at once, so blends that meet at a corner are built together instead of the later one being
+  // refused for the corner the earlier one already rounded. A variable radius spreads along one run, so it keeps
+  // one call per run.
+  type Batch = { readonly concave: boolean; readonly segments: BlendSegment[]; count: number };
+  const batches: Batch[] = [];
+  for (const group of resolvedResult.groups) {
+    const bucket = variable ? undefined : batches.find((batch) => batch.concave === group.concave);
+    if (bucket === undefined) batches.push({ concave: group.concave, segments: [...group.segments], count: 1 });
+    else { bucket.segments.push(...group.segments); bucket.count += 1; }
+  }
+  for (const batch of batches) {
     const common = {
-      onlyEdges: group.segments, concave: group.concave, strict: true, fitAgainst: mesh,
+      onlyEdges: batch.segments as readonly BlendSegment[], concave: batch.concave, strict: true, fitAgainst: mesh,
       ...(newFaceIndex === undefined ? {} : { newFaceIndex })
     };
     const result = spec.type === "fillet"
       ? meshFillet(current, { sizeMm: spec.sizeMm, ...(spec.endSizeMm === undefined ? {} : { endSizeMm: spec.endSizeMm }), ...(spec.segments === undefined ? {} : { segments: spec.segments }), ...common })
       : meshChamfer(current, { sizeMm: spec.sizeMm, ...(spec.secondSizeMm === undefined ? {} : { secondSizeMm: spec.secondSizeMm }), ...(spec.angleDeg === undefined ? {} : { angleDeg: spec.angleDeg }), ...(spec.flip === true ? { flip: true } : {}), ...common });
-    if (!result.ok) return { ok: false, message: resolvedResult.groups.length === 1 ? result.message : `Edge ${index + 1} of ${resolvedResult.groups.length}: ${result.message}` };
+    if (!result.ok) return { ok: false, message: batch.count === 1 && resolvedResult.groups.length === 1 ? result.message : `${batch.count} of the ${resolvedResult.groups.length} picked runs: ${result.message}` };
     current = { positionsMm: result.positionsMm, indices: result.indices, ...(result.faceTriangles === undefined ? {} : { faceTriangles: result.faceTriangles }) };
     newFaceIndex = result.newFaceIndex ?? newFaceIndex;
   }
