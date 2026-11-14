@@ -120,3 +120,74 @@
 .command-panel-ok {
   font-weight: 600;
 }
+
+/* PT-17: Fusion-style toolbar panels — a few large buttons, the panel's name opens a drop-down with the rest. */
+
+.ribbon-panel {
+  position: relative;
+}
+
+.ribbon-panel-menu {
+  position: static;
+}
+
+.ribbon-panel-menu summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.8;
+  text-align: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  user-select: none;
+}
+
+.ribbon-panel-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.ribbon-panel-menu summary:hover,
+.ribbon-panel-menu[open] summary {
+  opacity: 1;
+  background: rgb(63 160 255 / 14%);
+}
+
+.ribbon-panel-drop {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 230px;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--line, #3a4148);
+  border-radius: 8px;
+  background: var(--panel, #22272c);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 45%);
+}
+
+.ribbon-panel-drop .ribbon-button {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+}
+
+.ribbon-panel-drop .ribbon-button strong {
+  font-size: 12.5px;
+}
+
+.ribbon-panel-drop .ribbon-button small {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.65;
+}

@@ -194,6 +194,7 @@ import { hoverPickTests } from "./hover-pick.test.js";
 import { commandPanelTests } from "./command-panel.test.js";
 import { operationDefaultTests } from "./operation-default.test.js";
 import { featureBindingExtrasTests } from "./feature-binding-extras.test.js";
+import { ribbonPanelTests } from "./ribbon-panels.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -410,6 +411,7 @@ const tests: readonly TestCase[] = [
   ...commandPanelTests,
   ...operationDefaultTests,
   ...featureBindingExtrasTests,
+  ...ribbonPanelTests,
 ];
 let failures = 0;
 

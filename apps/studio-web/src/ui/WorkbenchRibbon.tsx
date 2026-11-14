@@ -286,20 +286,20 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
       </RibbonGroup>
     </>}
     {!props.masterCartOpen && props.project.activeWorkspace === "part" && <>
-      <RibbonGroup label="Sketch">
-        <RibbonButton icon="sketch" label="New Sketch" hint="plane or face" onClick={props.onNewSketch} />
-        <RibbonButton icon="dimension" label="Parameters" hint="fx · named values" onClick={props.onChangeParameters} />
-      </RibbonGroup>
-      <RibbonGroup label="Create">
-        <RibbonButton icon="extrude" label="Extrude" hint="E · finished sketch" onClick={() => props.onPartCreate("extrude")} />
-        <RibbonButton icon="revolve" label="Revolve" hint="finished sketch" onClick={() => props.onPartCreate("revolve")} />
-      </RibbonGroup>
-      <RibbonGroup label="Feature tools">
-        {props.project.part.templateVisible !== false && PART_FEATURES.map((feature) => <RibbonButton key={feature.id} icon={feature.icon} label={feature.label} hint={feature.level} active={props.selectedId === feature.id} onClick={() => props.onSelect(feature.id)} />)}
+      {/* PT-17: the Part toolbar is five Fusion-style panels (a few large buttons, the rest in the panel's drop-down).
+          The solid commands that used to be disabled until a body was selected now start and ask for what is missing. */}
+      <RibbonPanel label="Create" more={<>
+        <RibbonButton icon="box" label="Extrude to Face" hint="finished sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("face")} />
+        <RibbonButton icon="box" label="Extrude to Object" hint="finished sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("body")} />
+        <RibbonButton icon="box" label="Extrude to Vertex" hint="corners marked · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("vertex")} />
+        <RibbonButton icon="revolve" label="Revolve to Face" hint="finished sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("revolve-face")} />
+        <RibbonButton icon="extrude" label="Rib / Web" hint="open sketch · thickness" onClick={() => props.onBodyEdit("web")} />
+        <RibbonButton icon="move" label="Wrap" hint="sketch → cylinder" onClick={() => props.onBodyEdit("wrap")} />
+        <RibbonButton icon="pattern" label="Rectangular Pattern" hint="1 or 2 directions · solids" onClick={() => props.onPattern("rectangular")} />
+        <RibbonButton icon="pattern" label="Circular Pattern" hint="about an axis · solids" onClick={() => props.onPattern("circular")} />
+        <RibbonButton icon="mirror" label="Mirror" hint="datum / offset / construction plane" onClick={() => props.onPattern("mirror")} />
         <RibbonButton icon="pattern" label="Pattern Feature" hint={`${props.project.part.patternCount} × X · analytic body`} disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("pattern-feature", "Pattern Feature")} />
         <RibbonButton icon="mirror" label="Mirror Feature" hint="YZ plane · analytic body" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("mirror-feature", "Mirror Feature")} />
-      </RibbonGroup>
-      <RibbonGroup label="Primitive bodies">
         <RibbonButton icon="box" label="Block" hint="preview body" onClick={() => props.onCreatePartPreviewBody("block")} />
         <RibbonButton icon="cylinder" label="Cylinder" hint="preview body" onClick={() => props.onCreatePartPreviewBody("cylinder")} />
         <RibbonButton icon="cone" label="Cone" hint="preview body" onClick={() => props.onCreatePartPreviewBody("cone")} />
@@ -311,34 +311,57 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="spiral" label="Spiral" hint="flat ribbon" onClick={() => props.onCreatePartPreviewBody("spiral")} />
         <RibbonButton icon="tube" label="Tube" hint="hollow" onClick={() => props.onCreatePartPreviewBody("tube")} />
         <RibbonButton icon="revolve" label="Ring primitive" hint="Ø30 · Ø16 · 12 mm" onClick={() => props.onPartFeatureAction("revolve", "Ring primitive")} />
-      </RibbonGroup>
-      <RibbonGroup label="Direct body edit">
-        <RibbonButton icon="move" label="Move" hint="XYZ / rotate" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-transform", "Move Body")} />
-        <RibbonButton icon="scale" label="Size" hint="dimensions" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-size", "Scale Body")} />
-        <RibbonButton icon="copy" label="Copy" hint="independent" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("duplicate", "Copy Body")} />
-        <RibbonButton icon="pattern" label="Pattern Body" hint="3 × X · preview body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("pattern-x", "Pattern Body")} />
-        <RibbonButton icon="mirror" label="Mirror Body" hint="YZ plane · preview body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("mirror-x", "Mirror Body")} />
-        <RibbonButton icon="appearance" label="Appearance" hint="display color" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-appearance", "Edit Object Display")} />
-        <RibbonButton icon="eye-off" label="Hide / show" hint="body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("toggle-visible", "Show / Hide Body")} />
-        <RibbonButton icon="trash" label="Delete" hint="body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("delete", "Delete Body")} />
-      </RibbonGroup>
-      <RibbonGroup label="Face operations">
-        <RibbonButton icon="move-face" label="Move Face" hint="top face · typed mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("move-face", "Move Face")} />
-        <RibbonButton icon="offset-face" label="Offset Face" hint="top face · typed mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("offset-face", "Offset Face")} />
-        <RibbonButton icon="replace-face" label="Replace Face" hint="parallel datum" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("replace-face", "Replace Face")} />
-        <RibbonButton icon="delete-face" label="Delete Face" hint="recognize + heal" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("delete-face", "Delete Face")} />
-      </RibbonGroup>
-      <RibbonGroup label="Boolean & trim">
-        <RibbonButton icon="boolean" label="Combine" hint="join · cut · intersect" disabled={(props.project.part.generalBodies?.length ?? 0) < 2} onClick={props.onCombine} />
+      </>}>
+        <RibbonButton icon="sketch" label="New Sketch" hint="plane or face" onClick={props.onNewSketch} />
+        <RibbonButton icon="extrude" label="Extrude" hint="E · finished sketch" onClick={() => props.onPartCreate("extrude")} />
+        <RibbonButton icon="revolve" label="Revolve" hint="finished sketch" onClick={() => props.onPartCreate("revolve")} />
+        <RibbonButton icon="bore" label="Hole Wizard" hint="H · face + type" onClick={props.onHoleWizard} />
+      </RibbonPanel>
+      <RibbonPanel label="Modify" more={<>
+        <RibbonButton icon="hole" label="Hole" hint="typed Ø · through" onClick={() => props.onModifyGeneralBody("hole")} />
+        <RibbonButton icon="fillet" label="Fillet All" hint="all convex edges" onClick={() => props.onModifyGeneralBody("fillet", "all")} />
+        <RibbonButton icon="chamfer" label="Chamfer All" hint="all convex edges" onClick={() => props.onModifyGeneralBody("chamfer", "all")} />
+        <RibbonButton icon="draft" label="Draft Faces" hint="neutral · pull · faces" onClick={() => props.onBodyEdit("draft")} />
+        <RibbonButton icon="offset-face" label="Offset Region" hint="faces · ±mm" onClick={() => props.onBodyEdit("offset-region")} />
+        <RibbonButton icon="replace-face" label="Replace Face" hint="face → plane" onClick={() => props.onBodyEdit("replace-face")} />
+        <RibbonButton icon="move" label="Flex" hint="bend · twist" onClick={() => props.onBodyEdit("flex")} />
+        <RibbonButton icon="subtract" label="Indent" hint="press a tool in" disabled={(props.project.part.generalBodies?.length ?? 0) < 2} onClick={props.onIndent} />
+        <RibbonButton icon="move" label="Move Body" hint="dx · dy · dz" onClick={() => props.onDirectEdit("move-body")} />
+        <RibbonButton icon="scale" label="Scale Body" hint="×factor" onClick={() => props.onDirectEdit("scale-body")} />
+        <RibbonButton icon="move" label="Move Face" hint="pick role" onClick={() => props.onDirectEdit("move-face")} />
+        <RibbonButton icon="scale" label="Offset Face" hint="±mm · normal" onClick={() => props.onDirectEdit("offset-face")} />
+        <RibbonButton icon="move" label="Emboss" hint="face · ±mm" onClick={() => props.onDirectEdit("emboss")} />
         <RibbonButton icon="unite" label="Unite" hint="target + tool" disabled={!(analyticBodySelected && (props.project.part.previewBodies?.length ?? 0) >= 2) && !(generalBodySelected && (props.project.part.generalBodies?.length ?? 0) >= 2)} onClick={() => props.onPartFeatureAction("unite", "Unite")} />
         <RibbonButton icon="subtract" label="Subtract" hint="through cylinder" disabled={!(analyticBodySelected && (props.project.part.previewBodies?.length ?? 0) >= 2) && !(generalBodySelected && (props.project.part.generalBodies?.length ?? 0) >= 2)} onClick={() => props.onPartFeatureAction("subtract", "Subtract")} />
         <RibbonButton icon="trim" label="Trim Body" hint="typed kept length" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("trim-body", "Trim Body")} />
-      </RibbonGroup>
-      <RibbonGroup label="Construction">
-        <RibbonButton icon="projection" label="Offset Plane" hint="base + distance" onClick={() => props.onAddConstructionPlane("offset")} />
+        <RibbonButton icon="dimension" label="Parameters" hint="fx · named values" onClick={props.onChangeParameters} />
+        {props.project.part.templateVisible !== false && PART_FEATURES.map((feature) => <RibbonButton key={feature.id} icon={feature.icon} label={feature.label} hint={feature.level} active={props.selectedId === feature.id} onClick={() => props.onSelect(feature.id)} />)}
+        <RibbonButton icon="move-face" label="Move Face (analytic)" hint="top face · typed mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("move-face", "Move Face")} />
+        <RibbonButton icon="offset-face" label="Offset Face (analytic)" hint="top face · typed mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("offset-face", "Offset Face")} />
+        <RibbonButton icon="replace-face" label="Replace Face (analytic)" hint="parallel datum" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("replace-face", "Replace Face")} />
+        <RibbonButton icon="delete-face" label="Delete Face" hint="recognize + heal" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("delete-face", "Delete Face")} />
+        <RibbonButton icon="edge-blend" label="Edge Blend" hint="vertical chain" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("edge-blend", "Edge Blend")} />
+        <RibbonButton icon="chamfer" label="Chamfer (analytic)" hint="vertical chain" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("chamfer", "Chamfer")} />
+        <RibbonButton icon="resize-blend" label="Resize Blend" hint="+0.5 mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("resize-blend", "Resize Blend")} />
+        <RibbonButton icon="shell" label="Shell (analytic)" hint="open +Z" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("shell", "Shell")} />
+        <RibbonButton icon="draft" label="Draft (analytic)" hint="5° · local Z" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("draft", "Draft")} />
+        <RibbonButton icon="update-model" label="Update Model" hint={`build ${props.project.part.modelUpdateSerial ?? 0}`} onClick={() => props.onPartFeatureAction("update-model", "Update Model")} />
+        <RibbonButton icon="move" label="Move (preview body)" hint="XYZ / rotate" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-transform", "Move Body")} />
+        <RibbonButton icon="scale" label="Size (preview body)" hint="dimensions" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-size", "Scale Body")} />
+        <RibbonButton icon="copy" label="Copy (preview body)" hint="independent" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("duplicate", "Copy Body")} />
+        <RibbonButton icon="pattern" label="Pattern Body" hint="3 × X · preview body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("pattern-x", "Pattern Body")} />
+        <RibbonButton icon="mirror" label="Mirror Body" hint="YZ plane · preview body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("mirror-x", "Mirror Body")} />
+        <RibbonButton icon="appearance" label="Appearance" hint="display color" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("edit-appearance", "Edit Object Display")} />
+        <RibbonButton icon="eye-off" label="Hide / show" hint="preview body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("toggle-visible", "Show / Hide Body")} />
+        <RibbonButton icon="trash" label="Delete (preview body)" hint="body" disabled={props.selectedId?.startsWith("part-body:") !== true} onClick={() => props.onPartPreviewAction("delete", "Delete Body")} />
+      </>}>
+        <RibbonButton icon="fillet" label="Fillet" hint="F · pick edges" onClick={() => props.onModifyGeneralBody("fillet")} />
+        <RibbonButton icon="chamfer" label="Chamfer" hint="pick edges" onClick={() => props.onModifyGeneralBody("chamfer")} />
+        <RibbonButton icon="shell" label="Shell" hint="click open faces" onClick={() => props.onBodyEdit("shell")} />
+        <RibbonButton icon="boolean" label="Combine" hint="join · cut · intersect" disabled={(props.project.part.generalBodies?.length ?? 0) < 2} onClick={props.onCombine} />
+      </RibbonPanel>
+      <RibbonPanel label="Construct" more={<>
         <RibbonButton icon="projection" label="Angle Plane" hint="base + axis + angle" onClick={() => props.onAddConstructionPlane("angle")} />
-        <RibbonButton icon="projection" label="Three-Point Plane" hint="3 points" onClick={() => props.onAddConstructionPlane("three-points")} />
-        <RibbonButton icon="projection" label="Midplane" hint="between two offsets" onClick={() => props.onAddConstructionPlane("midplane")} />
         <RibbonButton icon="projection" label="Tangent Plane" hint="body + angle" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onAddConstructionPlane("tangent-to-cylinder")} />
         <RibbonButton icon="projection" label="Plane ⟂ axis" hint="axis + point" disabled={(props.project.part.constructionAxes?.length ?? 0) === 0} onClick={() => props.onAddConstructionPlane("perpendicular-to-axis")} />
         <RibbonButton icon="projection" label="Plane via 2 edges" hint="parallel or crossing" onClick={() => props.onAddConstructionPlane("through-two-edges")} />
@@ -354,84 +377,46 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="insert" label="Point: XYZ" hint="coords" onClick={() => props.onAddConstructionPoint("xyz")} />
         <RibbonButton icon="insert" label="Point: midpoint" hint="(a + b) / 2" onClick={() => props.onAddConstructionPoint("midpoint")} />
         <RibbonButton icon="insert" label="Point: axis ∩ plane" hint="axis + plane" disabled={(props.project.part.constructionAxes?.length ?? 0) === 0} onClick={() => props.onAddConstructionPoint("axis-plane-intersection")} />
-      </RibbonGroup>
-      <RibbonGroup label="Pattern">
-        <RibbonButton icon="pattern" label="Rectangular Pattern" hint="1 or 2 directions · solids" disabled={!generalBodySelected} onClick={() => props.onPattern("rectangular")} />
-        <RibbonButton icon="pattern" label="Circular Pattern" hint="about an axis · solids" disabled={!generalBodySelected} onClick={() => props.onPattern("circular")} />
-        <RibbonButton icon="mirror" label="Mirror" hint="datum / offset / construction plane" disabled={!generalBodySelected} onClick={() => props.onPattern("mirror")} />
-      </RibbonGroup>
-      <RibbonGroup label="Solid modify">
-        <RibbonButton icon="hole" label="Hole" hint="typed Ø · through" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("hole")} />
-        <RibbonButton icon="bore" label="Hole Wizard" hint="M-series + style" disabled={!generalBodySelected} onClick={props.onHoleWizard} />
-        <RibbonButton icon="fillet" label="Fillet" hint="click an edge" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("fillet")} />
-        <RibbonButton icon="chamfer" label="Chamfer" hint="click an edge" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer")} />
-        <RibbonButton icon="fillet" label="Fillet All" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("fillet", "all")} />
-        <RibbonButton icon="chamfer" label="Chamfer All" hint="all convex edges" disabled={!generalBodySelected} onClick={() => props.onModifyGeneralBody("chamfer", "all")} />
-        <RibbonButton icon="shell" label="Shell" hint="click open faces" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("shell")} />
-      </RibbonGroup>
-      <RibbonGroup label="Reach to">
-        <RibbonButton icon="box" label="Extrude to Face" hint="finished sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("face")} />
-        <RibbonButton icon="box" label="Extrude to Object" hint="finished sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("body")} />
-        <RibbonButton icon="box" label="Extrude to Vertex" hint="corners marked · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("vertex")} />
-        <RibbonButton icon="revolve" label="Revolve to Face" hint="finished sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("revolve-face")} />
-      </RibbonGroup>
-      <RibbonGroup label="Sheet metal">
-        <RibbonButton icon="bore" label="Edge Flange" hint="pick edge · bend" disabled={!generalBodySelected} onClick={props.onEdgeFlange} />
-        <RibbonButton icon="bore" label="Miter Flange" hint="edge chain · mitred" disabled={!generalBodySelected} onClick={() => props.onSheetMetal("miter-flange")} />
-        <RibbonButton icon="move" label="Jog" hint="step · two bends" disabled={!generalBodySelected} onClick={() => props.onSheetMetal("jog")} />
-        <RibbonButton icon="extrude" label="Lofted Bend" hint="from a Loft" disabled={!generalBodySelected} onClick={() => props.onSheetMetal("lofted-bend")} />
-        <RibbonButton icon="export" label="Bend Table" hint="K · allowance · deduction" disabled={!generalBodySelected} onClick={() => props.onSheetMetal("bend-table")} />
-        <RibbonButton icon="export" label="Bend Table CSV" hint="bends of the part" disabled={!generalBodySelected} onClick={() => props.onSheetMetal("bend-table-csv")} />
-        <RibbonButton icon="export" label="Flat Pattern SVG" hint="unfold · all bends" disabled={!generalBodySelected} onClick={() => props.onFlatPattern("svg")} />
-        <RibbonButton icon="export" label="Flat Pattern DXF" hint="unfold · laser / CNC" disabled={!generalBodySelected} onClick={() => props.onFlatPattern("dxf")} />
-      </RibbonGroup>
-      <RibbonGroup label="Direct editing">
-        <RibbonButton icon="move" label="Move Body" hint="dx · dy · dz" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("move-body")} />
-        <RibbonButton icon="scale" label="Scale Body" hint="×factor" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("scale-body")} />
-        <RibbonButton icon="move" label="Move Face" hint="pick role" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("move-face")} />
-        <RibbonButton icon="scale" label="Offset Face" hint="±mm · normal" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("offset-face")} />
-        <RibbonButton icon="move" label="Emboss" hint="face · ±mm" disabled={!generalBodySelected} onClick={() => props.onDirectEdit("emboss")} />
-        <RibbonButton icon="draft" label="Draft Faces" hint="neutral · pull · faces" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("draft")} />
-        <RibbonButton icon="offset-face" label="Offset Region" hint="faces · ±mm" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("offset-region")} />
-        <RibbonButton icon="replace-face" label="Replace Face" hint="face → plane" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("replace-face")} />
-        <RibbonButton icon="extrude" label="Rib / Web" hint="open sketch · thickness" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("web")} />
-        <RibbonButton icon="move" label="Wrap" hint="sketch → cylinder" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("wrap")} />
-        <RibbonButton icon="move" label="Flex" hint="bend · twist" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("flex")} />
-        <RibbonButton icon="subtract" label="Indent" hint="press a tool in" disabled={!generalBodySelected || (props.project.part.generalBodies?.length ?? 0) < 2} onClick={props.onIndent} />
-      </RibbonGroup>
-      <RibbonGroup label="Detail features">
-        <RibbonButton icon="edge-blend" label="Edge Blend" hint="vertical chain" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("edge-blend", "Edge Blend")} />
-        <RibbonButton icon="chamfer" label="Chamfer" hint="vertical chain" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("chamfer", "Chamfer")} />
-        <RibbonButton icon="resize-blend" label="Resize Blend" hint="+0.5 mm" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("resize-blend", "Resize Blend")} />
-        <RibbonButton icon="shell" label="Shell" hint="open +Z" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("shell", "Shell")} />
-        <RibbonButton icon="draft" label="Draft" hint="5° · local Z" disabled={!analyticBodySelected} onClick={() => props.onPartFeatureAction("draft", "Draft")} />
-        <RibbonButton icon="update-model" label="Update Model" hint={`build ${props.project.part.modelUpdateSerial ?? 0}`} onClick={() => props.onPartFeatureAction("update-model", "Update Model")} />
-      </RibbonGroup>
-      <RibbonGroup label="Inspect & exchange">
-        <RibbonButton icon="fit" label="Fit" hint="view" onClick={props.onFit} />
-        <RibbonButton icon="draft" label="Zebra" hint={props.zebra === null ? "G1 / G2 check" : `on · ${props.zebra.axis.toUpperCase()} stripes`} active={props.zebra !== null} onClick={() => props.onZebra(props.zebra === null ? { axis: "z", frequency: 6 } : null)} />
+      </>}>
+        <RibbonButton icon="projection" label="Offset Plane" hint="base + distance" onClick={() => props.onAddConstructionPlane("offset")} />
+        <RibbonButton icon="projection" label="Three-Point Plane" hint="3 points" onClick={() => props.onAddConstructionPlane("three-points")} />
+        <RibbonButton icon="projection" label="Midplane" hint="between two offsets" onClick={() => props.onAddConstructionPlane("midplane")} />
+      </RibbonPanel>
+      <RibbonPanel label="Inspect" more={<>
         {props.zebra !== null && <RibbonButton icon="axes" label={`Zebra axis ${props.zebra.axis.toUpperCase()}`} hint="cycle X · Y · Z" onClick={() => props.onZebra({ ...props.zebra!, axis: props.zebra!.axis === "x" ? "y" : props.zebra!.axis === "y" ? "z" : "x" })} />}
         {props.zebra !== null && <RibbonButton icon="pattern" label={`Stripes ×${props.zebra.frequency}`} hint="denser · coarser" onClick={() => props.onZebra({ ...props.zebra!, frequency: props.zebra!.frequency >= 24 ? 3 : props.zebra!.frequency * 2 })} />}
-        <RibbonButton icon="json" label="Plate JSON" hint="plate only" onClick={props.onNativeDownload} />
-        <RibbonButton icon="open" label="Open plate" hint="load" onClick={props.onNativeOpen} />
-        <RibbonButton icon="export" label="Export STL" hint="all shown" onClick={props.onExportStl} />
-        <RibbonButton icon="exchange" label="3D Exchange" hint="14 in · 6 out" onClick={props.onExchange} />
-      </RibbonGroup>
-      <RibbonGroup label="Analysis">
         <RibbonButton icon="inspect" label="Geometry check" hint="open · non-manifold" onClick={() => props.onSelect("analysis:geometry-check")} />
         <RibbonButton icon="interference" label="Interference" hint="shared volume" onClick={() => props.onSelect("analysis:interference")} />
         <RibbonButton icon="draft" label="Draft angle" hint="pull direction" onClick={() => props.onSelect("analysis:draft")} />
         <RibbonButton icon="section" label="Wall thickness" hint="thin walls" onClick={() => props.onSelect("analysis:wall-thickness")} />
         <RibbonButton icon="bezier" label="Curvature" hint="Gaussian · mean" onClick={() => props.onSelect("analysis:gaussian-curvature")} />
         <RibbonButton icon="spline" label="Curvature comb" hint="section curve" onClick={() => props.onSelect("analysis:section-comb")} />
-      </RibbonGroup>
-      <RibbonGroup label="Downstream">
-        <RibbonButton icon="assemble" label="Insert to assembly" hint="snapshot" onClick={props.onInsertPartIntoAssembly} />
-      </RibbonGroup>
-      <RibbonGroup label="Display units">
+      </>}>
+        <RibbonButton icon="measure" label="Measure" hint="I · two points" onClick={props.onMeasure} />
+        <RibbonButton icon="fit" label="Fit" hint="F6 · view" onClick={props.onFit} />
+        <RibbonButton icon="draft" label="Zebra" hint={props.zebra === null ? "G1 / G2 check" : `on · ${props.zebra.axis.toUpperCase()} stripes`} active={props.zebra !== null} onClick={() => props.onZebra(props.zebra === null ? { axis: "z", frequency: 6 } : null)} />
+      </RibbonPanel>
+      <RibbonPanel label="Sheet Metal" more={<>
+        <RibbonButton icon="bore" label="Miter Flange" hint="edge chain · mitred" onClick={() => props.onSheetMetal("miter-flange")} />
+        <RibbonButton icon="move" label="Jog" hint="step · two bends" onClick={() => props.onSheetMetal("jog")} />
+        <RibbonButton icon="extrude" label="Lofted Bend" hint="from a Loft" onClick={() => props.onSheetMetal("lofted-bend")} />
+        <RibbonButton icon="export" label="Bend Table" hint="K · allowance · deduction" onClick={() => props.onSheetMetal("bend-table")} />
+        <RibbonButton icon="export" label="Bend Table CSV" hint="bends of the part" onClick={() => props.onSheetMetal("bend-table-csv")} />
+        <RibbonButton icon="export" label="Flat Pattern SVG" hint="unfold · all bends" onClick={() => props.onFlatPattern("svg")} />
+        <RibbonButton icon="export" label="Flat Pattern DXF" hint="unfold · laser / CNC" onClick={() => props.onFlatPattern("dxf")} />
+      </>}>
+        <RibbonButton icon="bore" label="Edge Flange" hint="pick edge · bend" onClick={props.onEdgeFlange} />
+      </RibbonPanel>
+      <RibbonPanel label="Output" more={<>
+        <RibbonButton icon="json" label="Plate JSON" hint="plate only" onClick={props.onNativeDownload} />
+        <RibbonButton icon="open" label="Open plate" hint="load" onClick={props.onNativeOpen} />
+        <RibbonButton icon="export" label="Export STL" hint="all shown" onClick={props.onExportStl} />
         <RibbonButton icon="units-mm" label="Millimeter" hint="mm" active={props.displayUnit === "mm"} onClick={() => props.onDisplayUnit("mm")} />
         <RibbonButton icon="units-in" label="Inch" hint="in" active={props.displayUnit === "in"} onClick={() => props.onDisplayUnit("in")} />
-      </RibbonGroup>
+      </>}>
+        <RibbonButton icon="assemble" label="Insert to assembly" hint="snapshot" onClick={props.onInsertPartIntoAssembly} />
+        <RibbonButton icon="exchange" label="3D Exchange" hint="14 in · 6 out" onClick={props.onExchange} />
+      </RibbonPanel>
     </>}
     {!props.masterCartOpen && props.project.activeWorkspace === "assembly" && <>
       <RibbonGroup label="Auto-generate template">
@@ -577,6 +562,25 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
 
 function RibbonGroup({ label, children }: { readonly label: string; readonly children: React.ReactNode }): React.JSX.Element {
   return <div className="ribbon-group" role="group" aria-label={label}><div>{children}</div><small>{label}</small></div>;
+}
+
+/**
+ * PT-17: a Fusion-style toolbar panel — a few large buttons, then the panel's name with a small arrow that drops down
+ * the rest of the family. The drop-down is bounded by the window height and scrolls inside; clicking a command closes it.
+ */
+function RibbonPanel({ label, children, more }: { readonly label: string; readonly children: React.ReactNode; readonly more?: React.ReactNode }): React.JSX.Element {
+  return <div className="ribbon-group ribbon-panel" role="group" aria-label={label}>
+    <div>{children}</div>
+    {more === undefined
+      ? <small>{label}</small>
+      : <details className="ribbon-panel-menu">
+          <summary aria-label={`All ${label} commands`}>{label} ▾</summary>
+          <div className="ribbon-panel-drop" role="menu" aria-label={`${label} commands`} onClick={(event) => {
+            // A command click closes the drop-down; a click on a disabled button leaves it open.
+            if ((event.target as HTMLElement).closest("button") !== null) (event.currentTarget.parentElement as HTMLDetailsElement).open = false;
+          }}>{more}</div>
+        </details>}
+  </div>;
 }
 
 /** The persistent "Sketch plane: Top (XY)" chip. It is a button: clicking it opens the plane dialog to move this sketch to another plane. */
