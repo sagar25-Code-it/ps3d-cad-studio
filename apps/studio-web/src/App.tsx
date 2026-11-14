@@ -223,6 +223,7 @@ import {
 } from "./workspaces/RenderStudioWorkspace.js";
 import { SurfaceInspector } from "./workspaces/SurfaceInspector.js";
 import { withCosmeticThreads } from "./hole-threads.js";
+import { withStaleBodies } from "./stale-bodies.js";
 import { runSurfaceAction, withFormCages, withSurfaceBodies, type SurfaceAction } from "./surface-actions.js";
 import { DrawingWorkspace } from "./workspaces/DrawingWorkspace.js";
 import { AutomateWorkspace } from "./workspaces/AutomateWorkspace.js";
@@ -494,7 +495,7 @@ export function App(): React.JSX.Element {
     : { ...project.assembly, explodeMm: assemblyExplodePreviewMm }, [assemblyExplodePreviewMm, project.assembly]);
   const assemblyExplodePercent = Math.round(Math.min(100, displayedAssembly.explodeMm / assemblyExplodeMaxMm * 100));
   const assemblyScene = useMemo(() => buildAssemblyPreview(displayedAssembly), [displayedAssembly]);
-  const partScene = useMemo(() => withFormCages(withCosmeticThreads(buildPartPreview(project.part), project), project), [project.part, project.design]);
+  const partScene = useMemo(() => withStaleBodies(withFormCages(withCosmeticThreads(buildPartPreview(project.part), project), project), project), [project.part, project.design]);
   const interferences = useMemo(() => findAssemblyInterference(displayedAssembly), [displayedAssembly]);
   const surfacePreview = useMemo(() => { const base = buildSurfacePreview(project.surface); return { ...base, scene: withSurfaceBodies(base.scene, project) }; }, [project.surface, project.part.generalBodies]);
   const drawing = useMemo(() => createDrawingSvg(project.part, project.drawing), [project.part, project.drawing]);

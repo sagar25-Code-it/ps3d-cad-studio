@@ -132,3 +132,9 @@
 .studio-app .tree-eye .command-icon { width: 16px; height: 16px; }
 .studio-app .tree-rename { box-sizing: border-box; width: 100%; min-height: 34px; margin: 2px 0; padding: 0 0.5rem; border: 2px solid #c62836; border-radius: 5px; color: #1f2327; background: #fff; font: inherit; font-size: 12.5px; }
 .studio-app .tree-row > .tree-rename { flex: 1 1 0; width: auto; min-width: 0; }
+
+/* A step or solid that could not be rebuilt (HS-21): the row says so in the error colour, on top of the red chip in the timeline. */
+.studio-app .tree-item.failed { border-color: #d9a29b; background: #fdeceb; }
+.studio-app .tree-item.failed small { color: #8f2a1f; }
+.studio-app .tree-item.failed .tree-glyph { border-color: #c0392b; color: #c0392b; }
+.studio-app .tree-item.failed.selected { box-shadow: inset 3px 0 0 #c0392b; }

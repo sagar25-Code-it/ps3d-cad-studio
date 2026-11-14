@@ -1,4 +1,5 @@
 import { dependentsOf, isSplitPieceOf, modifiesBody } from "./design.js";
+import { isHealthNote } from "./design-labels.js";
 import type { DesignFeature, DesignHistory, DesignSolidFeature, WorkbenchProject } from "./types.js";
 
 /**
@@ -79,4 +80,35 @@ export function deleteImpactHeadline(impact: DeleteImpact): string {
   return count === 0
     ? `Delete ${impact.featureName}.`
     : `Deleting ${impact.featureName} also deletes ${count} other step${count === 1 ? "" : "s"} that ${count === 1 ? "depends" : "depend"} on it.`;
+}
+
+/** A solid whose last rebuild did not complete: the step that failed and the reason it gave. */
+export interface BodyFailure {
+  readonly bodyId: string;
+  readonly stepId: string;
+  readonly stepName: string;
+  readonly message: string;
+}
+
+/**
+ * The solids that are out of date because a live step of theirs could not be rebuilt (HS-21). A failed rebuild keeps the last good
+ * shape on screen rather than deleting it; this says which solids that shape is stale for, and why, so the canvas and the browser can
+ * show it. A suppressed step, a step after the rollback marker, and a note on a step that was applied do not count. The first failed
+ * step of a solid (in timeline order) is the one reported. Read from the health marks the rebuild already stores, so it needs no new
+ * saved data and an older project reads the same way.
+ */
+export function failedBodies(history: DesignHistory): ReadonlyMap<string, BodyFailure> {
+  const found = new Map<string, BodyFailure>();
+  history.features.forEach((feature, index) => {
+    if (feature.kind === "sketch" || feature.suppressed || index >= history.rollbackIndex) return;
+    const message = feature.health?.message;
+    if (message === undefined || isHealthNote(message) || found.has(feature.bodyId)) return;
+    found.set(feature.bodyId, { bodyId: feature.bodyId, stepId: feature.id, stepName: feature.name, message });
+  });
+  return found;
+}
+
+/** One line for a failed solid: "out of date: Cut 1 could not be rebuilt (reason)". */
+export function describeBodyFailure(failure: BodyFailure): string {
+  return `out of date: ${failure.stepName} could not be rebuilt (${failure.message.replace(/\.$/u, "")})`;
 }
