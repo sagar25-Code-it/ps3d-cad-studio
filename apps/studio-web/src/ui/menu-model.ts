@@ -139,9 +139,9 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
       hint: state.previewBodySelected ? "Edit its dimensions in the inspector" : "Select a preview body (Block, Cylinder, …) first", action: actions.onResizeSelectedBody },
     { id: "modify.combine", label: "Combine bodies…", icon: "unite", divider: true, disabled: state.generalBodyCount < 2,
       hint: state.generalBodyCount < 2 ? "Needs two solid bodies made from sketches" : "Join, cut or intersect two solids", action: actions.onCombine },
-    { id: "modify.hole", label: "Hole…", icon: "hole", divider: true, disabled: !state.generalBodySelected,
+    { id: "modify.hole", label: "Hole…", icon: "hole", shortcut: "H", divider: true, disabled: !state.generalBodySelected,
       hint: state.generalBodySelected ? "Drill a through-hole along +Z into the selected solid" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("hole") },
-    { id: "modify.fillet", label: "Fillet…", icon: "fillet", disabled: !state.generalBodySelected,
+    { id: "modify.fillet", label: "Fillet…", icon: "fillet", shortcut: "F", disabled: !state.generalBodySelected,
       hint: state.generalBodySelected ? "Click any sharp edge of the selected solid to round it" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("fillet") },
     { id: "modify.chamfer", label: "Chamfer…", icon: "chamfer", disabled: !state.generalBodySelected,
       hint: state.generalBodySelected ? "Click any sharp edge of the selected solid to bevel it" : "Select a solid body (from Extrude or Revolve) first", action: () => actions.onModifyGeneralBody("chamfer") },
@@ -171,7 +171,7 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
   ] };
 
   const view: WorkbenchMenu = { id: "view", label: "View", icon: "view", items: [
-    { id: "view.fit", label: "Fit canvas", icon: "fit", shortcut: "F", disabled: !is3d, hint: is3d ? undefined : "Open a 3D workspace first", action: actions.onFit },
+    { id: "view.fit", label: "Fit canvas", icon: "fit", shortcut: "F6", disabled: !is3d, hint: is3d ? undefined : "Open a 3D workspace first", action: actions.onFit },
     { id: "view.home", label: "Home view", icon: "home", disabled: !is3d, hint: is3d ? undefined : "Open a 3D workspace first", action: actions.onHome },
     { id: "view.grid", label: state.gridVisible ? "Hide grid" : "Show grid", icon: "grid", disabled: !gridToggleEnabled, action: actions.onToggleGrid },
     { id: "view.render-studio", label: "Render Studio", icon: "appearance", divider: true, action: actions.onRenderStudio },
@@ -182,7 +182,7 @@ export function buildWorkbenchMenus(state: WorkbenchMenuState, actions: Workbenc
 
   const inspect: WorkbenchMenu = { id: "inspect", label: "Inspect", icon: "inspect", items: [
     { id: "inspect.health", label: "Design Health Center", icon: "inspect", action: actions.onDesignHealth },
-    { id: "inspect.measure", label: "Measure points", icon: "measure", shortcut: "M", disabled: !is3d, hint: is3d ? undefined : "Open a 3D workspace first", action: actions.onMeasure },
+    { id: "inspect.measure", label: "Measure points", icon: "measure", shortcut: "I", disabled: !is3d, hint: is3d ? undefined : "Open a 3D workspace first", action: actions.onMeasure },
     { id: "inspect.fit", label: "Fit current model", icon: "fit", disabled: !is3d, action: actions.onFit },
     ...analysisItems(state, actions, overlayOpen),
     { id: "inspect.catalog", label: "Capability catalog", icon: "command", shortcut: "S", action: actions.onCommandPalette }

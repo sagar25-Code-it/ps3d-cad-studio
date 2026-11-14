@@ -112,6 +112,7 @@ import { facesOfBody } from "./edge-blend-step.js";
 import { blendAllFeature, centroidHoleFeature } from "./one-shot-steps.js";
 import { explicitBody, matchingSketches, profilesByAnswer, sketchByAnswer } from "./explicit-pick.js";
 import { shouldRefit } from "./view-fit.js";
+import { partHotkeyCommand, type PartHotkeyCommand } from "./part-hotkeys.js";
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
 import { flatPatternForBody, isRebuildFailure, isRebuildNote, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
@@ -278,17 +279,28 @@ const SHORTCUT_GROUPS: readonly { readonly title: string; readonly items: readon
     ]
   },
   {
+    title: "Part modelling",
+    items: [
+      { keys: ["E"], label: "Extrude a finished sketch" },
+      { keys: ["Q"], label: "Press Pull (offset the picked flat faces)" },
+      { keys: ["F"], label: "Fillet (click an edge); outside Part, F is Fit" },
+      { keys: ["H"], label: "Hole on the selected solid" },
+      { keys: ["M"], label: "Move the selected solid; outside Part, M is Measure" },
+      { keys: ["I"], label: "Measure" },
+      { keys: ["A"], label: "Appearance controls in the inspector" }
+    ]
+  },
+  {
     title: "View & navigation (3D; in Sketch O is Offset, see the Sketch list)",
     items: [
-      { keys: ["F"], label: "Fit all visible geometry" },
+      { keys: ["F6"], label: "Fit all visible geometry (also the Fit button)" },
       { keys: ["1"], label: "Front view" },
       { keys: ["2"], label: "Top view" },
       { keys: ["3"], label: "Right view" },
       { keys: ["4"], label: "Isometric view" },
       { keys: ["V"], label: "Select navigation mode" },
       { keys: ["O"], label: "Orbit navigation mode" },
-      { keys: ["P"], label: "Pan navigation mode" },
-      { keys: ["M"], label: "Measure (not in sketch)" }
+      { keys: ["P"], label: "Pan navigation mode" }
     ]
   },
   {
@@ -433,6 +445,8 @@ export function App(): React.JSX.Element {
   const lastFittedProjectRef = useRef<string | undefined>(undefined);
   /** Starts the Part-environment Extrude or Revolve (E key, ribbon, right-click); assigned after startPartCreate is defined. */
   const partCreateRef = useRef<(kind: "extrude" | "revolve", preferredSketchFeatureId?: string) => void>(() => undefined);
+  /** Runs a Part keyboard command (part-hotkeys.ts); assigned after the handlers are defined. */
+  const partHotkeyRef = useRef<(command: PartHotkeyCommand) => void>(() => undefined);
   const viewportRef = useRef<ThreeViewportAdapter | undefined>(undefined);
   /** Set while a command waits for the user to click something in the viewport; called with the click, or null when cancelled. */
   const pickRef = useRef<((point: ViewportMeasurePoint | null) => void) | null>(null);
@@ -3540,6 +3554,37 @@ export function App(): React.JSX.Element {
   };
   fitViewportRef.current = fitViewport;
 
+  /** PT-10: what each Part letter starts (the table is part-hotkeys.ts; the overlay and menus read the same table). */
+  const runPartHotkey = (command: PartHotkeyCommand): void => {
+    switch (command) {
+      case "extrude": partCreateRef.current("extrude"); return;
+      // Press Pull's honest subset on this kernel: pick flat faces of the selected solid and offset them.
+      case "press-pull": handleBodyEdit("offset-region"); return;
+      case "fillet": void handleEdgeTreatment("fillet"); return;
+      case "hole": void handleHoleWizard(); return;
+      case "move": void handleDirectEdit("move-body"); return;
+      case "measure": setViewportNavigation("measure"); return;
+      case "appearance": {
+        const card = globalThis.document?.querySelector<HTMLElement>(".part-appearance-card");
+        if (card === null || card === undefined) { setStatus("ready"); setStatusText("Appearance: the display colour and shading are in the Part inspector."); return; }
+        card.scrollIntoView({ block: "nearest" });
+        card.querySelector<HTMLElement>("input, select, button")?.focus();
+        setStatus("ready");
+        setStatusText("Appearance: the display colour and shading controls are focused in the inspector.");
+        return;
+      }
+      case "fit": fitViewport(); return;
+      case "view-front": setViewportOrientation("front"); return;
+      case "view-top": setViewportOrientation("top"); return;
+      case "view-right": setViewportOrientation("right"); return;
+      case "view-isometric": setViewportOrientation("isometric"); return;
+      case "nav-select": setViewportNavigation("select"); return;
+      case "nav-orbit": setViewportNavigation("orbit"); return;
+      case "nav-pan": setViewportNavigation("pan"); return;
+    }
+  };
+  partHotkeyRef.current = runPartHotkey;
+
   const setViewportNavigation = (mode: NavigationMode): void => {
     if (viewportRef.current === undefined) setViewportState((current) => ({ ...current, navigationMode: mode }));
     else viewportRef.current.setNavigationMode(mode);
@@ -3855,15 +3900,10 @@ export function App(): React.JSX.Element {
       if (sketch || masterCartOpen || !isThreeDimensional || isEditableTarget(event.target) || globalThis.document.querySelector('[role="dialog"]') !== null) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const key = event.key.toLowerCase();
-      if (key === "e" && projectRef.current.activeWorkspace === "part") { partCreateRef.current("extrude"); return; }
+      const command = partHotkeyCommand(key, projectRef.current.activeWorkspace);
+      if (command !== undefined) { partHotkeyRef.current(command); return; }
+      // Outside the Part workspace the Fusion letters stand aside and the older view keys keep working.
       if (key === "f") { fitViewportRef.current(); return; }
-      if (key === "1") setViewportOrientation("front");
-      if (key === "2") setViewportOrientation("top");
-      if (key === "3") setViewportOrientation("right");
-      if (key === "4") setViewportOrientation("isometric");
-      if (key === "v") setViewportNavigation("select");
-      if (key === "o") setViewportNavigation("orbit");
-      if (key === "p") setViewportNavigation("pan");
       if (key === "m") setViewportNavigation("measure");
     };
     window.addEventListener("keydown", listener);

@@ -209,7 +209,7 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
         command("view.projection.perspective", "Perspective", "view", "view"),
         command("view.projection.orthographic", "Orthographic", "view", "view")
       ]),
-      command("view.fit", "Fit", "fit", "view", true, undefined, false, "F"),
+      command("view.fit", "Fit", "fit", "view", true, undefined, false, "F6"),
       command("view.home", "Home / Isometric", "home", "view")
     );
   }

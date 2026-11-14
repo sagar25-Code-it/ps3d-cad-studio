@@ -187,6 +187,7 @@ import { blankProjectTests } from "./blank-project.test.js";
 import { explicitPickTests } from "./explicit-pick.test.js";
 import { viewFitTests } from "./view-fit.test.js";
 import { partCreateTests } from "./part-create.test.js";
+import { partHotkeyTests } from "./part-hotkeys.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -396,6 +397,7 @@ const tests: readonly TestCase[] = [
   ...explicitPickTests,
   ...viewFitTests,
   ...partCreateTests,
+  ...partHotkeyTests,
 ];
 let failures = 0;
 
