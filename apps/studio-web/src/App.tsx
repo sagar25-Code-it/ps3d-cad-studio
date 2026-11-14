@@ -208,7 +208,7 @@ import { SketchWorkspace } from "./workspaces/SketchWorkspace.js";
 import { SKETCH_EDIT_TOOL_LABELS, type SketchEditToolId } from "./workspaces/SketchEditPanel.js";
 import type { SketchEditPlan } from "../../../packages/workbench-sketch/src/edit-tools.js";
 import { selectionCountLabel } from "../../../packages/workbench-sketch/src/selection-actions.js";
-import { cancelSketchSession, commitWorkingSketchAtomically, type CommitOutcome } from "./sketch-session.js";
+import { applyIntent, cancelSketchSession, commitWorkingSketchAtomically, type CommitOutcome } from "./sketch-session.js";
 import { PartInspector } from "./workspaces/PartInspector.js";
 import { ImportedModelInspector } from "./workspaces/ImportedModelInspector.js";
 import { AssemblyInspector } from "./workspaces/AssemblyInspector.js";
@@ -1143,9 +1143,15 @@ export function App(): React.JSX.Element {
       : `${plane.toUpperCase()} plane${offsetMm === 0 ? "" : ` offset ${offsetMm} mm`}${tilt === undefined ? "" : ` tilted ${tilt.angleDeg}° about ${tilt.axis.toUpperCase()}`}`;
     const placement = { ...(offsetMm === 0 ? {} : { offsetMm }), ...(tilt === undefined ? {} : { tilt }), ...(frame === undefined ? {} : { frame }), ...(face === undefined ? {} : { face }), ...(convention === undefined ? {} : { convention }) };
     if (sketchPlaneDialogMode === "new") {
+      // The unrecorded sketch goes into the timeline and the new sketch starts in the same project: one Undo step for the command (HS-25).
       void (async () => {
-        await commitWorkingSketch();
-        if (applyProjectOperation({ kind: "new-design-sketch", plane: datum, ...placement }, false)) setStatusText(`New sketch started. ${describeSketchPlane(projectRef.current.sketch).status} The previous sketch is in the timeline.`);
+        lastSketchCommitRef.current = undefined;
+        await commitWorkingSketch([{ kind: "new-design-sketch", plane: datum, ...placement }]);
+        const outcome = lastSketchCommit();
+        if (outcome === undefined || outcome.failed.length > 0) return;
+        setSelectedId(null);
+        setStatus("ready");
+        setStatusText(`New sketch started. ${describeSketchPlane(projectRef.current.sketch).status} The previous sketch is in the timeline.`);
       })();
       return;
     }
@@ -1265,10 +1271,11 @@ export function App(): React.JSX.Element {
         combineToolBodyIds: [tool.id], combineMode: choice.mode,
         ...(choice.keepTool ? { combineKeepTools: true } : {})
       };
-      const added = await commitWithReplay({ kind: "add-design-solid", feature, body: target }, feature.id);
+      // A consumed tool is hidden rather than deleted: its steps stay, and showing it again brings it back. The hiding joins the
+      // combine's own project, so Combine is one Undo step (not the step and then a separate visibility change).
+      const hideTool: readonly OperationIntent[] = !choice.keepTool && tool.visible ? [{ kind: "toggle-general-body-visibility", bodyId: tool.id }] : [];
+      const added = await commitWithReplay({ kind: "add-design-solid", feature, body: target }, feature.id, false, { alsoApply: hideTool });
       if (!added) return "The combine was not applied; the status line names the reason.";
-      // A consumed tool is hidden rather than deleted: its steps stay, and showing it again brings it back.
-      if (!choice.keepTool && tool.visible) applyProjectOperation({ kind: "toggle-general-body-visibility", bodyId: tool.id }, false);
       setSelectedId(target.id);
       setCombineRequest(null);
       setStatus("ready");
@@ -1508,11 +1515,13 @@ export function App(): React.JSX.Element {
     if (frame === undefined) { setStatus("ready"); setStatusText("A sketch needs a flat, resolvable plane or face; this reference is not one right now."); return; }
     const sketchFrame = frame;
     void (async () => {
-      await commitWorkingSketch();
-      if (applyProjectOperation({ kind: "new-design-sketch", plane: "datum:xy", frame: sketchFrame }, false)) {
-        if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
-        setStatusText("New sketch on the selected plane. It keeps the plane as it is now; later changes to the plane do not move it.");
-      }
+      lastSketchCommitRef.current = undefined;
+      await commitWorkingSketch([{ kind: "new-design-sketch", plane: "datum:xy", frame: sketchFrame }]);
+      const outcome = lastSketchCommit();
+      if (outcome === undefined || outcome.failed.length > 0) return;
+      if (projectRef.current.activeWorkspace !== "sketch") switchWorkspace("sketch");
+      setStatus("ready");
+      setStatusText("New sketch on the selected plane. It keeps the plane as it is now; later changes to the plane do not move it.");
     })();
   };
 
@@ -2788,7 +2797,11 @@ export function App(): React.JSX.Element {
    * (which rebuilds the solids built on it). The sketch update, the rebuilt solids and any `then` operations are ONE project and
    * ONE Undo step. Returns the sketch feature's ID, or undefined if there is nothing to finish or the commit was refused.
    */
-  const commitWorkingSketch = async (then: Parameters<typeof commitWorkingSketchAtomically>[1]["then"] = []): Promise<string | undefined> => {
+  /**
+   * Works out what finishing the working sketch into the timeline gives (the sketch step and the rebuilt solids on it) WITHOUT recording
+   * it, so a command that does more (Create solid) can add its own step to the same project and push it once: one command, one Undo.
+   */
+  const prepareWorkingSketchCommit = async (then: Parameters<typeof commitWorkingSketchAtomically>[1]["then"] = []): Promise<CommitOutcome | undefined> => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const current = projectRef.current;
       const outcome = await commitWorkingSketchAtomically(current, { featureId: `feature:sketch-${crypto.randomUUID()}`, name: nextFeatureName(designOf(current), "Sketch"), then });
@@ -2796,15 +2809,21 @@ export function App(): React.JSX.Element {
       // The kernel rebuild is asynchronous; if the project moved meanwhile, redo the finish on the newer project rather than overwrite it.
       if (projectRef.current.revision !== current.revision) continue;
       lastSketchCommitRef.current = outcome.value;
-      if (outcome.value.changed) pushProject(outcome.value.project);
-      const { failed, rebuilt } = outcome.value;
-      if (failed.length > 0) { setStatus("error"); setStatusText(`${failed.length} timeline step${failed.length === 1 ? "" : "s"} could not be rebuilt: ${failed[0]!.message}`); }
-      else if (rebuilt.length > 0) { setStatus("ready"); setStatusText(`Rebuilt ${rebuilt.length} timeline step${rebuilt.length === 1 ? "" : "s"} from the edited sketch.${outcome.value.notes.length > 0 ? ` ${outcome.value.notes[0]}` : ""}`); }
-      return outcome.value.sketchFeatureId;
+      return outcome.value;
     }
     setStatus("error");
     setStatusText("The project changed while the sketch was being finished. Press Finish again.");
     return undefined;
+  };
+
+  const commitWorkingSketch = async (then: Parameters<typeof commitWorkingSketchAtomically>[1]["then"] = []): Promise<string | undefined> => {
+    const outcome = await prepareWorkingSketchCommit(then);
+    if (outcome === undefined) return undefined;
+    if (outcome.changed) pushProject(outcome.project);
+    const { failed, rebuilt } = outcome;
+    if (failed.length > 0) { setStatus("error"); setStatusText(`${failed.length} timeline step${failed.length === 1 ? "" : "s"} could not be rebuilt: ${failed[0]!.message}`); }
+    else if (rebuilt.length > 0) { setStatus("ready"); setStatusText(`Rebuilt ${rebuilt.length} timeline step${rebuilt.length === 1 ? "" : "s"} from the edited sketch.${outcome.notes.length > 0 ? ` ${outcome.notes[0]}` : ""}`); }
+    return outcome.sketchFeatureId;
   };
 
   const finishSketch = async (): Promise<void> => {
@@ -2932,13 +2951,23 @@ export function App(): React.JSX.Element {
     if (detectSketchProfiles(profileSource).length === 0) { setStatus("error"); setStatusText(`There is no closed region to build a solid from. ${explainNoProfiles(profileSource).join(" ")}`.trim()); return; }
     setStatus("working");
     setStatusText(`Building ${operation === "extrude" ? "extruded" : operation === "revolve" ? "revolved" : operation === "sweep" ? "swept" : operation === "loft" ? "lofted" : operation === "edge-fillet" ? "filleted" : operation === "edge-chamfer" ? "chamfered" : operation === "shell" ? "shelled" : operation === "helix" ? "helical" : operation === "thread" ? "threaded" : operation === "rib" ? "ribbed" : operation === "dome" ? "domed" : operation === "sheet-base" ? "sheet-metal base" : operation === "sheet-flange" ? "sheet-metal flange" : operation === "sheet-hem" ? "hemmed" : "drafted"} solid…`);
-    const sketchId = sourceSketchFeatureId ?? await commitWorkingSketch();
-    const sketchFeature = designOf(projectRef.current).features.find((feature) => feature.id === sketchId);
-    // A refused commit has already reported why (status and diagnostic); keep that message.
+    // HS-25: finishing the working sketch and adding the solid are one command, so they become one project and one Undo step. `base` is the
+    // project with the sketch finished but not yet recorded; the step is added to it and the result is pushed once at the end.
+    const live = projectRef.current;
+    let base = live;
+    let sketchId = sourceSketchFeatureId;
+    if (sketchId === undefined) {
+      const prepared = await prepareWorkingSketchCommit();
+      // A refused commit has already reported why (status and diagnostic); keep that message.
+      if (prepared === undefined) return;
+      base = prepared.project;
+      sketchId = prepared.sketchFeatureId;
+    }
     if (sketchId === undefined) return;
+    const sketchFeature = designOf(base).features.find((feature) => feature.id === sketchId);
     if (sketchFeature?.kind !== "sketch") { setStatus("error"); setStatusText("The sketch feature could not be found in the timeline."); return; }
-    const ordinal = designOf(projectRef.current).features.filter((feature) => feature.kind === operation).length + 1;
-    const targetBody = target === undefined ? undefined : projectRef.current.part.generalBodies?.find((body) => body.id === target.bodyId);
+    const ordinal = designOf(base).features.filter((feature) => feature.kind === operation).length + 1;
+    const targetBody = target === undefined ? undefined : base.part.generalBodies?.find((body) => body.id === target.bodyId);
     if (target !== undefined && targetBody === undefined) { setStatus("error"); setStatusText(`Pick the solid to ${target.mode} first. Create a solid with New body, then ${target.mode} with another sketch.`); return; }
     const bodyId = targetBody?.id ?? `general-body:${crypto.randomUUID()}`;
     const verb = target === undefined
@@ -2960,7 +2989,7 @@ export function App(): React.JSX.Element {
       : target.mode === "cut" ? "Cut" : target.mode === "intersect" ? "Intersect" : "Join";
     const feature: DesignSolidFeature = {
       id: `feature:${operation}-${crypto.randomUUID()}`,
-      name: `${verb} ${target === undefined ? ordinal : designOf(projectRef.current).features.filter((candidate) => candidate.kind !== "sketch" && candidate.operation === target.mode).length + 1}`,
+      name: `${verb} ${target === undefined ? ordinal : designOf(base).features.filter((candidate) => candidate.kind !== "sketch" && candidate.operation === target.mode).length + 1}`,
       kind: operation,
       suppressed: false,
       sketchFeatureId: sketchId,
@@ -3010,12 +3039,12 @@ export function App(): React.JSX.Element {
     // A through-all cut is sized across the target body here, the same way the timeline replay sizes it.
     // A "to" extent is measured from the target now, the same way the timeline replay measures it; the step keeps the measured value as its fallback.
     const reached = isToExtent(feature.extent)
-      ? await resolveExtent(feature, sketchFeature, { bodyOf: (id) => projectRef.current.part.generalBodies?.find((candidate) => candidate.id === id) }, (probe) => rebuildSolidFeature(probe, sketchFeature, targetBody?.color))
+      ? await resolveExtent(feature, sketchFeature, { bodyOf: (id) => base.part.generalBodies?.find((candidate) => candidate.id === id) }, (probe) => rebuildSolidFeature(probe, sketchFeature, targetBody?.color))
       : undefined;
     if (reached !== undefined && !reached.ok) { setStatus("error"); setStatusText(reached.message); return; }
     const sized = reached?.ok === true ? reached.step : feature.extent === "through-all" && targetBody !== undefined ? throughAllOverride(feature, sketchFeature, targetBody) : feature;
     const stored: DesignSolidFeature = reached?.ok === true ? { ...feature, valueMm: reached.step.valueMm } : feature;
-    const built = await rebuildSolidFeature(target === undefined ? sized : { ...sized, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color, sketchLookupOf(designOf(projectRef.current)));
+    const built = await rebuildSolidFeature(target === undefined ? sized : { ...sized, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color, sketchLookupOf(designOf(base)));
     const rebuilt = built.ok && reached?.ok === true && reached.trim !== undefined ? await trimToFace(built.body, reached.trim) : built;
     if (!rebuilt.ok) { setStatus("error"); setStatusText(rebuilt.message); return; }
     let resultBody = rebuilt.body;
@@ -3025,11 +3054,16 @@ export function App(): React.JSX.Element {
       resultBody = { ...combined.body, color: targetBody.color };
       // A cut that severs the solid keeps every piece: the step is added through a replay, which files the other pieces as bodies.
       if ((combined.pieces ?? []).length > 0) {
-        if (await commitWithReplay({ kind: "add-design-solid", feature, body: resultBody }, feature.id)) { switchWorkspace("part"); setSelectedId(bodyId); setStatus("ready"); }
+        if (await commitWithReplay({ kind: "add-design-solid", feature, body: resultBody }, feature.id, false, { from: base })) { switchWorkspace("part"); setSelectedId(bodyId); setStatus("ready"); }
         return;
       }
     }
-    if (applyProjectOperation({ kind: "add-design-solid", feature: stored, body: resultBody }, false)) {
+    if (projectRef.current !== live) { setStatus("ready"); setStatusText("The design changed while the solid was building, so it was not added. Try it again."); return; }
+    const added = applyIntent(base, { kind: "add-design-solid", feature: stored, body: resultBody });
+    if (!added.ok) { setStatus("error"); setStatusText(added.message); return; }
+    pushProject(added.value.project);
+    setDiagnostic(undefined);
+    {
       switchWorkspace("part");
       setSelectedId(bodyId);
       setStatus("ready");
@@ -3118,8 +3152,11 @@ export function App(): React.JSX.Element {
    * suppressing, rolling back, deleting or editing a step then changes the shape of a body, not only whether it is shown.
    * With `mustApply`, the change is refused (nothing is applied) when that feature cannot be rebuilt.
    */
-  const commitWithReplay = async (intent: OperationIntent, mustApply?: string, forceReplay = false): Promise<boolean> => {
-    const before = projectRef.current;
+  const commitWithReplay = async (intent: OperationIntent, mustApply?: string, forceReplay = false, options: { readonly from?: WorkbenchProject; readonly alsoApply?: readonly OperationIntent[] } = {}): Promise<boolean> => {
+    // `from` is a project the caller worked out but has not recorded (a sketch finished by the same command); `alsoApply` are the
+    // command's other changes (hiding a consumed tool). Everything lands as ONE project, so one Undo takes back the whole command (HS-25).
+    const live = projectRef.current;
+    const before = options.from ?? live;
     const first = applyWorkbenchOperation(before, { ...intent, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: before.revision } as WorkbenchOperation);
     if (!first.ok) {
       const problem = first.diagnostics[0];
@@ -3134,7 +3171,7 @@ export function App(): React.JSX.Element {
       setStatus("working");
       setStatusText("Rebuilding the timeline…");
       const results = await replayAllBodies(next);
-      if (projectRef.current !== before) { setStatus("ready"); setStatusText("The design changed while it was rebuilding, so that edit was not applied. Try it again."); return false; }
+      if (projectRef.current !== live) { setStatus("ready"); setStatusText("The design changed while it was rebuilding, so that edit was not applied. Try it again."); return false; }
       const blocked = mustApply === undefined ? undefined : results.find((result) => result.featureId === mustApply && isRebuildFailure(result));
       if (blocked?.message !== undefined) { setStatus("error"); setStatusText(`Not applied: ${blocked.message}`); return false; }
       if (results.length > 0) {
@@ -3143,7 +3180,7 @@ export function App(): React.JSX.Element {
           next = second.value.project;
           // A sketch that projected one of the rebuilt solids but has no step yet is not replayed by any of them: refresh its curves by sketch.
           const loose = await refreshLooseSketchProjections(next);
-          if (projectRef.current !== before) { setStatus("ready"); setStatusText("The design changed while it was rebuilding, so that edit was not applied. Try it again."); return false; }
+          if (projectRef.current !== live) { setStatus("ready"); setStatusText("The design changed while it was rebuilding, so that edit was not applied. Try it again."); return false; }
           if (loose.length > 0) {
             const third = applyWorkbenchOperation(next, { kind: "regenerate-design", results: [], sketchCurves: loose, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: next.revision } as WorkbenchOperation);
             if (third.ok) next = third.value.project;
@@ -3154,6 +3191,10 @@ export function App(): React.JSX.Element {
           if (noted !== undefined) summary = `${summary} ${noted.message}`;
         }
       }
+    }
+    for (const extra of options.alsoApply ?? []) {
+      const applied = applyWorkbenchOperation(next, { ...extra, operationId: `operation:ui-${crypto.randomUUID()}`, expectedRevision: next.revision } as WorkbenchOperation);
+      if (applied.ok) next = applied.value.project;
     }
     pushProject(next);
     setDiagnostic(undefined);
