@@ -75,15 +75,15 @@ export function isSolidFeature(feature: DesignFeature): feature is DesignSolidFe
   return feature.kind !== "sketch";
 }
 
-/** A join, cut, direct-edit, or face-modifying feature changes a body that an earlier step made; every other solid step makes a body of its own. */
-export function modifiesBody(feature: DesignFeature): feature is DesignSolidFeature & { readonly operation: "join" | "cut" | "direct-edit" } {
+/** A join, cut, intersect, direct-edit, or face-modifying feature changes a body that an earlier step made; every other solid step makes a body of its own. */
+export function modifiesBody(feature: DesignFeature): feature is DesignSolidFeature & { readonly operation: "join" | "cut" | "intersect" | "direct-edit" } {
   if (feature.kind === "sketch") return false;
   if (feature.kind === "move-body" || feature.kind === "scale-body" || feature.kind === "move-face" || feature.kind === "offset-face" || feature.kind === "emboss") return true;
   if (feature.kind === "indent" || feature.kind === "combine" || feature.kind === "sheet-edge-flange" || feature.kind === "hole" || feature.kind === "edge-blend" || feature.kind === "sheet-jog") return true;
   // A pattern joined into its body, or of features in it, changes that body; a new-bodies pattern makes bodies of its own.
   if (feature.kind === "pattern") return feature.pattern !== undefined && (feature.pattern.result === "join" || feature.pattern.featureIds !== undefined);
   if (feature.bodyEdit !== undefined) return true;
-  return feature.operation === "join" || feature.operation === "cut";
+  return feature.operation === "join" || feature.operation === "cut" || feature.operation === "intersect";
 }
 
 /** A step that reshapes an existing body by picked faces or a transform (general shell / draft, offset region, replace face, web, wrap, flex). */
@@ -540,7 +540,7 @@ export const MAX_PROFILE_REFS = 2048;
 
 export function validSolidFeaturePayload(value: unknown): value is DesignSolidFeature {
   if (!isRecord(value) || !hasOnly(value, ["id", "name", "kind", "suppressed", "sketchFeatureId", "profileIds", "valueMm", "bodyId"], ["direction", "secondValueMm", "thinWallMm", "thinSide", "extentTarget", "edge", "operation", "extent", "health", "sweepDirectionMm", "sweepPathEntityId", "sweepTwistDeg", "sweepFrameTransport", "loftTopScale", "loftSecondaryProfileIds", "loftContinuity", "loftRailEntityId", "loftTangencyWeight", "moveDeltaMm", "scaleFactor", "targetFaceRole", "moveFaceDeltaMm", "offsetFaceMm", "helixRadiusMm", "helixPitchMm", "helixTurns", "helixHandedness", "edgeEndSizeMm", "threadPitchMm", "threadTurns", "threadDepthMm", "threadHandedness", "ribThicknessMm", "ribDirection", "domeHeightMm", "embossHeightMm", "indentToolBodyId", "sheetThicknessMm", "sheetBendRadiusMm", "flangeLengthMm", "flangeAngleDeg", "flangeEdgeIndex", "flangeReliefMm", "combineToolBodyIds", "combineMode", "combineKeepTools", "holeStyle", "holePositionMm", "holeNormal", "holeDiameterMm", "holeDepthMm", "holeCounterDiameterMm", "holeCounterDepthMm", "holeSinkDiameterMm", "holeSinkAngleDeg", "hemStyle", "shellOpenFace", "shellThicknessMm", "draftNeutralFace", "draftAngleDeg", "pattern", "expressions", "bodyEdit", "holeThread", "flangeReliefShape", ...FEATURE_REF_KEYS, ...EDGE_BLEND_KEYS, ...SHEET_FEATURE_KEYS])) return false;
-  if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "direct-edit"].includes(String(value.operation))) return false;
+  if (Object.hasOwn(value, "operation") && !["new-body", "join", "cut", "intersect", "direct-edit"].includes(String(value.operation))) return false;
   if (!validExtent(value) || !validFeatureRefs(value)) return false;
   if (!stable(value.id) || !shortText(value.name, 120) || !["extrude", "revolve", "sweep", "loft", "edge-fillet", "edge-chamfer", "shell", "draft", "move-body", "scale-body", "move-face", "offset-face", "helix", "thread", "rib", "dome", "emboss", "indent", "combine", "sheet-base", "sheet-flange", "sheet-hem", "sheet-edge-flange", "hole", "pattern", "edge-blend", ...BODY_EDIT_ONLY_KINDS, ...SHEET_FEATURE_KINDS].includes(String(value.kind)) || typeof value.suppressed !== "boolean") return false;
   if (!stable(value.sketchFeatureId) || !stable(value.bodyId)) return false;

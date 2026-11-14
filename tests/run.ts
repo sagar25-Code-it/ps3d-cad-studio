@@ -192,6 +192,7 @@ import { combineStepTests } from "./combine-step.test.js";
 import { ribbonHonestyTests } from "./ribbon-honesty.test.js";
 import { hoverPickTests } from "./hover-pick.test.js";
 import { commandPanelTests } from "./command-panel.test.js";
+import { operationDefaultTests } from "./operation-default.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -406,6 +407,7 @@ const tests: readonly TestCase[] = [
   ...ribbonHonestyTests,
   ...hoverPickTests,
   ...commandPanelTests,
+  ...operationDefaultTests,
 ];
 let failures = 0;
 

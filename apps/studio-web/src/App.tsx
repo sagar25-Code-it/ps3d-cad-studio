@@ -115,6 +115,7 @@ import { openCommandPanel, openCommandPanelForEdit, panelAddFace, panelClearSele
 import { CommandPanel } from "./ui/CommandPanel.js";
 import { explicitBody, matchingSketches, profilesByAnswer, sketchByAnswer } from "./explicit-pick.js";
 import { shouldRefit } from "./view-fit.js";
+import { defaultCreateOperation, touchingBodies } from "./operation-default.js";
 import { partHotkeyCommand, type PartHotkeyCommand } from "./part-hotkeys.js";
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
 import { flatPatternForBody, isRebuildFailure, isRebuildNote, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
@@ -2805,7 +2806,7 @@ export function App(): React.JSX.Element {
     valueMm: number,
     edge?: { readonly kind: "chamfer" | "fillet"; readonly sizeMm: number },
     direction: "one-side" | "symmetric" | "flipped" | "two-side" = "one-side",
-    target?: { readonly mode: "join" | "cut"; readonly bodyId: string; readonly extent?: "through-all" },
+    target?: { readonly mode: "join" | "cut" | "intersect"; readonly bodyId: string; readonly extent?: "through-all" },
     advancedParams?: {
       /** Extrude and revolve reach: the second side's distance or angle, a "to" extent with its target, and a revolve's thin wall. */
       readonly secondValueMm?: number;
@@ -2909,7 +2910,7 @@ export function App(): React.JSX.Element {
                               : operation === "sheet-flange" ? "Flange"
                                 : operation === "sheet-hem" ? "Hem"
                                   : "Draft")
-      : target.mode === "cut" ? "Cut" : "Join";
+      : target.mode === "cut" ? "Cut" : target.mode === "intersect" ? "Intersect" : "Join";
     const feature: DesignSolidFeature = {
       id: `feature:${operation}-${crypto.randomUUID()}`,
       name: `${verb} ${target === undefined ? ordinal : designOf(projectRef.current).features.filter((candidate) => candidate.kind !== "sketch" && candidate.operation === target.mode).length + 1}`,
@@ -2991,7 +2992,7 @@ export function App(): React.JSX.Element {
         : `general mesh solid (${resultBody.positionsMm.length / 3} vertices)`;
       setStatusText(target === undefined
         ? `Added ${feature.name} to the timeline as a ${detail}. Double-click it in the timeline to edit, or edit the sketch and it rebuilds.`
-        : `Added ${feature.name} to the timeline: ${target.mode === "cut" ? "cut from" : "joined to"} ${targetBody?.name ?? "the solid"} (${detail}). Edit the step or its sketch and the solid is rebuilt in order.`);
+        : `Added ${feature.name} to the timeline: ${target.mode === "cut" ? "cut from" : target.mode === "intersect" ? "intersected with" : "joined to"} ${targetBody?.name ?? "the solid"} (${detail}). Edit the step or its sketch and the solid is rebuilt in order.`);
     }
   };
 
@@ -3034,15 +3035,28 @@ export function App(): React.JSX.Element {
       : { label: "Revolve angle", quantity: "angle", defaultValue: 360, min: 0, exclusiveMin: true, step: 15 });
     if (value === null) return;
     if (kind === "revolve" && value > 360) { setStatus("ready"); setStatusText("Revolve: enter an angle between 1 and 360 degrees."); return; }
-    // The result: a new body, or join / cut on the selected solid. Nothing is combined with a body the user did not pick.
-    const modifiable = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === selectedId);
-    let target: { readonly mode: "join" | "cut"; readonly bodyId: string } | undefined;
-    if (modifiable !== undefined) {
-      const answer = prompt(`Result: "new" body, "join" to ${modifiable.name} or "cut" from it`, "new");
+    // PT-14: the operation defaults by touch. The tool is built once to see which bodies the result meets; when it
+    // touches one, the prompt proposes Join to it (Fusion's default) and offers Cut and Intersect. The target is the
+    // selected solid, or the one touched body, named in the prompt — never a silent choice (PT-02).
+    const bodies = projectRef.current.part.generalBodies ?? [];
+    let touching: readonly GeneralSolidBody[] = [];
+    if (bodies.some((candidate) => candidate.visible)) {
+      const probe: DesignSolidFeature = { id: `feature:${kind}-probe`, name: "probe", kind, suppressed: false, sketchFeatureId: sketchFeature.id, profileIds, valueMm: value, bodyId: "general-body:probe" };
+      const builtProbe = await rebuildSolidFeature(probe, sketchFeature, undefined, sketchLookupOf(designOf(projectRef.current)));
+      if (builtProbe.ok) touching = touchingBodies(builtProbe.body.positionsMm, bodies);
+    }
+    const modifiable = bodies.find((candidate) => candidate.id === selectedId) ?? (touching.length === 1 ? touching[0] : undefined);
+    let target: { readonly mode: "join" | "cut" | "intersect"; readonly bodyId: string } | undefined;
+    if (bodies.length > 0) {
+      const touchNote = touching.length === 0 ? "" : ` — the result touches ${touching.map((candidate) => candidate.name).join(", ")}`;
+      const options = modifiable === undefined ? `"new" body` : `"new" body, "join" to ${modifiable.name}, "cut" from it or "intersect" with it`;
+      const answer = prompt(`Result: ${options}${touchNote}`, defaultCreateOperation(touching.length, modifiable !== undefined));
       if (answer === null) return;
       const mode = answer.trim().toLowerCase();
-      if (mode === "join" || mode === "cut") target = { mode, bodyId: modifiable.id };
-      else if (mode !== "" && mode !== "new") { setStatus("ready"); setStatusText(`${lead}: enter new, join or cut.`); return; }
+      if (mode === "join" || mode === "cut" || mode === "intersect") {
+        if (modifiable === undefined) { setStatus("ready"); setStatusText(`${lead}: select the solid to ${mode} first.`); return; }
+        target = { mode, bodyId: modifiable.id };
+      } else if (mode !== "" && mode !== "new") { setStatus("ready"); setStatusText(`${lead}: enter new, join, cut or intersect.`); return; }
     }
     await createGeneralSolid(profileIds, "xy", kind, value, undefined, "one-side", target, undefined, sketchFeature.id);
   };

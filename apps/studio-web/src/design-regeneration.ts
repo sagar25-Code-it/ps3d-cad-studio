@@ -484,7 +484,7 @@ export async function replayBodyState(project: WorkbenchProject, bodyId: string,
     }
     if (!modifies) { current = built.body; baseBody = built.body; outcomes.set(step.id, applied); continue; }
     if (current === undefined) { outcomes.set(step.id, { featureId: step.id, message: "The solid this step changes could not be built, so there is nothing to modify." }); continue; }
-    if (step.operation !== "join" && step.operation !== "cut") { outcomes.set(step.id, { featureId: step.id, message: "The modifier step has no boolean operation set." }); continue; }
+    if (step.operation !== "join" && step.operation !== "cut" && step.operation !== "intersect") { outcomes.set(step.id, { featureId: step.id, message: "The modifier step has no boolean operation set." }); continue; }
     const combined = await combineGeneralBodies({ target: current, tool: built.body, mode: step.operation, bodyId, name: current.name, ...(step.operation === "cut" ? { allowSplit: true } : {}) });
     if (!combined.ok) { outcomes.set(step.id, { featureId: step.id, message: combined.message }); continue; }
     const parent = current;

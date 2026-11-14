@@ -1292,13 +1292,14 @@ export interface DesignSolidFeature extends DesignFeatureBase {
   /** What the "to" extents reach. Present exactly when `extent` is one of the "to" values. */
   readonly extentTarget?: DesignExtentTarget;
   /**
-   * What the feature does with the solid it builds. Absent (or "new-body") makes a body of its own. A "join" or "cut"
-   * adds to or removes from the body named by `bodyId`, which an earlier new-body step made, and replays in timeline order.
-   * "direct-edit" is for the synchronous direct-edit kinds (move-body, scale-body) which transform the target body in
-   * place without building a tool solid. Modifier kinds (edge-fillet/chamfer/shell/draft) always modify the target body in
-   * place; this field is left absent for them.
+   * What the feature does with the solid it builds. Absent (or "new-body") makes a body of its own. A "join", "cut" or
+   * "intersect" adds to, removes from, or keeps only the overlap with the body named by `bodyId`, which an earlier
+   * new-body step made, and replays in timeline order. "direct-edit" is for the synchronous direct-edit kinds
+   * (move-body, scale-body) which transform the target body in place without building a tool solid. Modifier kinds
+   * (edge-fillet/chamfer/shell/draft) always modify the target body in place; this field is left absent for them.
+   * "intersect" is optional with the old meaning when absent, so older saved projects load unchanged.
    */
-  readonly operation?: "new-body" | "join" | "cut" | "direct-edit";
+  readonly operation?: "new-body" | "join" | "cut" | "intersect" | "direct-edit";
   /**
    * How far the feature reaches. Absent (or "distance") uses `valueMm`; "through-all" (an extruded cut) ignores the distance and
    * cuts through the whole body on both sides of the sketch plane, however the body later changes size. The "to" extents
