@@ -225,10 +225,9 @@ import {
 } from "./workspaces/RenderStudioWorkspace.js";
 import { SurfaceInspector } from "./workspaces/SurfaceInspector.js";
 import { withCosmeticThreads } from "./hole-threads.js";
-import { withSketchCurves } from "./sketch-curves.js";
+import { partScenes } from "./part-scenes.js";
 import { holePlacementFor } from "./hole-placement.js";
 import { namedViewById, type NamedViewId } from "./ui/named-views.js";
-import { withStaleBodies } from "./stale-bodies.js";
 import { runSurfaceAction, withFormCages, withSurfaceBodies, type SurfaceAction } from "./surface-actions.js";
 import { DrawingWorkspace } from "./workspaces/DrawingWorkspace.js";
 import { AutomateWorkspace } from "./workspaces/AutomateWorkspace.js";
@@ -500,7 +499,10 @@ export function App(): React.JSX.Element {
     : { ...project.assembly, explodeMm: assemblyExplodePreviewMm }, [assemblyExplodePreviewMm, project.assembly]);
   const assemblyExplodePercent = Math.round(Math.min(100, displayedAssembly.explodeMm / assemblyExplodeMaxMm * 100));
   const assemblyScene = useMemo(() => buildAssemblyPreview(displayedAssembly), [displayedAssembly]);
-  const partScene = useMemo(() => withSketchCurves(withStaleBodies(withFormCages(withCosmeticThreads(buildPartPreview(project.part), project), project), project), project), [project.part, project.design]);
+  // The part as a model (what Render Studio draws) and as the Part workspace shows it with its editing aids (sketch guides, out-of-date look): part-scenes.ts.
+  const partModelScene = useMemo(() => withFormCages(withCosmeticThreads(buildPartPreview(project.part), project), project), [project.part, project.design]);
+  const partSceneSet = useMemo(() => partScenes(partModelScene, project), [partModelScene, project.design]);
+  const partScene = partSceneSet.view;
   const interferences = useMemo(() => findAssemblyInterference(displayedAssembly), [displayedAssembly]);
   const surfacePreview = useMemo(() => { const base = buildSurfacePreview(project.surface); return { ...base, scene: withSurfaceBodies(base.scene, project) }; }, [project.surface, project.part.generalBodies]);
   const drawing = useMemo(() => createDrawingSvg(project.part, project.drawing), [project.part, project.drawing]);
@@ -1062,13 +1064,13 @@ export function App(): React.JSX.Element {
     const viewport = renderViewportRef.current;
     if (viewport === undefined) return;
     if (renderSettings.source === "part" && activeImport !== undefined) viewport.setExternalObject(activeImport.object);
-    else if (renderSettings.source === "part" && project.part.templateVisible === false) { viewport.setScene(partScene); viewport.fitPreview(partScene.boundsMm); }
-    else if (renderSettings.source === "part" && model !== undefined) { viewport.setArtifactWithScene(model.render, partScene); viewport.fitPreview(partScene.boundsMm); }
-    else if (renderSettings.source === "part") viewport.setScene(partScene);
+    else if (renderSettings.source === "part" && project.part.templateVisible === false) { viewport.setScene(partModelScene); viewport.fitPreview(partModelScene.boundsMm); }
+    else if (renderSettings.source === "part" && model !== undefined) { viewport.setArtifactWithScene(model.render, partModelScene); viewport.fitPreview(partModelScene.boundsMm); }
+    else if (renderSettings.source === "part") viewport.setScene(partModelScene);
     if (renderSettings.source === "assembly") viewport.setScene(assemblyScene);
     if (renderSettings.source === "surface") viewport.setScene(surfacePreview.scene);
     if (renderSettings.source === "vehicle") viewport.setScene(vehiclePreview.scene);
-  }, [activeImport, assemblyScene, model, partScene, project.part.templateVisible, renderSettings.source, renderStudioOpen, surfacePreview.scene, vehiclePreview.scene]);
+  }, [activeImport, assemblyScene, model, partModelScene, project.part.templateVisible, renderSettings.source, renderStudioOpen, surfacePreview.scene, vehiclePreview.scene]);
 
   useEffect(() => {
     const viewport = renderViewportRef.current;
@@ -1087,7 +1089,7 @@ export function App(): React.JSX.Element {
       rimIntensity: renderSettings.rimIntensity
     });
     viewport.setStudioGroundVisible(renderSettings.groundVisible);
-  }, [renderSettings, renderStudioOpen, activeImport, model, partScene, assemblyScene, surfacePreview.scene, vehiclePreview.scene]);
+  }, [renderSettings, renderStudioOpen, activeImport, model, partModelScene, assemblyScene, surfacePreview.scene, vehiclePreview.scene]);
 
   useEffect(() => {
     const viewport = renderViewportRef.current;
@@ -3740,7 +3742,7 @@ export function App(): React.JSX.Element {
     const viewport = renderViewportRef.current;
     if (viewport === undefined) return;
     if (renderSettings.source === "part" && activeImportRef.current !== undefined) viewport.fitCurrent();
-    else if (renderSettings.source === "part") viewport.fitPreview(partScene.boundsMm);
+    else if (renderSettings.source === "part") viewport.fitPreview(partModelScene.boundsMm);
     if (renderSettings.source === "assembly") viewport.fitPreview(assemblyScene.boundsMm);
     if (renderSettings.source === "surface") viewport.fitPreview(surfacePreview.scene.boundsMm);
     if (renderSettings.source === "vehicle") viewport.fitPreview(vehiclePreview.scene.boundsMm);
