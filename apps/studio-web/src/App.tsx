@@ -28,6 +28,7 @@ import {
   type SketchPlaneFaceRef,
   type RevolveAxisRef,
   featureOfBody,
+  nextBodyName,
   sketchOrderProblem,
   deleteImpact,
   type DeleteImpact,
@@ -3051,7 +3052,8 @@ export function App(): React.JSX.Element {
     const built = await rebuildSolidFeature(target === undefined ? sized : { ...sized, bodyId: `${feature.id}:tool` }, sketchFeature, targetBody?.color, sketchLookupOf(designOf(base)));
     const rebuilt = built.ok && reached?.ok === true && reached.trim !== undefined ? await trimToFace(built.body, reached.trim) : built;
     if (!rebuilt.ok) { setStatus("error"); setStatusText(rebuilt.message); return; }
-    let resultBody = rebuilt.body;
+    // A new body is named "Body N" (a step's name is the step's, not the body's); a join or cut keeps the name of the body it changes.
+    let resultBody = target === undefined ? { ...rebuilt.body, name: nextBodyName((base.part.generalBodies ?? []).map((body) => body.name)) } : rebuilt.body;
     if (targetBody !== undefined && target !== undefined) {
       const combined = await combineGeneralBodies({ target: targetBody, tool: rebuilt.body, mode: target.mode, bodyId: targetBody.id, name: targetBody.name, ...(target.mode === "cut" ? { allowSplit: true } : {}) });
       if (!combined.ok) { setStatus("error"); setStatusText(`${verb} did not change the solid: ${combined.message}`); return; }
@@ -4236,6 +4238,7 @@ export function App(): React.JSX.Element {
     }
     if (commandId === "component.move" || commandId === "mate.create" || commandId === "mate.edit") { switchWorkspace("assembly"); if (selectionId !== null) setSelectedId(selectionId); return; }
     if (commandId === "component.ground" && selectionId !== null) { applyProjectOperation({ kind: "toggle-component-grounded", componentId: selectionId }); return; }
+    if (commandId === "selection.rename" && selectionId !== null) { renameBodyWithPrompt(selectionId); return; }
     if (commandId === "selection.toggle-visibility" && selectionId !== null) {
       if (selectionId.startsWith("entity:")) applyProjectOperation({ kind: "toggle-sketch-entity-visibility", entityId: selectionId });
       else if (selectionId.startsWith("component:")) applyProjectOperation({ kind: "toggle-component-visibility", componentId: selectionId });
@@ -4426,6 +4429,14 @@ export function App(): React.JSX.Element {
     const pick = pickStep(feature);
     setStepPick(pick);
     setSelectedId(pick.selectionId);
+  };
+  /** Rename Body (context menu): asks for the new name and records it as one undo step; the project refuses a name another body has. */
+  const renameBodyWithPrompt = (bodyId: string): void => {
+    const body = (projectRef.current.part.generalBodies ?? []).find((candidate) => candidate.id === bodyId);
+    if (body === undefined) { setStatus("ready"); setStatusText("Rename Body: select a solid body made with Extrude or Revolve."); return; }
+    const raw = typeof window === "undefined" ? null : window.prompt("Body name", body.name);
+    if (raw === null || raw.trim() === "" || raw.trim() === body.name) return;
+    applyProjectOperation({ kind: "rename-general-body", bodyId, name: raw.trim() });
   };
   /** Deletes a step and what is built on it, as one undo step. */
   const performStepDelete = (featureId: string): void => {

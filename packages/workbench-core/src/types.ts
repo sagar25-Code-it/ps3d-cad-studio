@@ -1661,6 +1661,7 @@ export type WorkbenchOperation = OperationEnvelope & (
       readonly body: GeneralSolidBody;
     }
   | { readonly kind: "toggle-general-body-visibility"; readonly bodyId: string }
+  | { readonly kind: "rename-general-body"; readonly bodyId: string; readonly name: string }
   | { readonly kind: "add-construction-plane"; readonly plane: ConstructionPlane }
   | { readonly kind: "delete-construction-plane"; readonly planeId: string }
   | { readonly kind: "toggle-construction-plane-visibility"; readonly planeId: string }
@@ -1788,7 +1789,7 @@ export const WORKBENCH_OPERATION_KINDS = [
   "set-sketch-dimension", "toggle-sketch-construction", "toggle-sketch-entity-visibility", "apply-sketch-edit", "set-sketch-constraints-suppressed", "set-sketch-dimension-label", "set-sketch-plane",
   "commit-design-sketch", "edit-design-sketch", "new-design-sketch", "add-design-solid", "update-design-solid", "regenerate-design", "set-design-parameters",
   "set-design-feature-suppressed", "delete-design-feature", "set-design-rollback", "rename-design-feature", "set-part-parameter", "add-part-preview-bodies", "delete-part-preview-body",
-  "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility", "modify-general-body",
+  "add-general-body", "delete-general-body", "boolean-general-bodies", "toggle-general-body-visibility", "rename-general-body", "modify-general-body",
   "add-construction-plane", "delete-construction-plane", "toggle-construction-plane-visibility", "rename-construction-plane",
   "add-construction-binder", "delete-construction-binder", "toggle-construction-binder-visibility",
   "add-construction-axis", "delete-construction-axis", "toggle-construction-axis-visibility", "rename-construction-axis",

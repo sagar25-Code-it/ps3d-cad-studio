@@ -362,11 +362,18 @@ export function regenerateDesign(
   const priorVisibility = new Map(existingBodies.map((candidate) => [candidate.id, candidate.visible] as const));
   // A rebuilt body replaces the pieces it split into last time; the new pieces (if any) come back after the bodies.
   const kept = existingBodies.filter((candidate) => !rebuiltRoots.some((root) => isSplitPieceOf(root, candidate.id)));
-  const newPieces = results.flatMap((result) => (result.pieces ?? []).map((piece) => ({ ...piece, visible: priorVisibility.get(piece.id) ?? piece.visible })));
+  // A body keeps the name it has (the person may have renamed it, and a step's name is not the body's name); its pieces follow that name.
+  const priorName = new Map(existingBodies.map((candidate) => [candidate.id, candidate.name] as const));
+  const renamedPiece = (piece: GeneralSolidBody, root: GeneralSolidBody | undefined): string => {
+    const kept = root === undefined ? undefined : priorName.get(root.id);
+    return root !== undefined && kept !== undefined && piece.name.startsWith(root.name) ? `${kept}${piece.name.slice(root.name.length)}` : piece.name;
+  };
+  const rootOf = (piece: GeneralSolidBody): GeneralSolidBody | undefined => results.find((result) => result.body !== undefined && isSplitPieceOf(result.body.id, piece.id))?.body;
+  const newPieces = results.flatMap((result) => (result.pieces ?? []).map((piece) => ({ ...piece, name: renamedPiece(piece, rootOf(piece)), visible: priorVisibility.get(piece.id) ?? piece.visible })));
   if (kept.length + newPieces.length > MAX_GENERAL_BODIES) return fail("RESOURCE_LIMIT", "Splitting the solid would pass the part's body limit.", [project.part.id], "Delete a general body before cutting the solid apart.");
   const bodies = kept.map((candidate) => {
     for (const result of results) {
-      if (result.body !== undefined && result.body.id === candidate.id) return { ...result.body, visible: candidate.visible };
+      if (result.body !== undefined && result.body.id === candidate.id) return { ...result.body, name: candidate.name, visible: candidate.visible };
     }
     return candidate;
   }).concat(newPieces);

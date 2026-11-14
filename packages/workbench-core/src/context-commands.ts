@@ -132,6 +132,7 @@ export function resolveWorkbenchContextCommands(request: WorkbenchContextRequest
       command("modify.hole", "Hole", "bore", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON, false, "H"),
       command("modify.combine", "Combine", "boolean", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON),
       command("modify.pattern", "Rectangular Pattern", "pattern", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON),
+      command("selection.rename", "Rename Body", "edit", "edit", generalBody, generalBody ? undefined : GENERAL_ONLY_REASON, false, "F2"),
       command("selection.toggle-visibility", "Show / Hide Body", "show", "visibility", directBody, directBody ? undefined : ANALYTIC_BODY_REASON),
       command("selection.isolate", "Isolate Body", "isolate", "visibility", analyticBody, analyticBody ? undefined : (generalBody ? "Isolate is not a recorded operation for solids yet; hide the other bodies from the browser instead." : ANALYTIC_BODY_REASON)),
       command("body.appearance", "Appearance", "appearance", "edit"),

@@ -18,6 +18,7 @@ export { resizeSketchEntity } from "./sketch-dimension-edit.js";
 export * from "./constraint-fit.js";
 export * from "./design.js";
 export * from "./design-impact.js";
+export * from "./body-names.js";
 export * from "./pattern.js";
 export * from "./expressions.js";
 export * from "./feature-bindings.js";

@@ -22,6 +22,7 @@ import type {
   WorkspaceId
 } from "./types.js";
 import { validSubdCageData } from "./subd-cage.js";
+import { uniqueBodyName } from "./body-names.js";
 import { ELECTRICAL_SHEET_BOUNDS, ELECTROMECHANICAL_CATALOG_REVISION, GENERAL_BODY_OPERATIONS, SKETCH_DATUM_PLANES, SKETCH_POINT_REFS } from "./types.js";
 import { createBessContainerAssembly, createCargoContainerAssembly, createElectricalTemplate } from "./templates.js";
 import { createElectromechanicalAssembly, electricalSignature } from "./electromechanical.js";
@@ -454,6 +455,10 @@ function validateWorkbenchOperationShape(rawInput: unknown): WorkbenchResult<Wor
     case "delete-general-body":
     case "toggle-general-body-visibility":
       if (!keys(input, [...common, "bodyId"]) || !stableId(input.bodyId)) return invalidOperation("The general body ID is invalid.");
+      break;
+    case "rename-general-body":
+      if (!keys(input, [...common, "bodyId", "name"]) || !stableId(input.bodyId) || !shortText(input.name, 1, 120)) return invalidOperation("The body rename request is invalid.");
+      if (input.name.trim() === "") return invalidOperation("The body name cannot be blank. Type at least one character.");
       break;
     case "modify-general-body":
       if (!keys(input, [...common, "targetBodyId", "modifier", "label", "body"]) || !stableId(input.targetBodyId)
@@ -912,6 +917,15 @@ function applyIntent(project: WorkbenchProject, operation: WorkbenchOperation): 
       const target = current.find((body) => body.id === operation.bodyId);
       if (target === undefined) return broken(operation.bodyId, "The general body does not exist.");
       return changed({ ...project, part: { ...project.part, generalBodies: current.map((body) => body.id === target.id ? { ...body, visible: !body.visible } : body) } }, [target.id], `${target.visible ? "Hid" : "Showed"} ${target.name}.`);
+    }
+    case "rename-general-body": {
+      const current = project.part.generalBodies ?? [];
+      const target = current.find((body) => body.id === operation.bodyId);
+      if (target === undefined) return broken(operation.bodyId, "The general body does not exist.");
+      const name = operation.name.trim();
+      const clash = current.find((body) => body.id !== target.id && body.name.trim().toLowerCase() === name.toLowerCase());
+      if (clash !== undefined) return failure("INVALID_OPERATION", `Another body is already called "${clash.name}", and two bodies cannot share a name.`, [target.id, clash.id], `Choose a different name, for example "${uniqueBodyName(current.filter((body) => body.id !== target.id).map((body) => body.name), name)}".`);
+      return changed({ ...project, part: { ...project.part, generalBodies: current.map((body) => body.id === target.id ? { ...body, name } : body) } }, [target.id], `Renamed ${target.name} to ${name}.`);
     }
     case "modify-general-body": {
       const current = project.part.generalBodies ?? [];
