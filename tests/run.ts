@@ -184,6 +184,7 @@ import { sketchProjectionCurrentTests } from "./sketch-projection-current.test.j
 import { sketchDimensionPointFirstTests } from "./sketch-dimension-point-first.test.js";
 import { oneShotModifierTests } from "./one-shot-modifiers.test.js";
 import { blankProjectTests } from "./blank-project.test.js";
+import { explicitPickTests } from "./explicit-pick.test.js";
 
 const tests: readonly TestCase[] = [
   ...modelAndCommandTests,
@@ -390,6 +391,7 @@ const tests: readonly TestCase[] = [
   ...sketchDimensionPointFirstTests,
   ...oneShotModifierTests,
   ...blankProjectTests,
+  ...explicitPickTests,
 ];
 let failures = 0;
 

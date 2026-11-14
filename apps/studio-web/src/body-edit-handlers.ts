@@ -3,6 +3,7 @@ import { baseFeatureOf, describeBodyEdit, designOf } from "../../../packages/wor
 import { analyzeFaces, draftFaces, faceOutlineSegments, fitCylinder, resolveFace, shellBody } from "../../../packages/workbench-geometry/src/index.js";
 import { detectSketchProfiles } from "../../../packages/workbench-sketch/src/index.js";
 import { openCurveIds } from "./web-profile.js";
+import { matchingSketches, sketchByAnswer } from "./explicit-pick.js";
 import type { ViewportGuideSegment, ViewportMeasurePoint } from "../../../packages/viewport-three/src/index.js";
 
 /** The face-driven edits the ribbon offers; each records a replayable timeline step. */
@@ -169,14 +170,18 @@ export function createBodyEditHandlers(deps: BodyEditDeps): { readonly run: (mod
     await finish(bodyEditFeature("replace-face", spec, base, body.id, 1), body, `Replaced faces of ${body.name}: ${describeBodyEdit(spec)}.`);
   };
 
-  /** The most recent finished sketch in the timeline that has what `wanted` looks for. */
-  const latestSketch = (wanted: (sketch: DesignSketchFeature) => boolean): DesignSketchFeature | undefined => {
-    const features = designOf(deps.project()).features;
-    for (let index = features.length - 1; index >= 0; index -= 1) {
-      const feature = features[index]!;
-      if (feature.kind === "sketch" && !feature.suppressed && wanted(feature)) return feature;
-    }
-    return undefined;
+  /**
+   * The finished sketch a command uses: the only candidate when there is one, and otherwise the user chooses by name
+   * (Enter keeps the newest), so a command never silently takes a sketch the user did not mean (PT-02).
+   */
+  const chooseSketch = (command: string, wanted: (sketch: DesignSketchFeature) => boolean): DesignSketchFeature | undefined | null => {
+    const candidates = matchingSketches(designOf(deps.project()), wanted);
+    if (candidates.length <= 1) return candidates[0];
+    const raw = deps.ask(`${command}: which sketch? (${candidates.map((candidate) => candidate.name).join(", ")}; Enter keeps the newest)`, candidates[0]!.name);
+    if (raw === null) return null;
+    const chosen = sketchByAnswer(candidates, raw);
+    if (chosen === undefined) deps.say("ready", `${command}: no finished sketch matched that name.`);
+    return chosen ?? null;
   };
 
   const web = async (): Promise<void> => {
@@ -184,7 +189,8 @@ export function createBodyEditHandlers(deps: BodyEditDeps): { readonly run: (mod
     if (found === undefined) return;
     const { body, base } = found;
     if (base === undefined) { deps.say("ready", "Rib / Web: this body is not in the timeline, so the rib cannot be recorded."); return; }
-    const sketch = latestSketch((candidate) => openCurveIds(candidate.sketch).length > 0);
+    const sketch = chooseSketch("Rib / Web", (candidate) => openCurveIds(candidate.sketch).length > 0);
+    if (sketch === null) return;
     if (sketch === undefined) { deps.say("ready", "Rib / Web: draw an open profile (a line, arc or spline that does not close into a loop) in a sketch and finish the sketch first."); return; }
     const entityIds = openCurveIds(sketch.sketch);
     const thicknessRaw = deps.ask(`Rib thickness (mm) for the ${entityIds.length} open ${entityIds.length === 1 ? "curve" : "curves"} of ${sketch.name}:`, "2");
@@ -203,7 +209,8 @@ export function createBodyEditHandlers(deps: BodyEditDeps): { readonly run: (mod
     if (found === undefined) return;
     const { body, base } = found;
     if (base === undefined) { deps.say("ready", "Wrap: this body is not in the timeline, so the wrap cannot be recorded."); return; }
-    const sketch = latestSketch((candidate) => detectSketchProfiles(candidate.sketch).length > 0);
+    const sketch = chooseSketch("Wrap", (candidate) => detectSketchProfiles(candidate.sketch).length > 0);
+    if (sketch === null) return;
     if (sketch === undefined) { deps.say("ready", "Wrap: draw a closed profile (a shape or a letter outline) in a sketch and finish the sketch first."); return; }
     const picked = await deps.pick(`Wrap: click the round wall of ${body.name} where the middle of ${sketch.name} should go`);
     if (picked === null) return;

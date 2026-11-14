@@ -364,10 +364,10 @@ export function WorkbenchRibbon(props: WorkbenchRibbonProps): React.JSX.Element 
         <RibbonButton icon="shell" label="Shell" hint="click open faces" disabled={!generalBodySelected} onClick={() => props.onBodyEdit("shell")} />
       </RibbonGroup>
       <RibbonGroup label="Reach to">
-        <RibbonButton icon="box" label="Extrude to Face" hint="newest sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("face")} />
-        <RibbonButton icon="box" label="Extrude to Object" hint="newest sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("body")} />
+        <RibbonButton icon="box" label="Extrude to Face" hint="finished sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("face")} />
+        <RibbonButton icon="box" label="Extrude to Object" hint="finished sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("body")} />
         <RibbonButton icon="box" label="Extrude to Vertex" hint="corners marked · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("vertex")} />
-        <RibbonButton icon="revolve" label="Revolve to Face" hint="newest sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("revolve-face")} />
+        <RibbonButton icon="revolve" label="Revolve to Face" hint="finished sketch · pick" disabled={(props.project.part.generalBodies?.length ?? 0) === 0} onClick={() => props.onReachTo("revolve-face")} />
       </RibbonGroup>
       <RibbonGroup label="Sheet metal">
         <RibbonButton icon="bore" label="Edge Flange" hint="pick edge · bend" disabled={!generalBodySelected} onClick={props.onEdgeFlange} />

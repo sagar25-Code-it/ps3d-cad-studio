@@ -42,7 +42,7 @@ export const bodyEditFlowTests: readonly TestCase[] = [
     }
   },
   {
-    name: "The Wrap ribbon flow embosses the latest closed sketch onto the clicked cylinder and refuses a flat click or an unknown mode",
+    name: "The Wrap ribbon flow embosses the chosen closed sketch onto the clicked cylinder (Enter keeps the newest) and refuses a flat click or an unknown mode",
     run: async () => {
       const CAN = "general-body:can";
       let project = apply(createWorkbenchProject("project:test-wrap-flow"), { kind: "new-design-sketch", plane: "datum:xy" });
@@ -55,22 +55,25 @@ export const bodyEditFlowTests: readonly TestCase[] = [
       project = apply(project, { kind: "add-design-solid", feature: base, body: built.body });
       const volume = (current: WorkbenchProject): number => solidMetrics(bodyOf(current, CAN).positionsMm, bodyOf(current, CAN).indices).volumeMm3;
       const plain = volume(project);
-      // The can's own sketch is a closed circle, so the latest closed sketch is the can's and the wrap would use it; a label sketch comes next.
+      // The can's own sketch is a closed circle too, so with the label sketch there are two candidates and Wrap now asks
+      // which to use (PT-02: the newest is never taken silently); an empty answer keeps the newest, a name picks that one.
       project = apply(project, { kind: "new-design-sketch", plane: "datum:xy" });
       project = apply(project, { kind: "add-sketch-entity", entity: { id: "entity:label", kind: "rectangle", center: [0, 0], widthMm: 10, heightMm: 8, rotationDeg: 0, construction: false } });
       project = apply(project, { kind: "commit-design-sketch", featureId: "feature:sketch-2", name: "Label sketch" });
-      const done = await driveHandler(project, "wrap", [click([15, 0, 10], [1, 0, 0], CAN)], ["emboss", "1"], CAN);
+      const done = await driveHandler(project, "wrap", [click([15, 0, 10], [1, 0, 0], CAN)], ["", "emboss", "1"], CAN);
       near(volume(done.project) - plain, 80 * (1 + 1 / 30), 80 * 0.03, "the label sketch was wrapped on and raised 1 mm");
       const step = designOf(done.project).features.find((feature): feature is DesignSolidFeature => feature.kind === "wrap")!;
-      equal(step.sketchFeatureId, "feature:sketch-2", "the step uses the latest sketch");
+      equal(step.sketchFeatureId, "feature:sketch-2", "an empty answer keeps the newest sketch");
       assert(step.bodyEdit?.kind === "wrap" && step.bodyEdit.face.pointMm[0] === 15, "and remembers where the cylinder was clicked");
-      const cut = await driveHandler(project, "wrap", [click([15, 0, 10], [1, 0, 0], CAN)], ["deboss", "0.8"], CAN);
+      const cut = await driveHandler(project, "wrap", [click([15, 0, 10], [1, 0, 0], CAN)], ["Label sketch", "deboss", "0.8"], CAN);
       near(plain - volume(cut.project), 80 * 0.8 * (1 - 0.8 / 30), 80 * 0.04, "a deboss takes the label out of the surface");
-      const flat = await driveHandler(project, "wrap", [click([0, 0, 20], [0, 0, 1], CAN)], ["emboss", "1"], CAN);
+      const flat = await driveHandler(project, "wrap", [click([0, 0, 20], [0, 0, 1], CAN)], ["", "emboss", "1"], CAN);
       equal(stepCount(flat.project), stepCount(project), "a click on the flat end records nothing");
       assert(flat.statuses.some((text) => text.includes("flat")), "and says the face is flat");
-      const wrongMode = await driveHandler(project, "wrap", [click([15, 0, 10], [1, 0, 0], CAN)], ["engrave", "1"], CAN);
+      const wrongMode = await driveHandler(project, "wrap", [click([15, 0, 10], [1, 0, 0], CAN)], ["", "engrave", "1"], CAN);
       equal(stepCount(wrongMode.project), stepCount(project), "an unknown mode records nothing");
+      const wrongSketch = await driveHandler(project, "wrap", [click([15, 0, 10], [1, 0, 0], CAN)], ["No such sketch", "emboss", "1"], CAN);
+      equal(stepCount(wrongSketch.project), stepCount(project), "an unknown sketch name records nothing instead of falling back to the newest");
       const { project: block } = await blockProject();
       const none = await driveHandler(block, "wrap", [click([20, 0, 10], [1, 0, 0])], ["emboss", "1"]);
       equal(stepCount(none.project), stepCount(block), "a flat wall of a box is not a cylinder, so nothing is recorded");

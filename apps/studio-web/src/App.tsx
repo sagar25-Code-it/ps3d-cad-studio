@@ -110,6 +110,7 @@ import { isToExtent, resolveExtent, trimToFace } from "./extent-resolve.js";
 import { reachTargetFromClick, vertexPickGuides, type ReachPickMode } from "./reach-pick.js";
 import { facesOfBody } from "./edge-blend-step.js";
 import { blendAllFeature, centroidHoleFeature } from "./one-shot-steps.js";
+import { explicitBody, matchingSketches, sketchByAnswer } from "./explicit-pick.js";
 import { createBodyEditHandlers, type BodyEditMode } from "./body-edit-handlers.js";
 import { flatPatternForBody, isRebuildFailure, isRebuildNote, sketchLookupOf, sketchNormal, hasModifiers, planeKeyOf, rebuildDependents, rebuildSolidFeature, replayAllBodies, throughAllOverride } from "./design-regeneration.js";
 import { TimelineBar } from "./ui/TimelineBar.js";
@@ -1512,8 +1513,9 @@ export function App(): React.JSX.Element {
   const handleEdgeFlange = async (): Promise<void> => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
-    const body = bodies.find((candidate) => candidate.id === selectedId) ?? bodies[0];
-    if (body === undefined) { setStatus("ready"); setStatusText("Edge flange: create or select a plate first (a Sheet metal base plate or any extruded profile)."); return; }
+    const pickedBody = explicitBody(bodies, selectedId, "Edge flange");
+    if (!pickedBody.ok) { setStatus("ready"); setStatusText(bodies.length === 0 ? "Edge flange: create or select a plate first (a Sheet metal base plate or any extruded profile)." : pickedBody.message); return; }
+    const body = pickedBody.value;
     const history = designOf(current);
     const base = baseFeatureOf(history, body.id);
     const sketchFeature = base === undefined ? undefined : history.features.find((candidate) => candidate.id === base.sketchFeatureId && candidate.kind === "sketch");
@@ -1586,8 +1588,9 @@ export function App(): React.JSX.Element {
   const handleFlatPattern = async (format: "svg" | "dxf"): Promise<void> => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
-    const body = bodies.find((candidate) => candidate.id === selectedId) ?? bodies[0];
-    if (body === undefined) { setStatus("ready"); setStatusText("Flat pattern: select a sheet-metal body first."); return; }
+    const pickedBody = explicitBody(bodies, selectedId, "Flat pattern");
+    if (!pickedBody.ok) { setStatus("ready"); setStatusText(bodies.length === 0 ? "Flat pattern: select a sheet-metal body first." : pickedBody.message); return; }
+    const body = pickedBody.value;
     setStatus("working");
     const outcome = await flatPatternForBody(current, body.id);
     if (!outcome.ok) { setStatus("ready"); setStatusText(`Flat pattern: ${outcome.message}`); return; }
@@ -1600,8 +1603,9 @@ export function App(): React.JSX.Element {
   const handleIndent = (): void => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
-    const body = bodies.find((candidate) => candidate.id === selectedId) ?? bodies[0];
-    if (body === undefined) { setStatus("ready"); setStatusText("Indent: select the solid to indent first."); return; }
+    const pickedBody = explicitBody(bodies, selectedId, "Indent");
+    if (!pickedBody.ok) { setStatus("ready"); setStatusText(bodies.length === 0 ? "Indent: select the solid to indent first." : pickedBody.message); return; }
+    const body = pickedBody.value;
     const tools = bodies.filter((candidate) => candidate.id !== body.id);
     if (tools.length === 0) { setStatus("ready"); setStatusText("Indent: make a second solid to use as the tool, positioned where it should press into the first."); return; }
     const history = designOf(current);
@@ -1621,9 +1625,10 @@ export function App(): React.JSX.Element {
   const handleDirectEdit = async (mode: "move-body" | "scale-body" | "move-face" | "offset-face" | "emboss"): Promise<void> => {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
-    const body = bodies.find((candidate) => candidate.id === selectedId) ?? bodies[0];
     const niceName = mode === "move-body" ? "Move body" : mode === "scale-body" ? "Scale body" : mode === "move-face" ? "Move face" : mode === "emboss" ? "Emboss" : "Offset face";
-    if (body === undefined) { setStatus("ready"); setStatusText(`${niceName}: create or select a solid body first.`); return; }
+    const pickedBody = explicitBody(bodies, selectedId, niceName);
+    if (!pickedBody.ok) { setStatus("ready"); setStatusText(bodies.length === 0 ? `${niceName}: create or select a solid body first.` : pickedBody.message); return; }
+    const body = pickedBody.value;
     const history = designOf(current);
     const base = baseFeatureOf(history, body.id);
     if (base === undefined) { setStatus("ready"); setStatusText(`${niceName}: this body is not in the timeline, so a direct edit cannot be recorded.`); return; }
@@ -1738,9 +1743,20 @@ export function App(): React.JSX.Element {
     const current = projectRef.current;
     const bodies = current.part.generalBodies ?? [];
     const history = designOf(current);
-    const chosen = selectedTimelineFeature?.kind === "sketch" ? selectedTimelineFeature : [...history.features].reverse().find((feature) => feature.kind === "sketch");
     const lead = mode === "revolve-face" ? "Revolve to" : "Extrude to";
-    if (chosen?.kind !== "sketch") { setStatus("ready"); setStatusText(`${lead}: finish a sketch first, then pick what it should reach.`); return; }
+    // The profile sketch is never taken silently: the selected sketch step, the only finished sketch, or a choice by name (PT-02).
+    let chosen = selectedTimelineFeature?.kind === "sketch" ? selectedTimelineFeature : undefined;
+    if (chosen === undefined) {
+      const candidates = matchingSketches(history, () => true);
+      if (candidates.length === 0) { setStatus("ready"); setStatusText(`${lead}: finish a sketch first, then pick what it should reach.`); return; }
+      if (candidates.length === 1) chosen = candidates[0]!;
+      else {
+        const raw = typeof window === "undefined" ? candidates[0]!.name : window.prompt(`${lead}: which sketch gives the profile? (${candidates.map((candidate) => candidate.name).join(", ")}; Enter keeps the newest)`, candidates[0]!.name);
+        if (raw === null) return;
+        chosen = sketchByAnswer(candidates, raw);
+        if (chosen === undefined) { setStatus("ready"); setStatusText(`${lead}: no finished sketch matched that name.`); return; }
+      }
+    }
     const sketchFeature = chosen;
     if (bodies.length === 0) { setStatus("ready"); setStatusText(`${lead}: make a solid first; there is nothing to reach.`); return; }
     const revolving = mode === "revolve-face";
@@ -1965,12 +1981,18 @@ export function App(): React.JSX.Element {
       return;
     }
     if (operation === "unite" || operation === "subtract") {
-      const tool = bodies.find((candidate) => candidate.id !== body.id && candidate.visible);
-      if (tool === undefined) {
+      // The tool is never chosen silently: with one candidate it is named in the prompt, with several the user picks by name.
+      const candidates = bodies.filter((candidate) => candidate.id !== body.id && candidate.visible);
+      if (candidates.length === 0) {
         setStatus("ready");
         setStatusText(`${commandName} needs a second visible analytic body. Select the target, then create or show a compatible tool body.`);
         return;
       }
+      const ask = (label: string, defaultValue: string): string | null => typeof window === "undefined" ? defaultValue : window.prompt(label, defaultValue);
+      const raw = ask(`Tool body for ${commandName} on ${body.name} (available: ${candidates.map((candidate) => candidate.name).join(", ")}):`, candidates[0]!.name);
+      if (raw === null) return;
+      const tool = candidates.find((candidate) => candidate.name === raw.trim() || candidate.id === raw.trim());
+      if (tool === undefined) { setStatus("ready"); setStatusText(`${commandName}: no body matched that name.`); return; }
       if (applyProjectOperation({ kind: "boolean-part-bodies", targetBodyId: body.id, toolBodyId: tool.id, operation })) setSelectedId(body.id);
       return;
     }
