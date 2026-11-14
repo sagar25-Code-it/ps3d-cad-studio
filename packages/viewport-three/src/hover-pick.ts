@@ -101,6 +101,62 @@ export function edgePickToleranceMm(radiusMeters: number, canvasHeightPx: number
   return Math.min(50, Math.max(0.25, 8 * mmPerPx));
 }
 
+/** One pickable edge segment projected to screen pixels, for window and crossing selection (PT-09). */
+export interface ProjectedSegment {
+  readonly bodyId: string;
+  readonly chain: number;
+  readonly ax: number;
+  readonly ay: number;
+  readonly bx: number;
+  readonly by: number;
+}
+
+export interface SelectionBox {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+const inBox = (x: number, y: number, box: SelectionBox): boolean => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
+
+/** Whether the segment touches the box: an endpoint inside, or the segment crossing one of the box's sides. */
+function segmentTouchesBox(segment: ProjectedSegment, box: SelectionBox): boolean {
+  if (inBox(segment.ax, segment.ay, box) || inBox(segment.bx, segment.by, box)) return true;
+  const sides: readonly (readonly [number, number, number, number])[] = [
+    [box.left, box.top, box.right, box.top],
+    [box.right, box.top, box.right, box.bottom],
+    [box.right, box.bottom, box.left, box.bottom],
+    [box.left, box.bottom, box.left, box.top]
+  ];
+  const cross = (ox: number, oy: number, px: number, py: number, qx: number, qy: number): number => (px - ox) * (qy - oy) - (py - oy) * (qx - ox);
+  for (const [x1, y1, x2, y2] of sides) {
+    const d1 = cross(segment.ax, segment.ay, segment.bx, segment.by, x1, y1);
+    const d2 = cross(segment.ax, segment.ay, segment.bx, segment.by, x2, y2);
+    const d3 = cross(x1, y1, x2, y2, segment.ax, segment.ay);
+    const d4 = cross(x1, y1, x2, y2, segment.bx, segment.by);
+    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+  }
+  return false;
+}
+
+/**
+ * The edge chains a selection box takes, Fusion style: a left-to-right (window) box takes only the chains whose every
+ * segment lies fully inside it; a right-to-left (crossing) box takes any chain it touches.
+ */
+export function chainsInBox(segments: readonly ProjectedSegment[], box: SelectionBox, crossing: boolean): readonly { readonly bodyId: string; readonly chain: number }[] {
+  const byChain = new Map<string, { readonly bodyId: string; readonly chain: number; inside: boolean; touched: boolean }>();
+  for (const segment of segments) {
+    const key = `${segment.bodyId}\u0000${segment.chain}`;
+    const entry = byChain.get(key) ?? { bodyId: segment.bodyId, chain: segment.chain, inside: true, touched: false };
+    const fullyInside = inBox(segment.ax, segment.ay, box) && inBox(segment.bx, segment.by, box);
+    entry.inside = entry.inside && fullyInside;
+    entry.touched = entry.touched || fullyInside || segmentTouchesBox(segment, box);
+    byChain.set(key, entry);
+  }
+  return [...byChain.values()].filter((entry) => (crossing ? entry.touched : entry.inside)).map((entry) => ({ bodyId: entry.bodyId, chain: entry.chain }));
+}
+
 /** Whether two hover targets light up the same thing (so the overlay is only rebuilt when the target changes). */
 export function sameHoverTarget(left: HoverTarget | null, right: HoverTarget | null): boolean {
   if (left === null || right === null) return left === right;

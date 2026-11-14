@@ -855,6 +855,21 @@ export function App(): React.JSX.Element {
     }
     setSelectedId(target.bodyId);
   }, []);
+  /** A selection box with the Edge intent (PT-09): the chains it takes become the selection (Ctrl / Shift adds them). */
+  const acceptEntityBoxPick = useCallback((targets: readonly HoverTarget[], modifiers: { readonly ctrl: boolean; readonly shift: boolean }): void => {
+    const picked = targets.flatMap((target) => target.kind === "edge"
+      ? [{ bodyId: target.bodyId, chain: target.chain, segments: target.segments.map((segment) => [segment.a, segment.b] as ViewportGuideSegment) }]
+      : []);
+    setSelectedEdges((current) => {
+      const start = modifiers.ctrl || modifiers.shift ? [...current] : [];
+      for (const entry of picked) {
+        if (!start.some((existing) => existing.bodyId === entry.bodyId && existing.chain === entry.chain)) start.push(entry);
+      }
+      return start;
+    });
+    const firstBody = picked[0]?.bodyId;
+    if (firstBody !== undefined) setSelectedId(firstBody);
+  }, []);
   /** What each body offers the hover picker: its sharp edge chains (faces come from the mesh's own face names). */
   const partPickCandidates = useMemo((): ReadonlyMap<string, HoverCandidateBody> => {
     const map = new Map<string, HoverCandidateBody>();
@@ -882,6 +897,7 @@ export function App(): React.JSX.Element {
       onViewChange: setViewportState,
       onMeasurePoint: acceptMeasurePoint,
       onPickEntity: acceptEntityPick,
+      onPickEntities: acceptEntityBoxPick,
       onContextMenu: (request) => openContextMenu(request.clientX, request.clientY, request.semanticId, (request.selectionKind === "body" || request.selectionKind === "component") && request.selectionKind === classifyWorkbenchSelection(request.semanticId) ? request.selectionKind : undefined, true),
       ...(project.activeWorkspace === "assembly" ? { assemblyTouchGestures: {
         getExplodeMm: () => assemblyExplodeRef.current,
@@ -894,7 +910,7 @@ export function App(): React.JSX.Element {
     viewportRef.current = viewport;
     if (zebraRef.current !== null) viewport.setZebra(zebraRef.current);
     return () => { viewport.dispose(); viewportRef.current = undefined; };
-  }, [acceptEntityPick, acceptMeasurePoint, assemblyExplodeMaxMm, commitAssemblyExplode, isThreeDimensional, masterCartOpen, openContextMenu, previewAssemblyExplode, project.activeWorkspace]);
+  }, [acceptEntityBoxPick, acceptEntityPick, acceptMeasurePoint, assemblyExplodeMaxMm, commitAssemblyExplode, isThreeDimensional, masterCartOpen, openContextMenu, previewAssemblyExplode, project.activeWorkspace]);
 
   useEffect(() => {
     setMeasurePoints((current) => current.length === 0 ? current : []);
@@ -1927,8 +1943,10 @@ export function App(): React.JSX.Element {
     const selected = bodies.find((candidate) => candidate.id === selectedId);
     if (selected !== undefined) state = { ...state, bodyId: selected.id, bodyName: selected.name };
     // PT-09: edge chains picked with the Edge intent before the command fill its first selection row.
+    // One fillet works on one solid, so chains of the first picked body are seeded and the rest are left selected.
+    const seedBodyId = selectedEdges[0]?.bodyId;
     if ((command === "fillet" || command === "chamfer") && selectedEdges.length > 0) {
-      for (const entry of selectedEdges) {
+      for (const entry of selectedEdges.filter((candidate) => candidate.bodyId === seedBodyId)) {
         const body = bodies.find((candidate) => candidate.id === entry.bodyId);
         if (body === undefined) continue;
         const edges = pickableEdges({ positionsMm: body.positionsMm, indices: body.indices }, 5, { includeConcave: true });

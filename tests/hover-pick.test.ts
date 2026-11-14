@@ -1,4 +1,4 @@
-import { classifyHover, edgePickToleranceMm, nearestChainWithin, sameHoverTarget, type HoverCandidateBody, type PickSegmentMm } from "../packages/viewport-three/src/hover-pick.js";
+import { chainsInBox, classifyHover, edgePickToleranceMm, nearestChainWithin, sameHoverTarget, type HoverCandidateBody, type PickSegmentMm, type ProjectedSegment } from "../packages/viewport-three/src/hover-pick.js";
 import { assert, type TestCase } from "./test-kit.js";
 
 /**
@@ -71,6 +71,25 @@ export const hoverPickTests: readonly TestCase[] = [
       assert(nearest !== undefined && nearest.chain === 0, "nearestChainWithin honours the tolerance it is given");
       assert(nearestChainWithin(EDGES, [30, 5, 10], 1) === undefined, "outside the tolerance there is no chain");
       assert(nearestChainWithin([], [0, 0, 0], 10) === undefined, "no edges, no chain");
+    }
+  },
+  {
+    name: "Window and crossing boxes behave like Fusion: left-to-right takes only whole chains inside, right-to-left takes whatever it touches",
+    run: () => {
+      // Chain 1: fully inside the 100 × 100 box. Chain 2: one segment pokes out. Chain 3: crosses the box's right side without an endpoint inside. Chain 4: far away.
+      const segments: readonly ProjectedSegment[] = [
+        { bodyId: "b", chain: 1, ax: 10, ay: 10, bx: 90, by: 10 },
+        { bodyId: "b", chain: 1, ax: 90, ay: 10, bx: 90, by: 90 },
+        { bodyId: "b", chain: 2, ax: 20, ay: 50, bx: 140, by: 50 },
+        { bodyId: "b", chain: 3, ax: 80, ay: 120, bx: 120, by: 60 },
+        { bodyId: "b", chain: 4, ax: 300, ay: 300, bx: 400, by: 300 }
+      ];
+      const box = { left: 0, top: 0, right: 100, bottom: 100 };
+      const window = chainsInBox(segments, box, false);
+      assert(window.length === 1 && window[0]!.chain === 1, `a window box takes only the chain fully inside: ${JSON.stringify(window)}`);
+      const crossing = chainsInBox(segments, box, true).map((entry) => entry.chain).sort((a, b) => a - b);
+      assert(crossing.join(",") === "1,2,3", `a crossing box takes everything it touches, including a chain that only crosses its side: ${crossing.join(",")}`);
+      assert(chainsInBox([], box, true).length === 0, "no segments, no chains");
     }
   },
   {

@@ -6,10 +6,10 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { cloneExchangeObject, disposeExchangeObject, inspectExchangeObject, type ExchangeBounds, type ViewportJpeg } from "../../exchange-3d/src/index.js";
 import type { ModelSuccessResponse } from "../../worker-protocol/src/index.js";
 import type { PreviewBounds, PreviewPrimitive, PreviewScene } from "../../workbench-geometry/src/index.js";
-import { classifyHover, edgePickToleranceMm, sameHoverTarget, type HoverCandidateBody, type HoverFilter, type HoverRayHit, type HoverTarget } from "./hover-pick.js";
+import { chainsInBox, classifyHover, edgePickToleranceMm, sameHoverTarget, type HoverCandidateBody, type HoverFilter, type HoverRayHit, type HoverTarget, type ProjectedSegment } from "./hover-pick.js";
 
 export { buildAnalysisGroup, disposeAnalysisGroup, EMPTY_ANALYSIS_OVERLAY, type OverlayRgb, type ViewportAnalysisLines, type ViewportAnalysisMesh, type ViewportAnalysisOverlay } from "./analysis-overlay.js";
-export { classifyHover, edgePickToleranceMm, nearestChainWithin, sameHoverTarget, type HoverCandidateBody, type HoverFilter, type HoverRayHit, type HoverTarget, type PickSegmentMm } from "./hover-pick.js";
+export { chainsInBox, classifyHover, edgePickToleranceMm, nearestChainWithin, sameHoverTarget, type HoverCandidateBody, type HoverFilter, type HoverRayHit, type HoverTarget, type PickSegmentMm, type ProjectedSegment, type SelectionBox } from "./hover-pick.js";
 export { applyZebraToObject } from "./zebra-materials.js";
 export { ZEBRA_AXES, ZEBRA_DEFAULT, ZEBRA_MAX_FREQUENCY, ZEBRA_MIN_FREQUENCY, clampZebraFrequency, zebraBandAt, zebraReflection, type ZebraAxis, type ZebraOptions } from "./zebra.js";
 
@@ -23,6 +23,11 @@ export interface ViewportOptions {
    * `modifiers` carries Ctrl / Shift so the host can add to a selection instead of replacing it.
    */
   readonly onPickEntity?: (target: HoverTarget | null, modifiers: { readonly ctrl: boolean; readonly shift: boolean }) => void;
+  /**
+   * A drag box in select mode with the Edge intent (PT-09): every edge chain the box takes. Dragged left-to-right the box
+   * is a window (chains fully inside); right-to-left it is a crossing box (chains it touches).
+   */
+  readonly onPickEntities?: (targets: readonly HoverTarget[], modifiers: { readonly ctrl: boolean; readonly shift: boolean }) => void;
   readonly assemblyTouchGestures?: ViewportAssemblyTouchGestures;
 }
 
@@ -225,6 +230,9 @@ export class ThreeViewportAdapter {
   readonly #hoverGroup = new THREE.Group();
   #hoverBodyMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
   readonly #selectedEdgeGroup = new THREE.Group();
+  /** Window / crossing box selection with the Edge intent (PT-09): the drag in client pixels and its rubber-band rectangle. */
+  #boxSelect: { readonly startX: number; readonly startY: number; x: number; y: number } | undefined;
+  #boxDiv: HTMLDivElement | undefined;
   #drag: { pointerId: number; x: number; y: number; startX: number; startY: number; moved: boolean; mode: NavigationMode } | undefined;
   readonly #touchPointers = new Map<number, ViewportTouchPoint>();
   #assemblyTouchGesture: { startCentroidY: number; startExplodeMm: number; latestExplodeMm: number } | undefined;
@@ -706,6 +714,7 @@ export class ThreeViewportAdapter {
     this.#canvas.removeEventListener("pointerup", this.#onPointerUp);
     this.#canvas.removeEventListener("pointercancel", this.#onPointerUp);
     this.#canvas.removeEventListener("pointerleave", this.#onPointerLeave);
+    this.#removeSelectionBox();
     this.setSelectedEdges([]);
     this.#canvas.removeEventListener("wheel", this.#onWheel);
     this.#canvas.removeEventListener("contextmenu", this.#onContextMenu);
@@ -770,6 +779,16 @@ export class ThreeViewportAdapter {
     if (this.#drag === undefined && event.pointerType !== "touch" && this.#navigationMode === "select") this.#updateHover(event.clientX, event.clientY);
     if (this.#drag === undefined || this.#drag.pointerId !== event.pointerId) return;
     if (this.#drag.moved) this.#setHover(null);
+    // A left drag in select mode with the Edge intent is a selection box, not a camera move.
+    if (this.#drag.mode === "select" && this.#hoverFilter() === "edge" && event.pointerType !== "touch") {
+      if (this.#boxSelect === undefined && this.#drag.moved) this.#boxSelect = { startX: this.#drag.startX, startY: this.#drag.startY, x: event.clientX, y: event.clientY };
+      if (this.#boxSelect !== undefined) {
+        this.#boxSelect.x = event.clientX;
+        this.#boxSelect.y = event.clientY;
+        this.#drawSelectionBox();
+        return;
+      }
+    }
     const dx = event.clientX - this.#drag.x;
     const dy = event.clientY - this.#drag.y;
     if (Math.hypot(event.clientX - this.#drag.startX, event.clientY - this.#drag.startY) > 3) this.#drag.moved = true;
@@ -816,13 +835,73 @@ export class ThreeViewportAdapter {
         return;
       }
     }
-    if (this.#drag !== undefined && this.#drag.pointerId === event.pointerId && !this.#drag.moved) {
+    if (this.#drag !== undefined && this.#drag.pointerId === event.pointerId && this.#boxSelect !== undefined) {
+      this.#finishSelectionBox(event);
+    } else if (this.#drag !== undefined && this.#drag.pointerId === event.pointerId && !this.#drag.moved) {
       if (this.#drag.mode === "select") this.#pick(event);
       if (this.#drag.mode === "measure") this.#measurePick(event);
     }
     if (this.#drag?.pointerId === event.pointerId) this.#drag = undefined;
     if (this.#canvas.hasPointerCapture(event.pointerId)) this.#canvas.releasePointerCapture(event.pointerId);
   };
+
+  /** The rubber band: solid for a left-to-right window box, dashed for a right-to-left crossing box, Fusion style. */
+  #drawSelectionBox(): void {
+    const box = this.#boxSelect;
+    if (box === undefined) return;
+    if (this.#boxDiv === undefined) {
+      this.#boxDiv = this.#canvas.ownerDocument.createElement("div");
+      this.#boxDiv.style.position = "fixed";
+      this.#boxDiv.style.pointerEvents = "none";
+      this.#boxDiv.style.zIndex = "60";
+      this.#boxDiv.style.background = "rgba(63, 160, 255, 0.12)";
+      this.#canvas.ownerDocument.body.append(this.#boxDiv);
+    }
+    const crossing = box.x < box.startX;
+    this.#boxDiv.style.border = crossing ? "1px dashed #5fd4ff" : "1px solid #5fd4ff";
+    this.#boxDiv.style.left = `${Math.min(box.startX, box.x)}px`;
+    this.#boxDiv.style.top = `${Math.min(box.startY, box.y)}px`;
+    this.#boxDiv.style.width = `${Math.abs(box.x - box.startX)}px`;
+    this.#boxDiv.style.height = `${Math.abs(box.y - box.startY)}px`;
+  }
+
+  #removeSelectionBox(): void {
+    this.#boxSelect = undefined;
+    this.#boxDiv?.remove();
+    this.#boxDiv = undefined;
+  }
+
+  /** Ends the box: projects every pickable edge to the screen and reports the chains the box takes. */
+  #finishSelectionBox(event: PointerEvent): void {
+    const box = this.#boxSelect;
+    this.#removeSelectionBox();
+    if (box === undefined) return;
+    const crossing = box.x < box.startX;
+    const bounds = { left: Math.min(box.startX, box.x), top: Math.min(box.startY, box.y), right: Math.max(box.startX, box.x), bottom: Math.max(box.startY, box.y) };
+    const rect = this.#canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const camera = this.#activeCamera();
+    camera.updateMatrixWorld();
+    const vector = new THREE.Vector3();
+    const project = (point: readonly [number, number, number]): readonly [number, number] => {
+      vector.set(point[0] / 1000, point[1] / 1000, point[2] / 1000).project(camera);
+      return [rect.left + (vector.x + 1) / 2 * rect.width, rect.top + (1 - vector.y) / 2 * rect.height];
+    };
+    const projected: ProjectedSegment[] = [];
+    for (const [bodyId, candidates] of this.#pickCandidates) {
+      for (const edge of candidates.edges) {
+        const [ax, ay] = project(edge.a);
+        const [bx, by] = project(edge.b);
+        projected.push({ bodyId, chain: edge.chain, ax, ay, bx, by });
+      }
+    }
+    const chains = chainsInBox(projected, bounds, crossing);
+    const targets: HoverTarget[] = chains.map((entry) => {
+      const segments = this.#pickCandidates.get(entry.bodyId)?.edges.filter((edge) => edge.chain === entry.chain) ?? [];
+      return { kind: "edge", bodyId: entry.bodyId, chain: entry.chain, segments, distanceMm: 0, concave: segments[0]?.concave === true };
+    });
+    this.#options.onPickEntities?.(targets, { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey });
+  }
 
   readonly #onWheel = (event: WheelEvent): void => {
     event.preventDefault();
