@@ -150,6 +150,8 @@ import { sketchUi3ChromeTests } from "./sketch-ui3-chrome.test.js";
 import { sketchUi3ErrorTests } from "./sketch-ui3-errors.test.js";
 import { sketchFitInsetsTests } from "./sketch-fit-insets.test.js";
 import { layoutWindowSizeTests } from "./layout-window-size.test.js";
+import { sketchDragFuzzTests } from "./sketch-drag-fuzz.test.js";
+import { sketchGoldenTests } from "./sketch-golden.test.js";
 import { sketchEntryPointTests } from "./sketch-entry-points.test.js";
 import { sketchCircleDiameterTests } from "./sketch-circle-diameter.test.js";
 import { sketchRectangleLevelTests } from "./sketch-rectangle-level.test.js";
@@ -415,6 +417,8 @@ const tests: readonly TestCase[] = [
   ...sketchUi3ErrorTests,
   ...sketchFitInsetsTests,
   ...layoutWindowSizeTests,
+  ...sketchDragFuzzTests,
+  ...sketchGoldenTests,
   ...sketchEntryPointTests,
   ...sketchCircleDiameterTests,
   ...sketchRectangleLevelTests,
